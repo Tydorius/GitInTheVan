@@ -1,0 +1,10 @@
+services:
+  gitinthevan:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - GITV_SECRET_KEY=change-me-in-production
+    restart: unless-stopped

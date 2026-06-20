@@ -1,0 +1,90 @@
+<script lang="ts">
+  import { isAuthenticated, currentRoute, logout } from './stores'
+  import Login from './pages/Login.svelte'
+  import Dashboard from './pages/Dashboard.svelte'
+  import Endpoints from './pages/Endpoints.svelte'
+  import Cantrips from './pages/Cantrips.svelte'
+  import Lorebooks from './pages/Lorebooks.svelte'
+  import Verification from './pages/Verification.svelte'
+  import Settings from './pages/Settings.svelte'
+  import Users from './pages/Users.svelte'
+
+  const navItems = [
+    { path: '/', label: 'Dashboard', icon: 'D' },
+    { path: '/endpoints', label: 'Endpoints', icon: 'E' },
+    { path: '/cantrips', label: 'Cantrips', icon: 'C' },
+    { path: '/lorebooks', label: 'Lorebooks', icon: 'L' },
+    { path: '/verification', label: 'Verification', icon: 'V' },
+    { path: '/settings', label: 'Settings', icon: 'G' },
+    { path: '/users', label: 'Users', icon: 'U', admin: true },
+  ]
+
+  let apiKey = null
+
+  function handleLogout() {
+    logout()
+  }
+  $: route = $currentRoute || '/'
+  $: page = route.split('?')[0]
+
+  async function validateToken() {
+    try {
+      const resp = await fetch('/health')
+      if (resp.ok) {
+        const test = await fetch('/api/settings', {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('gitv_token')}` }
+        })
+        if (test.status === 401) {
+          logout()
+        }
+      }
+    } catch {}
+  }
+
+  validateToken()
+</script>
+
+{#if !$isAuthenticated}
+  <Login />
+{:else}
+  <div class="app-layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <img src="/gitinthevan-full.svg" alt="GitInTheVan" style="width: 100%; margin-bottom: 8px;" />
+        <p>LLM Proxy Router</p>
+      </div>
+      <nav class="sidebar-nav">
+        {#each navItems as item}
+          {#if !item.admin}
+            <a href={`#${item.path}`} class={page === item.path ? 'active' : ''}>
+              <span>{item.icon}</span> {item.label}
+            </a>
+          {/if}
+        {/each}
+      </nav>
+      <div style="padding: 16px 20px; border-top: 1px solid var(--border);">
+        <button onclick={handleLogout} style="width: 100%;">Logout</button>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      {#if page === '/'}
+        <Dashboard />
+      {:else if page === '/endpoints'}
+        <Endpoints />
+      {:else if page === '/cantrips'}
+        <Cantrips />
+      {:else if page === '/lorebooks'}
+        <Lorebooks />
+      {:else if page === '/verification'}
+        <Verification />
+      {:else if page === '/settings'}
+        <Settings />
+      {:else if page === '/users'}
+        <Users />
+      {:else}
+        <Dashboard />
+      {/if}
+    </main>
+  </div>
+{/if}

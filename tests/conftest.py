@@ -1,0 +1,61 @@
+import pytest
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+import app.services.cantrip as _cantrip_module
+import app.services.proxy as _proxy_module
+import app.services.verification as _verification_module
+from app.database import get_db
+from app.main import app
+from app.models.base import Base
+
+test_engine = create_async_engine("sqlite+aiosqlite://", echo=False)
+TestSessionLocal = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+
+_original_proxy_session = _proxy_module.async_session
+_original_cantrip_session = _cantrip_module.async_session
+_original_verification_session = _verification_module.async_session
+
+
+async def override_get_db():
+    async with TestSessionLocal() as session:
+        yield session
+
+
+app.dependency_overrides[get_db] = override_get_db
+
+
+@pytest.fixture(autouse=True)
+async def setup_database():
+    _proxy_module.async_session = TestSessionLocal
+    _cantrip_module.async_session = TestSessionLocal
+    _verification_module.async_session = TestSessionLocal
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+    _proxy_module.async_session = _original_proxy_session
+    _cantrip_module.async_session = _original_cantrip_session
+    _verification_module.async_session = _original_verification_session
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest.fixture
+async def client():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+@pytest.fixture
+async def admin_client(client):
+    setup_resp = await client.post(
+        "/api/auth/setup",
+        json={"username": "admin", "password": "adminpass123"},
+    )
+    assert setup_resp.status_code == 201
+    token = setup_resp.json()["access_token"]
+    api_key = setup_resp.json()["api_key"]
+    client.headers["Authorization"] = f"Bearer {token}"
+    yield client, token, api_key
+    client.headers.pop("Authorization", None)
