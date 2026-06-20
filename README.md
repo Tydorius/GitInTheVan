@@ -58,13 +58,45 @@ The following are planned for future releases.
 
 ## Quick Start
 
-### Prerequisites
+### Easy Deploy (Recommended)
+
+For non-technical users, a deploy script handles everything: Python setup, Deno download, frontend build, configuration, and server startup.
+
+**Windows:**
+```bash
+scripts\deploy-windows.bat
+```
+
+**macOS:**
+```bash
+./scripts/deploy-macos.sh
+```
+
+**Linux:**
+```bash
+./scripts/deploy-linux.sh
+```
+
+The script will:
+1. Create a Python virtual environment and install dependencies
+2. Download Deno automatically (for cantrip sandbox)
+3. Build the web UI frontend (requires Node.js 20+)
+4. Create a `.env` configuration file from the template
+5. Start the server
+
+Once running, open `http://localhost:8000` in your browser.
+
+### Manual Setup
+
+If you prefer to set things up manually or the deploy script doesn't work for your setup:
+
+#### Prerequisites
 
 - Python 3.12+
 - Node.js 20+ (for building the frontend)
 - [Deno](https://deno.land/) runtime (for cantrip sandbox)
 
-### Setup
+#### Steps
 
 ```bash
 # Clone and enter the project
@@ -84,6 +116,7 @@ pip install -e ".[dev]"
 # Option A: Download from https://deno.land and place at .deno/deno.exe
 # Option B: Install globally and set GITV_DENO_PATH in .env
 # Option C: The app auto-detects deno from PATH
+# Option D: Let the deploy script download it automatically
 
 # Build the frontend
 cd frontend

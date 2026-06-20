@@ -3,6 +3,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import settings
+from app.services.migrations import run_migrations
 
 logger = logging.getLogger(__name__)
 
@@ -20,4 +21,5 @@ async def init_db():
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database initialized")
+    await run_migrations(engine)
+    logger.info("Database initialized with migrations")
