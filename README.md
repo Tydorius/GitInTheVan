@@ -41,7 +41,7 @@ I will stress that I am not going to replicate or 100% replace Lorebary's functi
 
 ## Upcoming Features
 
-The following are planned for future releases. See [project-plan.md](../Planning/project-plan.md) for full details.
+The following are planned for future releases.
 
 - **Persistent Memory** — Zero-width character encoding for state persistence across conversation cycles
 - **Chat Memory Summarization** — Opt-in compression of conversation history using a user-selected LLM endpoint
