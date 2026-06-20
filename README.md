@@ -8,20 +8,22 @@ Licensed under Mozilla Public License 2.0.
 
 ## Contents
 
-[Why It Exists](#Why-It-Exists)
-[Features](#Features)
-[Upcoming Features](#Upcoming-Features)
-[Quick Start](#Quick-Start)
-[Configuration](#Configuration)
-[Using with JanitorAI](#Using-with-JanitorAI)
-[Cantrips](#Cantrips)
-[Verification](#Verification)
-[Development](#Development)
-[Starting Out With Cantrips](#Starting-Out-With-Cantrips)
-[Geting Support](#Getting-Support)
-[Giving Support](#Giving-Support)
-[Disclaimer: Use of AI](#Disclaimer:-Use-of-AI)
-[License](#License)
+[Why It Exists](#Why-It-Exists)  
+[Features](#Features)  
+[Upcoming Features](#Upcoming-Features)  
+[Quick Start](#Quick-Start)  
+[Configuration](#Configuration)  
+[Using with JanitorAI](#Using-with-JanitorAI)  
+[Cantrips](#Cantrips)  
+[Verification](#Verification)  
+[Development](#Development)  
+[Starting Out With Cantrips](#Starting-Out-With-Cantrips)  
+[Geting Support](#Getting-Support)  
+[Giving Support](#Giving-Support)  
+[Disclaimer: Use of AI](#Disclaimer:-Use-of-AI)  
+[License](#License)  
+
+[GUI Documentation](./docs/user-guide.md)
 
 ## Why It Exists
 
