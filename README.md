@@ -20,7 +20,7 @@ Licensed under Mozilla Public License 2.0.
 [Starting Out With Cantrips](#Starting-Out-With-Cantrips)  
 [Geting Support](#Getting-Support)  
 [Giving Support](#Giving-Support)  
-[Disclaimer: Use of AI](#Disclaimer:-Use-of-AI)  
+[Disclaimer on Use of AI](#Disclaimer-on-Use-of-AI)  
 [License](#License)  
 
 [GUI Documentation](./docs/user-guide.md)
@@ -302,11 +302,11 @@ If you like what I do, you can donate to me on ko-fi.
 
 [ko-fi.com/tydorius](https://ko-fi.com/tydorius)
 
-## Disclaimer: Use of AI
+## Disclaimer on Use of AI
 
 I am a cloud architect. I design and build systems for a living. I've been programming and scripting for thirty years, and I've been doing graphic design for nearly as long starting in Photoshop 6.0.
 
-I utilized GLM 5.x for parts of this project. I utilized Gemini 3.5 to generate the SVG logo. This is an open source project that is free for personal use, and with my schedule it was only possible through the assistance of artificial intelligence.
+I utilized GLM 5.x for parts of this project. I utilized Gemini 3.5 to generate a draft logo (before remaking it in Inkspcape). This is an open source project that is free for personal use, and with my schedule it was only possible through the assistance of artificial intelligence.
 
 I have no qualms about using AI in my work.
 
