@@ -17,8 +17,8 @@ import time
 import httpx
 
 PROXY_URL = "http://127.0.0.1:8000"
-ENDPOINT_URL = "https://owui.trustastranger.com"
-API_KEY = "sk-92469c45d3a547dcbdc3acda4852a8a2"
+ENDPOINT_URL = "https://your-provider.com"
+API_KEY = "sk-your-api-key-here"
 API_BASE_PATH = "/api"
 MODEL = "Gemma-4-31B-it"
 

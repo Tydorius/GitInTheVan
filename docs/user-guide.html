@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitInTheVan User Guide</title>
+    <style>
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --border: #2e3344;
+            --text: #e4e6ef;
+            --text-dim: #8b90a5;
+            --accent: #7c5cfc;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.7;
+            padding: 0;
+        }
+        .container { max-width: 1000px; margin: 0 auto; padding: 40px 24px; }
+        h1 { font-size: 32px; margin-bottom: 8px; color: var(--accent); }
+        h2 { font-size: 24px; margin-top: 48px; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+        h3 { font-size: 18px; margin-top: 24px; margin-bottom: 12px; color: var(--accent); }
+        p { margin-bottom: 12px; color: var(--text); }
+        ul, ol { margin-bottom: 16px; padding-left: 24px; }
+        li { margin-bottom: 6px; }
+        code { background: var(--surface); padding: 2px 8px; border-radius: 4px; font-family: monospace; font-size: 13px; color: var(--accent); }
+        pre { background: var(--surface); padding: 16px; border-radius: 8px; overflow-x: auto; margin-bottom: 16px; border: 1px solid var(--border); }
+        pre code { background: none; padding: 0; }
+        img { max-width: 100%; border-radius: 8px; border: 1px solid var(--border); margin: 16px 0; }
+        .toc { background: var(--surface); padding: 24px; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 32px; }
+        .toc ol { margin: 0; }
+        .toc a { color: var(--accent); text-decoration: none; }
+        .toc a:hover { text-decoration: underline; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+        th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+        th { color: var(--text-dim); font-size: 12px; text-transform: uppercase; }
+        .note { background: rgba(124, 92, 252, 0.1); border: 1px solid var(--accent); padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; }
+        .note::before { content: "Note: "; font-weight: bold; color: var(--accent); }
+        a { color: var(--accent); }
+        .screenshot-caption { color: var(--text-dim); font-size: 13px; text-align: center; margin-bottom: 24px; }
+    </style>
+</head>
+<body>
+<div class="container">
+
+<h1>GitInTheVan User Guide</h1>
+<p>This guide walks through every part of the GitInTheVan management interface.</p>
+
+<div class="toc">
+<ol>
+    <li><a href="#login">Login and Admin Setup</a></li>
+    <li><a href="#dashboard">Dashboard</a></li>
+    <li><a href="#endpoints">Endpoints</a></li>
+    <li><a href="#cantrips">Cantrips</a></li>
+    <li><a href="#lorebooks">Lorebooks</a></li>
+    <li><a href="#verification">Verification</a></li>
+    <li><a href="#settings">Settings</a></li>
+</ol>
+</div>
+
+<h2 id="login">1. Login and Admin Setup</h2>
+<img src="media/gitv-login.png" alt="Login Screen">
+<p class="screenshot-caption">Login screen with admin setup option</p>
+
+<p>On first launch, the login page appears. If no admin account exists yet, click <strong>"First run? Setup admin"</strong> at the bottom to create the initial administrator account.</p>
+
+<ul>
+    <li><strong>Username</strong>: Choose any username (e.g., <code>admin</code>)</li>
+    <li><strong>Password</strong>: Choose a secure password</li>
+</ul>
+
+<p>After setup, log in with your new credentials. Your <strong>API key</strong> (prefixed with <code>gitv_</code>) is available on the <strong>Settings</strong> page after logging in. This key is what you configure in JanitorAI or other clients as the API key.</p>
+
+<p>On subsequent visits, use the standard login form with your username and password.</p>
+
+<h2 id="dashboard">2. Dashboard</h2>
+<img src="media/gitv-dashboard.png" alt="Dashboard">
+<p class="screenshot-caption">Dashboard showing system overview</p>
+
+<p>The dashboard provides a quick overview of your GitInTheVan instance:</p>
+
+<ul>
+    <li><strong>Stat cards</strong>: Shows the count of configured Endpoints, Cantrips, Lorebooks, and Verification Rules</li>
+    <li><strong>System Status</strong>: Displays the proxy health check status</li>
+    <li><strong>Quick Start</strong>: Step-by-step links to get your proxy configured and running</li>
+</ul>
+
+<p>The sidebar on the left provides navigation to all management pages. The logo is displayed at the top, and the logout button is at the bottom.</p>
+
+<h2 id="endpoints">3. Endpoints</h2>
+<img src="media/gitv-endpoints.png" alt="Endpoints List">
+<p class="screenshot-caption">Endpoints management page</p>
+
+<p>The Endpoints page manages your LLM backend connections. Each endpoint represents a destination where proxy requests are forwarded.</p>
+
+<h3>Endpoint List</h3>
+<ul>
+    <li>Each endpoint card shows the <strong>name</strong>, <strong>enabled/disabled status</strong>, <strong>base URL</strong>, <strong>API base path</strong>, and a masked <strong>API key</strong></li>
+    <li><strong>Edit</strong> and <strong>Delete</strong> buttons are on each card</li>
+</ul>
+
+<h3>Adding an Endpoint</h3>
+<img src="media/gitv-edit-endpoint.png" alt="Edit Endpoint">
+<p class="screenshot-caption">Endpoint creation/edit form</p>
+
+<p>Click <strong>"+ Add Endpoint"</strong> to open the endpoint form:</p>
+
+<ul>
+    <li><strong>Name</strong>: A friendly label (e.g., "OpenWebUI", "OpenRouter")</li>
+    <li><strong>Base URL</strong>: The root URL of your LLM provider. You can paste the full URL (e.g., <code>https://your-provider.com/api/chat/completions</code>) and the system will auto-detect the base URL and API path</li>
+    <li><strong>API Key</strong>: Your provider's API key. Click the eye icon to toggle visibility</li>
+    <li><strong>API Base Path</strong>: Most providers use <code>/v1</code> (leave blank). OpenWebUI and some others use <code>/api</code>. This is auto-filled if you pasted a full URL above</li>
+    <li><strong>Enabled</strong>: Toggle whether this endpoint is active</li>
+</ul>
+
+<h3>API Base Path</h3>
+<table>
+    <thead><tr><th>Provider Type</th><th>Base Path</th><th>Example</th></tr></thead>
+    <tbody>
+        <tr><td>Standard OpenAI-compatible</td><td><em>(blank, defaults to /v1)</em></td><td><code>https://api.openai.com/v1/chat/completions</code></td></tr>
+        <tr><td>OpenWebUI</td><td><code>/api</code></td><td><code>https://your-provider.com/api/chat/completions</code></td></tr>
+    </tbody>
+</table>
+
+<h2 id="cantrips">4. Cantrips</h2>
+<img src="media/gitv-cantrips-test.png" alt="Cantrip Test Panel">
+<p class="screenshot-caption">Cantrips page with test panel open</p>
+
+<p>Cantrips are sandboxed JavaScript snippets that modify request context before it reaches the LLM. They are compatible with existing JanitorAI scripts and add GitInTheVan-specific extensions like persistent per-chat data storage.</p>
+
+<h3>Cantrip List</h3>
+<p>Each cantrip card shows:</p>
+<ul>
+    <li><strong>Name</strong> and <strong>Public</strong> badge (if shared)</li>
+    <li><strong>ON/OFF toggle</strong>: Enable or disable without editing</li>
+    <li><strong>Test</strong>: Open the cantrip tester</li>
+    <li><strong>Edit</strong> / <strong>Delete</strong></li>
+</ul>
+<p>The card footer displays the hook type, execution order, and timeout.</p>
+
+<h3>Cantrip Tester</h3>
+<p>The test panel lets you run a cantrip against sample context without forwarding anything to an LLM:</p>
+<ol>
+    <li><strong>Select a cantrip</strong> from the dropdown</li>
+    <li><strong>Enter test messages</strong> in JSON format (e.g., <code>[{"role": "user", "content": "Hello"}]</code>)</li>
+    <li>Optionally set a <strong>character name</strong> and <strong>chat data</strong> (JSON key-value pairs)</li>
+    <li>Click <strong>Run Test</strong></li>
+</ol>
+<p>The results show:</p>
+<ul>
+    <li><strong>Scenario Output</strong>: Text injected into the scenario context</li>
+    <li><strong>Personality Output</strong>: Text injected into the personality context</li>
+    <li><strong>Debug Logs</strong>: Output from <code>console.log()</code> calls in the cantrip</li>
+    <li><strong>Chat Data Result</strong>: The final state of <code>context.chat_data</code> after execution</li>
+</ul>
+
+<h3>Adding/Editing a Cantrip</h3>
+<ul>
+    <li><strong>Name</strong>: A label for the cantrip</li>
+    <li><strong>Hook Type</strong>: <code>pre</code> (runs before LLM request) or <code>post</code> (runs after)</li>
+    <li><strong>Description</strong>: Optional notes</li>
+    <li><strong>JavaScript Code</strong>: The cantrip code. Uses the JanitorAI <code>context</code> object API</li>
+    <li><strong>Execution Order</strong>: Lower numbers run first (when multiple cantrips are active)</li>
+    <li><strong>Timeout</strong>: Maximum execution time in milliseconds</li>
+    <li><strong>Active</strong>: Whether the cantrip is enabled</li>
+    <li><strong>Public</strong>: Whether other users can see and use this cantrip</li>
+</ul>
+
+<h2 id="lorebooks">5. Lorebooks</h2>
+<img src="media/gitb-lorebooks.png" alt="Lorebooks List">
+<p class="screenshot-caption">Lorebooks management page</p>
+
+<p>Lorebooks are JSON worldbook entries that inject context into requests based on keyword matching.</p>
+
+<h3>Lorebook List</h3>
+<p>The table shows each lorebook with:</p>
+<ul>
+    <li><strong>Name</strong>: Click to manage entries</li>
+    <li><strong>Entries</strong>: Count of keyword entries</li>
+    <li><strong>Active</strong>: ON/OFF toggle to enable/disable injection without deleting</li>
+    <li><strong>Visibility</strong>: Public or Private</li>
+    <li><strong>Actions</strong>: Manage, Export (download JSON), Delete</li>
+</ul>
+
+<h3>Importing Lorebooks</h3>
+<img src="media/gitv-import-lorebook.png" alt="Import Lorebook">
+<p class="screenshot-caption">Lorebook import dialog with file picker</p>
+
+<p>Click <strong>"Import JSON"</strong> to import a lorebook from an external source:</p>
+<ul>
+    <li><strong>Load from File</strong>: Click to open a file browser and select a <code>.json</code> file</li>
+    <li><strong>Or paste JSON</strong>: Manually paste lorebook JSON into the text area</li>
+    <li><strong>Lorebook Name</strong>: Optional, defaults to the name in the JSON</li>
+</ul>
+
+<p>Supported formats include:</p>
+<ul>
+    <li>GitInTheVan native format</li>
+    <li>SillyTavern world info format</li>
+    <li>Chub lorebook format</li>
+    <li>JanitorAI lorebook exports</li>
+</ul>
+
+<p>The import handles both array and dictionary-keyed entry formats, and maps common alternative field names automatically.</p>
+
+<h3>Managing Entries</h3>
+<img src="media/gitb-manage-lorebook.png" alt="Manage Lorebook">
+<p class="screenshot-caption">Lorebook entry management</p>
+
+<p>Click <strong>Manage</strong> on a lorebook to view and edit its entries:</p>
+
+<p>Each entry has:</p>
+<ul>
+    <li><strong>Entry Name</strong>: A label for the entry</li>
+    <li><strong>Keywords</strong>: Comma-separated trigger words (e.g., <code>castle, throne, keep</code>)</li>
+    <li><strong>Secondary Keywords</strong>: Additional keywords for selective matching</li>
+    <li><strong>Content</strong>: The text to inject when keywords match</li>
+    <li><strong>Position</strong>: Where in the message array to inject (<code>before_last_message</code> or <code>system_start</code>)</li>
+    <li><strong>Insertion Order</strong>: Sort order when multiple entries match (lower = first)</li>
+    <li><strong>Always Include (Constant)</strong>: Entry always fires regardless of keywords</li>
+    <li><strong>Selective</strong>: Requires both a primary AND secondary keyword to match</li>
+    <li><strong>Disabled</strong>: Temporarily disable this entry without deleting it</li>
+</ul>
+
+<h2 id="verification">6. Verification</h2>
+
+<p>Verification checks LLM responses against configurable rules using a separate LLM call. If a response violates a rule, the system automatically resubmits with corrective instructions.</p>
+
+<h3>Rules Tab</h3>
+<img src="media/gitb-edit-verification-rule.png" alt="Edit Verification Rule">
+<p class="screenshot-caption">Verification rule editor</p>
+
+<p>Each rule contains:</p>
+<ul>
+    <li><strong>Name</strong>: A label for the rule</li>
+    <li><strong>Description</strong>: Optional notes</li>
+    <li><strong>Verification Prompt</strong>: Instructions for the verification LLM (e.g., "The response must contain the string MARKER:")</li>
+    <li><strong>Max Retries</strong>: How many times to resubmit before giving up (default 2)</li>
+    <li><strong>Execution Order</strong>: Sort order when multiple rules are active</li>
+    <li><strong>Resubmission Strategy</strong>: How to handle violations:
+        <ul>
+            <li><strong>Add Instructions</strong>: Appends a corrective system message to the request</li>
+            <li><strong>Rewrite</strong>: Sends the bad response back with rewrite instructions</li>
+        </ul>
+    </li>
+</ul>
+
+<p>Each rule card has an <strong>ON/OFF toggle</strong> to enable/disable without editing.</p>
+
+<h3>Settings Tab</h3>
+<img src="media/gitv-verification-settings.png" alt="Verification Settings">
+<p class="screenshot-caption">Verification configuration</p>
+
+<p>Configure the verification system:</p>
+<ul>
+    <li><strong>Verification Enabled</strong>: Master toggle for response verification</li>
+    <li><strong>Verification Endpoint</strong>: Which endpoint to use for verification checks (can be the same or different from your main endpoint)</li>
+    <li><strong>Verification Model</strong>: Which model to use for checking (a fast, instruction-following model is recommended)</li>
+</ul>
+
+<div class="note">When verification is enabled, streaming requests are automatically converted to non-streaming to allow the full response to be checked before returning to the client.</div>
+
+<h3>Logs Tab</h3>
+<img src="media/gitv-verification-logs.png" alt="Verification Logs">
+<p class="screenshot-caption">Verification log entries</p>
+
+<p>The logs tab shows the history of verification checks:</p>
+<ul>
+    <li><strong>Rule</strong>: Which rule was evaluated</li>
+    <li><strong>Result</strong>: Approved or Rejected</li>
+    <li><strong>Severity</strong>: How serious the violation was (none, low, medium, high)</li>
+    <li><strong>Retries</strong>: How many resubmission attempts were made</li>
+    <li><strong>Reason</strong>: Why the response was rejected (if applicable)</li>
+    <li><strong>Time</strong>: When the check occurred</li>
+</ul>
+
+<p>Use the <strong>Refresh</strong> button to update the list, or toggle <strong>Auto</strong> for automatic refresh every 15 seconds.</p>
+
+<h3>Test Tab</h3>
+<img src="media/gitv-verification-tests.png" alt="Verification Test">
+<p class="screenshot-caption">Verification test panel</p>
+
+<p>The test panel lets you check sample responses against a verification rule without sending traffic through the proxy:</p>
+<ol>
+    <li>Enter or paste <strong>response content</strong> to evaluate</li>
+    <li>Enter a <strong>verification prompt</strong> (or use a saved rule)</li>
+    <li>Select an <strong>endpoint</strong> and <strong>model</strong> for the check</li>
+    <li>Click <strong>Run Verification Check</strong></li>
+</ol>
+
+<p>The result shows whether the response was approved or rejected, along with the reason and severity.</p>
+
+<h2 id="settings">7. Settings</h2>
+
+<p>The Settings page configures your default proxy behavior and displays your API key.</p>
+
+<h3>Proxy Configuration</h3>
+<ul>
+    <li><strong>Default Endpoint</strong>: Which endpoint to use when no specific routing applies</li>
+    <li><strong>Default Model Override</strong>: Force a specific model regardless of what the client sends (leave blank to use the client's model selection)</li>
+</ul>
+
+<h3>API Key</h3>
+
+<p>Your <code>gitv_</code> API key is displayed here with:</p>
+<ul>
+    <li><strong>Show/Hide toggle</strong> (eye icon): Reveal or mask the key</li>
+    <li><strong>Copy button</strong> (copy icon): Copy the key to clipboard</li>
+</ul>
+
+<p>Use this key as the Bearer token when configuring JanitorAI or other clients.</p>
+
+</div>
+</body>
+</html>

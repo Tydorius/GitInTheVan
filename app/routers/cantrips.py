@@ -57,6 +57,7 @@ class CantripListItem(BaseModel):
     id: str
     name: str
     description: str
+    code: str
     hook_type: str
     is_public: bool
     is_active: bool
@@ -114,6 +115,7 @@ def _cantrip_to_list_item(cantrip: Cantrip) -> CantripListItem:
         id=cantrip.id,
         name=cantrip.name,
         description=cantrip.description,
+        code=cantrip.code,
         hook_type=cantrip.hook_type,
         is_public=cantrip.is_public,
         is_active=cantrip.is_active,

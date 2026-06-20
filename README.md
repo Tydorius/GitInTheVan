@@ -6,6 +6,23 @@ A self-hostable man-in-the-middle LLM router/proxy for roleplay and creative wri
 
 Licensed under Mozilla Public License 2.0.
 
+## Contents
+
+[Why It Exists](#Why-It-Exists)
+[Features](#Features)
+[Upcoming Features](#Upcoming-Features)
+[Quick Start](#Quick-Start)
+[Configuration](#Configuration)
+[Using with JanitorAI](#Using-with-JanitorAI)
+[Cantrips](#Cantrips)
+[Verification](#Verification)
+[Development](#Development)
+[Starting Out With Cantrips](#Starting-Out-With-Cantrips)
+[Geting Support](#Getting-Support)
+[Giving Support](#Giving-Support)
+[Disclaimer: Use of AI](#Disclaimer:-Use-of-AI)
+[License](#License)
+
 ## Why It Exists
 
 I enjoy creative writing, but I spent the early 2000's absorbed in MSN Groups play-by-post roleplay as well as email based play-by-post. I spent a decade doing tabletop gaming online. With my life as hectic as it is, writing with people has become more difficult than I'd like, simply due to scheduling.
