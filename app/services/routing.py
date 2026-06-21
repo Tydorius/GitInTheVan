@@ -31,6 +31,10 @@ async def resolve_routing(bearer_token: str, db: AsyncSession) -> RoutingResult 
         logger.warning("Routing failed: no user for API key hash %s...%s", key_hash[:8], key_hash[-4:])
         return None
 
+    if user.is_disabled:
+        logger.warning("Routing blocked: user %s is disabled", user.username)
+        return None
+
     settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user.id))
     user_settings = settings_result.scalar_one_or_none()
 

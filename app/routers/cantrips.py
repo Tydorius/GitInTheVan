@@ -25,6 +25,10 @@ class CantripCreate(BaseModel):
     description: str = ""
     code: str = ""
     hook_type: str = "pre"
+    run_pre_driver: bool = True
+    run_driver_callable: bool = False
+    run_pre_navigator: bool = False
+    run_post_navigator: bool = False
     is_public: bool = False
     is_active: bool = True
     execution_order: int = 10
@@ -37,6 +41,10 @@ class CantripUpdate(BaseModel):
     description: str | None = None
     code: str | None = None
     hook_type: str | None = None
+    run_pre_driver: bool | None = None
+    run_driver_callable: bool | None = None
+    run_pre_navigator: bool | None = None
+    run_post_navigator: bool | None = None
     is_public: bool | None = None
     is_active: bool | None = None
     execution_order: int | None = None
@@ -50,6 +58,10 @@ class CantripResponse(BaseModel):
     description: str
     code: str
     hook_type: str
+    run_pre_driver: bool
+    run_driver_callable: bool
+    run_pre_navigator: bool
+    run_post_navigator: bool
     is_public: bool
     is_active: bool
     execution_order: int
@@ -63,11 +75,14 @@ class CantripListItem(BaseModel):
     description: str
     code: str
     hook_type: str
+    run_pre_driver: bool
+    run_driver_callable: bool
+    run_pre_navigator: bool
+    run_post_navigator: bool
     is_public: bool
     is_active: bool
     execution_order: int
     timeout_ms: int
-    tag: str
     tag: str
 
 
@@ -109,6 +124,10 @@ def _cantrip_to_response(cantrip: Cantrip) -> CantripResponse:
         description=cantrip.description,
         code=cantrip.code,
         hook_type=cantrip.hook_type,
+        run_pre_driver=cantrip.run_pre_driver,
+        run_driver_callable=cantrip.run_driver_callable,
+        run_pre_navigator=cantrip.run_pre_navigator,
+        run_post_navigator=cantrip.run_post_navigator,
         is_public=cantrip.is_public,
         is_active=cantrip.is_active,
         execution_order=cantrip.execution_order,
@@ -124,6 +143,10 @@ def _cantrip_to_list_item(cantrip: Cantrip) -> CantripListItem:
         description=cantrip.description,
         code=cantrip.code,
         hook_type=cantrip.hook_type,
+        run_pre_driver=cantrip.run_pre_driver,
+        run_driver_callable=cantrip.run_driver_callable,
+        run_pre_navigator=cantrip.run_pre_navigator,
+        run_post_navigator=cantrip.run_post_navigator,
         is_public=cantrip.is_public,
         is_active=cantrip.is_active,
         execution_order=cantrip.execution_order,
@@ -226,6 +249,10 @@ async def create_cantrip(
         description=req.description,
         code=req.code,
         hook_type=req.hook_type,
+        run_pre_driver=req.run_pre_driver,
+        run_driver_callable=req.run_driver_callable,
+        run_pre_navigator=req.run_pre_navigator,
+        run_post_navigator=req.run_post_navigator,
         is_public=req.is_public,
         is_active=req.is_active,
         execution_order=req.execution_order,

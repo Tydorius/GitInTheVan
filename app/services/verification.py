@@ -68,17 +68,21 @@ class VerificationLoopResult:
 
 
 def _build_verification_messages(
-    content: str, rule_prompt: str
+    content: str, rule_prompt: str, forbidden_context: str = ""
 ) -> list[dict[str, str]]:
+    user_content = (
+        f"Rules to check:\n{rule_prompt}\n\n"
+        f"---\nResponse to evaluate:\n{content[:4000]}\n---\n\n"
+    )
+    if forbidden_context:
+        user_content += f"{forbidden_context}\n\n"
+    user_content += "Return JSON only."
+
     return [
         {"role": "system", "content": VERIFICATION_SYSTEM_PROMPT},
         {
             "role": "user",
-            "content": (
-                f"Rules to check:\n{rule_prompt}\n\n"
-                f"---\nResponse to evaluate:\n{content[:4000]}\n---\n\n"
-                "Return JSON only."
-            ),
+            "content": user_content,
         },
     ]
 
@@ -115,6 +119,7 @@ async def check_response(
     endpoint: Endpoint,
     model: str,
     timeout: int = 120,
+    forbidden_context: str = "",
 ) -> VerificationCheckResult:
     judgments: list[VerificationJudgment] = []
     violations: list[VerificationJudgment] = []
@@ -134,57 +139,67 @@ async def check_response(
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(timeout, connect=15.0)
     ) as client:
-        for rule in rules:
-            messages = _build_verification_messages(content, rule.prompt)
-            body: dict[str, Any] = {
-                "model": model or "gpt-4",
-                "messages": messages,
-                "max_tokens": 200,
-                "temperature": 0.1,
-                "stream": False,
-            }
+        if not rules and forbidden_context:
+            judgment = VerificationJudgment(
+                violation=True,
+                reason="Forbidden words/phrases detected in response",
+                severity="high",
+                rule_name="forbidden_words",
+            )
+            judgments.append(judgment)
+            violations.append(judgment)
+        else:
+            for rule in rules:
+                messages = _build_verification_messages(content, rule.prompt, forbidden_context)
+                body: dict[str, Any] = {
+                    "model": model or "gpt-4",
+                    "messages": messages,
+                    "max_tokens": 200,
+                    "temperature": 0.1,
+                    "stream": False,
+                }
 
-            try:
-                resp = await client.post(url, json=body, headers=headers)
-                if resp.status_code != 200:
-                    logger.warning(
-                        "Verification LLM returned %d for rule '%s': %s",
-                        resp.status_code,
-                        rule.name,
-                        resp.text[:200],
+                try:
+                    resp = await client.post(url, json=body, headers=headers)
+                    if resp.status_code != 200:
+                        logger.warning(
+                            "Verification LLM returned %d for rule '%s': %s",
+                            resp.status_code,
+                            rule.name,
+                            resp.text[:200],
+                        )
+                        judgments.append(
+                            VerificationJudgment(
+                                violation=False,
+                                reason=f"Verification endpoint error ({resp.status_code})",
+                                severity="none",
+                                rule_name=rule.name,
+                            )
+                        )
+                        continue
+
+                    data = resp.json()
+                    llm_content = (
+                        data.get("choices", [{}])[0]
+                        .get("message", {})
+                        .get("content", "")
                     )
+
+                    judgment = _parse_judgment(llm_content, rule.name)
+                    judgments.append(judgment)
+                    if judgment.violation:
+                        violations.append(judgment)
+
+                except Exception:
+                    logger.exception("Verification check failed for rule '%s'", rule.name)
                     judgments.append(
                         VerificationJudgment(
                             violation=False,
-                            reason=f"Verification endpoint error ({resp.status_code})",
+                            reason="Verification check failed with exception",
                             severity="none",
                             rule_name=rule.name,
                         )
                     )
-                    continue
-
-                data = resp.json()
-                llm_content = (
-                    data.get("choices", [{}])[0]
-                    .get("message", {})
-                    .get("content", "")
-                )
-
-                judgment = _parse_judgment(llm_content, rule.name)
-                judgments.append(judgment)
-                if judgment.violation:
-                    violations.append(judgment)
-
-            except Exception:
-                logger.exception("Verification check failed for rule '%s'", rule.name)
-                judgments.append(
-                    VerificationJudgment(
-                        violation=False,
-                        reason="Verification check failed with exception",
-                        severity="none",
-                        rule_name=rule.name,
-                    )
-                )
 
     return VerificationCheckResult(
         approved=len(violations) == 0,
@@ -326,7 +341,16 @@ async def run_verification_loop(
             db, user_id
         )
 
-    if not rules or not v_endpoint:
+    forbidden_summary = response_data.pop("_gitv_forbidden_summary", "")
+
+    if not rules and not forbidden_summary:
+        if forbidden_summary:
+            response_data["_gitv_forbidden_summary"] = forbidden_summary
+        return response_data, None
+
+    if not v_endpoint:
+        if forbidden_summary:
+            response_data["_gitv_forbidden_summary"] = forbidden_summary
         return response_data, None
 
     strategy = rules[0].resubmission_strategy if rules else "add_instructions"
@@ -339,7 +363,8 @@ async def run_verification_loop(
 
     while True:
         check_result = await check_response(
-            current_content, rules, v_endpoint, v_model
+            current_content, rules, v_endpoint, v_model,
+            forbidden_context=forbidden_summary,
         )
         check_history.append(check_result)
 

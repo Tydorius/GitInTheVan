@@ -56,6 +56,10 @@ class LorebookCreate(BaseModel):
     is_public: bool = False
     is_active: bool = True
     tag: str = ""
+    run_pre_driver: bool = True
+    run_driver_callable: bool = False
+    run_pre_navigator: bool = False
+    run_post_navigator: bool = False
 
 
 class LorebookUpdate(BaseModel):
@@ -64,6 +68,10 @@ class LorebookUpdate(BaseModel):
     is_public: bool | None = None
     is_active: bool | None = None
     tag: str | None = None
+    run_pre_driver: bool | None = None
+    run_driver_callable: bool | None = None
+    run_pre_navigator: bool | None = None
+    run_post_navigator: bool | None = None
 
 
 class LorebookResponse(BaseModel):
@@ -73,6 +81,10 @@ class LorebookResponse(BaseModel):
     is_public: bool
     is_active: bool
     tag: str
+    run_pre_driver: bool
+    run_driver_callable: bool
+    run_pre_navigator: bool
+    run_post_navigator: bool
     entries: list[EntryResponse]
 
 
@@ -83,6 +95,10 @@ class LorebookListItem(BaseModel):
     is_public: bool
     is_active: bool
     tag: str
+    run_pre_driver: bool
+    run_driver_callable: bool
+    run_pre_navigator: bool
+    run_post_navigator: bool
     entry_count: int
 
 
@@ -158,6 +174,10 @@ async def list_lorebooks(
                 is_public=lb.is_public,
                 is_active=lb.is_active,
                 tag=lb.tag,
+                run_pre_driver=lb.run_pre_driver,
+                run_driver_callable=lb.run_driver_callable,
+                run_pre_navigator=lb.run_pre_navigator,
+                run_post_navigator=lb.run_post_navigator,
                 entry_count=len(lb.entries),
             )
             for lb in lorebooks
@@ -185,6 +205,10 @@ async def list_public_lorebooks(
                 is_public=lb.is_public,
                 is_active=lb.is_active,
                 tag=lb.tag,
+                run_pre_driver=lb.run_pre_driver,
+                run_driver_callable=lb.run_driver_callable,
+                run_pre_navigator=lb.run_pre_navigator,
+                run_post_navigator=lb.run_post_navigator,
                 entry_count=len(lb.entries),
             )
             for lb in lorebooks
@@ -216,6 +240,10 @@ async def get_lorebook(
         is_public=lorebook.is_public,
         is_active=lorebook.is_active,
         tag=lorebook.tag,
+        run_pre_driver=lorebook.run_pre_driver,
+        run_driver_callable=lorebook.run_driver_callable,
+        run_pre_navigator=lorebook.run_pre_navigator,
+        run_post_navigator=lorebook.run_post_navigator,
         entries=[_entry_to_response(e) for e in lorebook.entries],
     )
 
@@ -233,6 +261,10 @@ async def create_lorebook(
         is_public=req.is_public,
         is_active=req.is_active,
         tag=req.tag,
+        run_pre_driver=req.run_pre_driver,
+        run_driver_callable=req.run_driver_callable,
+        run_pre_navigator=req.run_pre_navigator,
+        run_post_navigator=req.run_post_navigator,
     )
     db.add(lorebook)
     await db.commit()
@@ -244,6 +276,10 @@ async def create_lorebook(
         is_public=lorebook.is_public,
         is_active=lorebook.is_active,
         tag=lorebook.tag,
+        run_pre_driver=lorebook.run_pre_driver,
+        run_driver_callable=lorebook.run_driver_callable,
+        run_pre_navigator=lorebook.run_pre_navigator,
+        run_post_navigator=lorebook.run_post_navigator,
         entries=[],
     )
 
@@ -279,6 +315,14 @@ async def update_lorebook(
         if existing.scalar_one_or_none() is not None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tag already in use")
         lorebook.tag = req.tag
+    if req.run_pre_driver is not None:
+        lorebook.run_pre_driver = req.run_pre_driver
+    if req.run_driver_callable is not None:
+        lorebook.run_driver_callable = req.run_driver_callable
+    if req.run_pre_navigator is not None:
+        lorebook.run_pre_navigator = req.run_pre_navigator
+    if req.run_post_navigator is not None:
+        lorebook.run_post_navigator = req.run_post_navigator
 
     await db.commit()
     await db.refresh(lorebook)
@@ -289,6 +333,10 @@ async def update_lorebook(
         is_public=lorebook.is_public,
         is_active=lorebook.is_active,
         tag=lorebook.tag,
+        run_pre_driver=lorebook.run_pre_driver,
+        run_driver_callable=lorebook.run_driver_callable,
+        run_pre_navigator=lorebook.run_pre_navigator,
+        run_post_navigator=lorebook.run_post_navigator,
         entries=[],
     )
 
@@ -504,6 +552,10 @@ async def import_lorebook(
         is_public=lorebook.is_public,
         is_active=lorebook.is_active,
         tag=lorebook.tag,
+        run_pre_driver=lorebook.run_pre_driver,
+        run_driver_callable=lorebook.run_driver_callable,
+        run_pre_navigator=lorebook.run_pre_navigator,
+        run_post_navigator=lorebook.run_post_navigator,
         entries=[_entry_to_response(e) for e in lorebook.entries],
     )
 

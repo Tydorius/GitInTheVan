@@ -28,17 +28,27 @@
   let testResult: any = null
   let testing = false
 
+  let forbiddenSettings = { forbidden_words_enabled: false, forbidden_words_case_sensitive: false }
+  let forbiddenWords: any[] = []
+  let newForbiddenPhrase = ''
+  let forbiddenTestContent = ''
+  let forbiddenTestResult: any = null
+  let forbiddenTesting = false
+
   async function load() {
     loading = true
     try {
-      const [r, e, s, l] = await Promise.all([
+      const [r, e, s, l, fs, fw] = await Promise.all([
         api.listVerificationRules(), api.listEndpoints(),
         api.getVerificationSettings(), api.listVerificationLogs(),
+        api.getForbiddenSettings(), api.listForbiddenWords(),
       ])
       rules = r.rules
       endpoints = e.endpoints
       vSettings = s
       logs = l.logs
+      forbiddenSettings = fs
+      forbiddenWords = fw.words
     } catch (e: any) { error = e.message }
     finally { loading = false }
   }
@@ -103,6 +113,37 @@
     finally { testing = false }
   }
 
+  async function saveForbiddenSettings() {
+    error = ''
+    try { forbiddenSettings = await api.updateForbiddenSettings(forbiddenSettings) }
+    catch (e: any) { error = e.message }
+  }
+
+  async function addForbiddenWord() {
+    if (!newForbiddenPhrase.trim()) return
+    error = ''
+    try {
+      await api.createForbiddenWord(newForbiddenPhrase.trim())
+      newForbiddenPhrase = ''
+      forbiddenWords = (await api.listForbiddenWords()).words
+    } catch (e: any) { error = e.message }
+  }
+
+  async function deleteForbiddenWord(id: string) {
+    try {
+      await api.deleteForbiddenWord(id)
+      forbiddenWords = (await api.listForbiddenWords()).words
+    } catch (e: any) { error = e.message }
+  }
+
+  async function testForbidden() {
+    forbiddenTesting = true; forbiddenTestResult = null; error = ''
+    try {
+      forbiddenTestResult = await api.testForbiddenWords(forbiddenTestContent)
+    } catch (e: any) { error = e.message }
+    finally { forbiddenTesting = false }
+  }
+
   let autoRefresh = false
   let refreshTimer: ReturnType<typeof setInterval> | null = null
 
@@ -134,6 +175,7 @@
     <button onclick={() => tab = 'rules'} class={tab === 'rules' ? 'primary' : ''}>Rules</button>
     <button onclick={() => tab = 'settings'} class={tab === 'settings' ? 'primary' : ''}>Settings</button>
     <button onclick={() => tab = 'logs'} class={tab === 'logs' ? 'primary' : ''}>Logs</button>
+    <button onclick={() => tab = 'forbidden'} class={tab === 'forbidden' ? 'primary' : ''}>Forbidden Words</button>
     <button onclick={() => tab = 'test'} class={tab === 'test' ? 'primary' : ''}>Test</button>
   </div>
 </div>
@@ -229,6 +271,73 @@
       </tbody>
     </table>
   {/if}
+
+{:else if tab === 'forbidden'}
+  <div class="card">
+    <h3>Forbidden Words &amp; Phrases</h3>
+    <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
+      Phrases checked case-insensitively against the Driver's response before the Navigator runs. Matches are surfaced to the Navigator as concrete violations. Works with or without verification rules.
+    </p>
+    <div class="form-group">
+      <label>
+        <input type="checkbox" bind:checked={forbiddenSettings.forbidden_words_enabled} style="width: auto;">
+        Enable Forbidden Words Check
+      </label>
+    </div>
+    <div class="form-group">
+      <label>
+        <input type="checkbox" bind:checked={forbiddenSettings.forbidden_words_case_sensitive} style="width: auto;">
+        Case Sensitive
+      </label>
+    </div>
+    <button class="primary" onclick={saveForbiddenSettings}>Save Settings</button>
+  </div>
+
+  <div class="card">
+    <h3>Forbidden Phrases</h3>
+    <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+      <input bind:value={newForbiddenPhrase} placeholder="Enter a word or phrase..." onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addForbiddenWord(); } }} />
+      <button class="primary" onclick={addForbiddenWord} disabled={!newForbiddenPhrase.trim()}>Add</button>
+    </div>
+    {#if forbiddenWords.length === 0}
+      <div class="empty-state" style="padding: 16px;">No forbidden phrases configured.</div>
+    {:else}
+      <table>
+        <thead><tr><th>Phrase</th><th>Regex</th><th>Actions</th></tr></thead>
+        <tbody>
+          {#each forbiddenWords as w}
+            <tr>
+              <td>{w.phrase}</td>
+              <td>{#if w.is_regex}<span class="badge approved">Yes</span>{:else}No{/if}</td>
+              <td><button class="danger" onclick={() => deleteForbiddenWord(w.id)} style="font-size: 12px;">Delete</button></td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    {/if}
+  </div>
+
+  <div class="card">
+    <h3>Test Forbidden Words</h3>
+    <div class="form-group">
+      <textarea bind:value={forbiddenTestContent} placeholder="Paste response text to check..." style="min-height: 80px;"></textarea>
+    </div>
+    <button class="primary" onclick={testForbidden} disabled={forbiddenTesting || !forbiddenTestContent.trim()}>
+      {forbiddenTesting ? 'Scanning...' : 'Scan'}
+    </button>
+    {#if forbiddenTestResult}
+      <div style="margin-top: 12px;">
+        {#if forbiddenTestResult.has_matches}
+          <div class="error-msg">
+            {forbiddenTestResult.match_count} phrase(s) matched.
+            <pre style="margin-top: 8px; white-space: pre-wrap;">{forbiddenTestResult.summary}</pre>
+          </div>
+        {:else}
+          <div class="success-msg">No forbidden phrases found.</div>
+        {/if}
+      </div>
+    {/if}
+  </div>
 
 {:else if tab === 'test'}
   <div class="card">

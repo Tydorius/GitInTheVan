@@ -16,6 +16,8 @@ Licensed under Mozilla Public License 2.0.
 [Using with JanitorAI](#Using-with-JanitorAI)  
 [Cantrips](#Cantrips)  
 [Verification](#Verification)  
+[Persistent Memory](#Persistent-Memory)  
+[Conversation Summarization](#Conversation-Summarization)  
 [Development](#Development)  
 [Starting Out With Cantrips](#Starting-Out-With-Cantrips)  
 [Geting Support](#Getting-Support)  
@@ -52,22 +54,21 @@ I will stress that I am not going to replicate or 100% replace Lorebary's functi
 ## Features
 
 - **Proxy Router** — Forwards OpenAI-compatible requests to any LLM endpoint (OpenWebUI, OpenRouter, local LLM servers)
-- **Multi-User** — Per-user API keys, endpoints, and configurations
-- **Lorebooks** — JSON worldbook system with keyword matching, constant/selective entries, enable/disable per lorebook, import from SillyTavern/Chub/JanitorAI formats, and file export
-- **Cantrips** — Sandboxed JavaScript execution compatible with JanitorAI scripts, with per-chat persistent storage via `context.chat_data`
-- **Verification** — LLM-based response checking with configurable rules, automatic resubmission with retry limits, and verification logs
-- **Web UI** — Full management interface built with Svelte 5 including cantrip tester, verification tester, and log viewer
+- **Multi-User** — Per-user API keys, endpoints, and configurations with full admin management (edit, disable, delete with cascade cleanup, password reset, API key regeneration)
+- **Lorebooks** — JSON worldbook system with keyword matching, constant/selective entries, enable/disable per lorebook, import from SillyTavern/Chub/JanitorAI formats, and file export. Supports pipeline positioning (pre-Driver, pre-Navigator, etc.)
+- **Cantrips** — Sandboxed JavaScript execution compatible with JanitorAI scripts, with per-chat persistent storage via `context.chat_data`. Four pipeline positions (Pre-Driver, Driver-Callable, Pre-Navigator, Post-Navigator). Includes built-in templates (dice roller, status tracker, day counter, weather system)
+- **Verification** — LLM-based response checking (Navigator) with configurable rules, automatic resubmission with retry limits, and verification logs
+- **Persistent Memory** — Database-backed memory system using `<memstore>` tags. LLM responses are scanned for key/value pairs, stored per-conversation, and injected as a `[PERSISTENT MEMORY]` context block on subsequent requests. No zero-width character encoding — the database is the source of truth
+- **Conversation Summarization** — Automatically compresses long conversations when token count exceeds a configurable threshold. Older dialogue is summarized by a user-selected LLM and replaced with a `[CONVERSATION SUMMARY]` context block, while recent messages are always forwarded verbatim
+- **Forbidden Words** — Global per-user phrase list checked against responses before the Navigator runs. Supports plain-text and regex matching, case-insensitive by default
+- **Tagging System** — Activate lorebooks, cantrips, and verification rules via `<#type-name#>` delimiters in persona or message text. Tags are auto-stripped before forwarding to the LLM
+- **Diagnostics** — Automated endpoint and configuration checker for troubleshooting connectivity issues
+- **Web UI** — Full management interface built with Svelte 5 including cantrip tester, verification tester, forbidden word scanner, code editor with syntax highlighting, and log viewer
 
 ## Upcoming Features
 
 The following are planned for future releases.
 
-- **Hybrid Verification** — Fast regex checks before LLM verification to catch obvious violations without extra API calls
-- **Cantrip Templates** — Pre-built cantrips for common use cases (dice rolling, status tracking, day counters) that users install with one click
-- **Diagnostic Tool** — Automated endpoint and configuration checker for troubleshooting "no response" errors
-- **Persistent Memory** — Zero-width character encoding for state persistence across conversation cycles
-- **Chat Memory Summarization** — Opt-in compression of conversation history using a user-selected LLM endpoint
-- **Tagging System** — Activate lorebooks, cantrips, and verification rules via `<#tag#>` delimiters in persona text
 - **Embedded Creator Lorebooks** — `<jslorebook>` tag extraction from character cards for plug-and-play cantrip support
 - **Prefill Support** — Provider-specific prefill injection that adapts to each endpoint's capabilities
 - **Command Tags** — Inline tags (`<LORE:name>`, `<VERIFY:off>`) for per-message configuration overrides
@@ -242,14 +243,74 @@ Use the Cantrip Tester in the web UI (Cantrips page) to run a cantrip against sa
 
 ## Verification
 
-Verification checks LLM responses against configurable rules using a separate LLM call:
+Verification uses a separate LLM (the **Navigator**) to check the writing LLM's (the **Driver's**) responses against configurable rules. GitInTheVan uses van-themed terminology: **Driver** is the primary writing LLM, **Navigator** is the verification LLM.
 
-1. LLM produces a response
-2. The response is sent to a verification LLM with your rule prompt
+1. Driver produces a response
+2. The response is sent to the Navigator with your rule prompt
 3. If the response violates the rule, the request is resubmitted with corrective instructions
 4. Retries are limited (configurable per rule, default 2)
 
 **Note:** When verification is enabled, responses are buffered (non-streaming) to allow checking before returning to the client.
+
+## Persistent Memory
+
+GitInTheVan provides database-backed persistent memory — no zero-width character encoding, no reliance on the LLM to preserve hidden data.
+
+### How It Works
+
+1. The LLM includes `<memstore>` tags in its response to save memories:
+   ```
+   <memstore key="location">Dragon's Breath Tavern</memstore>
+   <memstore key="time">evening</memstore>
+   ```
+2. GitInTheVan extracts these tags, stores them in the database per-conversation, and **strips them** from the response before it reaches the user
+3. On the next request, all stored memories for that conversation are injected as a system context block:
+   ```
+   [PERSISTENT MEMORY]
+   location: Dragon's Breath Tavern
+   time: evening
+   [/PERSISTENT MEMORY]
+   ```
+4. The system uses **rolling hash conversation tracking** to identify which conversation a request belongs to. The hash is edit-tolerant: it excludes the current user message and the preceding assistant message, so editing or swiping the LLM's last response does not break the conversation chain or orphan its memories
+
+Memories are managed via the **Memories** page in the web UI (view, edit, delete per conversation).
+
+### Cantrip Access
+
+Cantrips can also access persistent memory via `context.chat_data` — a per-chat key/value store that survives across conversation cycles:
+
+```javascript
+const day = context.chat_data.get('day') || 1;
+context.chat_data.set('day', day + 1);
+```
+
+## Conversation Summarization
+
+When conversations grow long, summarization automatically compresses older history to reduce token usage while preserving narrative context.
+
+### How It Works
+
+1. GitInTheVan estimates the token count of the request messages (~4 chars per token heuristic)
+2. If the count exceeds the configurable **token threshold**, the older dialogue messages are sent to a user-selected LLM for summarization
+3. The summarized messages are **removed** from the request and replaced with a single `[CONVERSATION SUMMARY]` system block
+4. The most recent messages (configurable, minimum 3) are always forwarded verbatim — the summary and recent context never overlap
+5. Summaries are cached per conversation using a boundary hash. Rerolls and forks reuse the cached summary without re-calling the summarization LLM. Continuations build on the prior summary (rolling pattern)
+6. System messages (persona, lorebook constant entries, cantrip scenario additions) are preserved — only user/assistant dialogue is summarized
+
+### Configuration
+
+Configure in **Settings > Conversation Summarization**:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Enabled | Off | Master toggle |
+| Endpoint | *(default)* | Which LLM endpoint to use for summarization (can be a cheaper/faster model) |
+| Model Override | *(blank)* | Override the model name for summarization calls |
+| Token Threshold | 8000 | When estimated tokens exceed this, summarization triggers |
+| Keep Recent Messages | 6 | Number of recent messages always sent verbatim (minimum 3) |
+| Summarization Prompt | *(default)* | System prompt for the summarization LLM |
+
+Summaries can be viewed and managed on the **Memories** page.
 
 ## Development
 

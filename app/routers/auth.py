@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.models.user import User
 from app.models.user_settings import UserSettings
 from app.services.auth import (
@@ -40,6 +41,19 @@ class SetupResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     api_key: str
+
+
+class MeResponse(BaseModel):
+    id: str
+    username: str
+    is_admin: bool
+
+
+@router.get("/me")
+async def get_me(
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    return MeResponse(id=current_user.id, username=current_user.username, is_admin=current_user.is_admin)
 
 
 @router.post("/setup", status_code=status.HTTP_201_CREATED)
@@ -80,6 +94,9 @@ async def login(
     user = result.scalar_one_or_none()
     if user is None or not verify_password(req.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    if user.is_disabled:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled")
 
     token = create_access_token(user.id, user.username, user.is_admin)
     return AuthResponse(access_token=token)

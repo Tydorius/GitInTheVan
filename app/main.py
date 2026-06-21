@@ -13,9 +13,12 @@ from app.routers.auth import router as auth_router
 from app.routers.cantrips import router as cantrips_router
 from app.routers.diagnostics import router as diagnostics_router
 from app.routers.endpoints import router as endpoints_router
+from app.routers.forbidden_words import router as forbidden_words_router
 from app.routers.lorebook import router as lorebook_router
+from app.routers.memories import router as memories_router
 from app.routers.proxy import router as proxy_router
 from app.routers.settings import router as settings_router
+from app.routers.summarization import router as summarization_router
 from app.routers.users import router as users_router
 from app.routers.verification import router as verification_router
 
@@ -37,7 +40,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="GitInTheVan",
     description="Self-hostable MITM LLM router/proxy for roleplay services",
-    version="0.1.0",
+    version="0.7.1",
     lifespan=lifespan,
 )
 
@@ -55,9 +58,12 @@ app.include_router(users_router)
 app.include_router(endpoints_router)
 app.include_router(settings_router)
 app.include_router(lorebook_router)
+app.include_router(memories_router)
 app.include_router(cantrips_router)
 app.include_router(diagnostics_router)
 app.include_router(verification_router)
+app.include_router(summarization_router)
+app.include_router(forbidden_words_router)
 
 
 @app.get("/health")

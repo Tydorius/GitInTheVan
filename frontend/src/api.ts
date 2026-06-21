@@ -82,6 +82,9 @@ export const api = {
       body: JSON.stringify({ username, password }),
     }),
 
+  getMe: () =>
+    request<{ id: string; username: string; is_admin: boolean }>('/api/auth/me'),
+
   // Health
   health: () => request<{ status: string }>('/health'),
 
@@ -92,6 +95,14 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ username, password }),
     }),
+  updateUser: (id: string, data: { username?: string; is_disabled?: boolean }) =>
+    request<any>(`/api/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteUser: (id: string) =>
+    request<void>(`/api/users/${id}`, { method: 'DELETE' }),
+  resetUserPassword: (id: string, password: string) =>
+    request<any>(`/api/users/${id}/reset-password`, { method: 'POST', body: JSON.stringify({ password }) }),
+  regenerateUserApiKey: (id: string) =>
+    request<{ api_key: string }>(`/api/users/${id}/regenerate-api-key`, { method: 'POST' }),
 
   // Endpoints
   listEndpoints: () => request<{ endpoints: any[] }>('/api/endpoints'),
@@ -165,6 +176,45 @@ export const api = {
   testVerification: (data: any) =>
     request<any>('/api/verification/test', { method: 'POST', body: JSON.stringify(data) }),
   listVerificationLogs: () => request<{ logs: any[]; total: number }>('/api/verification/logs'),
+
+  // Memories
+  listMemories: (conversationId?: string) =>
+    request<{ memories: any[]; total: number }>(`/api/memories${conversationId ? `?conversation_id=${conversationId}` : ''}`),
+  updateMemory: (id: string, value: string) =>
+    request<any>(`/api/memories/${id}`, { method: 'PUT', body: JSON.stringify({ value }) }),
+  deleteMemory: (id: string) =>
+    request<void>(`/api/memories/${id}`, { method: 'DELETE' }),
+
+  // Summarization
+  getSummarizationSettings: () =>
+    request<{
+      summarization_enabled: boolean;
+      summarization_endpoint_id: string | null;
+      summarization_model: string;
+      summarization_token_threshold: number;
+      summarization_keep_recent: number;
+      summarization_prompt: string;
+    }>('/api/summarization/settings'),
+  updateSummarizationSettings: (data: any) =>
+    request<any>('/api/summarization/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  listSummaries: (internalChatId?: string) =>
+    request<{ summaries: any[]; total: number }>(`/api/summarization/summaries${internalChatId ? `?internal_chat_id=${internalChatId}` : ''}`),
+  deleteSummary: (id: string) =>
+    request<void>(`/api/summarization/summaries/${id}`, { method: 'DELETE' }),
+
+  // Forbidden Words
+  getForbiddenSettings: () =>
+    request<{ forbidden_words_enabled: boolean; forbidden_words_case_sensitive: boolean }>('/api/forbidden-words/settings'),
+  updateForbiddenSettings: (data: any) =>
+    request<any>('/api/forbidden-words/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  listForbiddenWords: () =>
+    request<{ words: any[]; total: number }>('/api/forbidden-words'),
+  createForbiddenWord: (phrase: string, is_regex: boolean = false) =>
+    request<any>('/api/forbidden-words', { method: 'POST', body: JSON.stringify({ phrase, is_regex }) }),
+  deleteForbiddenWord: (id: string) =>
+    request<void>(`/api/forbidden-words/${id}`, { method: 'DELETE' }),
+  testForbiddenWords: (content: string) =>
+    request<{ has_matches: boolean; summary: string; match_count: number }>('/api/forbidden-words/test', { method: 'POST', body: JSON.stringify({ content }) }),
 
   // Tags - browse public tagged resources
   listPublicLorebooks: () => request<{ lorebooks: any[] }>('/api/lorebooks/public'),

@@ -63,6 +63,66 @@ MIGRATIONS: list[tuple[str, str]] = [
         UPDATE verification_rules SET tag = REPLACE(REPLACE(tag, 'verify-', ''), 'verify_', '') WHERE tag LIKE 'verify-%' OR tag LIKE 'verify_%';
         """,
     ),
+    (
+        "008_add_user_settings_summarization_fields",
+        """
+        ALTER TABLE user_settings ADD COLUMN summarization_enabled BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN summarization_endpoint_id VARCHAR(36);
+        ALTER TABLE user_settings ADD COLUMN summarization_model VARCHAR(128) DEFAULT '' NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN summarization_token_threshold INTEGER DEFAULT 8000 NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN summarization_keep_recent INTEGER DEFAULT 6 NOT NULL;
+        """,
+    ),
+    (
+        "009_add_user_settings_summarization_prompt",
+        """
+        ALTER TABLE user_settings ADD COLUMN summarization_prompt TEXT DEFAULT 'Summarize the following roleplay conversation excerpt. Preserve key facts, character development, important plot points, established relationships, locations, items, and any commitments or promises made. Write in concise bullet points. Do not add new information. Output only the summary.' NOT NULL;
+        """,
+    ),
+    (
+        "010_add_cantrip_position_flags",
+        """
+        ALTER TABLE cantrips ADD COLUMN run_pre_driver BOOLEAN DEFAULT 1 NOT NULL;
+        ALTER TABLE cantrips ADD COLUMN run_driver_callable BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE cantrips ADD COLUMN run_pre_navigator BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE cantrips ADD COLUMN run_post_navigator BOOLEAN DEFAULT 0 NOT NULL;
+        """,
+    ),
+    (
+        "011_add_lorebook_position_flags",
+        """
+        ALTER TABLE lorebooks ADD COLUMN run_pre_driver BOOLEAN DEFAULT 1 NOT NULL;
+        ALTER TABLE lorebooks ADD COLUMN run_driver_callable BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE lorebooks ADD COLUMN run_pre_navigator BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE lorebooks ADD COLUMN run_post_navigator BOOLEAN DEFAULT 0 NOT NULL;
+        """,
+    ),
+    (
+        "012_add_user_settings_forbidden_words_fields",
+        """
+        ALTER TABLE user_settings ADD COLUMN forbidden_words_enabled BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN forbidden_words_case_sensitive BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN driver_callable_turns INTEGER DEFAULT 1 NOT NULL;
+        """,
+    ),
+    (
+        "013_create_forbidden_words_table",
+        """
+        CREATE TABLE IF NOT EXISTS forbidden_words (
+            id VARCHAR(36) PRIMARY KEY,
+            user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            phrase TEXT NOT NULL,
+            is_regex BOOLEAN DEFAULT 0 NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        """,
+    ),
+    (
+        "014_add_user_is_disabled",
+        """
+        ALTER TABLE users ADD COLUMN is_disabled BOOLEAN DEFAULT 0 NOT NULL;
+        """,
+    ),
 ]
 
 

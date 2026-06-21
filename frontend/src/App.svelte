@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { isAuthenticated, currentRoute, logout } from './stores'
+  import { isAuthenticated, currentRoute, logout, isAdmin, checkAdmin } from './stores'
   import Login from './pages/Login.svelte'
   import Dashboard from './pages/Dashboard.svelte'
   import Endpoints from './pages/Endpoints.svelte'
   import Cantrips from './pages/Cantrips.svelte'
   import Lorebooks from './pages/Lorebooks.svelte'
   import Verification from './pages/Verification.svelte'
+  import Memories from './pages/Memories.svelte'
   import Settings from './pages/Settings.svelte'
   import Users from './pages/Users.svelte'
 
@@ -15,6 +16,7 @@
     { path: '/cantrips', label: 'Cantrips', icon: 'C' },
     { path: '/lorebooks', label: 'Lorebooks', icon: 'L' },
     { path: '/verification', label: 'Verification', icon: 'V' },
+    { path: '/memories', label: 'Memories', icon: 'M' },
     { path: '/settings', label: 'Settings', icon: 'G' },
     { path: '/users', label: 'Users', icon: 'U', admin: true },
   ]
@@ -36,6 +38,8 @@
         })
         if (test.status === 401) {
           logout()
+        } else {
+          await checkAdmin()
         }
       }
     } catch {}
@@ -55,7 +59,7 @@
       </div>
       <nav class="sidebar-nav">
         {#each navItems as item}
-          {#if !item.admin}
+          {#if !item.admin || $isAdmin}
             <a href={`#${item.path}`} class={page === item.path ? 'active' : ''}>
               <span>{item.icon}</span> {item.label}
             </a>
@@ -78,6 +82,8 @@
         <Lorebooks />
       {:else if page === '/verification'}
         <Verification />
+      {:else if page === '/memories'}
+        <Memories />
       {:else if page === '/settings'}
         <Settings />
       {:else if page === '/users'}

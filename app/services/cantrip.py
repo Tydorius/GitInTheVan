@@ -67,16 +67,26 @@ async def _save_chat_data(
     await db.commit()
 
 
-async def _load_active_cantrips(db: AsyncSession, user_id: str) -> list[Cantrip]:
-    result = await db.execute(
+async def _load_active_cantrips(
+    db: AsyncSession, user_id: str, position: str = "pre_driver"
+) -> list[Cantrip]:
+    flag_map = {
+        "pre_driver": Cantrip.run_pre_driver,
+        "pre_navigator": Cantrip.run_pre_navigator,
+        "post_navigator": Cantrip.run_post_navigator,
+    }
+    flag = flag_map.get(position, Cantrip.run_pre_driver)
+
+    query = (
         select(Cantrip)
         .where(
             Cantrip.user_id == user_id,
             Cantrip.is_active.is_(True),
-            Cantrip.hook_type == "pre",
+            flag.is_(True),
         )
         .order_by(Cantrip.execution_order, Cantrip.created_at)
     )
+    result = await db.execute(query)
     return list(result.scalars().all())
 
 
@@ -85,6 +95,7 @@ async def process_cantrips(
     user_id: str,
     request_headers: dict[str, str],
     tags: list | None = None,
+    position: str = "pre_driver",
 ) -> dict[str, Any]:
     messages = body_json.get("messages", [])
     if not messages:
@@ -93,7 +104,7 @@ async def process_cantrips(
     params = extract_context_params(body_json, request_headers)
 
     async with async_session() as db:
-        all_cantrips = await _load_active_cantrips(db, user_id)
+        all_cantrips = await _load_active_cantrips(db, user_id, position)
         if not all_cantrips:
             return body_json
 
@@ -174,3 +185,94 @@ async def test_cantrip(
     timeout_ms: int = 5000,
 ) -> CantripResult:
     return await run_cantrip(code, context, chat_data, timeout_ms)
+
+
+async def process_cantrips_post_driver(
+    response_content: str,
+    body_json: dict[str, Any],
+    user_id: str,
+    request_headers: dict[str, str],
+    tags: list | None = None,
+    position: str = "pre_navigator",
+) -> str:
+    """Run post-Driver cantrips that can modify the response content.
+
+    Used for pre-Navigator (regex/keyword checks, cleanup) and
+    post-Navigator (final formatting) positions. Cantrips at these
+    positions have access to context.response.content.
+    """
+    messages = body_json.get("messages", [])
+    if not messages:
+        return response_content
+
+    params = extract_context_params(body_json, request_headers)
+
+    async with async_session() as db:
+        all_cantrips = await _load_active_cantrips(db, user_id, position)
+        if not all_cantrips:
+            return response_content
+
+        from app.services.tagging import should_activate_resource
+        cantrips = []
+        for c in all_cantrips:
+            if c.tag and tags:
+                if should_activate_resource(
+                    c.tag, "cantrip", c.is_active, c.is_public, c.user_id, user_id, tags
+                ):
+                    cantrips.append(c)
+            else:
+                cantrips.append(c)
+
+        if not cantrips:
+            return response_content
+
+        conversation_id = params.get("conversation_id", "")
+        chat_data = await _load_chat_data(db, user_id, conversation_id)
+
+        context = build_context(messages, **params)
+        context["response"] = {
+            "content": response_content,
+            "original_content": response_content,
+            "modified": False,
+        }
+
+        current_content = response_content
+
+        for cantrip in cantrips:
+            try:
+                context["response"]["content"] = current_content
+                result = await run_cantrip(
+                    code=cantrip.code,
+                    context=context,
+                    chat_data=chat_data,
+                    timeout_ms=cantrip.timeout_ms,
+                )
+            except Exception:
+                logger.exception("Post-driver cantrip '%s' failed", cantrip.name)
+                continue
+
+            if result.has_error:
+                logger.warning("Post-driver cantrip '%s' error: %s", cantrip.name, result.error)
+
+            if result.debug_logs:
+                logger.debug(
+                    "Post-driver cantrip '%s' logs: %s",
+                    cantrip.name, " | ".join(result.debug_logs),
+                )
+
+            if result.response_content is not None and result.response_content != current_content:
+                current_content = result.response_content
+                context["response"]["modified"] = True
+
+            chat_data = result.chat_data
+
+        if conversation_id:
+            await _save_chat_data(db, user_id, conversation_id, chat_data)
+
+    if current_content != response_content:
+        logger.info(
+            "Post-driver cantrips (%s): %d scripts, response modified %d -> %d chars",
+            position, len(cantrips), len(response_content), len(current_content),
+        )
+
+    return current_content

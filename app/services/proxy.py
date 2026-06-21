@@ -130,8 +130,45 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
                 if isinstance(content, str):
                     msg["content"] = strip_tags(content)
 
+        body_json["_gitv_tags"] = tags
+
+        from app.services.conversation import (
+            load_memories_for_chat,
+            resolve_conversation,
+        )
+        from app.services.memory import build_memory_context_block as _build_mem_block
+
+        messages_for_conv = body_json.get("messages", [])
+        internal_chat_id, is_new_conv = await resolve_conversation(messages_for_conv, user_id)
+
+        memories = await load_memories_for_chat(internal_chat_id, user_id)
+        if memories:
+            memory_block = _build_mem_block(memories)
+            if memory_block:
+                msgs = body_json["messages"]
+                system_idx = None
+                for i, msg in enumerate(msgs):
+                    if msg.get("role") == "system":
+                        system_idx = i
+                        break
+                if system_idx is not None:
+                    msgs[system_idx] = {
+                        **msgs[system_idx],
+                        "content": msgs[system_idx]["content"] + "\n\n" + memory_block,
+                    }
+                else:
+                    msgs.insert(0, {"role": "system", "content": memory_block})
+                logger.info("Memory injection: %d keys for chat %s", len(memories), internal_chat_id[:12])
+
         body_json = await _apply_lorebook_injection(body_json, user_id, tags)
         body_json = await process_cantrips(body_json, user_id, request_headers, tags)
+
+        body_json["_gitv_chat_id"] = internal_chat_id
+        body_json["_gitv_messages_for_hash"] = body_json.get("messages", [])
+
+        from app.services.summarization import maybe_summarize
+        body_json = await maybe_summarize(body_json, user_id, internal_chat_id)
+
         body = json.dumps(body_json).encode()
 
     timeout = httpx.Timeout(settings.request_timeout, connect=10.0)
@@ -302,10 +339,47 @@ async def _apply_lorebook_injection(
 
 
 async def _forward_non_streaming(
-    method: str, url: str, headers: dict[str, str], body: bytes, timeout: httpx.Timeout
+    method: str, url: str, headers: dict[str, str], body: bytes, timeout: httpx.Timeout,
+    user_id: str | None = None, body_json: dict[str, Any] | None = None,
 ) -> JSONResponse:
     response_data, status_code = await _do_forward(method, url, headers, body, timeout)
+
+    if status_code == 200 and user_id and body_json and body_json.get("_gitv_chat_id"):
+        response_data = await _extract_response_memories(response_data, user_id, body_json)
+
     return JSONResponse(status_code=status_code, content=response_data)
+
+
+async def _extract_response_memories(
+    response_data: dict[str, Any], user_id: str, body_json: dict[str, Any]
+) -> dict[str, Any]:
+    choices = response_data.get("choices", [])
+    if not choices:
+        return response_data
+
+    content = choices[0].get("message", {}).get("content", "")
+    if not content:
+        return response_data
+
+    from app.services.conversation import record_post_hash, save_memories_for_chat
+    from app.services.memory import parse_memstore_tags
+
+    cleaned, memories = parse_memstore_tags(content)
+
+    chat_id = body_json.get("_gitv_chat_id", "")
+    messages_for_hash = body_json.get("_gitv_messages_for_hash", body_json.get("messages", []))
+
+    if cleaned != content:
+        response_data["choices"][0]["message"]["content"] = cleaned
+
+    if chat_id and memories:
+        await save_memories_for_chat(chat_id, user_id, memories)
+        logger.info("Memory extraction: %d keys saved for chat %s", len(memories), chat_id[:12])
+
+    if chat_id:
+        await record_post_hash(messages_for_hash, cleaned, chat_id, user_id)
+
+    return response_data
 
 
 async def _forward_non_streaming_verified(
@@ -321,6 +395,10 @@ async def _forward_non_streaming_verified(
     response_data, status_code = await _do_forward(method, url, headers, body, timeout)
 
     if status_code == 200 and user_id:
+        response_data = await _apply_post_driver_processing(
+            response_data, body_json, user_id, request_headers
+        )
+
         conversation_id = request_headers.get("x-conversation-id", "")
         try:
             response_data, vresult = await run_verification_loop(
@@ -337,7 +415,100 @@ async def _forward_non_streaming_verified(
         except Exception:
             logger.exception("Verification loop failed, returning original response")
 
+        try:
+            response_data = await _apply_post_navigator_processing(
+                response_data, body_json, user_id, request_headers
+            )
+        except Exception:
+            logger.exception("Post-navigator processing failed")
+
+    if status_code == 200 and user_id and body_json.get("_gitv_chat_id"):
+        response_data = await _extract_response_memories(response_data, user_id, body_json)
+
+    response_data.pop("_gitv_forbidden_summary", None)
+
     return JSONResponse(status_code=status_code, content=response_data)
+
+
+async def _apply_post_driver_processing(
+    response_data: dict[str, Any],
+    body_json: dict[str, Any],
+    user_id: str,
+    request_headers: dict[str, str],
+) -> dict[str, Any]:
+    """Run pre-Navigator cantrips and forbidden word scan on Driver response."""
+    choices = response_data.get("choices", [])
+    if not choices:
+        return response_data
+
+    content = choices[0].get("message", {}).get("content", "")
+    if not content:
+        return response_data
+
+    from app.services.cantrip import process_cantrips_post_driver
+
+    tags = body_json.get("_gitv_tags", [])
+    body_json_for_cantrip = {k: v for k, v in body_json.items() if not k.startswith("_gitv")}
+
+    try:
+        new_content = await process_cantrips_post_driver(
+            content, body_json_for_cantrip, user_id, request_headers,
+            tags=tags, position="pre_navigator",
+        )
+        if new_content != content:
+            response_data["choices"][0]["message"]["content"] = new_content
+            content = new_content
+            logger.info("Pre-navigator cantrips modified response")
+    except Exception:
+        logger.exception("Pre-navigator cantrip processing failed")
+
+    try:
+        from app.services.forbidden_words import scan_response
+        scan_result = await scan_response(content, user_id)
+        if scan_result.has_matches:
+            response_data["_gitv_forbidden_summary"] = scan_result.summary
+            logger.info(
+                "Forbidden words: %d phrase(s) matched",
+                len(scan_result.matches),
+            )
+    except Exception:
+        logger.exception("Forbidden word scan failed")
+
+    return response_data
+
+
+async def _apply_post_navigator_processing(
+    response_data: dict[str, Any],
+    body_json: dict[str, Any],
+    user_id: str,
+    request_headers: dict[str, str],
+) -> dict[str, Any]:
+    """Run post-Navigator cantrips (final cleanup) on the approved response."""
+    choices = response_data.get("choices", [])
+    if not choices:
+        return response_data
+
+    content = choices[0].get("message", {}).get("content", "")
+    if not content:
+        return response_data
+
+    from app.services.cantrip import process_cantrips_post_driver
+
+    tags = body_json.get("_gitv_tags", [])
+    body_json_for_cantrip = {k: v for k, v in body_json.items() if not k.startswith("_gitv")}
+
+    try:
+        new_content = await process_cantrips_post_driver(
+            content, body_json_for_cantrip, user_id, request_headers,
+            tags=tags, position="post_navigator",
+        )
+        if new_content != content:
+            response_data["choices"][0]["message"]["content"] = new_content
+            logger.info("Post-navigator cantrips modified response")
+    except Exception:
+        logger.exception("Post-navigator cantrip processing failed")
+
+    return response_data
 
 
 async def _do_forward(

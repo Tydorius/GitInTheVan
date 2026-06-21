@@ -26,6 +26,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     gitv_api_key: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_disabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

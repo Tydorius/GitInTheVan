@@ -2,6 +2,76 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.7.1] - 2026-06-21
+
+### Added
+
+- User management: edit username, reset password, regenerate API key, disable/enable users, delete users with full cascade cleanup of all user data (endpoints, cantrips, lorebooks, memories, summaries, forbidden words, verification rules/logs, chat data, conversation hashes, settings)
+- `is_disabled` field on users — disabled users are blocked from login and proxy routing
+- `/api/auth/me` endpoint exposing current user's id, username, and is_admin status
+- Admin sidebar link conditionally visible based on `isAdmin` store (was hidden for everyone)
+- Protection against deleting or disabling admin users
+- Context Budgeting System design (Phase 12 planning): weighted token budget allocation across cantrips/lorebooks with dynamic detail scaling
+- Memory Rules System design (Phase 12 planning): taggable per-conversation summarization rules with override thresholds/prompts
+- Dependency version pinning added to Phase 13 (Security Hardening) planning
+
+### Fixed
+
+- Users page: invalid date display (created_at was not included in API response)
+- Users page: admin sidebar link was hidden from all users including admins (`{#if !item.admin}` excluded everyone)
+
+## [0.7.0] - 2026-06-21
+
+### Added
+
+- **Multi-Position Cantrips and Lorebooks (Phase 10)**: Cantrips and lorebooks now have four independent boolean position flags (checkboxes, not radio buttons) controlling when they execute in the pipeline
+- **Pre-Navigator position**: Cantrips and lorebooks can run after the Driver (writing LLM) responds and before the Navigator (verification LLM) checks. Pre-Navigator cantrips have access to `context.response.content` to modify the response (regex cleanup, keyword checks, content formatting). Pre-Navigator lorebooks can inject correction notes into the verification context
+- **Post-Navigator position**: Cantrips can run after verification completes for final cleanup (format correction, markdown repair, tag stripping). Also has access to `context.response.content`
+- **Forbidden Words/Phrases Macro**: Global per-user list of forbidden phrases checked case-insensitively (or case-sensitively) against the Driver's response before the Navigator runs. Supports plain-text and regex matching. Matches are surfaced to the Navigator LLM as concrete violations in a `[FORBIDDEN CONTENT DETECTED]` block. Works with or without verification rules enabled (triggers verification loop alone if matches found and Navigator configured). Test scanner built into the Verification page
+- **Post-Driver cantrip context**: Deno sandbox extended with `context.response.content`, `context.response.original_content`, and `context.response.modified` for cantrips at Pre-Navigator and Post-Navigator positions
+- **Driver/Navigator terminology**: Documentation and UI now use "Driver" (writing LLM), "Navigator" (verification LLM), and "Summarizer" (summarization LLM) for clarity
+- Position checkboxes in cantrip editor and lorebook CRUD
+- Forbidden Words tab on Verification page with settings, phrase management, and test scanner
+- 21 new Phase 10 tests covering forbidden word scanning (plain, regex, case sensitivity), forbidden words API CRUD, cantrip/lorebook position flags via API, and migration verification (225 tests total)
+
+### Changed
+
+- Cantrip loader now filters by position flags (`run_pre_driver`, `run_pre_navigator`, `run_post_navigator`) instead of the deprecated `hook_type` field. `hook_type` is retained for backward compatibility
+- Verification `check_response` now accepts `forbidden_context` parameter; when forbidden words are matched, the summary is prepended to the Navigator's verification prompt
+- Pipeline updated: tags stored in body_json for post-Driver access; pre-Navigator cantrips and forbidden word scan run before verification loop; post-Navigator cantrips run after verification
+- Bumped version to 0.7.0
+
+### Migrations
+
+- `010_add_cantrip_position_flags`: Added `run_pre_driver`, `run_driver_callable`, `run_pre_navigator`, `run_post_navigator` to cantrips table
+- `011_add_lorebook_position_flags`: Same four position flags added to lorebooks table
+- `012_add_user_settings_forbidden_words_fields`: Added `forbidden_words_enabled`, `forbidden_words_case_sensitive`, `driver_callable_turns` to user_settings
+- `013_create_forbidden_words_table`: Created `forbidden_words` table for phrase storage
+
+## [0.6.0] - 2026-06-21
+
+### Added
+
+- Chat Memory Summarization (Phase 9): automatically compresses long conversations into a summary when the estimated token count exceeds a configurable threshold
+- Conversations exceeding the threshold have their older dialogue summarized by a user-selected LLM endpoint and replaced with a `[CONVERSATION SUMMARY]` context block, while the most recent messages are always forwarded verbatim
+- Rolling summary reuse: summaries are cached per conversation keyed by a boundary hash of the summarized messages, so rerolls/forks reuse the cached summary without re-calling the LLM; continuations build on the prior summary for efficiency
+- System messages (persona, lorebook constant entries, cantrip scenario additions) are preserved during compression; only user/assistant dialogue turns are summarized
+- Conversation-hash continuity preserved: the rolling conversation hash is captured before compression so fork/reroll detection is unaffected
+- Summarization runs on the request side, so it works for both streaming and non-streaming requests (no buffering required)
+- Configurable summarization settings: enable/disable, endpoint selection, model override, token threshold, number of recent messages to keep, and a customizable summarization prompt
+- Summaries management view on the Memories page: list, view full summary text, and delete conversation summaries
+- Dedicated `conversation_summaries` table for summary storage with backward-compatible additive migration (008, 009)
+- 35 new summarization tests covering token estimation, boundary hashing, transcript formatting, message compression logic, LLM call handling, caching/reuse, threshold gating, settings CRUD, and summaries list/delete API
+
+### Changed
+
+- Edit-tolerant rolling hash: conversation resolution now excludes the current user message AND the preceding assistant message, so editing or swiping the LLM's most recent response no longer breaks the conversation chain or orphans its memories/summaries. The recorded anchor is the request messages exactly as sent (the bot response is no longer part of the hash).
+- Backward-compatible legacy fallback: conversations recorded under the previous hashing scheme (which included the bot response) still resolve correctly on their next unedited turn, then transition to the new scheme
+- Fork detection preserved: editing an older (non-most-recent) LLM message within the hash window still creates a new conversation chain
+- 16 new conversation-hash tests covering the slicing logic, multi-turn chaining, edit tolerance, fork detection, legacy fallback, and record/dedup behavior
+- Bumped version to 0.6.0
+- Proxy pipeline now includes a summarization stage after cantrip execution (stage order: tag extraction, conversation resolution, memory injection, lorebook injection, cantrip execution, summarization, forward)
+
 ## [0.5.0] - 2026-06-19
 
 ### Added

@@ -16,6 +16,8 @@
   let form = {
     name: '', description: '', code: '',
     hook_type: 'pre', is_active: true, is_public: false,
+    run_pre_driver: true, run_driver_callable: false,
+    run_pre_navigator: false, run_post_navigator: false,
     execution_order: 10, timeout_ms: 5000,
   }
 
@@ -38,13 +40,19 @@
   }
 
   function resetForm() {
-    form = { name: '', description: '', code: '', hook_type: 'pre', is_active: true, is_public: false, execution_order: 10, timeout_ms: 5000 }
+    form = { name: '', description: '', code: '', hook_type: 'pre', is_active: true, is_public: false, run_pre_driver: true, run_driver_callable: false, run_pre_navigator: false, run_post_navigator: false, execution_order: 10, timeout_ms: 5000 }
     editingId = null
   }
 
   function startEdit(s: any) {
     editingId = s.id
-    form = { name: s.name, description: s.description, code: s.code || '', hook_type: s.hook_type, is_active: s.is_active, is_public: s.is_public, execution_order: s.execution_order, timeout_ms: s.timeout_ms }
+    form = {
+      name: s.name, description: s.description, code: s.code || '',
+      hook_type: s.hook_type, is_active: s.is_active, is_public: s.is_public,
+      run_pre_driver: s.run_pre_driver ?? true, run_driver_callable: s.run_driver_callable ?? false,
+      run_pre_navigator: s.run_pre_navigator ?? false, run_post_navigator: s.run_post_navigator ?? false,
+      execution_order: s.execution_order, timeout_ms: s.timeout_ms,
+    }
     showForm = true
   }
 
@@ -296,16 +304,29 @@
             <input id="cantrip-name" autocomplete="off" bind:value={form.name} required />
           </div>
           <div class="form-group">
-            <label for="cantrip-hook">Hook Type</label>
-            <select id="cantrip-hook" bind:value={form.hook_type}>
-              <option value="pre">pre</option>
-              <option value="post">post</option>
-            </select>
+            <label for="cantrip-desc">Description</label>
+            <input id="cantrip-desc" autocomplete="off" bind:value={form.description} />
           </div>
         </div>
         <div class="form-group">
-          <label for="cantrip-desc">Description</label>
-          <input id="cantrip-desc" autocomplete="off" bind:value={form.description} />
+          <label>Pipeline Positions</label>
+          <div style="display: flex; flex-wrap: wrap; gap: 12px; margin-top: 4px;">
+            <label style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
+              <input type="checkbox" bind:checked={form.run_pre_driver} style="width: auto;"> Pre-Driver
+            </label>
+            <label style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
+              <input type="checkbox" bind:checked={form.run_driver_callable} style="width: auto;"> Driver-Callable
+            </label>
+            <label style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
+              <input type="checkbox" bind:checked={form.run_pre_navigator} style="width: auto;"> Pre-Navigator
+            </label>
+            <label style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
+              <input type="checkbox" bind:checked={form.run_post_navigator} style="width: auto;"> Post-Navigator
+            </label>
+          </div>
+          <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+            Select when this cantrip runs. Pre-Driver: before the writing LLM. Pre-Navigator: after response, before verification (can modify response). Post-Navigator: after verification, final cleanup.
+          </p>
         </div>
         <div class="form-group">
           <label for="cantrip-code">JavaScript Code</label>

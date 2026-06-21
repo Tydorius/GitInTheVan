@@ -3,7 +3,11 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.services.cantrip as _cantrip_module
+import app.services.conversation as _conversation_module
+import app.services.forbidden_words as _forbidden_words_module
+import app.services.memory as _memory_module
 import app.services.proxy as _proxy_module
+import app.services.summarization as _summarization_module
 import app.services.verification as _verification_module
 from app.database import get_db
 from app.main import app
@@ -14,7 +18,11 @@ TestSessionLocal = async_sessionmaker(test_engine, class_=AsyncSession, expire_o
 
 _original_proxy_session = _proxy_module.async_session
 _original_cantrip_session = _cantrip_module.async_session
+_original_memory_session = _memory_module.async_session
 _original_verification_session = _verification_module.async_session
+_original_conversation_session = _conversation_module.async_session
+_original_summarization_session = _summarization_module.async_session
+_original_forbidden_words_session = _forbidden_words_module.async_session
 
 
 async def override_get_db():
@@ -29,13 +37,21 @@ app.dependency_overrides[get_db] = override_get_db
 async def setup_database():
     _proxy_module.async_session = TestSessionLocal
     _cantrip_module.async_session = TestSessionLocal
+    _memory_module.async_session = TestSessionLocal
+    _conversation_module.async_session = TestSessionLocal
     _verification_module.async_session = TestSessionLocal
+    _summarization_module.async_session = TestSessionLocal
+    _forbidden_words_module.async_session = TestSessionLocal
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
     _proxy_module.async_session = _original_proxy_session
     _cantrip_module.async_session = _original_cantrip_session
+    _memory_module.async_session = _original_memory_session
+    _conversation_module.async_session = _original_conversation_session
     _verification_module.async_session = _original_verification_session
+    _summarization_module.async_session = _original_summarization_session
+    _forbidden_words_module.async_session = _original_forbidden_words_session
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
 

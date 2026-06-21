@@ -26,6 +26,10 @@ class Lorebook(Base):
     is_public: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     tag: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    run_pre_driver: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    run_driver_callable: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    run_pre_navigator: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    run_post_navigator: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
