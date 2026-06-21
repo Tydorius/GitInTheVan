@@ -2,6 +2,41 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.8.1] - 2026-06-21
+
+### Added
+
+- **LLM Instructions field** on cantrips and lorebooks: a dedicated text field for LLM-facing instructions that appear in tool notifications. Used by `build_tool_notification` when available, falling back to Description if empty. Enables richer tool descriptions like argument syntax, usage examples, and expected output format
+- Driver-Callable flow test: creates a dice rolling cantrip with `run_driver_callable=true` and `llm_instructions`, enables driver-callable turns, sends a request asking the LLM to roll dice, and verifies the tool loop executes without crashing
+- `llm_instructions` field exposed in cantrip and lorebook API responses and create/update endpoints
+- `llm_instructions` textarea in the cantrip editor UI
+
+### Changed
+
+- `build_tool_notification` now prefers `llm_instructions` over `description` when building the tool list for the Driver
+- Bumped version to 0.8.1
+
+## [0.8.0] - 2026-06-21
+
+### Added
+
+- **Driver-Callable Tool System**: The writing LLM (Driver) can now invoke cantrips as tools during generation using a notification-based, turn-tracked approach that works with any model — no OpenAI function-calling support required
+- **Tool notification injection**: Before forwarding to the Driver, a `[TOOL ACCESS]` block is injected into the system prompt listing available tools (name + description) and turns remaining
+- **Call tag parsing**: After the Driver responds, the system scans for `<call:tool_name arg="value">` tags. If found, the requested cantrip executes with args available via `context.tool_call`, and the result is returned as a `[TOOL RESULT]` message for the Driver's next turn
+- **Turn tracking with auto-disable**: User-configurable turn budget (default 1). Each tool call decrements the counter. When turns reach 0, the tool notification stops being injected — the Driver no longer sees any tools, preventing infinite loops. Auto-disables when no active, tag-matched resources have `run_driver_callable=true`
+- **`context.tool_call` and `context.tool_result`**: New cantrip context fields for driver-callable cantrips. `context.tool_call` provides the name and args from the call tag. Cantrips write their output to `context.tool_result` which is sent back to the Driver
+- **Streaming compatibility**: When driver-callable is active, streaming requests are internally converted to non-streaming (the tool loop requires buffering to check for call tags), then converted back to SSE for the client
+- **Driver-Callable settings**: Configurable turns (0 = disabled) on the Settings page
+- 19 new tests covering call tag parsing, stripping, tool notification building, notification injection (append, insert, replace), and tool result formatting (244 tests total)
+
+### Changed
+
+- `CantripResult` dataclass extended with `tool_result` field
+- Deno template extended with `context.tool_result` initialization
+- Settings API response now includes `driver_callable_turns`
+- Proxy pipeline updated: driver-callable loop runs before pre-Navigator/verification/post-Navigator stages when active
+- Bumped version to 0.8.0
+
 ## [0.7.1] - 2026-06-21
 
 ### Added

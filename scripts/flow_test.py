@@ -660,6 +660,103 @@ context.response.content = context.response.content.replace("FLOW_TEST_MARKER", 
     return True
 
 
+def test_driver_callable(tc: TestClient) -> bool:
+    section("TEST: Driver-Callable Tools")
+    code = '''
+if (context.tool_call) {
+    const sides = parseInt(context.tool_call.args.sides) || 6;
+    const count = parseInt(context.tool_call.args.count) || 1;
+    let results = [];
+    for (let i = 0; i < count; i++) {
+        results.push(Math.floor(Math.random() * sides) + 1);
+    }
+    const total = results.reduce((a, b) => a + b, 0);
+    context.tool_result = `${count}d${sides} = [${results.join(", ")}] = ${total}`;
+} else {
+    context.tool_result = "No tool call received.";
+}
+'''
+    resp = httpx.post(
+        f"{tc.server}/api/cantrips",
+        json={
+            "name": "dice_roll",
+            "description": "Rolls dice when requested.",
+            "llm_instructions": "Call this tool to roll dice. Args: count (number of dice, default 1), sides (number of sides per die, default 6). Example: <call:dice_roll count=\"2\" sides=\"6\">",
+            "code": code,
+            "run_pre_driver": False,
+            "run_driver_callable": True,
+        },
+        headers=tc.test_headers(),
+        timeout=10.0,
+    )
+    if resp.status_code != 201:
+        fail_test(f"Could not create driver-callable cantrip: {resp.status_code}")
+        return False
+    cid = resp.json()["id"]
+    pass_test("Created driver-callable cantrip 'dice_roll'")
+
+    c_data = resp.json()
+    if c_data.get("run_driver_callable") is True:
+        pass_test("Driver-Callable flag correctly stored")
+    else:
+        fail_test("Driver-Callable flag not stored correctly")
+
+    if c_data.get("llm_instructions"):
+        pass_test("LLM instructions stored")
+    else:
+        info("Warning: LLM instructions not stored")
+
+    httpx.put(
+        f"{tc.server}/api/settings",
+        json={"driver_callable_turns": 1},
+        headers=tc.test_headers(),
+        timeout=10.0,
+    )
+    pass_test("Enabled driver-callable turns (1)")
+
+    messages = [
+        {"role": "system", "content": "You are a helpful assistant. Reply briefly."},
+        {"role": "user", "content": "Roll a six-sided die and tell me the result."},
+    ]
+    result = tc.send_proxy_request(messages)
+    if isinstance(result, dict):
+        content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        if content:
+            pass_test(f"Driver-callable request succeeded, response: {content[:100]}")
+        else:
+            fail_test("Empty response during driver-callable test")
+            tc.update_cantrip(cid, {"is_active": False})
+            httpx.put(f"{tc.server}/api/settings", json={"driver_callable_turns": 0}, headers=tc.test_headers(), timeout=10.0)
+            return False
+    else:
+        fail_test("Unexpected response during driver-callable test")
+        tc.update_cantrip(cid, {"is_active": False})
+        httpx.put(f"{tc.server}/api/settings", json={"driver_callable_turns": 0}, headers=tc.test_headers(), timeout=10.0)
+        return False
+
+    call_tags_present = "<call:" in json.dumps(result)
+    if not call_tags_present:
+        pass_test("Call tags stripped from final response")
+    else:
+        fail_test("Call tags leaked into final response")
+
+    tool_result_present = "[TOOL RESULT]" in json.dumps(result)
+    if not tool_result_present:
+        pass_test("Tool result blocks not leaked into response")
+    else:
+        fail_test("Tool result blocks leaked into response")
+
+    tc.update_cantrip(cid, {"is_active": False})
+    httpx.put(
+        f"{tc.server}/api/settings",
+        json={"driver_callable_turns": 0},
+        headers=tc.test_headers(),
+        timeout=10.0,
+    )
+    pass_test("Disabled driver-callable and cleaned up")
+    return True
+
+
 def main() -> None:
     import argparse
 
@@ -697,6 +794,7 @@ def main() -> None:
     results.append(("Summarization", test_summarization(tc)))
     results.append(("Forbidden Words", test_forbidden_words(tc)))
     results.append(("Multi-Position Cantrip", test_multi_position_cantrip(tc)))
+    results.append(("Driver-Callable Tools", test_driver_callable(tc)))
 
     tc.cleanup_test_user_resources()
 

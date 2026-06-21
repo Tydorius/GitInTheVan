@@ -23,6 +23,7 @@ class Lorebook(Base):
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    llm_instructions: Mapped[str] = mapped_column(Text, nullable=False, default="")
     is_public: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     tag: Mapped[str] = mapped_column(String(128), nullable=False, default="")

@@ -22,6 +22,7 @@ class SettingsResponse(BaseModel):
     preserve_thinking: bool
     gitv_status: bool
     simulated_streaming_speed: int
+    driver_callable_turns: int
 
 
 class SettingsUpdate(BaseModel):
@@ -30,6 +31,7 @@ class SettingsUpdate(BaseModel):
     preserve_thinking: bool | None = None
     gitv_status: bool | None = None
     simulated_streaming_speed: int | None = None
+    driver_callable_turns: int | None = None
 
 
 @router.get("")
@@ -51,6 +53,7 @@ async def get_settings(
         preserve_thinking=user_settings.preserve_thinking,
         gitv_status=user_settings.gitv_status,
         simulated_streaming_speed=user_settings.simulated_streaming_speed,
+        driver_callable_turns=user_settings.driver_callable_turns,
     )
 
 
@@ -76,6 +79,8 @@ async def update_settings(
         user_settings.gitv_status = req.gitv_status
     if req.simulated_streaming_speed is not None:
         user_settings.simulated_streaming_speed = req.simulated_streaming_speed
+    if req.driver_callable_turns is not None:
+        user_settings.driver_callable_turns = max(0, req.driver_callable_turns)
 
     await db.commit()
     await db.refresh(user_settings)
@@ -86,4 +91,5 @@ async def update_settings(
         preserve_thinking=user_settings.preserve_thinking,
         gitv_status=user_settings.gitv_status,
         simulated_streaming_speed=user_settings.simulated_streaming_speed,
+        driver_callable_turns=user_settings.driver_callable_turns,
     )

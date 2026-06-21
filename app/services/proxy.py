@@ -169,6 +169,25 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
         from app.services.summarization import maybe_summarize
         body_json = await maybe_summarize(body_json, user_id, internal_chat_id)
 
+        from app.services.driver_callable import (
+            build_tool_notification,
+            load_driver_callable_config,
+        )
+        async with async_session() as db:
+            dc_config = await load_driver_callable_config(db, user_id, tags)
+
+        if dc_config.enabled:
+            notification = build_tool_notification(dc_config.tools, dc_config.turns)
+            if notification:
+                body_json["_gitv_driver_callable"] = True
+                body_json["_gitv_driver_callable_turns"] = dc_config.turns
+                body_json["_gitv_driver_callable_tools"] = [
+                    {"id": t.id, "name": t.name.lower()} for t in dc_config.tools
+                ]
+                body_json["messages"] = inject_tool_notification_safe(
+                    body_json.get("messages", []), notification
+                )
+
         body = json.dumps(body_json).encode()
 
     timeout = httpx.Timeout(settings.request_timeout, connect=10.0)
@@ -180,12 +199,17 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
         except Exception:
             verification_on = False
 
-        if verification_on:
+        dc_active = body_json.get("_gitv_driver_callable", False)
+
+        if verification_on or dc_active:
             ux_settings = await _load_ux_settings(user_id)
             body_json_verified = dict(body_json)
             body_json_verified["stream"] = False
             body_verified = json.dumps(body_json_verified).encode()
-            logger.info("Verification enabled: converting streaming request to non-streaming for verification")
+            if dc_active:
+                logger.info("Driver-callable active: converting streaming to non-streaming for tool loop")
+            elif verification_on:
+                logger.info("Verification enabled: converting streaming request to non-streaming for verification")
             response = await _forward_non_streaming_verified(
                 request.method, upstream_url, headers, body_verified, body_json,
                 timeout, user_id, request_headers,
@@ -382,6 +406,122 @@ async def _extract_response_memories(
     return response_data
 
 
+def inject_tool_notification_safe(
+    messages: list[dict[str, Any]], notification: str
+) -> list[dict[str, Any]]:
+    from app.services.driver_callable import inject_tool_notification
+    return inject_tool_notification(messages, notification)
+
+
+async def _run_driver_callable_loop(
+    body_json: dict[str, Any],
+    method: str,
+    url: str,
+    headers: dict[str, str],
+    timeout: httpx.Timeout,
+    user_id: str,
+    request_headers: dict[str, str],
+) -> dict[str, Any] | None:
+    """Run the Driver-Callable tool loop.
+
+    Returns the final response_data dict if the loop ran, or None if
+    driver-callable is not active for this request (caller should
+    forward normally).
+    """
+    if not body_json.get("_gitv_driver_callable"):
+        return None
+
+    from app.services.driver_callable import (
+        build_tool_notification,
+        execute_tool_call,
+        format_tool_result,
+        parse_call_tags,
+        strip_call_tags,
+    )
+
+    turns_remaining = body_json.get("_gitv_driver_callable_turns", 0)
+
+    from app.services.cantrip import _load_active_cantrips
+
+    async with async_session() as db:
+        all_cantrips = await _load_active_cantrips(db, user_id, "pre_driver")
+        tool_cantrips = {c.name.lower(): c for c in all_cantrips if c.run_driver_callable}
+
+    loop_messages = [msg.copy() for msg in body_json.get("messages", [])]
+    conversation_id = body_json.get("_gitv_chat_id", "")
+
+    loop_body = {k: v for k, v in body_json.items() if not k.startswith("_gitv")}
+    loop_body["stream"] = False
+    loop_body["messages"] = loop_messages
+
+    rounds = 0
+    max_rounds = max(turns_remaining, 1)
+
+    while rounds < max_rounds:
+        body_bytes = json.dumps(loop_body).encode()
+        response_data, status_code = await _do_forward(method, url, headers, body_bytes, timeout)
+
+        if status_code != 200:
+            logger.warning("Driver-callable loop: forward returned %d", status_code)
+            return response_data
+
+        choices = response_data.get("choices", [])
+        if not choices:
+            return response_data
+
+        content = choices[0].get("message", {}).get("content", "")
+        calls = parse_call_tags(content)
+
+        if not calls or turns_remaining <= 0:
+            cleaned = strip_call_tags(content)
+            if cleaned != content:
+                response_data["choices"][0]["message"]["content"] = cleaned
+            return response_data
+
+        turns_remaining -= 1
+        rounds += 1
+
+        assistant_content = strip_call_tags(content).strip()
+        loop_messages.append({"role": "assistant", "content": assistant_content})
+
+        for call in calls:
+            tool = tool_cantrips.get(call.name)
+            if tool is None:
+                result_text = f"Error: tool '{call.name}' not found"
+            else:
+                result_text = await execute_tool_call(
+                    tool, call, loop_messages, request_headers, user_id, conversation_id
+                )
+
+            tool_msg = format_tool_result(call.name, result_text)
+            loop_messages.append({"role": "user", "content": tool_msg})
+            logger.info(
+                "Driver-callable: executed '%s' (turn %d, %d remaining)",
+                call.name, rounds, turns_remaining,
+            )
+
+        if turns_remaining > 0:
+            notification = build_tool_notification(
+                [tc for tc in tool_cantrips.values()], turns_remaining
+            )
+            loop_messages = inject_tool_notification_safe(loop_messages, notification)
+
+        loop_body["messages"] = loop_messages
+
+    body_bytes = json.dumps(loop_body).encode()
+    response_data, status_code = await _do_forward(method, url, headers, body_bytes, timeout)
+
+    if status_code == 200:
+        choices = response_data.get("choices", [])
+        if choices:
+            content = choices[0].get("message", {}).get("content", "")
+            cleaned = strip_call_tags(content)
+            if cleaned != content:
+                response_data["choices"][0]["message"]["content"] = cleaned
+
+    return response_data
+
+
 async def _forward_non_streaming_verified(
     method: str,
     url: str,
@@ -392,6 +532,51 @@ async def _forward_non_streaming_verified(
     user_id: str | None,
     request_headers: dict[str, str],
 ) -> JSONResponse:
+    if body_json.get("_gitv_driver_callable") and user_id:
+        try:
+            loop_result = await _run_driver_callable_loop(
+                body_json, method, url, headers, timeout, user_id, request_headers,
+            )
+            if loop_result is not None:
+                body_json["_gitv_driver_callable_completed"] = True
+                response_data = loop_result
+                status_code = 200
+
+                if status_code == 200 and user_id:
+                    response_data = await _apply_post_driver_processing(
+                        response_data, body_json, user_id, request_headers
+                    )
+                    conversation_id = request_headers.get("x-conversation-id", "")
+                    try:
+                        response_data, vresult = await run_verification_loop(
+                            response_data, body_json, method, url, headers, timeout,
+                            user_id, conversation_id,
+                        )
+                        if vresult:
+                            logger.info(
+                                "Verification: approved=%s retries=%d violations_total=%d",
+                                vresult.approved,
+                                vresult.retries_used,
+                                sum(len(c.violations) for c in vresult.check_history),
+                            )
+                    except Exception:
+                        logger.exception("Verification loop failed, returning original response")
+
+                    try:
+                        response_data = await _apply_post_navigator_processing(
+                            response_data, body_json, user_id, request_headers
+                        )
+                    except Exception:
+                        logger.exception("Post-navigator processing failed")
+
+                if status_code == 200 and body_json.get("_gitv_chat_id"):
+                    response_data = await _extract_response_memories(response_data, user_id, body_json)
+
+                response_data.pop("_gitv_forbidden_summary", None)
+                return JSONResponse(status_code=status_code, content=response_data)
+        except Exception:
+            logger.exception("Driver-callable loop failed, falling through to normal forward")
+
     response_data, status_code = await _do_forward(method, url, headers, body, timeout)
 
     if status_code == 200 and user_id:

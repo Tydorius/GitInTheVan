@@ -123,6 +123,13 @@ MIGRATIONS: list[tuple[str, str]] = [
         ALTER TABLE users ADD COLUMN is_disabled BOOLEAN DEFAULT 0 NOT NULL;
         """,
     ),
+    (
+        "015_add_llm_instructions",
+        """
+        ALTER TABLE cantrips ADD COLUMN llm_instructions TEXT DEFAULT '' NOT NULL;
+        ALTER TABLE lorebooks ADD COLUMN llm_instructions TEXT DEFAULT '' NOT NULL;
+        """,
+    ),
 ]
 
 

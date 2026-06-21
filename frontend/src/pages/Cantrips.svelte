@@ -14,7 +14,7 @@
   let testing = false
 
   let form = {
-    name: '', description: '', code: '',
+    name: '', description: '', llm_instructions: '', code: '',
     hook_type: 'pre', is_active: true, is_public: false,
     run_pre_driver: true, run_driver_callable: false,
     run_pre_navigator: false, run_post_navigator: false,
@@ -40,14 +40,14 @@
   }
 
   function resetForm() {
-    form = { name: '', description: '', code: '', hook_type: 'pre', is_active: true, is_public: false, run_pre_driver: true, run_driver_callable: false, run_pre_navigator: false, run_post_navigator: false, execution_order: 10, timeout_ms: 5000 }
+    form = { name: '', description: '', llm_instructions: '', code: '', hook_type: 'pre', is_active: true, is_public: false, run_pre_driver: true, run_driver_callable: false, run_pre_navigator: false, run_post_navigator: false, execution_order: 10, timeout_ms: 5000 }
     editingId = null
   }
 
   function startEdit(s: any) {
     editingId = s.id
     form = {
-      name: s.name, description: s.description, code: s.code || '',
+      name: s.name, description: s.description, llm_instructions: s.llm_instructions || '', code: s.code || '',
       hook_type: s.hook_type, is_active: s.is_active, is_public: s.is_public,
       run_pre_driver: s.run_pre_driver ?? true, run_driver_callable: s.run_driver_callable ?? false,
       run_pre_navigator: s.run_pre_navigator ?? false, run_post_navigator: s.run_post_navigator ?? false,
@@ -326,6 +326,15 @@
           </div>
           <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
             Select when this cantrip runs. Pre-Driver: before the writing LLM. Pre-Navigator: after response, before verification (can modify response). Post-Navigator: after verification, final cleanup.
+          </p>
+        </div>
+        <div class="form-group">
+          <label for="cantrip-llm">LLM Instructions (for Driver-Callable tool notifications)</label>
+          <textarea id="cantrip-llm" bind:value={form.llm_instructions} rows="3"
+            placeholder="Instructions the LLM sees when this cantrip is available as a tool. E.g., 'Call this to roll dice. Args: count (number of dice), sides (number of sides).'"
+            style="width: 100%; font-family: monospace; font-size: 12px; resize: vertical;"></textarea>
+          <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+            When this cantrip is in the Driver-Callable position, this text is shown to the writing LLM. Falls back to Description if empty.
           </p>
         </div>
         <div class="form-group">

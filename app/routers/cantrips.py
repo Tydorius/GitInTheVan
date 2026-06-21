@@ -23,6 +23,7 @@ router = APIRouter(prefix="/api/cantrips", tags=["cantrips"])
 class CantripCreate(BaseModel):
     name: str
     description: str = ""
+    llm_instructions: str = ""
     code: str = ""
     hook_type: str = "pre"
     run_pre_driver: bool = True
@@ -39,6 +40,7 @@ class CantripCreate(BaseModel):
 class CantripUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
+    llm_instructions: str | None = None
     code: str | None = None
     hook_type: str | None = None
     run_pre_driver: bool | None = None
@@ -56,6 +58,7 @@ class CantripResponse(BaseModel):
     id: str
     name: str
     description: str
+    llm_instructions: str
     code: str
     hook_type: str
     run_pre_driver: bool
@@ -73,6 +76,7 @@ class CantripListItem(BaseModel):
     id: str
     name: str
     description: str
+    llm_instructions: str
     code: str
     hook_type: str
     run_pre_driver: bool
@@ -122,6 +126,7 @@ def _cantrip_to_response(cantrip: Cantrip) -> CantripResponse:
         id=cantrip.id,
         name=cantrip.name,
         description=cantrip.description,
+        llm_instructions=cantrip.llm_instructions,
         code=cantrip.code,
         hook_type=cantrip.hook_type,
         run_pre_driver=cantrip.run_pre_driver,
@@ -141,6 +146,7 @@ def _cantrip_to_list_item(cantrip: Cantrip) -> CantripListItem:
         id=cantrip.id,
         name=cantrip.name,
         description=cantrip.description,
+        llm_instructions=cantrip.llm_instructions,
         code=cantrip.code,
         hook_type=cantrip.hook_type,
         run_pre_driver=cantrip.run_pre_driver,
@@ -247,6 +253,7 @@ async def create_cantrip(
         user_id=current_user.id,
         name=req.name,
         description=req.description,
+        llm_instructions=req.llm_instructions,
         code=req.code,
         hook_type=req.hook_type,
         run_pre_driver=req.run_pre_driver,

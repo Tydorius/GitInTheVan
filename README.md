@@ -55,12 +55,13 @@ I will stress that I am not going to replicate or 100% replace Lorebary's functi
 
 - **Proxy Router** — Forwards OpenAI-compatible requests to any LLM endpoint (OpenWebUI, OpenRouter, local LLM servers)
 - **Multi-User** — Per-user API keys, endpoints, and configurations with full admin management (edit, disable, delete with cascade cleanup, password reset, API key regeneration)
-- **Lorebooks** — JSON worldbook system with keyword matching, constant/selective entries, enable/disable per lorebook, import from SillyTavern/Chub/JanitorAI formats, and file export. Supports pipeline positioning (pre-Driver, pre-Navigator, etc.)
-- **Cantrips** — Sandboxed JavaScript execution compatible with JanitorAI scripts, with per-chat persistent storage via `context.chat_data`. Four pipeline positions (Pre-Driver, Driver-Callable, Pre-Navigator, Post-Navigator). Includes built-in templates (dice roller, status tracker, day counter, weather system)
+- **Lorebooks** — JSON worldbook system with keyword matching, constant/selective entries, enable/disable per lorebook, import from SillyTavern/Chub/JanitorAI formats, and file export. Supports pipeline positioning (pre-Driver, pre-Navigator, etc.) and LLM-facing instructions
+- **Cantrips** — Sandboxed JavaScript execution compatible with JanitorAI scripts, with per-chat persistent storage via `context.chat_data`. Four pipeline positions (Pre-Driver, Driver-Callable, Pre-Navigator, Post-Navigator). LLM instructions field for tool notifications. Includes built-in templates (dice roller, status tracker, day counter, weather system)
+- **Driver-Callable Tools** — Writing LLM can invoke cantrips as tools during generation via a notification-based, turn-tracked approach that works with any model. No OpenAI function-calling support required. Auto-disables when no tools are active. Infinite-loop prevention via turn budget
 - **Verification** — LLM-based response checking (Navigator) with configurable rules, automatic resubmission with retry limits, and verification logs
 - **Persistent Memory** — Database-backed memory system using `<memstore>` tags. LLM responses are scanned for key/value pairs, stored per-conversation, and injected as a `[PERSISTENT MEMORY]` context block on subsequent requests. No zero-width character encoding — the database is the source of truth
 - **Conversation Summarization** — Automatically compresses long conversations when token count exceeds a configurable threshold. Older dialogue is summarized by a user-selected LLM and replaced with a `[CONVERSATION SUMMARY]` context block, while recent messages are always forwarded verbatim
-- **Forbidden Words** — Global per-user phrase list checked against responses before the Navigator runs. Supports plain-text and regex matching, case-insensitive by default
+- **Forbidden Words** — Global per-user phrase list checked against responses before the Navigator runs. Supports plain-text and regex matching, case-insensitive by default. Matches surfaced to the Navigator as concrete violations
 - **Tagging System** — Activate lorebooks, cantrips, and verification rules via `<#type-name#>` delimiters in persona or message text. Tags are auto-stripped before forwarding to the LLM
 - **Diagnostics** — Automated endpoint and configuration checker for troubleshooting connectivity issues
 - **Web UI** — Full management interface built with Svelte 5 including cantrip tester, verification tester, forbidden word scanner, code editor with syntax highlighting, and log viewer
@@ -236,6 +237,29 @@ context.chat_data.set('day', day + 1);
 
 console.log('Debug output visible in cantrip tester');
 ```
+
+### Pipeline Positions
+
+Cantrips run at four configurable positions in the pipeline:
+
+| Position | When | Context Available |
+|----------|------|-------------------|
+| **Pre-Driver** | Before the writing LLM | `context.character`, `context.chat_data` |
+| **Driver-Callable** | LLM invokes via `<call:tool_name>` | `context.tool_call`, `context.tool_result`, `context.chat_data` |
+| **Pre-Navigator** | After Driver responds, before verification | `context.response.content`, `context.chat_data` |
+| **Post-Navigator** | After verification completes | `context.response.content`, `context.chat_data` |
+
+### Driver-Callable Tools
+
+Cantrips with the Driver-Callable position can be invoked by the writing LLM during generation:
+
+1. A `[TOOL ACCESS]` block listing available tools is injected into the system prompt
+2. The LLM responds with `<call:tool_name arg="value">` to invoke a tool
+3. The cantrip executes, reads `context.tool_call.name` / `.args`, and writes `context.tool_result`
+4. The result is returned as a `[TOOL RESULT]` message and turns are decremented
+5. When turns reach 0, the notification is no longer injected — preventing infinite loops
+
+Configure the maximum tool-call turns per request in **Settings > Driver-Callable Tools**.
 
 ### Testing Cantrips
 

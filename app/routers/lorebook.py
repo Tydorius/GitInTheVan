@@ -53,6 +53,7 @@ class EntryResponse(BaseModel):
 class LorebookCreate(BaseModel):
     name: str
     description: str = ""
+    llm_instructions: str = ""
     is_public: bool = False
     is_active: bool = True
     tag: str = ""
@@ -65,6 +66,7 @@ class LorebookCreate(BaseModel):
 class LorebookUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
+    llm_instructions: str | None = None
     is_public: bool | None = None
     is_active: bool | None = None
     tag: str | None = None
@@ -78,6 +80,7 @@ class LorebookResponse(BaseModel):
     id: str
     name: str
     description: str
+    llm_instructions: str
     is_public: bool
     is_active: bool
     tag: str
@@ -92,6 +95,7 @@ class LorebookListItem(BaseModel):
     id: str
     name: str
     description: str
+    llm_instructions: str
     is_public: bool
     is_active: bool
     tag: str
@@ -171,6 +175,7 @@ async def list_lorebooks(
                 id=lb.id,
                 name=lb.name,
                 description=lb.description,
+                llm_instructions=lb.llm_instructions,
                 is_public=lb.is_public,
                 is_active=lb.is_active,
                 tag=lb.tag,
@@ -202,6 +207,7 @@ async def list_public_lorebooks(
                 id=lb.id,
                 name=lb.name,
                 description=lb.description,
+                llm_instructions=lb.llm_instructions,
                 is_public=lb.is_public,
                 is_active=lb.is_active,
                 tag=lb.tag,
@@ -237,6 +243,7 @@ async def get_lorebook(
         id=lorebook.id,
         name=lorebook.name,
         description=lorebook.description,
+        llm_instructions=lorebook.llm_instructions,
         is_public=lorebook.is_public,
         is_active=lorebook.is_active,
         tag=lorebook.tag,
@@ -258,6 +265,7 @@ async def create_lorebook(
         user_id=current_user.id,
         name=req.name,
         description=req.description,
+        llm_instructions=req.llm_instructions,
         is_public=req.is_public,
         is_active=req.is_active,
         tag=req.tag,
@@ -273,6 +281,7 @@ async def create_lorebook(
         id=lorebook.id,
         name=lorebook.name,
         description=lorebook.description,
+        llm_instructions=lorebook.llm_instructions,
         is_public=lorebook.is_public,
         is_active=lorebook.is_active,
         tag=lorebook.tag,
@@ -323,6 +332,8 @@ async def update_lorebook(
         lorebook.run_pre_navigator = req.run_pre_navigator
     if req.run_post_navigator is not None:
         lorebook.run_post_navigator = req.run_post_navigator
+    if req.llm_instructions is not None:
+        lorebook.llm_instructions = req.llm_instructions
 
     await db.commit()
     await db.refresh(lorebook)
@@ -330,6 +341,7 @@ async def update_lorebook(
         id=lorebook.id,
         name=lorebook.name,
         description=lorebook.description,
+        llm_instructions=lorebook.llm_instructions,
         is_public=lorebook.is_public,
         is_active=lorebook.is_active,
         tag=lorebook.tag,
@@ -549,6 +561,7 @@ async def import_lorebook(
         id=lorebook.id,
         name=lorebook.name,
         description=lorebook.description,
+        llm_instructions=lorebook.llm_instructions,
         is_public=lorebook.is_public,
         is_active=lorebook.is_active,
         tag=lorebook.tag,

@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 import app.services.cantrip as _cantrip_module
 import app.services.conversation as _conversation_module
+import app.services.driver_callable as _driver_callable_module
 import app.services.forbidden_words as _forbidden_words_module
 import app.services.memory as _memory_module
 import app.services.proxy as _proxy_module
@@ -23,6 +24,7 @@ _original_verification_session = _verification_module.async_session
 _original_conversation_session = _conversation_module.async_session
 _original_summarization_session = _summarization_module.async_session
 _original_forbidden_words_session = _forbidden_words_module.async_session
+_original_driver_callable_session = _driver_callable_module.async_session
 
 
 async def override_get_db():
@@ -42,6 +44,7 @@ async def setup_database():
     _verification_module.async_session = TestSessionLocal
     _summarization_module.async_session = TestSessionLocal
     _forbidden_words_module.async_session = TestSessionLocal
+    _driver_callable_module.async_session = TestSessionLocal
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
@@ -52,6 +55,7 @@ async def setup_database():
     _verification_module.async_session = _original_verification_session
     _summarization_module.async_session = _original_summarization_session
     _forbidden_words_module.async_session = _original_forbidden_words_session
+    _driver_callable_module.async_session = _original_driver_callable_session
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
 

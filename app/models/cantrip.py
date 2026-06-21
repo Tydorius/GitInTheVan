@@ -22,6 +22,7 @@ class Cantrip(Base):
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    llm_instructions: Mapped[str] = mapped_column(Text, nullable=False, default="")
     code: Mapped[str] = mapped_column(Text, nullable=False, default="")
     hook_type: Mapped[str] = mapped_column(String(32), default="pre", nullable=False)
     run_pre_driver: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

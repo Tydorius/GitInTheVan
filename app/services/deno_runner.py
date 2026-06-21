@@ -45,6 +45,7 @@ class CantripResult:
     scenario: str = ""
     example_dialogs: str = ""
     response_content: str | None = None
+    tool_result: str = ""
     chat_data: dict = field(default_factory=dict)
     debug_logs: list[str] = field(default_factory=list)
     error: str | None = None
@@ -55,7 +56,7 @@ class CantripResult:
 
     @property
     def has_modifications(self) -> bool:
-        return bool(self.personality or self.scenario or self.example_dialogs or self.response_content)
+        return bool(self.personality or self.scenario or self.example_dialogs or self.response_content or self.tool_result)
 
 
 class CantripTimeoutError(Exception):
@@ -125,6 +126,7 @@ async def run_cantrip(
             scenario=result_data.get("scenario", ""),
             example_dialogs=result_data.get("example_dialogs", ""),
             response_content=result_data.get("response_content"),
+            tool_result=result_data.get("tool_result", ""),
             chat_data=result_data.get("chat_data", {}),
             debug_logs=result_data.get("debug_logs", []),
             error=result_data.get("error"),

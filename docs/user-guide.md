@@ -114,6 +114,21 @@ Cantrips can run at multiple positions in the request pipeline. Each cantrip has
 
 Pre-Driver is enabled by default. The other positions are opt-in per cantrip.
 
+### Driver-Callable Tools
+
+Driver-Callable cantrips are invoked by the writing LLM during generation. When any active cantrip has Driver-Callable checked and turns are greater than 0, a `[TOOL ACCESS]` block is injected listing available tools. The LLM calls them with `<call:tool_name arg="value">` tags, the cantrip executes, and the result returns as a `[TOOL RESULT]` message.
+
+Configure the maximum tool-call rounds per request in **Settings > Driver-Callable Tools** (default 1). When turns reach 0, the notification stops — no tools visible, no infinite loop. Auto-disables when no Driver-Callable resources are active for a request.
+
+### LLM Instructions
+
+Each cantrip has an **LLM Instructions** field. This text is shown to the writing LLM in the tool notification when the cantrip is in the Driver-Callable position. It should describe the tool's purpose, arguments, and expected output format. Falls back to Description if empty.
+
+Example:
+```
+Call this tool to roll dice. Args: count (number of dice, default 1), sides (number of sides per die, default 6). Example: <call:dice_roll count="2" sides="6">
+```
+
 ### Cantrip List
 
 Each cantrip card shows:
@@ -145,8 +160,9 @@ The results show:
 *Screenshot: Add/Edit cantrip modal with pipeline position checkboxes*
 
 - **Name**: A label for the cantrip
+- **Description**: Optional notes for the user
+- **LLM Instructions**: Text shown to the writing LLM in tool notifications (for Driver-Callable cantrips). Describe the tool's purpose, arguments, and call syntax
 - **Pipeline Positions**: Checkboxes for Pre-Driver, Driver-Callable, Pre-Navigator, Post-Navigator
-- **Description**: Optional notes
 - **JavaScript Code**: The cantrip code. Uses the JanitorAI `context` object API
 - **Execution Order**: Lower numbers run first (when multiple cantrips are active)
 - **Timeout**: Maximum execution time in milliseconds
@@ -179,6 +195,20 @@ Pre-Navigator and Post-Navigator cantrips also have access to the Driver's respo
 ```javascript
 if (context.response) {
     context.response.content = context.response.content.replace("badword", "***");
+}
+```
+
+Driver-Callable cantrips have access to tool call information:
+
+```javascript
+if (context.tool_call) {
+    const sides = parseInt(context.tool_call.args.sides) || 6;
+    const count = parseInt(context.tool_call.args.count) || 1;
+    let results = [];
+    for (let i = 0; i < count; i++) {
+        results.push(Math.floor(Math.random() * sides) + 1);
+    }
+    context.tool_result = `${count}d${sides} = [${results.join(", ")}] = ${results.reduce((a, b) => a + b, 0)}`;
 }
 ```
 
@@ -405,6 +435,17 @@ Automatically compresses long conversations to reduce token usage while preservi
 - **Summarization Prompt**: System prompt for the summarization LLM
 
 When summarization triggers, older dialogue is removed from the request and replaced with a single `[CONVERSATION SUMMARY]` system block. The most recent messages are always forwarded verbatim. Summaries are cached per conversation — rerolls and forks reuse the cached summary without re-calling the LLM.
+
+### Driver-Callable Tools
+
+![Driver-Callable Settings](media/gitv-driver-callable-settings.png)
+*Screenshot: Driver-Callable tools settings card*
+
+Controls whether the writing LLM (Driver) can invoke cantrips as tools during generation:
+
+- **Driver-Callable Turns**: Maximum number of tool-call rounds per request (0 = disabled). Default 1. Auto-disables when no active resources have the Driver-Callable position checked.
+
+When enabled, a `[TOOL ACCESS]` block listing available tools is injected into the system prompt. The LLM calls tools with `<call:tool_name arg="value">` tags. Each call decrements the turn counter. When turns reach 0, the notification stops — preventing infinite loops.
 
 ### API Key
 

@@ -33,6 +33,12 @@ if (context.response) {
     if (typeof context.response.modified !== 'boolean') context.response.modified = false;
 }
 
+let __hasToolCall = false;
+if (context.tool_call) {
+    __hasToolCall = true;
+}
+if (typeof context.tool_result !== 'string') context.tool_result = "";
+
 let __error = null;
 try {
     let fn;
@@ -53,6 +59,7 @@ const __result = {
     scenario: context.character.scenario || "",
     example_dialogs: context.character.example_dialogs || "",
     response_content: __hasResponse ? (context.response.content || null) : null,
+    tool_result: context.tool_result || "",
     chat_data: Object.assign({}, __chatData),
     debug_logs: __debugLogs,
     error: __error

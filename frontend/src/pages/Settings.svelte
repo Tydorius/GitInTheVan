@@ -17,6 +17,7 @@
     summarization_keep_recent: 6,
     summarization_prompt: '',
   }
+  let driverCallableTurns = 1
   let endpoints: any[] = []
   let apiKey: string | null = null
   let error = ''
@@ -41,6 +42,14 @@
       summarization.summarization_token_threshold = sum.summarization_token_threshold || 8000
       summarization.summarization_keep_recent = sum.summarization_keep_recent ?? 6
       summarization.summarization_prompt = sum.summarization_prompt || ''
+
+      try {
+        const me = await api.getMe()
+        if (me.is_admin || true) {
+          const s = await api.getSettings()
+          driverCallableTurns = (s as any).driver_callable_turns ?? 1
+        }
+      } catch {}
     } catch (e: any) { error = e.message }
   }
 
@@ -58,6 +67,13 @@
         summarization_endpoint_id: summarization.summarization_endpoint_id || '',
       })
       sumSaved = true
+    } catch (e: any) { error = e.message }
+  }
+
+  async function saveDriverCallable() {
+    error = ''
+    try {
+      await api.updateSettings({ driver_callable_turns: driverCallableTurns } as any)
     } catch (e: any) { error = e.message }
   }
 
@@ -173,6 +189,21 @@
     </p>
   </div>
   <button class="primary" onclick={saveSummarization}>Save Summarization Settings</button>
+</div>
+
+<div class="card">
+  <h3>Driver-Callable Tools</h3>
+  <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
+    When cantrips or lorebooks with the Driver-Callable position are active, the writing LLM can invoke them as tools via call tags. This setting controls the maximum number of tool-call rounds per request. Set to 0 to disable tool access entirely.
+  </p>
+  <div class="form-group">
+    <label for="dc-turns">Driver-Callable Turns (0 = disabled)</label>
+    <input id="dc-turns" type="number" min="0" bind:value={driverCallableTurns} placeholder="1" />
+    <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+      Auto-disables when no Driver-Callable resources are active for a request, regardless of this setting.
+    </p>
+  </div>
+  <button class="primary" onclick={saveDriverCallable}>Save</button>
 </div>
 
 <div class="card">
