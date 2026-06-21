@@ -2,6 +2,7 @@
   import { api } from '../api'
   import { onMount } from 'svelte'
   import CodeEditor from '../lib/CodeEditor.svelte'
+  import TagEditModal from '../lib/TagEditModal.svelte'
 
   let rules: any[] = []
   let endpoints: any[] = []
@@ -17,6 +18,9 @@
     is_active: true, max_retries: 2, execution_order: 10,
     resubmission_strategy: 'add_instructions',
   }
+
+  let tagModal = { show: false, id: '', name: '', tag: '' }
+  let tagError = ''
 
   let vSettings = { verification_enabled: false, verification_endpoint_id: '' as string | null, verification_model: '' }
 
@@ -68,6 +72,16 @@
   async function toggleRuleActive(r: any) {
     try { await api.updateVerificationRule(r.id, { is_active: !r.is_active }); await load() }
     catch (e: any) { error = e.message }
+  }
+
+  function openTagModal(r: any) {
+    tagError = ''
+    tagModal = { show: true, id: r.id, name: r.name, tag: r.tag || '' }
+  }
+
+  async function saveTag(tag: string) {
+    try { await api.updateVerificationRule(tagModal.id, { tag }); tagModal.show = false; await load() }
+    catch (e: any) { tagError = e.message }
   }
 
   async function saveSettings() {
@@ -139,6 +153,16 @@
           <div class="card-header">
             <div>
               <strong>{r.name}</strong>
+              {#if r.tag}
+                <span style="display: inline-flex; align-items: center; gap: 4px; margin-left: 8px;">
+                  <span class="api-key-display" style="display: inline; font-size: 10px; padding: 2px 6px; cursor: pointer;"
+                        onclick={() => navigator.clipboard.writeText('<#verify-' + r.tag + '#>')}
+                        title="Click to copy">&lt;#verify-{r.tag}#&gt;</span>
+                  <button onclick={() => openTagModal(r)} style="padding: 0 4px; font-size: 14px; border: none; background: none; cursor: pointer;" title="Edit tag">🖉</button>
+                </span>
+              {:else}
+                <button onclick={() => openTagModal(r)} style="margin-left: 8px; padding: 2px 8px; font-size: 11px;">+ Tag</button>
+              {/if}
             </div>
             <div>
               <button
@@ -276,3 +300,12 @@
     </div>
   </div>
 {/if}
+
+<TagEditModal
+  bind:show={tagModal.show}
+  resourceType="verify"
+  resourceName={tagModal.name}
+  currentTag={tagModal.tag}
+  bind:errorMsg={tagError}
+  onSave={saveTag}
+/>

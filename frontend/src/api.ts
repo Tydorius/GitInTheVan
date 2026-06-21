@@ -165,4 +165,8 @@ export const api = {
   testVerification: (data: any) =>
     request<any>('/api/verification/test', { method: 'POST', body: JSON.stringify(data) }),
   listVerificationLogs: () => request<{ logs: any[]; total: number }>('/api/verification/logs'),
+
+  // Tags - browse public tagged resources
+  listPublicLorebooks: () => request<{ lorebooks: any[] }>('/api/lorebooks/public'),
+  listPublicCantrips: () => request<{ cantrips: any[] }>('/api/cantrips/public'),
 };

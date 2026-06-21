@@ -84,6 +84,7 @@ async def process_cantrips(
     body_json: dict[str, Any],
     user_id: str,
     request_headers: dict[str, str],
+    tags: list | None = None,
 ) -> dict[str, Any]:
     messages = body_json.get("messages", [])
     if not messages:
@@ -92,7 +93,21 @@ async def process_cantrips(
     params = extract_context_params(body_json, request_headers)
 
     async with async_session() as db:
-        cantrips = await _load_active_cantrips(db, user_id)
+        all_cantrips = await _load_active_cantrips(db, user_id)
+        if not all_cantrips:
+            return body_json
+
+        from app.services.tagging import should_activate_resource
+        cantrips = []
+        for c in all_cantrips:
+            if c.tag and tags:
+                if should_activate_resource(
+                    c.tag, "cantrip", c.is_active, c.is_public, c.user_id, user_id, tags
+                ):
+                    cantrips.append(c)
+            else:
+                cantrips.append(c)
+
         if not cantrips:
             return body_json
 

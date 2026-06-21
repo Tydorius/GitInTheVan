@@ -2,6 +2,7 @@
   import { api } from '../api'
   import { onMount } from 'svelte'
   import CodeEditor from '../lib/CodeEditor.svelte'
+  import TagEditModal from '../lib/TagEditModal.svelte'
 
   let lorebooks: any[] = []
   let loading = true
@@ -75,6 +76,19 @@
       if (selectedLorebook?.id === id) selectedLorebook = null
       await api.deleteLorebook(id); await load()
     }
+    catch (e: any) { error = e.message }
+  }
+
+  let tagModal = { show: false, id: '', name: '', tag: '' }
+  let tagError = ''
+
+  function openTagModal(lb: any) {
+    tagError = ''
+    tagModal = { show: true, id: lb.id, name: lb.name, tag: lb.tag || '' }
+  }
+
+  async function saveTag(tag: string) {
+    try { await api.updateLorebook(tagModal.id, { tag }); tagModal.show = false; await load() }
     catch (e: any) { error = e.message }
   }
 
@@ -262,7 +276,19 @@
       <tbody>
         {#each lorebooks as lb}
           <tr>
-            <td><a href="#" onclick={(e) => { e.preventDefault(); openLorebook(lb); }}>{lb.name}</a></td>
+            <td>
+              <div><a href="#" onclick={(e) => { e.preventDefault(); openLorebook(lb); }}>{lb.name}</a></div>
+              {#if lb.tag}
+                <span style="display: inline-flex; align-items: center; gap: 4px; margin-top: 2px;">
+                  <span class="api-key-display" style="display: inline; font-size: 10px; padding: 2px 6px; cursor: pointer;"
+                        onclick={() => navigator.clipboard.writeText('<#lore-' + lb.tag + '#>')}
+                        title="Click to copy">&lt;#lore-{lb.tag}#&gt;</span>
+                  <button onclick={() => openTagModal(lb)} style="padding: 0 4px; font-size: 14px; border: none; background: none; cursor: pointer;" title="Edit tag">🖉</button>
+                </span>
+              {:else}
+                <button onclick={() => openTagModal(lb)} style="margin-top: 2px; padding: 2px 8px; font-size: 11px;">+ Tag</button>
+              {/if}
+            </td>
             <td>{lb.entry_count}</td>
             <td>
               <button
@@ -300,6 +326,17 @@
         </div>
       </div>
       {#if selectedLorebook.description}<p style="color: var(--text-dim); font-size: 12px; margin-bottom: 12px;">{selectedLorebook.description}</p>{/if}
+      {#if selectedLorebook.tag}
+        <div style="margin-bottom: 16px;">
+          <span style="font-size: 11px; color: var(--text-dim);">Tag: </span>
+          <span style="display: inline-flex; align-items: center; gap: 4px;">
+            <span class="api-key-display" style="display: inline; font-size: 10px; padding: 2px 6px; cursor: pointer;"
+                  onclick={() => navigator.clipboard.writeText('<#lore-' + selectedLorebook.tag + '#>')}
+                  title="Click to copy">&lt;#lore-{selectedLorebook.tag}#&gt;</span>
+            <button onclick={() => openTagModal(selectedLorebook)} style="padding: 0 4px; font-size: 14px; border: none; background: none; cursor: pointer;" title="Edit tag">🖉</button>
+          </span>
+        </div>
+      {/if}
 
       {#if jsonMode}
         <div class="form-group" style="margin-top: 12px;">
@@ -420,3 +457,12 @@
     </div>
   </div>
 {/if}
+
+<TagEditModal
+  bind:show={tagModal.show}
+  resourceType="lore"
+  resourceName={tagModal.name}
+  currentTag={tagModal.tag}
+  bind:errorMsg={tagError}
+  onSave={saveTag}
+/>

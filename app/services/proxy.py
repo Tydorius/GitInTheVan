@@ -120,8 +120,18 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
     request_headers: dict[str, str] = {}
     if user_id and "messages" in body_json:
         request_headers = {k.lower(): v for k, v in request.headers.items()}
-        body_json = await _apply_lorebook_injection(body_json, user_id)
-        body_json = await process_cantrips(body_json, user_id, request_headers)
+
+        from app.services.tagging import extract_all_tags_from_messages, strip_tags
+        tags = extract_all_tags_from_messages(body_json.get("messages", []))
+        if tags:
+            logger.info("Tags detected: %s", [t["raw"] for t in tags])
+            for msg in body_json["messages"]:
+                content = msg.get("content", "")
+                if isinstance(content, str):
+                    msg["content"] = strip_tags(content)
+
+        body_json = await _apply_lorebook_injection(body_json, user_id, tags)
+        body_json = await process_cantrips(body_json, user_id, request_headers, tags)
         body = json.dumps(body_json).encode()
 
     timeout = httpx.Timeout(settings.request_timeout, connect=10.0)
@@ -231,18 +241,33 @@ def _convert_to_sse(
     )
 
 
-async def _apply_lorebook_injection(body_json: dict[str, Any], user_id: str) -> dict[str, Any]:
+async def _apply_lorebook_injection(
+    body_json: dict[str, Any], user_id: str, tags: list | None = None
+) -> dict[str, Any]:
     try:
+        from app.services.tagging import should_activate_resource
+
         async with async_session() as db:
             result = await db.execute(
                 select(Lorebook)
-                .where(Lorebook.user_id == user_id, Lorebook.is_active.is_(True))
+                .where(Lorebook.user_id == user_id)
                 .options(selectinload(Lorebook.entries))
             )
             lorebooks = result.scalars().all()
 
-            all_entries: list[dict] = []
+            active_lorebooks = []
             for lb in lorebooks:
+                if lb.tag and tags:
+                    activate = should_activate_resource(
+                        lb.tag, "lore", lb.is_active, lb.is_public, lb.user_id, user_id, tags
+                    )
+                    if activate:
+                        active_lorebooks.append(lb)
+                elif lb.is_active:
+                    active_lorebooks.append(lb)
+
+            all_entries: list[dict] = []
+            for lb in active_lorebooks:
                 for entry in lb.entries:
                     all_entries.append(
                         {

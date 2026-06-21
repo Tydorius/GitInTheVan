@@ -26,6 +26,7 @@ class Cantrip(Base):
     hook_type: Mapped[str] = mapped_column(String(32), default="pre", nullable=False)
     is_public: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    tag: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     execution_order: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
     timeout_ms: Mapped[int] = mapped_column(Integer, default=5000, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

@@ -2,6 +2,7 @@
   import { api } from '../api'
   import { onMount } from 'svelte'
   import CodeEditor from '../lib/CodeEditor.svelte'
+  import TagEditModal from '../lib/TagEditModal.svelte'
 
   let cantrips: any[] = []
   let loading = true
@@ -17,6 +18,8 @@
     hook_type: 'pre', is_active: true, is_public: false,
     execution_order: 10, timeout_ms: 5000,
   }
+
+  let tagModal = { show: false, id: '', name: '', tag: '' }
 
   let testConfig = {
     selectedCantripId: '',
@@ -44,6 +47,16 @@
     form = { name: s.name, description: s.description, code: s.code || '', hook_type: s.hook_type, is_active: s.is_active, is_public: s.is_public, execution_order: s.execution_order, timeout_ms: s.timeout_ms }
     showForm = true
   }
+
+  function openTagModal(s: any) {
+    tagModal = { show: true, id: s.id, name: s.name, tag: s.tag || '' }
+  }
+
+  async function saveTag(tag: string) {
+    try { await api.updateCantrip(tagModal.id, { tag }); tagModal.show = false; await load() }
+    catch (e: any) { tagError = e.message }
+  }
+  let tagError = ''
 
   let validationStatus: { valid: boolean; error: string | null } | null = null
   let validating = false
@@ -232,6 +245,16 @@
         <div>
           <strong>{s.name}</strong>
           {#if s.is_public}<span class="badge active" style="margin-left: 4px;">Public</span>{/if}
+          {#if s.tag}
+            <span style="margin-left: 8px; display: inline-flex; align-items: center; gap: 4px;">
+              <span class="api-key-display" style="display: inline; font-size: 10px; padding: 2px 6px; cursor: pointer;"
+                    onclick={() => navigator.clipboard.writeText('<#cantrip-' + s.tag + '#>')}
+                    title="Click to copy">&lt;#cantrip-{s.tag}#&gt;</span>
+              <button onclick={() => openTagModal(s)} style="padding: 0 4px; font-size: 14px; border: none; background: none; cursor: pointer;" title="Edit tag">🖉</button>
+            </span>
+          {:else}
+            <button onclick={() => openTagModal(s)} style="margin-left: 8px; padding: 2px 8px; font-size: 11px;">+ Tag</button>
+          {/if}
         </div>
         <div>
           <button
@@ -251,6 +274,15 @@
     </div>
   {/each}
 {/if}
+
+<TagEditModal
+  bind:show={tagModal.show}
+  resourceType="cantrip"
+  resourceName={tagModal.name}
+  currentTag={tagModal.tag}
+  bind:errorMsg={tagError}
+  onSave={saveTag}
+/>
 
 {#if showForm}
   <div class="modal-overlay" role="dialog" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) showForm = false; }}>

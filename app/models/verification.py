@@ -24,6 +24,7 @@ class VerificationRule(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    tag: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     max_retries: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
     execution_order: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
     resubmission_strategy: Mapped[str] = mapped_column(

@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -28,6 +28,7 @@ class RuleCreate(BaseModel):
     max_retries: int = 2
     execution_order: int = 10
     resubmission_strategy: str = "add_instructions"
+    tag: str = ""
 
 
 class RuleUpdate(BaseModel):
@@ -38,6 +39,7 @@ class RuleUpdate(BaseModel):
     max_retries: int | None = None
     execution_order: int | None = None
     resubmission_strategy: str | None = None
+    tag: str | None = None
 
 
 class RuleResponse(BaseModel):
@@ -49,6 +51,7 @@ class RuleResponse(BaseModel):
     max_retries: int
     execution_order: int
     resubmission_strategy: str
+    tag: str
 
 
 class RuleListItem(BaseModel):
@@ -60,6 +63,25 @@ class RuleListItem(BaseModel):
     max_retries: int
     execution_order: int
     resubmission_strategy: str
+    tag: str
+
+
+async def _check_tag_unique(
+    db: AsyncSession, user_id: str, resource_type: str, tag: str, exclude_id: str | None = None
+) -> bool:
+    if not tag:
+        return True
+    table_map = {"lore": "lorebooks", "cantrip": "cantrips", "verify": "verification_rules"}
+    table = table_map.get(resource_type, "")
+    if not table:
+        return True
+    query = f"SELECT id FROM {table} WHERE tag = :tag AND user_id = :user_id"
+    params = {"tag": tag, "user_id": user_id}
+    if exclude_id:
+        query += " AND id != :exclude_id"
+        params["exclude_id"] = exclude_id
+    result = await db.execute(text(query), params)
+    return result.scalar_one_or_none() is None
 
 
 class RuleListResponse(BaseModel):
@@ -122,6 +144,7 @@ def _rule_to_response(rule: VerificationRule) -> RuleResponse:
         max_retries=rule.max_retries,
         execution_order=rule.execution_order,
         resubmission_strategy=rule.resubmission_strategy,
+        tag=rule.tag,
     )
 
 
@@ -135,6 +158,7 @@ def _rule_to_list_item(rule: VerificationRule) -> RuleListItem:
         max_retries=rule.max_retries,
         execution_order=rule.execution_order,
         resubmission_strategy=rule.resubmission_strategy,
+        tag=rule.tag,
     )
 
 
@@ -184,6 +208,7 @@ async def create_rule(
         max_retries=req.max_retries,
         execution_order=req.execution_order,
         resubmission_strategy=req.resubmission_strategy,
+        tag=req.tag,
     )
     db.add(rule)
     await db.commit()
@@ -206,6 +231,10 @@ async def update_rule(
     rule = result.scalar_one_or_none()
     if rule is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
+
+    if req.tag is not None and req.tag != rule.tag:
+        if not await _check_tag_unique(db, current_user.id, "verify", req.tag, rule_id):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tag already in use")
 
     for key, value in req.model_dump(exclude_unset=True).items():
         setattr(rule, key, value)

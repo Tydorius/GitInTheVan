@@ -3,7 +3,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -29,6 +29,7 @@ class CantripCreate(BaseModel):
     is_active: bool = True
     execution_order: int = 10
     timeout_ms: int = 5000
+    tag: str = ""
 
 
 class CantripUpdate(BaseModel):
@@ -40,6 +41,7 @@ class CantripUpdate(BaseModel):
     is_active: bool | None = None
     execution_order: int | None = None
     timeout_ms: int | None = None
+    tag: str | None = None
 
 
 class CantripResponse(BaseModel):
@@ -52,6 +54,7 @@ class CantripResponse(BaseModel):
     is_active: bool
     execution_order: int
     timeout_ms: int
+    tag: str
 
 
 class CantripListItem(BaseModel):
@@ -64,6 +67,8 @@ class CantripListItem(BaseModel):
     is_active: bool
     execution_order: int
     timeout_ms: int
+    tag: str
+    tag: str
 
 
 class CantripListResponse(BaseModel):
@@ -108,6 +113,7 @@ def _cantrip_to_response(cantrip: Cantrip) -> CantripResponse:
         is_active=cantrip.is_active,
         execution_order=cantrip.execution_order,
         timeout_ms=cantrip.timeout_ms,
+        tag=cantrip.tag,
     )
 
 
@@ -122,6 +128,7 @@ def _cantrip_to_list_item(cantrip: Cantrip) -> CantripListItem:
         is_active=cantrip.is_active,
         execution_order=cantrip.execution_order,
         timeout_ms=cantrip.timeout_ms,
+        tag=cantrip.tag,
     )
 
 
@@ -223,6 +230,7 @@ async def create_cantrip(
         is_active=req.is_active,
         execution_order=req.execution_order,
         timeout_ms=req.timeout_ms,
+        tag=req.tag,
     )
     db.add(cantrip)
     await db.commit()
@@ -243,6 +251,14 @@ async def update_cantrip(
     cantrip = result.scalar_one_or_none()
     if cantrip is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cantrip not found")
+
+    if req.tag is not None and req.tag != cantrip.tag:
+        existing = await db.execute(
+            text("SELECT id FROM cantrips WHERE tag = :tag AND user_id = :uid AND id != :cid"),
+            {"tag": req.tag, "uid": current_user.id, "cid": cantrip_id}
+        )
+        if existing.scalar_one_or_none() is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tag already in use")
 
     update_data = req.model_dump(exclude_unset=True)
     for key, value in update_data.items():

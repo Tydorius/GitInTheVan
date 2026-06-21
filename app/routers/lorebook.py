@@ -55,6 +55,7 @@ class LorebookCreate(BaseModel):
     description: str = ""
     is_public: bool = False
     is_active: bool = True
+    tag: str = ""
 
 
 class LorebookUpdate(BaseModel):
@@ -62,6 +63,7 @@ class LorebookUpdate(BaseModel):
     description: str | None = None
     is_public: bool | None = None
     is_active: bool | None = None
+    tag: str | None = None
 
 
 class LorebookResponse(BaseModel):
@@ -70,6 +72,7 @@ class LorebookResponse(BaseModel):
     description: str
     is_public: bool
     is_active: bool
+    tag: str
     entries: list[EntryResponse]
 
 
@@ -79,6 +82,7 @@ class LorebookListItem(BaseModel):
     description: str
     is_public: bool
     is_active: bool
+    tag: str
     entry_count: int
 
 
@@ -153,6 +157,7 @@ async def list_lorebooks(
                 description=lb.description,
                 is_public=lb.is_public,
                 is_active=lb.is_active,
+                tag=lb.tag,
                 entry_count=len(lb.entries),
             )
             for lb in lorebooks
@@ -179,6 +184,7 @@ async def list_public_lorebooks(
                 description=lb.description,
                 is_public=lb.is_public,
                 is_active=lb.is_active,
+                tag=lb.tag,
                 entry_count=len(lb.entries),
             )
             for lb in lorebooks
@@ -209,6 +215,7 @@ async def get_lorebook(
         description=lorebook.description,
         is_public=lorebook.is_public,
         is_active=lorebook.is_active,
+        tag=lorebook.tag,
         entries=[_entry_to_response(e) for e in lorebook.entries],
     )
 
@@ -225,6 +232,7 @@ async def create_lorebook(
         description=req.description,
         is_public=req.is_public,
         is_active=req.is_active,
+        tag=req.tag,
     )
     db.add(lorebook)
     await db.commit()
@@ -235,6 +243,7 @@ async def create_lorebook(
         description=lorebook.description,
         is_public=lorebook.is_public,
         is_active=lorebook.is_active,
+        tag=lorebook.tag,
         entries=[],
     )
 
@@ -261,6 +270,15 @@ async def update_lorebook(
         lorebook.is_public = req.is_public
     if req.is_active is not None:
         lorebook.is_active = req.is_active
+    if req.tag is not None and req.tag != lorebook.tag:
+        from sqlalchemy import text as sa_text
+        existing = await db.execute(
+            sa_text("SELECT id FROM lorebooks WHERE tag = :tag AND user_id = :uid AND id != :lid"),
+            {"tag": req.tag, "uid": current_user.id, "lid": lorebook_id}
+        )
+        if existing.scalar_one_or_none() is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tag already in use")
+        lorebook.tag = req.tag
 
     await db.commit()
     await db.refresh(lorebook)
@@ -270,6 +288,7 @@ async def update_lorebook(
         description=lorebook.description,
         is_public=lorebook.is_public,
         is_active=lorebook.is_active,
+        tag=lorebook.tag,
         entries=[],
     )
 
@@ -484,6 +503,7 @@ async def import_lorebook(
         description=lorebook.description,
         is_public=lorebook.is_public,
         is_active=lorebook.is_active,
+        tag=lorebook.tag,
         entries=[_entry_to_response(e) for e in lorebook.entries],
     )
 
