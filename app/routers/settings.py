@@ -19,11 +19,17 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 class SettingsResponse(BaseModel):
     default_endpoint_id: str | None
     default_model: str
+    preserve_thinking: bool
+    gitv_status: bool
+    simulated_streaming_speed: int
 
 
 class SettingsUpdate(BaseModel):
     default_endpoint_id: str | None = None
     default_model: str | None = None
+    preserve_thinking: bool | None = None
+    gitv_status: bool | None = None
+    simulated_streaming_speed: int | None = None
 
 
 @router.get("")
@@ -42,6 +48,9 @@ async def get_settings(
     return SettingsResponse(
         default_endpoint_id=user_settings.default_endpoint_id,
         default_model=user_settings.default_model,
+        preserve_thinking=user_settings.preserve_thinking,
+        gitv_status=user_settings.gitv_status,
+        simulated_streaming_speed=user_settings.simulated_streaming_speed,
     )
 
 
@@ -61,6 +70,12 @@ async def update_settings(
         user_settings.default_endpoint_id = req.default_endpoint_id or None
     if req.default_model is not None:
         user_settings.default_model = req.default_model
+    if req.preserve_thinking is not None:
+        user_settings.preserve_thinking = req.preserve_thinking
+    if req.gitv_status is not None:
+        user_settings.gitv_status = req.gitv_status
+    if req.simulated_streaming_speed is not None:
+        user_settings.simulated_streaming_speed = req.simulated_streaming_speed
 
     await db.commit()
     await db.refresh(user_settings)
@@ -68,4 +83,7 @@ async def update_settings(
     return SettingsResponse(
         default_endpoint_id=user_settings.default_endpoint_id,
         default_model=user_settings.default_model,
+        preserve_thinking=user_settings.preserve_thinking,
+        gitv_status=user_settings.gitv_status,
+        simulated_streaming_speed=user_settings.simulated_streaming_speed,
     )

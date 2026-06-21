@@ -25,6 +25,14 @@ MIGRATIONS: list[tuple[str, str]] = [
         ALTER TABLE user_settings ADD COLUMN verification_model VARCHAR(128) DEFAULT '' NOT NULL;
         """,
     ),
+    (
+        "004_add_user_settings_ux_fields",
+        """
+        ALTER TABLE user_settings ADD COLUMN preserve_thinking BOOLEAN DEFAULT 1 NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN gitv_status BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN simulated_streaming_speed INTEGER DEFAULT 0 NOT NULL;
+        """,
+    ),
 ]
 
 

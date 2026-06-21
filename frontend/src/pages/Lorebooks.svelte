@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from '../api'
   import { onMount } from 'svelte'
+  import CodeEditor from '../lib/CodeEditor.svelte'
 
   let lorebooks: any[] = []
   let loading = true
@@ -11,6 +12,40 @@
   let selectedLorebook: any = null
   let showEntryForm = false
   let editingEntryId: string | null = null
+  let jsonMode = false
+  let jsonEditData = ''
+  let jsonError = ''
+  let importJsonError = ''
+  let importJsonValid: boolean | null = null
+
+  function validateJson(text: string): { valid: boolean; error: string | null } {
+    if (!text.trim()) return { valid: false, error: 'Empty' }
+    try {
+      JSON.parse(text)
+      return { valid: true, error: null }
+    } catch (e: any) {
+      const msg = e.message || 'Invalid JSON'
+      const posMatch = msg.match(/position (\d+)/i)
+      if (posMatch) {
+        const pos = parseInt(posMatch[1])
+        const before = text.substring(0, pos)
+        const line = before.split('\n').length
+        return { valid: false, error: `Line ${line}: ${msg}` }
+      }
+      return { valid: false, error: msg }
+    }
+  }
+
+  function checkImportJson() {
+    if (!importJson.trim()) {
+      importJsonValid = null
+      importJsonError = ''
+      return
+    }
+    const result = validateJson(importJson)
+    importJsonValid = result.valid
+    importJsonError = result.valid ? '' : result.error || ''
+  }
   let entryForm = {
     name: '', keys: '', secondary_keys: '', content: '',
     position: 'before_last_message', insertion_order: 10,
@@ -53,7 +88,54 @@
   async function openLorebook(lb: any) {
     try {
       selectedLorebook = await api.getLorebook(lb.id)
+      jsonMode = false
+      jsonError = ''
     } catch (e: any) { error = e.message }
+  }
+
+  function enterJsonMode() {
+    jsonError = ''
+    const entries = (selectedLorebook.entries || []).map((e: any) => ({
+      name: e.name || '',
+      keys: e.keys || [],
+      secondary_keys: e.secondary_keys || [],
+      content: e.content || '',
+      position: e.position || 'before_last_message',
+      insertion_order: e.insertion_order || 10,
+      is_constant: e.is_constant || false,
+      is_selective: e.is_selective || false,
+      is_disabled: e.is_disabled || false,
+    }))
+    jsonEditData = JSON.stringify({
+      name: selectedLorebook.name,
+      description: selectedLorebook.description || '',
+      entries,
+    }, null, 2)
+    jsonMode = true
+  }
+
+  async function saveJsonMode() {
+    jsonError = ''
+    try {
+      const data = JSON.parse(jsonEditData)
+      for (const e of data.entries || []) {
+        await api.addLorebookEntry(selectedLorebook.id, {
+          name: e.name || '',
+          keys: Array.isArray(e.keys) ? e.keys : [],
+          secondary_keys: Array.isArray(e.secondary_keys) ? e.secondary_keys : [],
+          content: e.content || '',
+          position: e.position || 'before_last_message',
+          insertion_order: e.insertion_order || 10,
+          is_constant: e.is_constant || false,
+          is_selective: e.is_selective || false,
+          is_disabled: e.is_disabled || false,
+        })
+      }
+      jsonMode = false
+      await openLorebook(selectedLorebook)
+    } catch (e: any) {
+      jsonError = e.message || 'Invalid JSON'
+    }
   }
 
   function resetEntryForm() {
@@ -121,6 +203,8 @@
       showImport = false
       importJson = ''
       importName = ''
+      importJsonValid = null
+      importJsonError = ''
       await load()
     } catch (e: any) {
       error = e.message || 'Invalid JSON'
@@ -205,13 +289,25 @@
           {#if selectedLorebook.is_public}<span class="badge active" style="margin-left: 8px;">Public</span>{/if}
         </div>
         <div>
-          <button class="primary" onclick={() => { resetEntryForm(); showEntryForm = true; }}>+ Add Entry</button>
-          <button onclick={() => selectedLorebook = null}>Back</button>
+          {#if jsonMode}
+            <button class="primary" onclick={saveJsonMode}>Save JSON</button>
+            <button onclick={() => jsonMode = false}>Cancel</button>
+          {:else}
+            <button onclick={enterJsonMode}>Manual JSON</button>
+            <button class="primary" onclick={() => { resetEntryForm(); showEntryForm = true; }}>+ Add Entry</button>
+            <button onclick={() => selectedLorebook = null}>Back</button>
+          {/if}
         </div>
       </div>
       {#if selectedLorebook.description}<p style="color: var(--text-dim); font-size: 12px; margin-bottom: 12px;">{selectedLorebook.description}</p>{/if}
 
-      {#if selectedLorebook.entries?.length === 0}
+      {#if jsonMode}
+        <div class="form-group" style="margin-top: 12px;">
+          <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 8px;">Edit the raw lorebook JSON. Saving will replace all entries.</p>
+          {#if jsonError}<div class="error-msg">{jsonError}</div>{/if}
+          <CodeEditor bind:value={jsonEditData} language="json" minHeight="400px" />
+        </div>
+      {:else if selectedLorebook.entries?.length === 0}
         <div class="empty-state">No entries yet. Click "Add Entry" to create one.</div>
       {:else}
         <table>
@@ -269,7 +365,9 @@
           <div class="form-group"><label for="entry-keys">Keywords (comma-separated)</label><input id="entry-keys" autocomplete="off" bind:value={entryForm.keys} placeholder="castle, throne, keep" /></div>
           <div class="form-group"><label for="entry-skeys">Secondary Keys (comma-separated)</label><input id="entry-skeys" autocomplete="off" bind:value={entryForm.secondary_keys} placeholder="king, queen" /></div>
         </div>
-        <div class="form-group"><label for="entry-content">Content</label><textarea id="entry-content" bind:value={entryForm.content} class="code-editor" placeholder="The castle has seven towers..."></textarea></div>
+        <div class="form-group"><label for="entry-content">Content</label>
+          <CodeEditor bind:value={entryForm.content} language="javascript" minHeight="120px" placeholder="The castle has seven towers..." />
+        </div>
         <div class="form-row">
           <div class="form-group"><label for="entry-pos">Position</label>
             <select id="entry-pos" bind:value={entryForm.position}>
@@ -304,10 +402,20 @@
       </div>
       <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 12px;">Or paste lorebook JSON below (name, description, entries array).</p>
       <div class="form-group"><label for="imp-name">Lorebook Name (optional, uses JSON name if blank)</label><input id="imp-name" autocomplete="off" bind:value={importName} placeholder="My Imported Lorebook" /></div>
-      <div class="form-group"><label for="imp-json">JSON Data</label><textarea id="imp-json" bind:value={importJson} class="code-editor" style="min-height: 250px;" placeholder="Paste lorebook JSON here"></textarea></div>
+      <div class="form-group"><label for="imp-json">JSON Data</label>
+        <CodeEditor bind:value={importJson} language="json" minHeight="250px" placeholder="Paste lorebook JSON here" />
+        <div style="margin-top: 8px; display: flex; gap: 8px; align-items: center;">
+          <button type="button" onclick={checkImportJson} disabled={!importJson.trim()} style="font-size: 12px; padding: 4px 12px;">Validate JSON</button>
+          {#if importJsonValid === true}
+            <span style="color: var(--success); font-size: 12px;">✓ Valid JSON</span>
+          {:else if importJsonValid === false}
+            <span style="color: var(--danger); font-size: 12px;">✗ {importJsonError}</span>
+          {/if}
+        </div>
+      </div>
       <div class="modal-actions">
         <button onclick={() => showImport = false}>Cancel</button>
-        <button onclick={handleImport} class="primary">Import</button>
+        <button onclick={handleImport} class="primary" disabled={importJsonValid === false}>Import</button>
       </div>
     </div>
   </div>

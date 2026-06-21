@@ -11,6 +11,7 @@ from app.config import settings
 from app.database import init_db
 from app.routers.auth import router as auth_router
 from app.routers.cantrips import router as cantrips_router
+from app.routers.diagnostics import router as diagnostics_router
 from app.routers.endpoints import router as endpoints_router
 from app.routers.lorebook import router as lorebook_router
 from app.routers.proxy import router as proxy_router
@@ -55,6 +56,7 @@ app.include_router(endpoints_router)
 app.include_router(settings_router)
 app.include_router(lorebook_router)
 app.include_router(cantrips_router)
+app.include_router(diagnostics_router)
 app.include_router(verification_router)
 
 

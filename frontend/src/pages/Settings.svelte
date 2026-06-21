@@ -2,7 +2,13 @@
   import { api, getApiKey } from '../api'
   import { onMount } from 'svelte'
 
-  let settings = { default_endpoint_id: '' as string | null, default_model: '' }
+  let settings = {
+    default_endpoint_id: '' as string | null,
+    default_model: '',
+    preserve_thinking: true,
+    gitv_status: false,
+    simulated_streaming_speed: 0,
+  }
   let endpoints: any[] = []
   let apiKey: string | null = null
   let error = ''
@@ -15,6 +21,9 @@
       const [s, e] = await Promise.all([api.getSettings(), api.listEndpoints()])
       settings.default_endpoint_id = s.default_endpoint_id || ''
       settings.default_model = s.default_model || ''
+      settings.preserve_thinking = s.preserve_thinking
+      settings.gitv_status = s.gitv_status
+      settings.simulated_streaming_speed = s.simulated_streaming_speed || 0
       endpoints = e.endpoints
       apiKey = getApiKey()
     } catch (e: any) { error = e.message }
@@ -53,6 +62,39 @@
   <div class="form-group">
     <label for="default-model">Default Model Override</label>
     <input id="default-model" autocomplete="off" bind:value={settings.default_model} placeholder="Leave blank to use client's model" />
+  </div>
+  <button class="primary" onclick={save}>Save Settings</button>
+</div>
+
+<div class="card">
+  <h3>Streaming and Status</h3>
+  <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
+    These settings affect how responses are delivered when verification is enabled. Since verification requires buffering the full response, these options let you control the streaming experience.
+  </p>
+  <div class="form-group">
+    <label>
+      <input type="checkbox" bind:checked={settings.gitv_status} style="width: auto;">
+      GITV Status Block
+    </label>
+    <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+      Includes a &lt;think&gt;&lt;gitv&gt; status block before the response showing pipeline activity (verification results, etc).
+    </p>
+  </div>
+  <div class="form-group">
+    <label>
+      <input type="checkbox" bind:checked={settings.preserve_thinking} style="width: auto;">
+      Preserve Thinking
+    </label>
+    <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+      Include the LLM's reasoning/thought process in the final response if the model produces it.
+    </p>
+  </div>
+  <div class="form-group">
+    <label for="stream-speed">Simulated Streaming Speed (tokens/min, 0 = instant)</label>
+    <input id="stream-speed" type="number" bind:value={settings.simulated_streaming_speed} placeholder="0" />
+    <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+      When verification buffers the response, simulate streaming output at this speed. Set to 0 to deliver the entire response at once.
+    </p>
   </div>
   <button class="primary" onclick={save}>Save Settings</button>
 </div>

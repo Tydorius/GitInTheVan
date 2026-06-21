@@ -134,6 +134,7 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
             verification_on = False
 
         if verification_on:
+            ux_settings = await _load_ux_settings(user_id)
             body_json_verified = dict(body_json)
             body_json_verified["stream"] = False
             body_verified = json.dumps(body_json_verified).encode()
@@ -143,7 +144,11 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
                 timeout, user_id, request_headers,
             )
             if response.status_code == 200 and stream:
-                response = _convert_to_sse(response, model or body_json.get("model", ""))
+                response = _convert_to_sse(
+                    response, model or body_json.get("model", ""),
+                    gitv_status=ux_settings.get("gitv_status", False),
+                    simulated_speed=ux_settings.get("simulated_streaming_speed", 0),
+                )
             return response
 
     if stream:
@@ -154,29 +159,65 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
     )
 
 
-def _convert_to_sse(response: JSONResponse, model: str) -> StreamingResponse:
+async def _load_ux_settings(user_id: str) -> dict[str, Any]:
+    from app.models.user_settings import UserSettings
+    try:
+        async with async_session() as db:
+            result = await db.execute(
+                select(UserSettings).where(UserSettings.user_id == user_id)
+            )
+            s = result.scalar_one_or_none()
+            if s:
+                return {
+                    "gitv_status": s.gitv_status,
+                    "simulated_streaming_speed": s.simulated_streaming_speed,
+                    "preserve_thinking": s.preserve_thinking,
+                }
+    except Exception:
+        pass
+    return {"gitv_status": False, "simulated_streaming_speed": 0, "preserve_thinking": True}
+
+
+def _convert_to_sse(
+    response: JSONResponse,
+    model: str,
+    gitv_status: bool = False,
+    simulated_speed: int = 0,
+) -> StreamingResponse:
+    import time
+
     data = json.loads(response.body)
     content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
     chunk_id = data.get("id", "chatcmpl-converted")
+    created = data.get("created", 0)
 
-    def generate():
-        if content:
-            chunk = {
-                "id": chunk_id,
-                "object": "chat.completion.chunk",
-                "created": data.get("created", 0),
-                "model": model,
-                "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}],
-            }
-            yield f"data: {json.dumps(chunk)}\n\n"
-        done_chunk = {
+    def make_chunk(delta_content: str, finish: str | None = None) -> str:
+        chunk = {
             "id": chunk_id,
             "object": "chat.completion.chunk",
-            "created": data.get("created", 0),
+            "created": created,
             "model": model,
-            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            "choices": [{"index": 0, "delta": {"content": delta_content}, "finish_reason": finish}],
         }
-        yield f"data: {json.dumps(done_chunk)}\n\n"
+        return f"data: {json.dumps(chunk)}\n\n"
+
+    def generate():
+        if gitv_status:
+            status_text = "<think>\n<gitv>\nVerification complete. Streaming response to client.\n</gitv>\n</think>\n"
+            yield make_chunk(status_text)
+
+        if simulated_speed > 0 and content:
+            words = content.split(" ")
+            for i in range(len(words)):
+                if i == 0:
+                    yield make_chunk(words[i])
+                else:
+                    yield make_chunk(" " + words[i])
+                time.sleep(60.0 / simulated_speed / 10)
+        elif content:
+            yield make_chunk(content)
+
+        yield make_chunk("", finish="stop")
         yield b"data: [DONE]\n\n"
 
     return StreamingResponse(

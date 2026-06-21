@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -30,6 +30,9 @@ class UserSettings(Base):
         String(36), ForeignKey("endpoints.id", ondelete="SET NULL"), nullable=True
     )
     verification_model: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    preserve_thinking: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    gitv_status: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    simulated_streaming_speed: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

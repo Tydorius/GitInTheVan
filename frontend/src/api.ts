@@ -103,7 +103,7 @@ export const api = {
     request<void>(`/api/endpoints/${id}`, { method: 'DELETE' }),
 
   // Settings
-  getSettings: () => request<{ default_endpoint_id: string | null; default_model: string }>('/api/settings'),
+  getSettings: () => request<{ default_endpoint_id: string | null; default_model: string; preserve_thinking: boolean; gitv_status: boolean; simulated_streaming_speed: number }>('/api/settings'),
   updateSettings: (data: any) =>
     request<any>('/api/settings', { method: 'PUT', body: JSON.stringify(data) }),
 
@@ -120,6 +120,15 @@ export const api = {
     request<any>('/api/cantrips/test', { method: 'POST', body: JSON.stringify(data) }),
   testCantripById: (id: string, data: any) =>
     request<any>(`/api/cantrips/${id}/test`, { method: 'POST', body: JSON.stringify(data) }),
+  validateCantrip: (code: string) =>
+    request<{ valid: boolean; error: string | null }>('/api/cantrips/validate', { method: 'POST', body: JSON.stringify({ code }) }),
+  listTemplates: () =>
+    request<{ templates: any[] }>('/api/cantrips/templates'),
+  installTemplate: (name: string) =>
+    request<any>('/api/cantrips/templates/install', { method: 'POST', body: JSON.stringify({ template_name: name }) }),
+
+  // Diagnostics
+  runAudit: () => request<{ results: any[]; all_passed: boolean }>('/api/diagnostics/audit'),
 
   // Lorebooks
   listLorebooks: () => request<{ lorebooks: any[] }>('/api/lorebooks'),

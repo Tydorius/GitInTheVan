@@ -13,6 +13,7 @@ from app.models.user import User
 from app.services.cantrip import test_cantrip
 from app.services.cantrip_context import build_context
 from app.services.deno_runner import CantripExecutionError, CantripTimeoutError
+from app.templates.cantrip_templates import get_templates
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +152,46 @@ async def list_public_cantrips(
     return CantripListResponse(cantrips=[_cantrip_to_list_item(s) for s in cantrips])
 
 
+class TemplateInstall(BaseModel):
+    template_name: str
+
+
+@router.get("/templates")
+async def list_templates(
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    templates = get_templates()
+    return {"templates": [{"name": t["name"], "description": t["description"]} for t in templates]}
+
+
+@router.post("/templates/install", status_code=status.HTTP_201_CREATED)
+async def install_template(
+    req: TemplateInstall,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    templates = get_templates()
+    template = next((t for t in templates if t["name"] == req.template_name), None)
+    if template is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
+
+    cantrip = Cantrip(
+        user_id=current_user.id,
+        name=template["name"],
+        description=template["description"],
+        code=template["code"],
+        hook_type=template.get("hook_type", "pre"),
+        is_public=False,
+        is_active=True,
+        execution_order=template.get("execution_order", 10),
+        timeout_ms=template.get("timeout_ms", 5000),
+    )
+    db.add(cantrip)
+    await db.commit()
+    await db.refresh(cantrip)
+    return _cantrip_to_response(cantrip)
+
+
 @router.get("/{cantrip_id}")
 async def get_cantrip(
     cantrip_id: str,
@@ -226,6 +267,74 @@ async def delete_cantrip(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cantrip not found")
     await db.delete(cantrip)
     await db.commit()
+
+
+class ValidateRequest(BaseModel):
+    code: str
+
+
+class ValidateResponse(BaseModel):
+    valid: bool
+    error: str | None = None
+
+
+@router.post("/validate")
+async def validate_cantrip(
+    req: ValidateRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    import asyncio
+    import os
+    import tempfile
+
+    from app.services.deno_runner import DENO_PATH
+
+    if not DENO_PATH:
+        return ValidateResponse(valid=True, error=None)
+
+    wrapper = f"""
+const __userCode = {repr(req.code)};
+try {{
+    new Function('context', __userCode);
+}} catch(e) {{
+    Deno.stdout.writeSync(new TextEncoder().encode(JSON.stringify({{error: e.message}})));
+    Deno.exit(1);
+}}
+Deno.stdout.writeSync(new TextEncoder().encode(JSON.stringify({{error: null}})));
+"""
+
+    fd, temp_path = tempfile.mkstemp(suffix=".mjs", prefix="gitv_validate_")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(wrapper)
+
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: __import__("subprocess").run(
+                [DENO_PATH, "run", "--quiet", temp_path],
+                capture_output=True, timeout=5,
+            ),
+        )
+
+        stdout = result.stdout.decode("utf-8", errors="replace").strip() if result.stdout else ""
+        if stdout:
+            import json
+            try:
+                data = json.loads(stdout)
+                if data.get("error"):
+                    return ValidateResponse(valid=False, error=data["error"])
+            except json.JSONDecodeError:
+                pass
+
+        return ValidateResponse(valid=True, error=None)
+    except Exception as e:
+        return ValidateResponse(valid=False, error=str(e))
+    finally:
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
 
 
 @router.post("/test")

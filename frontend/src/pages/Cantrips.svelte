@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from '../api'
   import { onMount } from 'svelte'
+  import CodeEditor from '../lib/CodeEditor.svelte'
 
   let cantrips: any[] = []
   let loading = true
@@ -44,6 +45,29 @@
     showForm = true
   }
 
+  let validationStatus: { valid: boolean; error: string | null } | null = null
+  let validating = false
+  let errorLine: number | null = null
+
+  function parseErrorLine(error: string): number | null {
+    const match = error.match(/(?:line\s+|<anonymous>:)(\d+)/i)
+    if (match) return parseInt(match[1])
+    return null
+  }
+
+  async function validateCode() {
+    if (!form.code.trim()) return
+    validating = true; validationStatus = null; errorLine = null
+    try {
+      validationStatus = await api.validateCantrip(form.code)
+      if (validationStatus.error) {
+        errorLine = parseErrorLine(validationStatus.error)
+      }
+    } catch (e: any) {
+      validationStatus = { valid: false, error: e.message }
+    } finally { validating = false }
+  }
+
   async function handleSubmit() {
     error = ''
     try {
@@ -62,6 +86,23 @@
   async function toggleActive(s: any) {
     try { await api.updateCantrip(s.id, { is_active: !s.is_active }); await load() }
     catch (e: any) { error = e.message }
+  }
+
+  let templates: any[] = []
+  let showTemplates = false
+
+  async function loadTemplates() {
+    try { const data = await api.listTemplates(); templates = data.templates }
+    catch (e: any) { error = e.message }
+  }
+
+  async function installTemplate(name: string) {
+    error = ''
+    try {
+      await api.installTemplate(name)
+      showTemplates = false
+      await load()
+    } catch (e: any) { error = e.message }
   }
 
   function openTest(cantripId?: string) {
@@ -100,12 +141,35 @@
 <div class="page-header">
   <h2>Cantrips</h2>
   <div>
+    <button onclick={() => { loadTemplates(); showTemplates = !showTemplates; }}>Templates</button>
     <button onclick={() => { showTest = !showTest; testResults = null; }}>Test Panel</button>
     <button class="primary" onclick={() => { resetForm(); showForm = true; }}>+ Add Cantrip</button>
   </div>
 </div>
 
 {#if error}<div class="error-msg">{error}</div>{/if}
+
+{#if showTemplates}
+  <div class="card">
+    <h3>Cantrip Templates</h3>
+    <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">Install pre-built cantrips with one click. You can customize them after installation.</p>
+    {#if templates.length === 0}
+      <div class="loading">Loading templates...</div>
+    {:else}
+      {#each templates as t}
+        <div class="card" style="margin-bottom: 8px; border-color: var(--border);">
+          <div class="card-header">
+            <div>
+              <strong>{t.name}</strong>
+            </div>
+            <button class="primary" onclick={() => installTemplate(t.name)} style="font-size: 12px; padding: 4px 12px;">Install</button>
+          </div>
+          <p style="color: var(--text-dim); font-size: 12px;">{t.description}</p>
+        </div>
+      {/each}
+    {/if}
+  </div>
+{/if}
 
 {#if showTest}
   <div class="card">
@@ -213,7 +277,25 @@
         </div>
         <div class="form-group">
           <label for="cantrip-code">JavaScript Code</label>
-          <textarea id="cantrip-code" bind:value={form.code} class="code-editor" placeholder="context.character.scenario += ' Hello world';"></textarea>
+          <CodeEditor
+            bind:value={form.code}
+            language="javascript"
+            placeholder="context.character.scenario += ' Hello world';"
+            minHeight="250px"
+            {errorLine}
+          />
+          <div style="margin-top: 8px; display: flex; gap: 8px; align-items: center;">
+            <button type="button" onclick={validateCode} disabled={validating || !form.code.trim()} style="font-size: 12px; padding: 4px 12px;">
+              {validating ? 'Checking...' : 'Validate Syntax'}
+            </button>
+            {#if validationStatus}
+              {#if validationStatus.valid}
+                <span style="color: var(--success); font-size: 12px;">✓ Valid syntax</span>
+              {:else}
+                <span style="color: var(--danger); font-size: 12px;">✗ {validationStatus.error}</span>
+              {/if}
+            {/if}
+          </div>
         </div>
         <div class="form-row">
           <div class="form-group">

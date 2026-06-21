@@ -62,17 +62,22 @@ I will stress that I am not going to replicate or 100% replace Lorebary's functi
 
 The following are planned for future releases.
 
+- **Hybrid Verification** — Fast regex checks before LLM verification to catch obvious violations without extra API calls
+- **Cantrip Templates** — Pre-built cantrips for common use cases (dice rolling, status tracking, day counters) that users install with one click
+- **Diagnostic Tool** — Automated endpoint and configuration checker for troubleshooting "no response" errors
 - **Persistent Memory** — Zero-width character encoding for state persistence across conversation cycles
 - **Chat Memory Summarization** — Opt-in compression of conversation history using a user-selected LLM endpoint
-- **Status Streaming** — Real-time pipeline visibility via `<think><gitv>` status blocks when verification is active
-- **Simulated Streaming** — Token-speed-controlled output when verification forces non-streaming mode
-- **Embedded Creator Lorebooks** — `<jslorebook>` tag extraction from character cards for plug-and-play cantrip support
 - **Tagging System** — Activate lorebooks, cantrips, and verification rules via `<#tag#>` delimiters in persona text
-- **Cantrip Chaining** — Multi-turn LLM interactions for complex systems like dice resolution and critical tables
+- **Embedded Creator Lorebooks** — `<jslorebook>` tag extraction from character cards for plug-and-play cantrip support
+- **Prefill Support** — Provider-specific prefill injection that adapts to each endpoint's capabilities
 - **Command Tags** — Inline tags (`<LORE:name>`, `<VERIFY:off>`) for per-message configuration overrides
 - **Content Bypass Plugins** — Provider-specific encoding/decoding for content filtering
+- **GitHub Repository Sync** — Link GitHub repositories containing structured content packs (cantrips, lorebooks, verification rules) with versioning and one-click install
+- **Per-Server Sharing** — Share resources among users on the same GitInTheVan instance via public flags
+- **Cantrip Chaining** — Multi-turn LLM interactions for complex systems like dice resolution and critical tables
 - **Debug Mode** — Preserve last N chat exchanges with full pipeline visibility for development
-- **Security Hardening** — Rate limiting, CORS hardening, JWT refresh tokens, audit logging
+- **Natural-Language Cantrip Generator** — Describe what you want in plain English and an LLM generates the cantrip code or lorebook
+- **Security Hardening** — Rate limiting, per-user quotas, CORS hardening, JWT refresh tokens, audit logging
 - **Docker Distribution** — Multi-platform container images and docker-compose for production deployment
 
 ## Quick Start

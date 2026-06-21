@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from '../api'
   import { onMount } from 'svelte'
+  import CodeEditor from '../lib/CodeEditor.svelte'
 
   let rules: any[] = []
   let endpoints: any[] = []
@@ -253,7 +254,7 @@
         <div class="form-group"><label>Description</label><input bind:value={form.description} /></div>
         <div class="form-group">
           <label>Verification Prompt</label>
-          <textarea bind:value={form.prompt} class="code-editor" placeholder="The response must stay in character at all times. The character must never mention being an AI..." required></textarea>
+          <CodeEditor bind:value={form.prompt} language="markdown" minHeight="150px" placeholder="The response must stay in character at all times. The character must never mention being an AI..." />
         </div>
         <div class="form-row">
           <div class="form-group"><label>Max Retries</label><input type="number" bind:value={form.max_retries} /></div>

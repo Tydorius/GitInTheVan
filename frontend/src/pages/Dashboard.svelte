@@ -4,6 +4,24 @@
 
   let stats = { endpoints: 0, cantrips: 0, lorebooks: 0, rules: 0 }
   let health = ''
+  let auditResults: any[] = []
+  let auditRunning = false
+  let auditDone = false
+  let endpoints: any[] = []
+  let selectedEndpoint = ''
+
+  async function runAudit() {
+    auditRunning = true; auditDone = false
+    try {
+      const params = selectedEndpoint ? `?endpoint_id=${selectedEndpoint}` : ''
+      const data = await fetch(`/api/diagnostics/audit${params}`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('gitv_token')}` }
+      }).then(r => r.json())
+      auditResults = data.results
+      auditDone = true
+    } catch {}
+    finally { auditRunning = false }
+  }
 
   onMount(async () => {
     try {
@@ -14,6 +32,10 @@
     try {
       const eps = await api.listEndpoints()
       stats.endpoints = eps.endpoints.length
+      endpoints = eps.endpoints
+      if (endpoints.length > 0 && !selectedEndpoint) {
+        selectedEndpoint = endpoints[0].id
+      }
     } catch {}
 
     try {
@@ -59,6 +81,35 @@
 <div class="card">
   <h3>System Status</h3>
   <p style="margin-top: 12px;">Proxy health: <span class="badge {health === 'ok' ? 'active' : 'inactive'}">{health || 'checking...'}</span></p>
+</div>
+
+<div class="card">
+  <h3>Diagnostics</h3>
+  <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 12px;">Run a quick check of your endpoint, cantrip, and verification configuration.</p>
+  {#if endpoints.length > 0}
+    <div class="form-group">
+      <label for="diag-ep">Endpoint to Test</label>
+      <select id="diag-ep" bind:value={selectedEndpoint}>
+        {#each endpoints as ep}<option value={ep.id}>{ep.name}</option>{/each}
+      </select>
+    </div>
+  {/if}
+  <button class="primary" onclick={runAudit} disabled={auditRunning}>{auditRunning ? 'Checking...' : 'Run Diagnostic'}</button>
+
+  {#if auditDone}
+    <div style="margin-top: 16px;">
+      {#each auditResults as r}
+        <div style="display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border);">
+          <span class="badge {r.passed ? 'approved' : 'violation'}">{r.passed ? 'OK' : 'FAIL'}</span>
+          <strong style="font-size: 13px;">{r.check}:</strong>
+          <span style="font-size: 12px; color: var(--text-dim);">{r.message}</span>
+        </div>
+        {#if r.detail}
+          <div style="font-size: 11px; color: var(--warn); padding: 2px 0 8px 56px;">{r.detail}</div>
+        {/if}
+      {/each}
+    </div>
+  {/if}
 </div>
 
 <div class="card">
