@@ -10,19 +10,59 @@ cd "$(dirname "$0")/.."
 
 # Check Python version (3.12+ required)
 echo "[1/6] Checking Python..."
-if ! command -v python3 &> /dev/null; then
-    echo "ERROR: Python 3 is not installed or not in PATH."
-    echo "Please install Python 3.12+ via your package manager, e.g.:"
-    echo "  Ubuntu/Debian: sudo apt install python3 python3-venv python3-pip"
-    echo "  Fedora: sudo dnf install python3"
-    echo "  Arch: sudo pacman -S python"
-    exit 1
+PYTHON_CMD=""
+
+if command -v python3 &> /dev/null; then
+    python3 --version
+    if python3 -c "import sys; exit(0 if sys.version_info >= (3, 12) else 1)" 2>/dev/null; then
+        PYTHON_CMD="python3"
+    fi
 fi
-python3 --version
-if ! python3 -c "import sys; exit(0 if sys.version_info >= (3, 12) else 1)"; then
-    echo "ERROR: Python 3.12+ required, found $(python3 --version)."
-    echo "Please upgrade via your package manager."
-    exit 1
+
+if [ -z "$PYTHON_CMD" ]; then
+    echo "Python 3.12+ is required but was not found."
+
+    PKG_MGR=""
+    INSTALL_CMD=""
+    if command -v apt-get &> /dev/null; then
+        PKG_MGR="apt-get"
+        INSTALL_CMD="sudo apt-get update && sudo apt-get install -y python3.12 python3.12-venv"
+    elif command -v dnf &> /dev/null; then
+        PKG_MGR="dnf"
+        INSTALL_CMD="sudo dnf install -y python3.12"
+    elif command -v pacman &> /dev/null; then
+        PKG_MGR="pacman"
+        INSTALL_CMD="sudo pacman -S --noconfirm python"
+    fi
+
+    if [ -n "$PKG_MGR" ]; then
+        read -p "Would you like to install Python 3.12 via $PKG_MGR? [y/n]: " INSTALL_PY
+        if [[ "$INSTALL_PY" =~ ^[Yy]$ ]]; then
+            echo "Installing Python 3.12..."
+            if ! eval "$INSTALL_CMD"; then
+                echo "Installation failed. Python 3.12 may not be available in your distribution's"
+                echo "default repositories. Please install it manually."
+                exit 1
+            fi
+            hash -r 2>/dev/null
+            if command -v python3.12 &> /dev/null; then
+                PYTHON_CMD="python3.12"
+            elif command -v python3 &> /dev/null && python3 -c "import sys; exit(0 if sys.version_info >= (3, 12) else 1)" 2>/dev/null; then
+                PYTHON_CMD="python3"
+            else
+                echo "Installation completed but Python 3.12+ not found."
+                echo "Please open a new terminal and re-run this script."
+                exit 1
+            fi
+        else
+            echo "Please install Python 3.12+ via your package manager."
+            exit 1
+        fi
+    else
+        echo "Could not detect a supported package manager (apt/dnf/pacman)."
+        echo "Please install Python 3.12+ manually."
+        exit 1
+    fi
 fi
 echo
 
@@ -30,7 +70,7 @@ echo
 echo "[2/6] Setting up Python environment..."
 if [ ! -f ".venv/bin/python" ]; then
     echo "Creating virtual environment..."
-    python3 -m venv .venv
+    $PYTHON_CMD -m venv .venv
 fi
 echo "Upgrading pip..."
 .venv/bin/python -m pip install --upgrade pip -q

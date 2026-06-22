@@ -10,16 +10,40 @@ cd "$(dirname "$0")/.."
 
 # Check Python version (3.12+ required)
 echo "[1/6] Checking Python..."
-if ! command -v python3 &> /dev/null; then
-    echo "ERROR: Python 3 is not installed or not in PATH."
-    echo "Please install Python 3.12+ from https://python.org or via Homebrew: brew install python"
-    exit 1
+PYTHON_CMD=""
+
+if command -v python3 &> /dev/null; then
+    python3 --version
+    if python3 -c "import sys; exit(0 if sys.version_info >= (3, 12) else 1)" 2>/dev/null; then
+        PYTHON_CMD="python3"
+    fi
 fi
-python3 --version
-if ! python3 -c "import sys; exit(0 if sys.version_info >= (3, 12) else 1)"; then
-    echo "ERROR: Python 3.12+ required, found $(python3 --version)."
-    echo "Please upgrade via https://python.org or: brew upgrade python"
-    exit 1
+
+if [ -z "$PYTHON_CMD" ]; then
+    echo "Python 3.12+ is required but was not found."
+    if command -v brew &> /dev/null; then
+        read -p "Would you like to install Python 3.12 via Homebrew? [y/n]: " INSTALL_PY
+        if [[ "$INSTALL_PY" =~ ^[Yy]$ ]]; then
+            echo "Installing Python 3.12..."
+            brew install python@3.12
+            hash -r 2>/dev/null
+            if command -v python3.12 &> /dev/null; then
+                PYTHON_CMD="python3.12"
+            else
+                echo "Installation completed but python3.12 not found in PATH."
+                echo "Please open a new terminal window and re-run this script."
+                exit 1
+            fi
+        else
+            echo "Please install Python 3.12+ from https://python.org or: brew install python@3.12"
+            exit 1
+        fi
+    else
+        echo "Homebrew is not installed."
+        echo "Please install Python 3.12+ from https://python.org"
+        echo "Or install Homebrew first: https://brew.sh"
+        exit 1
+    fi
 fi
 echo
 
@@ -27,7 +51,7 @@ echo
 echo "[2/6] Setting up Python environment..."
 if [ ! -f ".venv/bin/python" ]; then
     echo "Creating virtual environment..."
-    python3 -m venv .venv
+    $PYTHON_CMD -m venv .venv
 fi
 echo "Upgrading pip..."
 .venv/bin/python -m pip install --upgrade pip -q
