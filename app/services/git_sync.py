@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,7 +35,6 @@ class RepoManifest:
 
 
 def _build_auth_url(url: str, token: str) -> str:
-    """Embed token in HTTPS URL for authentication."""
     if not token:
         return url
     if "://" not in url:
@@ -43,29 +43,33 @@ def _build_auth_url(url: str, token: str) -> str:
     return f"{scheme}://token:{token}@{rest}"
 
 
-def fetch_repo_info(url: str, branch: str = "main", token: str = "") -> dict[str, Any]:
-    """Clone a repo (shallow) and return the descriptions.json + file list.
+class _WinTempDir:
+    """Temp directory that suppresses Windows file-lock cleanup errors."""
 
-    Uses dulwich for pure-Python git access. Repo is cloned to a temp
-    directory, read, then cleaned up.
-    """
+    def __init__(self):
+        self.path = Path(tempfile.mkdtemp(prefix="gitv_repo_"))
+
+    def __enter__(self):
+        return self.path
+
+    def __exit__(self, *exc):
+        shutil.rmtree(self.path, ignore_errors=True)
+        return False
+
+
+def fetch_repo_info(url: str, branch: str = "main", token: str = "") -> dict[str, Any]:
     from dulwich import porcelain
-    from dulwich.errors import GitProtocolError
 
     auth_url = _build_auth_url(url, token)
 
-    with tempfile.TemporaryDirectory(prefix="gitv_repo_") as tmpdir:
-        clone_kwargs: dict[str, Any] = {
-            "checkout": True,
-        }
-
+    with _WinTempDir() as tmpdir:
         try:
             porcelain.clone(
                 auth_url,
-                target=Path(tmpdir).as_posix(),
-                **clone_kwargs,
+                target=str(tmpdir),
+                checkout=True,
             )
-        except (GitProtocolError, Exception) as e:
+        except Exception as e:
             err_msg = str(e)[:300]
             logger.error("Git clone failed for %s: %s", url, err_msg)
             if "not found" in err_msg.lower() or "404" in err_msg:
@@ -74,18 +78,10 @@ def fetch_repo_info(url: str, branch: str = "main", token: str = "") -> dict[str
                 raise GitCloneError(f"Authentication failed. Check token or repo access: {url}") from e
             raise GitCloneError(f"Failed to clone repository: {err_msg}") from e
 
-        repo_path = Path(tmpdir)
-
-        if branch and branch != "main":
-            branch_path = repo_path / ".git" / "refs" / "heads" / branch
-            if not branch_path.exists():
-                logger.warning("Branch '%s' not found, using default", branch)
-
-        return _read_repo(repo_path)
+        return _read_repo(tmpdir)
 
 
 def _read_repo(repo_path: Path) -> dict[str, Any]:
-    """Read descriptions.json and file listing from a cloned repo."""
     manifest_path = repo_path / "descriptions.json"
 
     files: list[dict[str, Any]] = []
@@ -112,7 +108,6 @@ def _read_repo(repo_path: Path) -> dict[str, Any]:
 
 
 def _auto_scan_repo(repo_path: Path) -> list[dict[str, Any]]:
-    """Scan type folders and auto-extract file metadata."""
     type_folders = {
         "cantrips": "cantrip",
         "lorebooks": "lorebook",
@@ -149,22 +144,21 @@ def _auto_scan_repo(repo_path: Path) -> list[dict[str, Any]]:
 
 
 def fetch_file_content(url: str, file_path: str, token: str = "") -> str:
-    """Clone repo and read a specific file's content."""
     from dulwich import porcelain
 
     auth_url = _build_auth_url(url, token)
 
-    with tempfile.TemporaryDirectory(prefix="gitv_file_") as tmpdir:
+    with _WinTempDir() as tmpdir:
         try:
             porcelain.clone(
                 auth_url,
-                target=Path(tmpdir).as_posix(),
+                target=str(tmpdir),
                 checkout=True,
             )
         except Exception as e:
             raise GitCloneError(f"Failed to clone repository: {e}") from e
 
-        file_full = Path(tmpdir) / file_path
+        file_full = tmpdir / file_path
         if not file_full.exists():
             raise FileNotFoundError(f"File not found in repo: {file_path}")
 
