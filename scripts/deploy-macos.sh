@@ -8,7 +8,7 @@ echo
 
 cd "$(dirname "$0")/.."
 
-# Check Python
+# Check Python version (3.12+ required)
 echo "[1/6] Checking Python..."
 if ! command -v python3 &> /dev/null; then
     echo "ERROR: Python 3 is not installed or not in PATH."
@@ -16,6 +16,11 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 python3 --version
+if ! python3 -c "import sys; exit(0 if sys.version_info >= (3, 12) else 1)"; then
+    echo "ERROR: Python 3.12+ required, found $(python3 --version)."
+    echo "Please upgrade via https://python.org or: brew upgrade python"
+    exit 1
+fi
 echo
 
 # Check for existing venv or create it
@@ -24,6 +29,8 @@ if [ ! -f ".venv/bin/python" ]; then
     echo "Creating virtual environment..."
     python3 -m venv .venv
 fi
+echo "Upgrading pip..."
+.venv/bin/python -m pip install --upgrade pip -q
 echo "Installing dependencies..."
 .venv/bin/pip install -e ".[dev]" -q
 echo "Done."
@@ -72,7 +79,7 @@ elif command -v node &> /dev/null; then
     echo "Frontend built."
 else
     echo "WARNING: Node.js not found. Frontend will not be built."
-    echo "Install Node.js 20+ from https://nodejs.org and run:"
+    echo "Install Node.js 24+ from https://nodejs.org and run:"
     echo "  cd frontend && npm install && npm run build"
 fi
 echo

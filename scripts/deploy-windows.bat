@@ -9,7 +9,7 @@ echo.
 
 cd /d "%~dp0\.."
 
-REM Check Python
+REM Check Python version (3.12+ required)
 echo [1/6] Checking Python...
 python --version >nul 2>&1
 if errorlevel 1 (
@@ -19,6 +19,20 @@ if errorlevel 1 (
     exit /b 1
 )
 python --version
+for /f "tokens=2" %%v in ('python --version 2^>^&1') do set PYVER=%%v
+for /f "tokens=1,2 delims=." %%a in ("!PYVER!") do (
+    set PYMAJOR=%%a
+    set PYMINOR=%%b
+)
+set PYOK=0
+if !PYMAJOR! GTR 3 set PYOK=1
+if !PYMAJOR! EQU 3 if !PYMINOR! GEQ 12 set PYOK=1
+if !PYOK! EQU 0 (
+    echo ERROR: Python 3.12+ required, found !PYMAJOR!.!PYMINOR!.
+    echo Please upgrade from https://python.org
+    pause
+    exit /b 1
+)
 echo.
 
 REM Check for existing venv or create it
@@ -32,8 +46,16 @@ if not exist ".venv\Scripts\python.exe" (
         exit /b 1
     )
 )
+echo Upgrading pip...
+".venv\Scripts\python" -m pip install --upgrade pip -q
 echo Installing dependencies...
 ".venv\Scripts\pip" install -e ".[dev]" -q
+if errorlevel 1 (
+    echo ERROR: Failed to install Python dependencies.
+    echo This usually means pip is outdated or Python version is incompatible.
+    pause
+    exit /b 1
+)
 echo Done.
 echo.
 
@@ -70,7 +92,7 @@ if exist "static\index.html" (
     where node >nul 2>&1
     if errorlevel 1 (
         echo WARNING: Node.js not found. Frontend will not be built.
-        echo Install Node.js 20+ from https://nodejs.org and run:
+        echo Install Node.js 24+ from https://nodejs.org and run:
         echo   cd frontend ^&^& npm install ^&^& npm run build
     ) else (
         echo Building frontend...
