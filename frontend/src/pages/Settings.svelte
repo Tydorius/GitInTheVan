@@ -20,6 +20,9 @@
   let driverCallableTurns = 1
   let bypassMethod = 'none'
   let prefillEnabled = false
+  let budgetPercent = 10.0
+  let contextWindowOverride = 0
+  let debugMode = false
   let endpoints: any[] = []
   let apiKey: string | null = null
   let error = ''
@@ -54,6 +57,9 @@
           driverCallableTurns = (s as any).driver_callable_turns ?? 1
           bypassMethod = (s as any).bypass_method ?? 'none'
           prefillEnabled = (s as any).prefill_enabled ?? false
+          budgetPercent = (s as any).context_budget_percent ?? 10.0
+          contextWindowOverride = (s as any).context_window_override ?? 0
+          debugMode = (s as any).debug_mode ?? false
         }
       } catch {}
     } catch (e: any) { error = e.message }
@@ -87,6 +93,13 @@
     error = ''
     try {
       await api.updateSettings({ bypass_method: bypassMethod, prefill_enabled: prefillEnabled } as any)
+    } catch (e: any) { error = e.message }
+  }
+
+  async function saveBudget() {
+    error = ''
+    try {
+      await api.updateSettings({ context_budget_percent: budgetPercent, context_window_override: contextWindowOverride, debug_mode: debugMode } as any)
     } catch (e: any) { error = e.message }
   }
 
@@ -263,6 +276,30 @@
     </select>
   </div>
   <button class="primary" onclick={saveBypassPrefill}>Save</button>
+</div>
+
+<div class="card">
+  <h3>Context Budgeting</h3>
+  <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
+    Allocates a percentage of the context window for injected content (cantrips, lorebooks, memory). Cantrips can access their allocation via <code>context.budget</code> to dynamically scale their output (full / summary / bullets). Set to 0 to disable.
+  </p>
+  <div class="form-group">
+    <label for="budget-percent">Injection Budget (%)</label>
+    <input id="budget-percent" type="number" bind:value={budgetPercent} min="0" max="100" step="0.5" style="width: 100px;">
+    <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">Percentage of the context window reserved for cantrips and lorebooks.</p>
+  </div>
+  <div class="form-group">
+    <label for="ctx-window">Context Window Override (tokens)</label>
+    <input id="ctx-window" type="number" bind:value={contextWindowOverride} min="0" step="1000" style="width: 120px;">
+    <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">Override the model's context window size. 0 = auto-detect from model name.</p>
+  </div>
+  <div class="form-group">
+    <label>
+      <input type="checkbox" bind:checked={debugMode} style="width: auto;">
+      Debug Mode (capture pipeline stages for last 20 exchanges)
+    </label>
+  </div>
+  <button class="primary" onclick={saveBudget}>Save</button>
 </div>
 
 <div class="card">

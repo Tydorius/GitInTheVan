@@ -18,6 +18,9 @@ Licensed under Mozilla Public License 2.0.
 [Verification](#Verification)  
 [Persistent Memory](#Persistent-Memory)  
 [Conversation Summarization](#Conversation-Summarization)  
+[Context Budgeting](#Context-Budgeting)  
+[Memory Rules](#Memory-Rules)  
+[Debug Mode](#Debug-Mode)  
 [Command Tags](#Command-Tags)  
 [Development](#Development)  
 [Starting Out With Cantrips](#Starting-Out-With-Cantrips)  
@@ -59,7 +62,7 @@ I will stress that I am not going to replicate or 100% replace Lorebary's functi
 - **Lorebooks** — JSON worldbook system with keyword matching, constant/selective entries, enable/disable per lorebook, import from SillyTavern/Chub/JanitorAI formats, and file export. Supports pipeline positioning (pre-Driver, pre-Navigator, etc.) and LLM-facing instructions
 - **Cantrips** — Sandboxed JavaScript execution compatible with JanitorAI scripts, with per-chat persistent storage via `context.chat_data`. Four pipeline positions (Pre-Driver, Driver-Callable, Pre-Navigator, Post-Navigator). LLM instructions field for tool notifications. Includes built-in templates (dice roller, status tracker, day counter, weather system)
 - **Driver-Callable Tools** — Writing LLM can invoke cantrips as tools during generation via a notification-based, turn-tracked approach that works with any model. No OpenAI function-calling support required. Auto-disables when no tools are active. Infinite-loop prevention via turn budget
-- **Verification** — LLM-based response checking (Navigator) with configurable rules, automatic resubmission with retry limits, and verification logs
+- **Verification** — LLM-based response checking (Navigator) with configurable rules, automatic resubmission with retry limits, verification logs, and per-rule endpoint/model overrides
 - **Persistent Memory** — Database-backed memory system using `<memstore>` tags. LLM responses are scanned for key/value pairs, stored per-conversation, and injected as a `[PERSISTENT MEMORY]` context block on subsequent requests. No zero-width character encoding — the database is the source of truth
 - **Conversation Summarization** — Automatically compresses long conversations when token count exceeds a configurable threshold. Older dialogue is summarized by a user-selected LLM and replaced with a `[CONVERSATION SUMMARY]` context block, while recent messages are always forwarded verbatim
 - **Forbidden Words** — Global per-user phrase list checked against responses before the Navigator runs. Supports plain-text and regex matching, case-insensitive by default. Matches surfaced to the Navigator as concrete violations
@@ -70,7 +73,10 @@ I will stress that I am not going to replicate or 100% replace Lorebary's functi
 - **Tagging System** — Activate lorebooks, cantrips, and verification rules via `<#type-name#>` delimiters in persona or message text. Tags are auto-stripped before forwarding to the LLM
 - **Content Discovery and Sync** — Link any git repository as a content pack. Browse, install (linked with update tracking), or fork (independent copy) cantrips, lorebooks, and rules. Safety scanner checks for malicious code. Auto-discovers resources from folder structure. "Download at your own risk" disclaimer
 - **Diagnostics** — Automated endpoint and configuration checker for troubleshooting connectivity issues
-- **Web UI** — Full management interface built with Svelte 5 including cantrip tester, verification tester, forbidden word scanner, code editor with syntax highlighting, and log viewer
+- **Web UI** — Full management interface built with Svelte 5 including cantrip tester, verification tester, forbidden word scanner, code editor with syntax highlighting, jump-to-top/bottom navigation, and log viewer
+- **Context Budgeting** — Weighted token budget allocation across cantrips and lorebooks. Cantrips access their share via `context.budget` and can dynamically scale output detail (full/summary/bullets) based on remaining tokens. Configurable per-user budget percentage and context window override
+- **Memory Rules** — Taggable per-conversation summarization overrides. Rules can override the token threshold, keep-recent count, prompt, or disable summarization entirely for specific conversations. Activate via `<#memory-rule-tag#>` tags
+- **Debug Mode** — Captures the last 20 pipeline exchanges with full visibility (original messages, modified messages after pipeline processing, Driver response, and verification results). Dedicated Debug page for troubleshooting pipeline behavior
 
 ## Upcoming Features
 
@@ -78,8 +84,8 @@ The following are planned for future releases.
 
 - **Per-server sharing** — Share resources among users on the same GitInTheVan instance via public flags
 - **Cantrip Chaining** — Multi-turn LLM interactions for complex systems like dice resolution and critical tables
-- **Debug Mode** — Preserve last N chat exchanges with full pipeline visibility for development
 - **Natural-Language Cantrip Generator** — Describe what you want in plain English and an LLM generates the cantrip code or lorebook
+- **Per-Endpoint API Keys** — Endpoint-key mapping table for multi-platform users who need different API keys per service
 - **Security Hardening** — Rate limiting, per-user quotas, CORS hardening, JWT refresh tokens, audit logging
 - **Docker Distribution** — Multi-platform container images and docker-compose for production deployment
 
@@ -107,9 +113,11 @@ scripts\deploy-windows.bat
 The script will:
 1. Create a Python virtual environment and install dependencies
 2. Download Deno automatically (for cantrip sandbox)
-3. Build the web UI frontend (requires Node.js 20+)
+3. Build the web UI frontend (requires Node.js 24+)
 4. Create a `.env` configuration file from the template
 5. Start the server
+
+If Python 3.12+ is not installed, the script offers to install it automatically (Windows: winget, macOS: Homebrew, Linux: apt/dnf/pacman).
 
 Once running, open `http://localhost:8000` in your browser.
 
@@ -120,7 +128,7 @@ If you prefer to set things up manually or the deploy script doesn't work for yo
 #### Prerequisites
 
 - Python 3.12+
-- Node.js 20+ (for building the frontend)
+- Node.js 24+ (for building the frontend)
 - [Deno](https://deno.land/) runtime (for cantrip sandbox)
 
 #### Steps
@@ -241,6 +249,14 @@ const location = context.memory.get('location');
 context.memory.set('weather', 'stormy');
 const allKeys = context.memory.keys();
 
+// Context budget (when budgeting is enabled in Settings)
+const budget = context.budget;  // {total, remaining, weight, share, detail_level}
+if (budget.detail_level === 'bullets') {
+    context.character.scenario += '- Brief notes only';
+} else {
+    context.character.scenario += 'Full detailed description...';
+}
+
 console.log('Debug output visible in cantrip tester');
 ```
 
@@ -341,6 +357,100 @@ Configure in **Settings > Conversation Summarization**:
 | Summarization Prompt | *(default)* | System prompt for the summarization LLM |
 
 Summaries can be viewed and managed on the **Memories** page.
+
+## Context Budgeting
+
+Context Budgeting allocates a percentage of the model's context window for injected content (cantrips, lorebooks, memory). This prevents injected content from consuming too much of the context window and gives cantrips the information they need to scale their output dynamically.
+
+### How It Works
+
+1. Before Pre-Driver cantrips run, GitInTheVan calculates the total context window (auto-detected from model name or manually overridden) and the current token usage
+2. A configurable percentage (default 10%) of the context window is allocated as the "injection budget"
+3. The budget is divided across active cantrips and lorebooks proportionally by their **budget weight** (default 1.0 each)
+4. Each cantrip receives a `context.budget` object with its share and a suggested detail level
+
+### Cantrip Budget API
+
+```javascript
+const budget = context.budget;
+// budget = {
+//   total: 819,           // total injection budget in tokens
+//   remaining: 655,       // tokens remaining after prior cantrips
+//   weight: 2.0,          // this cantrip's configured weight
+//   share: 327,           // tokens allocated to this cantrip
+//   detail_level: "full"  // "full" | "summary" | "bullets"
+// }
+```
+
+Detail levels are determined by the share size:
+- **Full** (≥4000 tokens): Enough for detailed content
+- **Summary** (≥1500 tokens): Condensed but complete
+- **Bullets** (<1500 tokens): Minimal bullet-point format
+
+### Configuration
+
+Configure in **Settings > Context Budgeting**:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Injection Budget (%) | 10 | Percentage of context window reserved for injections. Set to 0 to disable. |
+| Context Window Override | 0 | Override the model's context window size. 0 = auto-detect from model name. |
+
+Per-cantrip and per-lorebook **Budget Weight** fields control proportional allocation. A weight of 2.0 gets twice the tokens of a weight of 1.0.
+
+## Memory Rules
+
+Memory Rules allow overriding summarization behavior per conversation. Rules are taggable and follow the same pattern as verification rules.
+
+### How It Works
+
+1. Rules are evaluated in execution order when summarization is about to trigger
+2. Tagged rules activate via `<#memory-rule-tag#>` in persona or message text
+3. The first matching rule (tagged > untagged default) determines the summarization behavior
+4. If no rules match, global settings apply
+
+### Rule Fields
+
+| Field | Description |
+|-------|-------------|
+| Name | Human-readable label |
+| Summarization Enabled | Whether to summarize at all for matching conversations |
+| Token Threshold | Override the global threshold (0 = use global) |
+| Keep Recent | Override the global keep_recent (0 = use global) |
+| Custom Prompt | Override the summarization prompt (empty = use global) |
+| Tag | Activation tag for `<#memory-rule-tag#>` matching |
+
+### Example Use Cases
+
+- **Slow-burn RP**: More aggressive summarization (lower threshold, fewer recent messages) for political/intrigue roleplay with long histories
+- **Casual chat**: Disable summarization entirely for short conversations that don't need compression
+- **Custom prompt per character**: Different summarization focus (e.g., track relationship status vs. plot events)
+
+Memory Rules are managed on the **Memories** page.
+
+## Debug Mode
+
+Debug Mode captures pipeline data for the last 20 exchanges, providing full visibility into how GitInTheVan transforms requests and responses.
+
+### What It Captures
+
+Each captured exchange includes:
+- **Original Messages**: The request as received from the client (before any pipeline processing)
+- **Modified Messages**: The request as sent to the Driver (after lorebooks, cantrips, memory, budget, summarization)
+- **Budget Data**: Token budget calculations and allocations
+- **Tags**: Any activation tags detected
+- **Driver Response**: The raw response from the writing LLM
+- **Verification Results**: Check history with violations and retry details
+
+### Using Debug Mode
+
+1. Enable **Debug Mode** in **Settings > Context Budgeting**
+2. Send requests through the proxy as normal
+3. Open the **Debug** page in the sidebar
+4. Select an exchange from the list to view the pipeline stages
+5. Toggle between **Original**, **Modified**, and **Response** views
+
+Debug exchanges are automatically pruned to the most recent 20 per user. Use **Clear All** to wipe all captured data.
 
 ## Command Tags
 

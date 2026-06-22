@@ -2,6 +2,27 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.12.0] - 2026-06-22
+
+### Added
+
+- **Context Budgeting System**: Weighted token budget allocation across cantrips and lorebooks. Cantrips access their allocation via `context.budget` (total, remaining, weight, share, detail_level). Dynamic detail scaling (full/summary/bullets) based on remaining tokens. Configurable per-user budget percentage and context window override. Per-resource budget weight on cantrips and lorebooks.
+- **Memory Rules System**: Taggable per-conversation summarization rules with override thresholds, keep_recent, and custom prompts. Rules activate via `<#memory-rule-tag#>` tags. UnTagged rules act as defaults. First matching rule wins (tagged > default).
+- **Debug Mode**: Captures last 20 pipeline exchanges with full visibility (original messages, modified messages, response, verification results). Toggle in Settings. Dedicated Debug page with side-by-side pipeline view.
+- **Per-Rule Verification Endpoints**: Each verification rule can specify its own endpoint and model, falling back to global settings when unset.
+- **Deploy Script Python Auto-Install**: Windows (winget), macOS (Homebrew), and Linux (apt/dnf/pacman) deploy scripts now offer to install Python 3.12+ if not found or outdated.
+- **Jump to Top/Bottom Buttons**: Code editor now has floating navigation buttons for scrolling to the start or end of long files.
+- **Python Version Enforcement**: Deploy scripts now check for Python 3.12+ and refuse to continue with older versions.
+
+### Fixed
+
+- **Deploy Script Dependency Installation**: Scripts now upgrade pip before installing dependencies, preventing silent failures with hatchling/pyproject.toml editable installs on systems with bundled old pip.
+- **Deploy Script Error Handling**: Windows script now checks pip install exit code and reports errors instead of silently continuing.
+
+### Changed
+
+- Node.js minimum version updated from 20+ to 24+ in deploy scripts (Vite 8/Rolldown requirement).
+
 ## [0.11.4] - 2026-06-22
 
 ### Fixed

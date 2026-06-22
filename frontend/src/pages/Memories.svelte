@@ -4,22 +4,51 @@
 
   let memories: any[] = []
   let summaries: any[] = []
+  let memoryRules: any[] = []
   let loading = true
   let error = ''
   let filterConversation = ''
   let editingId: string | null = null
   let editValue = ''
   let expandedSummary: string | null = null
+  let showRuleForm = false
+  let editingRuleId: string | null = null
+  let ruleForm = {
+    name: '', description: '',
+    summarization_enabled: true,
+    token_threshold: 0, keep_recent: 0,
+    prompt: '', tag: '', execution_order: 10, is_active: true,
+  }
+
+  function resetRuleForm() {
+    ruleForm = { name: '', description: '', summarization_enabled: true, token_threshold: 0, keep_recent: 0, prompt: '', tag: '', execution_order: 10, is_active: true }
+    editingRuleId = null
+  }
+
+  function startEditRule(r: any) {
+    editingRuleId = r.id
+    ruleForm = {
+      name: r.name, description: r.description || '',
+      summarization_enabled: r.summarization_enabled,
+      token_threshold: r.token_threshold || 0,
+      keep_recent: r.keep_recent || 0,
+      prompt: r.prompt || '', tag: r.tag || '',
+      execution_order: r.execution_order || 10, is_active: r.is_active,
+    }
+    showRuleForm = true
+  }
 
   async function load() {
     loading = true
     try {
-      const [memData, sumData] = await Promise.all([
+      const [memData, sumData, ruleData] = await Promise.all([
         api.listMemories(filterConversation || undefined),
         api.listSummaries(),
+        api.listMemoryRules(),
       ])
       memories = memData.memories
       summaries = sumData.summaries
+      memoryRules = ruleData.rules
     } catch (e: any) { error = e.message }
     finally { loading = false }
   }
@@ -48,6 +77,31 @@
   function startEdit(m: any) {
     editingId = m.id
     editValue = m.value
+  }
+
+  async function handleSaveRule() {
+    error = ''
+    try {
+      if (editingRuleId) {
+        await api.updateMemoryRule(editingRuleId, ruleForm)
+      } else {
+        await api.createMemoryRule(ruleForm)
+      }
+      showRuleForm = false
+      resetRuleForm()
+      await load()
+    } catch (e: any) { error = e.message }
+  }
+
+  async function handleDeleteRule(id: string) {
+    if (!confirm('Delete this memory rule?')) return
+    try { await api.deleteMemoryRule(id); await load() }
+    catch (e: any) { error = e.message }
+  }
+
+  async function toggleRuleActive(r: any) {
+    try { await api.updateMemoryRule(r.id, { is_active: !r.is_active }); await load() }
+    catch (e: any) { error = e.message }
   }
 
   onMount(load)
@@ -144,6 +198,83 @@
               </td>
             </tr>
           {/if}
+        {/each}
+      </tbody>
+    </table>
+  {/if}
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h3>Memory Rules</h3>
+    <button class="primary" onclick={() => { resetRuleForm(); showRuleForm = true; }}>+ Add Rule</button>
+  </div>
+  <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
+    Override summarization behavior per conversation. Tagged rules activate via <code style="color: var(--accent);">&lt;#memory-rule-tag#&gt;</code>. A rule with no tag acts as the default. Fields set to 0 or empty inherit global settings.
+  </p>
+  {#if showRuleForm}
+    <div class="card" style="background: var(--bg-elevated); margin-bottom: 16px;">
+      <div class="form-group">
+        <label for="rule-name">Name</label>
+        <input id="rule-name" bind:value={ruleForm.name} placeholder="Rule name" />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="rule-tag">Tag (optional)</label>
+          <input id="rule-tag" bind:value={ruleForm.tag} placeholder="e.g. slow-burn" />
+        </div>
+        <div class="form-group">
+          <label for="rule-order">Execution Order</label>
+          <input id="rule-order" type="number" bind:value={ruleForm.execution_order} />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="rule-threshold">Token Threshold (0 = global)</label>
+          <input id="rule-threshold" type="number" bind:value={ruleForm.token_threshold} />
+        </div>
+        <div class="form-group">
+          <label for="rule-recent">Keep Recent (0 = global)</label>
+          <input id="rule-recent" type="number" bind:value={ruleForm.keep_recent} />
+        </div>
+      </div>
+      <div class="form-group">
+        <label><input type="checkbox" bind:checked={ruleForm.summarization_enabled} style="width: auto;"> Summarization Enabled</label>
+      </div>
+      <div class="form-group">
+        <label for="rule-prompt">Custom Prompt (empty = global)</label>
+        <textarea id="rule-prompt" bind:value={ruleForm.prompt} rows="3" style="width: 100%;"></textarea>
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <button class="primary" onclick={handleSaveRule}>{editingRuleId ? 'Update' : 'Create'}</button>
+        <button onclick={() => { showRuleForm = false; resetRuleForm(); }}>Cancel</button>
+      </div>
+    </div>
+  {/if}
+  {#if memoryRules.length === 0}
+    <div class="empty-state" style="padding: 16px;">
+      No memory rules configured. Rules let you customize summarization behavior per conversation.
+    </div>
+  {:else}
+    <table>
+      <thead>
+        <tr><th>Name</th><th>Tag</th><th>Summary</th><th>Threshold</th><th>Active</th><th>Actions</th></tr>
+      </thead>
+      <tbody>
+        {#each memoryRules as r}
+          <tr>
+            <td>{r.name}</td>
+            <td>{#if r.tag}<span class="api-key-display" style="display: inline; font-size: 10px; padding: 2px 6px;">{r.tag}</span>{:else}<span style="color: var(--text-dim); font-size: 11px;">default</span>{/if}</td>
+            <td>{r.summarization_enabled ? 'ON' : 'OFF'}</td>
+            <td style="font-size: 12px;">{r.token_threshold > 0 ? r.token_threshold : 'global'}</td>
+            <td>
+              <button onclick={() => toggleRuleActive(r)} style="padding: 2px 8px; font-size: 11px;" class={r.is_active ? 'primary' : ''}>{r.is_active ? 'ON' : 'OFF'}</button>
+            </td>
+            <td>
+              <button onclick={() => startEditRule(r)} style="font-size: 12px;">Edit</button>
+              <button class="danger" onclick={() => handleDeleteRule(r.id)} style="font-size: 12px;">Delete</button>
+            </td>
+          </tr>
         {/each}
       </tbody>
     </table>

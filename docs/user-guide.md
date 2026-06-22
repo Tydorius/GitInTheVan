@@ -25,7 +25,8 @@ GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:
 9. [Command Tags](#9-command-tags)
 10. [Content Packs](#10-content-packs)
 11. [Settings](#11-settings)
-12. [Users](#12-users)
+12. [Debug](#12-debug)
+13. [Users](#13-users)
 
 ---
 
@@ -168,6 +169,7 @@ The results show:
 - **JavaScript Code**: The cantrip code. Uses the JanitorAI `context` object API
 - **Execution Order**: Lower numbers run first (when multiple cantrips are active)
 - **Timeout**: Maximum execution time in milliseconds
+- **Budget Weight**: Proportional weight for context budget allocation (default 1.0). Higher weights receive a larger share of the injection budget.
 - **Active**: Whether the cantrip is enabled
 - **Public**: Whether other users can see and use this cantrip
 
@@ -293,6 +295,8 @@ Each rule contains:
 - **Resubmission Strategy**: How to handle violations:
   - **Add Instructions**: Appends a corrective system message to the request
   - **Rewrite**: Sends the bad response back with rewrite instructions
+- **Verification Endpoint Override**: Use a specific endpoint for this rule (leave as "Use global setting" for the default)
+- **Verification Model Override**: Use a specific model for this rule (leave blank for the global setting)
 
 Each rule card has an **ON/OFF toggle** to enable/disable without editing.
 
@@ -399,6 +403,26 @@ When summarization is enabled (see [Settings](#9-settings)), long conversations 
 - **Updated**: When the summary was last generated
 
 Click **View** to expand and read the full summary text. Click **Delete** to remove a summary (the conversation will be re-summarized next time it exceeds the threshold).
+
+### Memory Rules
+
+Memory Rules override summarization behavior for specific conversations. Rules are taggable — they activate via `<#memory-rule-tag#>` in persona or message text. A rule with no tag acts as the default fallback.
+
+Each rule can override:
+- **Summarization Enabled**: Turn summarization on or off for matching conversations
+- **Token Threshold**: Override the global threshold (0 = use global)
+- **Keep Recent**: Override the global keep-recent count (0 = use global)
+- **Custom Prompt**: Override the summarization prompt (empty = use global)
+
+Rules are evaluated in execution order. The first matching tagged rule wins. If no tagged rules match, the default (untagged) rule applies. If no rules exist, global settings are used.
+
+To create a memory rule:
+1. Click **+ Add Rule** in the Memory Rules section
+2. Enter a **Name** and optional **Tag**
+3. Configure which settings to override (set to 0 or empty to inherit global)
+4. Click **Create**
+
+Use **Edit** to modify a rule and the **ON/OFF** toggle to enable/disable without deleting.
 
 ---
 
@@ -587,6 +611,22 @@ Three methods are available:
 | **Dot Separation** | Inserts periods between characters in sensitive words. More aggressive than space separation. |
 | **Character Replacement** | Replaces Latin characters with visually similar Cyrillic homoglyphs. Most aggressive bypass. |
 
+### Context Budgeting
+
+![Context Budgeting Settings](media/gitv-budget-settings.png)
+*Screenshot: Context Budgeting settings card*
+
+Allocates a percentage of the model's context window for injected content (cantrips, lorebooks, memory). Cantrips can access their allocation via `context.budget` to dynamically scale their output.
+
+- **Injection Budget (%)**: Percentage of the context window reserved for injections (default 10). Set to 0 to disable budgeting entirely.
+- **Context Window Override**: Manually set the model's context window size in tokens. Set to 0 to auto-detect from the model name (e.g., GPT-4o = 128K, Claude 3.5 = 200K, Gemini 2 = 1M).
+
+When enabled, each active cantrip and lorebook receives a proportional share of the budget based on their **Budget Weight** field (found on each cantrip/lorebook edit form). Cantrips can read `context.budget.detail_level` to choose between full, summary, or bullet-point output.
+
+### Debug Mode
+
+- **Debug Mode**: When enabled, captures the last 20 pipeline exchanges with full visibility. Each capture includes original messages (before pipeline), modified messages (after pipeline processing), Driver response, budget data, and verification results. View captured exchanges on the dedicated Debug page.
+
 ### API Key
 
 Your `gitv_` API key is displayed with:
@@ -597,7 +637,36 @@ Use this key as the Bearer token when configuring JanitorAI or other clients.
 
 ---
 
-## 12. Users
+## 12. Debug
+
+The Debug page provides full pipeline visibility for troubleshooting. When Debug Mode is enabled in Settings, GitInTheVan captures the last 20 exchanges with every pipeline stage preserved.
+
+### Exchange List
+
+The left panel shows recent captured exchanges, newest first. Each entry shows:
+- **Model**: The model name used for the request
+- **Timestamp**: When the exchange was captured
+- **Stage count**: How many pipeline stages were recorded
+- **Verified badge**: Whether verification ran on this exchange
+
+### Pipeline View
+
+Select an exchange to see three views:
+
+- **Original**: The messages as received from the client, before any pipeline processing. Tags detected in the request are shown.
+- **Modified**: The messages as sent to the Driver, after lorebooks, cantrips, memory injection, budget calculation, and summarization. Budget allocation data is shown if budgeting is enabled.
+- **Response**: The Driver's response content and verification results (if verification ran). Shows approval status, retry count, and any violations detected.
+
+### Managing Captures
+
+- **Refresh**: Reload the exchange list
+- **Clear All**: Delete all captured exchanges
+
+Captures are automatically pruned to the most recent 20 per user.
+
+---
+
+## 13. Users
 
 ![Users Page](media/gitv-users.png)
 *Screenshot: Users page with management actions*

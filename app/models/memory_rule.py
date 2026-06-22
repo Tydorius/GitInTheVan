@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -13,8 +13,8 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 
-class Cantrip(Base):
-    __tablename__ = "cantrips"
+class MemoryRule(Base):
+    __tablename__ = "memory_rules"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(
@@ -22,19 +22,13 @@ class Cantrip(Base):
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    llm_instructions: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    code: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    hook_type: Mapped[str] = mapped_column(String(32), default="pre", nullable=False)
-    run_pre_driver: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    run_driver_callable: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    run_pre_navigator: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    run_post_navigator: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    is_public: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    summarization_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    token_threshold: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    keep_recent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
     tag: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     execution_order: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
-    timeout_ms: Mapped[int] = mapped_column(Integer, default=5000, nullable=False)
-    budget_weight: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
@@ -43,4 +37,4 @@ class Cantrip(Base):
         onupdate=lambda: datetime.now(UTC),
     )
 
-    user: Mapped[User] = relationship(back_populates="cantrips")
+    user: Mapped[User] = relationship()

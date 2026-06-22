@@ -35,6 +35,7 @@ class CantripCreate(BaseModel):
     execution_order: int = 10
     timeout_ms: int = 5000
     tag: str = ""
+    budget_weight: float = 1.0
 
 
 class CantripUpdate(BaseModel):
@@ -52,6 +53,7 @@ class CantripUpdate(BaseModel):
     execution_order: int | None = None
     timeout_ms: int | None = None
     tag: str | None = None
+    budget_weight: float | None = None
 
 
 class CantripResponse(BaseModel):
@@ -70,6 +72,7 @@ class CantripResponse(BaseModel):
     execution_order: int
     timeout_ms: int
     tag: str
+    budget_weight: float
 
 
 class CantripListItem(BaseModel):
@@ -88,6 +91,7 @@ class CantripListItem(BaseModel):
     execution_order: int
     timeout_ms: int
     tag: str
+    budget_weight: float
 
 
 class CantripListResponse(BaseModel):
@@ -138,6 +142,7 @@ def _cantrip_to_response(cantrip: Cantrip) -> CantripResponse:
         execution_order=cantrip.execution_order,
         timeout_ms=cantrip.timeout_ms,
         tag=cantrip.tag,
+        budget_weight=cantrip.budget_weight,
     )
 
 
@@ -158,6 +163,7 @@ def _cantrip_to_list_item(cantrip: Cantrip) -> CantripListItem:
         execution_order=cantrip.execution_order,
         timeout_ms=cantrip.timeout_ms,
         tag=cantrip.tag,
+        budget_weight=cantrip.budget_weight,
     )
 
 
@@ -265,6 +271,7 @@ async def create_cantrip(
         execution_order=req.execution_order,
         timeout_ms=req.timeout_ms,
         tag=req.tag,
+        budget_weight=req.budget_weight,
     )
     db.add(cantrip)
     await db.commit()

@@ -88,11 +88,26 @@
     }
   }
 
+  function scrollToTop() {
+    if (textarea) {
+      textarea.scrollTop = 0
+      syncScroll()
+    }
+  }
+
+  function scrollToBottom() {
+    if (textarea) {
+      textarea.scrollTop = textarea.scrollHeight
+      syncScroll()
+    }
+  }
+
   $: if (value !== undefined) updateHighlight()
   $: if (errorLine !== null) updateHighlight()
 </script>
 
-<div class="code-editor-container" style="min-height: {minHeightPx};">
+<div class="code-editor-wrapper" style="min-height: {minHeightPx};">
+  <div class="code-editor-container" style="min-height: {minHeightPx};">
   <div class="code-editor-gutter" aria-hidden="true">{@html lineNumbersHtml || '&nbsp;'}</div>
   <div class="code-editor-main">
     <pre class="code-editor-pre hljs" bind:this={preEl} aria-hidden="true">{@html highlighted || '&nbsp;'}</pre>
@@ -108,9 +123,20 @@
       placeholder={placeholder}
     ></textarea>
   </div>
+  </div>
+  <div class="code-editor-nav">
+    <button type="button" class="ce-nav-btn" onclick={scrollToTop} title="Jump to top">↑
+    </button>
+    <button type="button" class="ce-nav-btn" onclick={scrollToBottom} title="Jump to bottom">↓
+    </button>
+  </div>
 </div>
 
 <style>
+  .code-editor-wrapper {
+    position: relative;
+  }
+
   .code-editor-container {
     display: flex;
     border: 1px solid var(--border, #2e3344);
@@ -198,6 +224,38 @@
   :global(.hljs-number) { color: #d19a66; }
   :global(.hljs-comment) { color: #7f848e; font-style: italic; }
   :global(.hljs-function .hljs-title) { color: #61afef; }
+
+  .code-editor-nav {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    z-index: 10;
+  }
+
+  .ce-nav-btn {
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--border, #2e3344);
+    border-radius: 4px;
+    background: var(--surface, #1a1d27);
+    color: var(--text-dim, #8b90a5);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.7;
+    transition: opacity 0.15s;
+  }
+
+  .ce-nav-btn:hover {
+    opacity: 1;
+    background: var(--bg-elevated, #252836);
+  }
   :global(.hljs-title) { color: #61afef; }
   :global(.hljs-params) { color: var(--text, #e4e6ef); }
   :global(.hljs-built_in) { color: #e6c07b; }

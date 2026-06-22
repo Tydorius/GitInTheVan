@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import async_session
 from app.models.conversation_summary import ConversationSummary
 from app.models.endpoint import Endpoint
+from app.models.memory_rule import MemoryRule
 from app.models.user_settings import UserSettings
 
 logger = logging.getLogger(__name__)
@@ -267,8 +268,45 @@ def _compress_messages(
     return result
 
 
+async def resolve_memory_rule(
+    db: AsyncSession, user_id: str, tags: list | None
+) -> MemoryRule | None:
+    """Find the first matching memory rule for the given tags.
+
+    Rules are evaluated in execution_order. Tagged rules are checked first,
+    then untagged (default) rules. Returns None if no rules match.
+    """
+    result = await db.execute(
+        select(MemoryRule)
+        .where(MemoryRule.user_id == user_id, MemoryRule.is_active.is_(True))
+        .order_by(MemoryRule.execution_order, MemoryRule.created_at)
+    )
+    all_rules = list(result.scalars().all())
+
+    if not all_rules:
+        return None
+
+    from app.services.tagging import should_activate_resource
+
+    tagged_rule = None
+    default_rule = None
+
+    for rule in all_rules:
+        if rule.tag and tags:
+            if should_activate_resource(
+                rule.tag, "memory-rule", rule.is_active, False, rule.user_id, user_id, tags
+            ):
+                tagged_rule = rule
+                break
+        elif not rule.tag and not default_rule:
+            default_rule = rule
+
+    return tagged_rule or default_rule
+
+
 async def maybe_summarize(
-    body_json: dict[str, Any], user_id: str, internal_chat_id: str
+    body_json: dict[str, Any], user_id: str, internal_chat_id: str,
+    tags: list | None = None,
 ) -> dict[str, Any]:
     if not internal_chat_id:
         return body_json
@@ -280,12 +318,27 @@ async def maybe_summarize(
     try:
         async with async_session() as db:
             user_settings, endpoint = await load_summarization_config(db, user_id)
+            memory_rule = await resolve_memory_rule(db, user_id, tags)
 
         if not user_settings or not endpoint:
             return body_json
 
+        if memory_rule and not memory_rule.summarization_enabled:
+            logger.info("Memory rule '%s' disabled summarization for this request", memory_rule.name)
+            return body_json
+
         threshold = max(1, user_settings.summarization_token_threshold)
         keep_recent = max(0, user_settings.summarization_keep_recent)
+        prompt = user_settings.summarization_prompt or DEFAULT_PROMPT
+
+        if memory_rule:
+            if memory_rule.token_threshold > 0:
+                threshold = max(1, memory_rule.token_threshold)
+            if memory_rule.keep_recent > 0:
+                keep_recent = max(0, memory_rule.keep_recent)
+            if memory_rule.prompt:
+                prompt = memory_rule.prompt
+            logger.info("Memory rule '%s' applied to summarization", memory_rule.name)
 
         total_tokens = estimate_tokens(messages)
         if total_tokens < threshold:
@@ -313,7 +366,6 @@ async def maybe_summarize(
                 len(to_compress),
             )
         else:
-            prompt = user_settings.summarization_prompt or DEFAULT_PROMPT
             summary_text = await summarize_messages(
                 to_compress,
                 endpoint,

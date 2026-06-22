@@ -30,6 +30,10 @@ class VerificationRule(Base):
     resubmission_strategy: Mapped[str] = mapped_column(
         String(32), default="add_instructions", nullable=False
     )
+    verification_endpoint_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("endpoints.id", ondelete="SET NULL"), nullable=True
+    )
+    verification_model: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

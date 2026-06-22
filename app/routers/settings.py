@@ -25,6 +25,9 @@ class SettingsResponse(BaseModel):
     driver_callable_turns: int
     bypass_method: str
     prefill_enabled: bool
+    context_budget_percent: float
+    context_window_override: int
+    debug_mode: bool
 
 
 class SettingsUpdate(BaseModel):
@@ -36,6 +39,9 @@ class SettingsUpdate(BaseModel):
     driver_callable_turns: int | None = None
     bypass_method: str | None = None
     prefill_enabled: bool | None = None
+    context_budget_percent: float | None = None
+    context_window_override: int | None = None
+    debug_mode: bool | None = None
 
 
 @router.get("")
@@ -60,6 +66,9 @@ async def get_settings(
         driver_callable_turns=user_settings.driver_callable_turns,
         bypass_method=user_settings.bypass_method,
         prefill_enabled=user_settings.prefill_enabled,
+        context_budget_percent=user_settings.context_budget_percent,
+        context_window_override=user_settings.context_window_override,
+        debug_mode=user_settings.debug_mode,
     )
 
 
@@ -91,6 +100,12 @@ async def update_settings(
         user_settings.bypass_method = req.bypass_method
     if req.prefill_enabled is not None:
         user_settings.prefill_enabled = req.prefill_enabled
+    if req.context_budget_percent is not None:
+        user_settings.context_budget_percent = max(0.0, min(100.0, req.context_budget_percent))
+    if req.context_window_override is not None:
+        user_settings.context_window_override = max(0, req.context_window_override)
+    if req.debug_mode is not None:
+        user_settings.debug_mode = req.debug_mode
 
     await db.commit()
     await db.refresh(user_settings)
@@ -104,4 +119,7 @@ async def update_settings(
         driver_callable_turns=user_settings.driver_callable_turns,
         bypass_method=user_settings.bypass_method,
         prefill_enabled=user_settings.prefill_enabled,
+        context_budget_percent=user_settings.context_budget_percent,
+        context_window_override=user_settings.context_window_override,
+        debug_mode=user_settings.debug_mode,
     )

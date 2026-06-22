@@ -134,12 +134,21 @@ async def process_cantrips(
             memory_map = await load_memories_for_chat(internal_chat_id, user_id)
             context["__memories"] = memory_map
 
+        from app.services.budget import build_cantrip_budget_context
+
+        budget_allocations = body_json.get("_gitv_budget_allocations")
+
         accumulated_memories: dict[str, str] = {}
         accumulated_personality = ""
         accumulated_scenario = ""
         accumulated_example_dialogs = ""
 
         for cantrip in cantrips:
+            if budget_allocations:
+                context["budget"] = build_cantrip_budget_context(
+                    budget_allocations, cantrip.id, cantrip.budget_weight
+                )
+
             try:
                 if internal_chat_id and accumulated_memories:
                     context["__memories"] = {**context.get("__memories", {}), **accumulated_memories}

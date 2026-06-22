@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -31,6 +31,7 @@ class Lorebook(Base):
     run_driver_callable: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     run_pre_navigator: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     run_post_navigator: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    budget_weight: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

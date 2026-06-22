@@ -29,6 +29,8 @@ class RuleCreate(BaseModel):
     execution_order: int = 10
     resubmission_strategy: str = "add_instructions"
     tag: str = ""
+    verification_endpoint_id: str | None = None
+    verification_model: str = ""
 
 
 class RuleUpdate(BaseModel):
@@ -40,6 +42,8 @@ class RuleUpdate(BaseModel):
     execution_order: int | None = None
     resubmission_strategy: str | None = None
     tag: str | None = None
+    verification_endpoint_id: str | None = None
+    verification_model: str | None = None
 
 
 class RuleResponse(BaseModel):
@@ -52,6 +56,8 @@ class RuleResponse(BaseModel):
     execution_order: int
     resubmission_strategy: str
     tag: str
+    verification_endpoint_id: str | None
+    verification_model: str
 
 
 class RuleListItem(BaseModel):
@@ -64,6 +70,8 @@ class RuleListItem(BaseModel):
     execution_order: int
     resubmission_strategy: str
     tag: str
+    verification_endpoint_id: str | None
+    verification_model: str
 
 
 async def _check_tag_unique(
@@ -145,6 +153,8 @@ def _rule_to_response(rule: VerificationRule) -> RuleResponse:
         execution_order=rule.execution_order,
         resubmission_strategy=rule.resubmission_strategy,
         tag=rule.tag,
+        verification_endpoint_id=rule.verification_endpoint_id,
+        verification_model=rule.verification_model,
     )
 
 
@@ -159,6 +169,8 @@ def _rule_to_list_item(rule: VerificationRule) -> RuleListItem:
         execution_order=rule.execution_order,
         resubmission_strategy=rule.resubmission_strategy,
         tag=rule.tag,
+        verification_endpoint_id=rule.verification_endpoint_id,
+        verification_model=rule.verification_model,
     )
 
 
@@ -209,6 +221,8 @@ async def create_rule(
         execution_order=req.execution_order,
         resubmission_strategy=req.resubmission_strategy,
         tag=req.tag,
+        verification_endpoint_id=req.verification_endpoint_id,
+        verification_model=req.verification_model,
     )
     db.add(rule)
     await db.commit()

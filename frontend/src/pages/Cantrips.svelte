@@ -18,7 +18,7 @@
     hook_type: 'pre', is_active: true, is_public: false,
     run_pre_driver: true, run_driver_callable: false,
     run_pre_navigator: false, run_post_navigator: false,
-    execution_order: 10, timeout_ms: 5000,
+    execution_order: 10, timeout_ms: 5000, budget_weight: 1.0,
   }
 
   let tagModal = { show: false, id: '', name: '', tag: '' }
@@ -40,7 +40,7 @@
   }
 
   function resetForm() {
-    form = { name: '', description: '', llm_instructions: '', code: '', hook_type: 'pre', is_active: true, is_public: false, run_pre_driver: true, run_driver_callable: false, run_pre_navigator: false, run_post_navigator: false, execution_order: 10, timeout_ms: 5000 }
+    form = { name: '', description: '', llm_instructions: '', code: '', hook_type: 'pre', is_active: true, is_public: false, run_pre_driver: true, run_driver_callable: false, run_pre_navigator: false, run_post_navigator: false, execution_order: 10, timeout_ms: 5000, budget_weight: 1.0 }
     editingId = null
   }
 
@@ -52,6 +52,7 @@
       run_pre_driver: s.run_pre_driver ?? true, run_driver_callable: s.run_driver_callable ?? false,
       run_pre_navigator: s.run_pre_navigator ?? false, run_post_navigator: s.run_post_navigator ?? false,
       execution_order: s.execution_order, timeout_ms: s.timeout_ms,
+      budget_weight: s.budget_weight ?? 1.0,
     }
     showForm = true
   }
@@ -367,6 +368,10 @@
           <div class="form-group">
             <label for="cantrip-timeout">Timeout (ms)</label>
             <input id="cantrip-timeout" type="number" bind:value={form.timeout_ms} />
+          </div>
+          <div class="form-group">
+            <label for="cantrip-budget">Budget Weight</label>
+            <input id="cantrip-budget" type="number" step="0.1" min="0" bind:value={form.budget_weight} />
           </div>
         </div>
         <div class="form-row">

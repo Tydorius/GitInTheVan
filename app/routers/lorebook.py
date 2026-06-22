@@ -61,6 +61,7 @@ class LorebookCreate(BaseModel):
     run_driver_callable: bool = False
     run_pre_navigator: bool = False
     run_post_navigator: bool = False
+    budget_weight: float = 1.0
 
 
 class LorebookUpdate(BaseModel):
@@ -74,6 +75,7 @@ class LorebookUpdate(BaseModel):
     run_driver_callable: bool | None = None
     run_pre_navigator: bool | None = None
     run_post_navigator: bool | None = None
+    budget_weight: float | None = None
 
 
 class LorebookResponse(BaseModel):
@@ -88,6 +90,7 @@ class LorebookResponse(BaseModel):
     run_driver_callable: bool
     run_pre_navigator: bool
     run_post_navigator: bool
+    budget_weight: float
     entries: list[EntryResponse]
 
 
@@ -103,6 +106,7 @@ class LorebookListItem(BaseModel):
     run_driver_callable: bool
     run_pre_navigator: bool
     run_post_navigator: bool
+    budget_weight: float
     entry_count: int
 
 
@@ -183,6 +187,7 @@ async def list_lorebooks(
                 run_driver_callable=lb.run_driver_callable,
                 run_pre_navigator=lb.run_pre_navigator,
                 run_post_navigator=lb.run_post_navigator,
+                budget_weight=lb.budget_weight,
                 entry_count=len(lb.entries),
             )
             for lb in lorebooks
@@ -215,6 +220,7 @@ async def list_public_lorebooks(
                 run_driver_callable=lb.run_driver_callable,
                 run_pre_navigator=lb.run_pre_navigator,
                 run_post_navigator=lb.run_post_navigator,
+                budget_weight=lb.budget_weight,
                 entry_count=len(lb.entries),
             )
             for lb in lorebooks
@@ -251,6 +257,7 @@ async def get_lorebook(
         run_driver_callable=lorebook.run_driver_callable,
         run_pre_navigator=lorebook.run_pre_navigator,
         run_post_navigator=lorebook.run_post_navigator,
+        budget_weight=lorebook.budget_weight,
         entries=[_entry_to_response(e) for e in lorebook.entries],
     )
 
@@ -273,6 +280,7 @@ async def create_lorebook(
         run_driver_callable=req.run_driver_callable,
         run_pre_navigator=req.run_pre_navigator,
         run_post_navigator=req.run_post_navigator,
+        budget_weight=req.budget_weight,
     )
     db.add(lorebook)
     await db.commit()
@@ -289,6 +297,7 @@ async def create_lorebook(
         run_driver_callable=lorebook.run_driver_callable,
         run_pre_navigator=lorebook.run_pre_navigator,
         run_post_navigator=lorebook.run_post_navigator,
+        budget_weight=lorebook.budget_weight,
         entries=[],
     )
 
@@ -334,6 +343,8 @@ async def update_lorebook(
         lorebook.run_post_navigator = req.run_post_navigator
     if req.llm_instructions is not None:
         lorebook.llm_instructions = req.llm_instructions
+    if req.budget_weight is not None:
+        lorebook.budget_weight = req.budget_weight
 
     await db.commit()
     await db.refresh(lorebook)
@@ -349,6 +360,7 @@ async def update_lorebook(
         run_driver_callable=lorebook.run_driver_callable,
         run_pre_navigator=lorebook.run_pre_navigator,
         run_post_navigator=lorebook.run_post_navigator,
+        budget_weight=lorebook.budget_weight,
         entries=[],
     )
 
@@ -569,6 +581,7 @@ async def import_lorebook(
         run_driver_callable=lorebook.run_driver_callable,
         run_pre_navigator=lorebook.run_pre_navigator,
         run_post_navigator=lorebook.run_post_navigator,
+        budget_weight=lorebook.budget_weight,
         entries=[_entry_to_response(e) for e in lorebook.entries],
     )
 

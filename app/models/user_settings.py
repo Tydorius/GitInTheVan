@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -52,6 +52,9 @@ class UserSettings(Base):
     driver_callable_turns: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     bypass_method: Mapped[str] = mapped_column(String(32), default="none", nullable=False)
     prefill_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    context_budget_percent: Mapped[float] = mapped_column(Float, default=10.0, nullable=False)
+    context_window_override: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    debug_mode: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

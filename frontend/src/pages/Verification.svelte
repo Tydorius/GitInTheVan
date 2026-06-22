@@ -17,6 +17,8 @@
     name: '', description: '', prompt: '',
     is_active: true, max_retries: 2, execution_order: 10,
     resubmission_strategy: 'add_instructions',
+    verification_endpoint_id: null as string | null,
+    verification_model: '',
   }
 
   let tagModal = { show: false, id: '', name: '', tag: '' }
@@ -54,13 +56,13 @@
   }
 
   function resetForm() {
-    form = { name: '', description: '', prompt: '', is_active: true, max_retries: 2, execution_order: 10, resubmission_strategy: 'add_instructions' }
+    form = { name: '', description: '', prompt: '', is_active: true, max_retries: 2, execution_order: 10, resubmission_strategy: 'add_instructions', verification_endpoint_id: null, verification_model: '' }
     editingId = null
   }
 
   function startEdit(r: any) {
     editingId = r.id
-    form = { name: r.name, description: r.description, prompt: r.prompt, is_active: r.is_active, max_retries: r.max_retries, execution_order: r.execution_order, resubmission_strategy: r.resubmission_strategy }
+    form = { name: r.name, description: r.description, prompt: r.prompt, is_active: r.is_active, max_retries: r.max_retries, execution_order: r.execution_order, resubmission_strategy: r.resubmission_strategy, verification_endpoint_id: r.verification_endpoint_id || null, verification_model: r.verification_model || '' }
     showForm = true
   }
 
@@ -401,6 +403,19 @@
           </select>
         </div>
         <div class="form-group"><label><input type="checkbox" bind:checked={form.is_active} style="width: auto;"> Active</label></div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Verification Endpoint Override</label>
+            <select bind:value={form.verification_endpoint_id}>
+              <option value={null}>Use global setting</option>
+              {#each endpoints as ep}<option value={ep.id}>{ep.name} ({ep.base_url})</option>{/each}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Verification Model Override</label>
+            <input bind:value={form.verification_model} placeholder="Leave blank for global" />
+          </div>
+        </div>
         <div class="modal-actions">
           <button onclick={() => { showForm = false; resetForm(); }}>Cancel</button>
           <button type="submit" class="primary">{editingId ? 'Update' : 'Create'}</button>

@@ -137,6 +137,60 @@ MIGRATIONS: list[tuple[str, str]] = [
         ALTER TABLE user_settings ADD COLUMN prefill_enabled BOOLEAN DEFAULT 0 NOT NULL;
         """,
     ),
+    (
+        "017_add_context_budget_fields",
+        """
+        ALTER TABLE cantrips ADD COLUMN budget_weight REAL DEFAULT 1.0 NOT NULL;
+        ALTER TABLE lorebooks ADD COLUMN budget_weight REAL DEFAULT 1.0 NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN context_budget_percent REAL DEFAULT 10.0 NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN context_window_override INTEGER DEFAULT 0 NOT NULL;
+        """,
+    ),
+    (
+        "018_create_memory_rules_table",
+        """
+        CREATE TABLE IF NOT EXISTS memory_rules (
+            id VARCHAR(36) PRIMARY KEY,
+            user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            name VARCHAR(128) NOT NULL,
+            description TEXT DEFAULT '' NOT NULL,
+            summarization_enabled BOOLEAN DEFAULT 1 NOT NULL,
+            token_threshold INTEGER DEFAULT 0 NOT NULL,
+            keep_recent INTEGER DEFAULT 0 NOT NULL,
+            prompt TEXT DEFAULT '' NOT NULL,
+            tag VARCHAR(128) DEFAULT '' NOT NULL,
+            execution_order INTEGER DEFAULT 10 NOT NULL,
+            is_active BOOLEAN DEFAULT 1 NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS ix_memory_rules_user_id ON memory_rules (user_id);
+        """,
+    ),
+    (
+        "019_add_debug_mode_fields",
+        """
+        ALTER TABLE user_settings ADD COLUMN debug_mode BOOLEAN DEFAULT 0 NOT NULL;
+        CREATE TABLE IF NOT EXISTS debug_exchanges (
+            id VARCHAR(36) PRIMARY KEY,
+            user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            chat_id VARCHAR(256) DEFAULT '' NOT NULL,
+            model VARCHAR(128) DEFAULT '' NOT NULL,
+            pipeline_data TEXT DEFAULT '{}' NOT NULL,
+            response_content TEXT DEFAULT '' NOT NULL,
+            verification_data TEXT DEFAULT '' NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS ix_debug_exchanges_user_id ON debug_exchanges (user_id);
+        """,
+    ),
+    (
+        "020_add_per_rule_verification_endpoints",
+        """
+        ALTER TABLE verification_rules ADD COLUMN verification_endpoint_id VARCHAR(36);
+        ALTER TABLE verification_rules ADD COLUMN verification_model VARCHAR(128) DEFAULT '' NOT NULL;
+        """,
+    ),
 ]
 
 

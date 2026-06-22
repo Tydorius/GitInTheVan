@@ -120,21 +120,10 @@ async def check_response(
     model: str,
     timeout: int = 120,
     forbidden_context: str = "",
+    rule_endpoints: dict[str, tuple[Endpoint, str]] | None = None,
 ) -> VerificationCheckResult:
     judgments: list[VerificationJudgment] = []
     violations: list[VerificationJudgment] = []
-
-    headers = {
-        "Authorization": f"Bearer {endpoint.api_key}",
-        "Content-Type": "application/json",
-    }
-
-    api_base_path = endpoint.api_base_path or ""
-    if api_base_path.endswith("/chat/completions"):
-        url = f"{endpoint.base_url}{api_base_path}"
-    else:
-        path_prefix = api_base_path or "/v1"
-        url = f"{endpoint.base_url}{path_prefix}/chat/completions"
 
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(timeout, connect=15.0)
@@ -150,14 +139,30 @@ async def check_response(
             violations.append(judgment)
         else:
             for rule in rules:
+                rule_ep = endpoint
+                rule_model = model
+                if rule_endpoints and rule.id in rule_endpoints:
+                    rule_ep, rule_model = rule_endpoints[rule.id]
+
                 messages = _build_verification_messages(content, rule.prompt, forbidden_context)
                 body: dict[str, Any] = {
-                    "model": model or "gpt-4",
+                    "model": rule_model or "gpt-4",
                     "messages": messages,
                     "max_tokens": 200,
                     "temperature": 0.1,
                     "stream": False,
                 }
+
+                headers = {
+                    "Authorization": f"Bearer {rule_ep.api_key}",
+                    "Content-Type": "application/json",
+                }
+                api_base_path = rule_ep.api_base_path or ""
+                if api_base_path.endswith("/chat/completions"):
+                    url = f"{rule_ep.base_url}{api_base_path}"
+                else:
+                    path_prefix = api_base_path or "/v1"
+                    url = f"{rule_ep.base_url}{path_prefix}/chat/completions"
 
                 try:
                     resp = await client.post(url, json=body, headers=headers)
@@ -341,6 +346,21 @@ async def run_verification_loop(
             db, user_id
         )
 
+        rule_endpoints: dict[str, tuple[Endpoint, str]] = {}
+        for rule in rules:
+            if rule.verification_endpoint_id:
+                ep_result = await db.execute(
+                    select(Endpoint).where(
+                        Endpoint.id == rule.verification_endpoint_id,
+                        Endpoint.enabled.is_(True),
+                    )
+                )
+                rule_ep = ep_result.scalar_one_or_none()
+                if rule_ep:
+                    rule_endpoints[rule.id] = (rule_ep, rule.verification_model or v_model)
+            elif rule.verification_model and rule.verification_model != v_model:
+                rule_endpoints[rule.id] = (v_endpoint, rule.verification_model)
+
     forbidden_summary = response_data.pop("_gitv_forbidden_summary", "")
 
     if not rules and not forbidden_summary:
@@ -365,6 +385,7 @@ async def run_verification_loop(
         check_result = await check_response(
             current_content, rules, v_endpoint, v_model,
             forbidden_context=forbidden_summary,
+            rule_endpoints=rule_endpoints if rule_endpoints else None,
         )
         check_history.append(check_result)
 

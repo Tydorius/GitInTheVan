@@ -151,6 +151,15 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
 
         body_json["_gitv_tags"] = tags
 
+        from app.services.debug import is_debug_mode
+        debug_on = await is_debug_mode(user_id)
+        if debug_on:
+            import json as _json
+            body_json["_gitv_debug"] = {
+                "original_messages": _json.dumps(body_json.get("messages", []), default=str),
+                "tags": [t.get("raw", "") for t in tags],
+            }
+
         from app.services.conversation import (
             load_memories_for_chat,
             resolve_conversation,
@@ -189,6 +198,10 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
                 logger.info("Memory injection: %d keys for chat %s", len(memories), internal_chat_id[:12])
 
         body_json = await _apply_lorebook_injection(body_json, user_id, tags)
+
+        from app.services.budget import prepare_budget
+        await prepare_budget(body_json, user_id, tags)
+
         body_json = await process_cantrips(body_json, user_id, request_headers, tags, internal_chat_id=internal_chat_id)
 
         body_json["_gitv_chat_id"] = internal_chat_id
@@ -196,7 +209,7 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
 
         from app.services.summarization import maybe_summarize
         if body_json.get("_gitv_command_overrides", {}).get("summary") is not False:
-            body_json = await maybe_summarize(body_json, user_id, internal_chat_id)
+            body_json = await maybe_summarize(body_json, user_id, internal_chat_id, tags)
 
         from app.services.driver_callable import (
             build_tool_notification,
@@ -239,6 +252,14 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
         if bypass_method != "none":
             body_json = apply_bypass_encode(body_json, bypass_method)
             body_json["_gitv_bypass_method"] = bypass_method
+
+        if debug_on:
+            import json as _json
+            debug_data = body_json.get("_gitv_debug", {})
+            debug_data["modified_messages"] = _json.dumps(body_json.get("messages", []), default=str)
+            if body_json.get("_gitv_budget"):
+                debug_data["budget"] = body_json["_gitv_budget"]
+            body_json["_gitv_debug"] = debug_data
 
         body = json.dumps(body_json).encode()
 
@@ -639,6 +660,9 @@ async def _forward_non_streaming_verified(
                     from app.services.bypass import apply_bypass_decode
                     response_data = apply_bypass_decode(response_data, body_json["_gitv_bypass_method"])
 
+                if body_json.get("_gitv_debug") and user_id:
+                    await _save_debug_exchange(response_data, body_json, user_id, locals().get("vresult"))
+
                 return JSONResponse(status_code=status_code, content=response_data)
         except Exception:
             logger.exception("Driver-callable loop failed, falling through to normal forward")
@@ -683,7 +707,54 @@ async def _forward_non_streaming_verified(
         from app.services.bypass import apply_bypass_decode
         response_data = apply_bypass_decode(response_data, body_json["_gitv_bypass_method"])
 
+    if body_json.get("_gitv_debug") and user_id:
+        await _save_debug_exchange(response_data, body_json, user_id, locals().get("vresult"))
+
     return JSONResponse(status_code=status_code, content=response_data)
+
+
+async def _save_debug_exchange(
+    response_data: dict[str, Any],
+    body_json: dict[str, Any],
+    user_id: str,
+    vresult: Any = None,
+) -> None:
+    """Capture pipeline data and response for debug mode."""
+    from app.services.debug import capture_exchange
+
+    debug_data = body_json.get("_gitv_debug", {})
+
+    response_content = ""
+    choices = response_data.get("choices", [])
+    if choices:
+        response_content = choices[0].get("message", {}).get("content", "")
+
+    verification_data: dict[str, Any] = {}
+    if vresult:
+        verification_data = {
+            "approved": vresult.approved,
+            "retries_used": vresult.retries_used,
+            "check_history": [
+                {
+                    "approved": c.approved,
+                    "violations": c.violations,
+                }
+                for c in vresult.check_history
+            ],
+        }
+
+    pipeline_data = {
+        k: v for k, v in debug_data.items()
+    }
+
+    await capture_exchange(
+        user_id=user_id,
+        chat_id=body_json.get("_gitv_chat_id", ""),
+        model=body_json.get("model", ""),
+        pipeline_data=pipeline_data,
+        response_content=response_content,
+        verification_data=verification_data,
+    )
 
 
 async def _apply_post_driver_processing(

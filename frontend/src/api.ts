@@ -192,6 +192,26 @@ export const api = {
   deleteMemory: (id: string) =>
     request<void>(`/api/memories/${id}`, { method: 'DELETE' }),
 
+  // Memory Rules
+  listMemoryRules: () =>
+    request<{ rules: any[] }>('/api/memory-rules'),
+  getMemoryRule: (id: string) =>
+    request<any>(`/api/memory-rules/${id}`),
+  createMemoryRule: (data: any) =>
+    request<any>('/api/memory-rules', { method: 'POST', body: JSON.stringify(data) }),
+  updateMemoryRule: (id: string, data: any) =>
+    request<any>(`/api/memory-rules/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteMemoryRule: (id: string) =>
+    request<void>(`/api/memory-rules/${id}`, { method: 'DELETE' }),
+
+  // Debug
+  listDebugExchanges: () =>
+    request<{ exchanges: any[] }>('/api/debug'),
+  getDebugExchange: (id: string) =>
+    request<any>(`/api/debug/${id}`),
+  clearDebugExchanges: () =>
+    request<void>(`/api/debug`, { method: 'DELETE' }),
+
   // Summarization
   getSummarizationSettings: () =>
     request<{
