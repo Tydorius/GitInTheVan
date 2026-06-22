@@ -2,6 +2,20 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.11.1] - 2026-06-22
+
+### Security
+
+- **Frontend toolchain upgraded**: Vite 5.4.21 → 7.3.5 (resolves CVE-2026-39365 path traversal, CVE-2025-32395 request bypass, CVE-2025-58751 symlink bypass). @sveltejs/vite-plugin-svelte 3.1.2 → 6.2.4 (resolves Svelte 5 compilation peer dependency conflicts, eliminates --force/--legacy-peer-deps bypasses)
+- **Vite dev server hardened**: Server explicitly bound to `127.0.0.1` (prevents lateral network access). Filesystem strict mode enabled with deny list for `.env`, `package.json`, `package-lock.json`
+- **Python dependencies pinned**: All dependencies changed from `>=` floor to exact `==` pins to prevent supply chain attacks via transitive dependency updates. Pinned: fastapi 0.136.3, uvicorn 0.49.0, httpx 0.28.1, sqlalchemy 2.0.50, aiosqlite 0.22.1, pydantic 2.13.4, pydantic-settings 2.14.1, python-jose 3.5.0, bcrypt 5.0.0, dulwich 1.2.6
+- **API key regeneration**: New `POST /api/auth/regenerate-key` endpoint for self-service key rotation. Settings page shows "not available" message with regenerate button when key isn't in localStorage (after login, which only stores JWT)
+- Fixed TypeScript optional parameter syntax incompatible with new Svelte 5 compiler
+
+### Note
+
+Vite 8 (latest) requires Node.js 20.19+. Currently on Vite 7 (Node 20.17 compatible). Upgrade to Vite 8 when Node.js is updated.
+
 ## [0.11.0] - 2026-06-22
 
 ### Added

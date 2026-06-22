@@ -126,7 +126,7 @@
     } catch (e: any) { error = e.message }
   }
 
-  function openTest(cantripId?: string) {
+  function openTest(cantripId: string | undefined = undefined) {
     testConfig.selectedCantripId = cantripId || ''
     showTest = true
     testResults = null
