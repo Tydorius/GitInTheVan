@@ -20,6 +20,16 @@ context.chat_data = {
     delete: (key) => { delete __chatData[key]; }
 };
 
+const __memories = context.__memories || {};
+delete context.__memories;
+context.memory = {
+    get: (key) => key in __memories ? __memories[key] : null,
+    set: (key, value) => { __memories[key] = String(value); },
+    keys: () => Object.keys(__memories),
+    delete: (key) => { delete __memories[key]; },
+    all: () => Object.assign({}, __memories)
+};
+
 if (!context.character) context.character = {};
 if (!context.character.personality) context.character.personality = "";
 if (!context.character.scenario) context.character.scenario = "";
@@ -61,6 +71,7 @@ const __result = {
     response_content: __hasResponse ? (context.response.content || null) : null,
     tool_result: context.tool_result || "",
     chat_data: Object.assign({}, __chatData),
+    memories: Object.assign({}, __memories),
     debug_logs: __debugLogs,
     error: __error
 };

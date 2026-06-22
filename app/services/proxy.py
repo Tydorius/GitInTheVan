@@ -121,7 +121,12 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
     if user_id and "messages" in body_json:
         request_headers = {k.lower(): v for k, v in request.headers.items()}
 
+        from app.services.command_tags import (
+            extract_command_tags_from_messages,
+            strip_command_tags_from_messages,
+        )
         from app.services.tagging import extract_all_tags_from_messages, strip_tags
+
         tags = extract_all_tags_from_messages(body_json.get("messages", []))
         if tags:
             logger.info("Tags detected: %s", [t["raw"] for t in tags])
@@ -129,6 +134,13 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
                 content = msg.get("content", "")
                 if isinstance(content, str):
                     msg["content"] = strip_tags(content)
+
+        message_commands = extract_command_tags_from_messages(body_json.get("messages", []))
+        if message_commands:
+            logger.info("Command tags detected: %s", [
+                f"{c.command}:{c.setting}" + (":persist" if c.persist else "") for c in message_commands
+            ])
+            body_json["messages"] = strip_command_tags_from_messages(body_json["messages"])
 
         body_json["_gitv_tags"] = tags
 
@@ -141,7 +153,16 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
         messages_for_conv = body_json.get("messages", [])
         internal_chat_id, is_new_conv = await resolve_conversation(messages_for_conv, user_id)
 
-        memories = await load_memories_for_chat(internal_chat_id, user_id)
+        from app.services.command_tags import resolve_command_overrides
+        command_overrides = await resolve_command_overrides(
+            user_id, internal_chat_id, message_commands
+        )
+        body_json["_gitv_command_overrides"] = command_overrides.to_dict()
+
+        cmd_overrides_mem = body_json.get("_gitv_command_overrides", {})
+        memory_disabled = cmd_overrides_mem.get("memory") is False
+
+        memories = {} if memory_disabled else await load_memories_for_chat(internal_chat_id, user_id)
         if memories:
             memory_block = _build_mem_block(memories)
             if memory_block:
@@ -161,13 +182,14 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
                 logger.info("Memory injection: %d keys for chat %s", len(memories), internal_chat_id[:12])
 
         body_json = await _apply_lorebook_injection(body_json, user_id, tags)
-        body_json = await process_cantrips(body_json, user_id, request_headers, tags)
+        body_json = await process_cantrips(body_json, user_id, request_headers, tags, internal_chat_id=internal_chat_id)
 
         body_json["_gitv_chat_id"] = internal_chat_id
         body_json["_gitv_messages_for_hash"] = body_json.get("messages", [])
 
         from app.services.summarization import maybe_summarize
-        body_json = await maybe_summarize(body_json, user_id, internal_chat_id)
+        if body_json.get("_gitv_command_overrides", {}).get("summary") is not False:
+            body_json = await maybe_summarize(body_json, user_id, internal_chat_id)
 
         from app.services.driver_callable import (
             build_tool_notification,
@@ -175,6 +197,12 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
         )
         async with async_session() as db:
             dc_config = await load_driver_callable_config(db, user_id, tags)
+
+        cmd_overrides_dc = body_json.get("_gitv_command_overrides", {})
+        if cmd_overrides_dc.get("driver_callable") is False:
+            dc_config.enabled = False
+        elif cmd_overrides_dc.get("driver_callable") is True and dc_config.tools:
+            dc_config.enabled = True
 
         if dc_config.enabled:
             notification = build_tool_notification(dc_config.tools, dc_config.turns)
@@ -198,6 +226,12 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
             verification_on = await is_verification_enabled(user_id)
         except Exception:
             verification_on = False
+
+        cmd_overrides = body_json.get("_gitv_command_overrides", {})
+        if cmd_overrides.get("verify") is False:
+            verification_on = False
+        elif cmd_overrides.get("verify") is True:
+            verification_on = True
 
         dc_active = body_json.get("_gitv_driver_callable", False)
 
@@ -223,7 +257,9 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
             return response
 
     if stream:
-        return await _forward_streaming(request.method, upstream_url, headers, body, timeout)
+        return await _forward_streaming(
+            request.method, upstream_url, headers, body, timeout, user_id, body_json
+        )
 
     return await _forward_non_streaming_verified(
         request.method, upstream_url, headers, body, body_json, timeout, user_id, request_headers
@@ -369,7 +405,8 @@ async def _forward_non_streaming(
     response_data, status_code = await _do_forward(method, url, headers, body, timeout)
 
     if status_code == 200 and user_id and body_json and body_json.get("_gitv_chat_id"):
-        response_data = await _extract_response_memories(response_data, user_id, body_json)
+        if body_json.get("_gitv_command_overrides", {}).get("memory") is not False:
+            response_data = await _extract_response_memories(response_data, user_id, body_json)
 
     return JSONResponse(status_code=status_code, content=response_data)
 
@@ -649,13 +686,15 @@ async def _apply_post_driver_processing(
 
     try:
         from app.services.forbidden_words import scan_response
-        scan_result = await scan_response(content, user_id)
-        if scan_result.has_matches:
-            response_data["_gitv_forbidden_summary"] = scan_result.summary
-            logger.info(
-                "Forbidden words: %d phrase(s) matched",
-                len(scan_result.matches),
-            )
+        cmd_overrides = body_json.get("_gitv_command_overrides", {})
+        if cmd_overrides.get("forbidden") is not False:
+            scan_result = await scan_response(content, user_id)
+            if scan_result.has_matches:
+                response_data["_gitv_forbidden_summary"] = scan_result.summary
+                logger.info(
+                    "Forbidden words: %d phrase(s) matched",
+                    len(scan_result.matches),
+                )
     except Exception:
         logger.exception("Forbidden word scan failed")
 
@@ -727,6 +766,29 @@ async def _do_forward(
 
 
 async def _forward_streaming(
+    method: str,
+    url: str,
+    headers: dict[str, str],
+    body: bytes,
+    timeout: httpx.Timeout,
+    user_id: str | None = None,
+    body_json: dict[str, Any] | None = None,
+) -> StreamingResponse:
+    has_memory_processing = (
+        user_id is not None
+        and body_json is not None
+        and body_json.get("_gitv_chat_id")
+    )
+
+    if not has_memory_processing:
+        return await _forward_streaming_raw(method, url, headers, body, timeout)
+
+    return await _forward_streaming_with_memory(
+        method, url, headers, body, timeout, user_id, body_json
+    )
+
+
+async def _forward_streaming_raw(
     method: str, url: str, headers: dict[str, str], body: bytes, timeout: httpx.Timeout
 ) -> StreamingResponse:
     client = httpx.AsyncClient(timeout=timeout)
@@ -761,3 +823,28 @@ async def _forward_streaming(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+async def _forward_streaming_with_memory(
+    method: str,
+    url: str,
+    headers: dict[str, str],
+    body: bytes,
+    timeout: httpx.Timeout,
+    user_id: str,
+    body_json: dict[str, Any],
+) -> StreamingResponse:
+    """Buffer a streaming response, extract and strip <memstore> tags,
+    record the post-hash, then re-emit as SSE. Memory tags span content
+    chunks so they can't be reliably extracted from individual chunks."""
+    response_data, status_code = await _do_forward(method, url, headers, body, timeout)
+
+    if status_code == 200:
+        response_data = await _extract_response_memories(response_data, user_id, body_json)
+        model = body_json.get("model", "")
+        return _convert_to_sse(
+            JSONResponse(status_code=200, content=response_data),
+            model,
+        )
+
+    return JSONResponse(status_code=status_code, content=response_data)

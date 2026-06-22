@@ -2,6 +2,43 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.9.0] - 2026-06-21
+
+### Added
+
+- **Command Tags**: Inline tags for per-request pipeline overrides, parsed from user messages and stripped before forwarding to the LLM
+- **Five controllable commands**: `<VERIFY:on|off>`, `<SUMMARY:on|off>`, `<FORBIDDEN:on|off>`, `<MEMORY:on|off>`, `<DRIVER:on|off>`
+- **Persist flag**: Optional third parameter (`<VERIFY:off:persist>`) saves the override to the conversation's persistent memory. Applies to all subsequent messages in that chat until reset
+- **Reset command**: `<VERIFY:reset>` clears any persistent override for that command in the current chat
+- **Three-tier precedence**: One-off commands (no persist) supersede persistent commands, which supersede GUI settings. One-off applies to current request only; persistent applies until reset
+- **Per-conversation isolation**: Persistent overrides are scoped to each conversation (tracked via rolling hash). Different chats have independent override state
+- Command tags stored in `memories` table as `memory_type="command_override"` with prefixed keys (`__cmd_persist_*`)
+- 25 new tests covering parsing (on/off/reset/persist, case-insensitive, duplicates), stripping (text and messages), extraction from user/assistant messages, and full resolve precedence (one-off > persistent > GUI, persistence across requests, reset, isolation between chats)
+- Flow test: command tag test group verifying one-off override, tag stripping, persist, and reset
+
+### Changed
+
+- Proxy pipeline stage 1 now parses both `<#tag#>` activation tags and `<CMD:setting>` command tags
+- Summarization, verification, forbidden words, memory injection/extraction, and driver-callable all check command overrides before running
+- `None` (no override) means use the GUI setting; `True`/`False` means force on/off for this request
+- Bumped version to 0.9.0
+
+## [0.8.2] - 2026-06-21
+
+### Fixed
+
+- **Streaming memory extraction**: Pure streaming passthrough now buffers the response to extract `<memstore>` tags, strip them, and record the post-hash before re-emitting as SSE. Previously only non-streaming and verification-converted paths extracted memories.
+- **Cantrip memory access**: Cantrips can now read and write persistent memory via `context.memory.get(key)`, `context.memory.set(key, value)`, `context.memory.keys()`, `context.memory.delete(key)`, `context.memory.all()`. Memory changes are saved to the database after cantrip execution.
+
+### Changed
+
+- Deno template extended with `context.memory` object (rebuilt in-template from `__memories` dict, same pattern as `context.chat_data`)
+- `CantripResult` dataclass extended with `memories` field
+- `process_cantrips` accepts optional `internal_chat_id` parameter for loading/saving memories
+- Proxy passes `internal_chat_id` to `process_cantrips`
+- `_forward_streaming` refactored: split into `_forward_streaming_raw` (passthrough) and `_forward_streaming_with_memory` (buffer + extract + re-emit)
+- Bumped version to 0.8.2
+
 ## [0.8.1] - 2026-06-21
 
 ### Added

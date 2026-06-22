@@ -96,6 +96,7 @@ async def process_cantrips(
     request_headers: dict[str, str],
     tags: list | None = None,
     position: str = "pre_driver",
+    internal_chat_id: str = "",
 ) -> dict[str, Any]:
     messages = body_json.get("messages", [])
     if not messages:
@@ -127,12 +128,22 @@ async def process_cantrips(
 
         context = build_context(messages, **params)
 
+        if internal_chat_id:
+            from app.services.conversation import load_memories_for_chat
+
+            memory_map = await load_memories_for_chat(internal_chat_id, user_id)
+            context["__memories"] = memory_map
+
+        accumulated_memories: dict[str, str] = {}
         accumulated_personality = ""
         accumulated_scenario = ""
         accumulated_example_dialogs = ""
 
         for cantrip in cantrips:
             try:
+                if internal_chat_id and accumulated_memories:
+                    context["__memories"] = {**context.get("__memories", {}), **accumulated_memories}
+
                 result = await run_cantrip(
                     code=cantrip.code,
                     context=context,
@@ -154,11 +165,17 @@ async def process_cantrips(
             accumulated_personality += result.personality
             accumulated_scenario += result.scenario
             accumulated_example_dialogs += result.example_dialogs
+            accumulated_memories.update(result.memories)
 
             chat_data = result.chat_data
 
         if conversation_id:
             await _save_chat_data(db, user_id, conversation_id, chat_data)
+
+    if internal_chat_id and accumulated_memories:
+        from app.services.conversation import save_memories_for_chat
+        await save_memories_for_chat(internal_chat_id, user_id, accumulated_memories)
+        logger.info("Cantrip memory updates: %d keys for chat %s", len(accumulated_memories), internal_chat_id[:12])
 
     if accumulated_personality or accumulated_scenario or accumulated_example_dialogs:
         body_json["messages"] = apply_cantrip_result_to_messages(

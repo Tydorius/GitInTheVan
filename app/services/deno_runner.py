@@ -47,6 +47,7 @@ class CantripResult:
     response_content: str | None = None
     tool_result: str = ""
     chat_data: dict = field(default_factory=dict)
+    memories: dict = field(default_factory=dict)
     debug_logs: list[str] = field(default_factory=list)
     error: str | None = None
 
@@ -128,6 +129,7 @@ async def run_cantrip(
             response_content=result_data.get("response_content"),
             tool_result=result_data.get("tool_result", ""),
             chat_data=result_data.get("chat_data", {}),
+            memories=result_data.get("memories", {}),
             debug_logs=result_data.get("debug_logs", []),
             error=result_data.get("error"),
         )

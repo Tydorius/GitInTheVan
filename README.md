@@ -18,6 +18,7 @@ Licensed under Mozilla Public License 2.0.
 [Verification](#Verification)  
 [Persistent Memory](#Persistent-Memory)  
 [Conversation Summarization](#Conversation-Summarization)  
+[Command Tags](#Command-Tags)  
 [Development](#Development)  
 [Starting Out With Cantrips](#Starting-Out-With-Cantrips)  
 [Geting Support](#Getting-Support)  
@@ -62,6 +63,7 @@ I will stress that I am not going to replicate or 100% replace Lorebary's functi
 - **Persistent Memory** — Database-backed memory system using `<memstore>` tags. LLM responses are scanned for key/value pairs, stored per-conversation, and injected as a `[PERSISTENT MEMORY]` context block on subsequent requests. No zero-width character encoding — the database is the source of truth
 - **Conversation Summarization** — Automatically compresses long conversations when token count exceeds a configurable threshold. Older dialogue is summarized by a user-selected LLM and replaced with a `[CONVERSATION SUMMARY]` context block, while recent messages are always forwarded verbatim
 - **Forbidden Words** — Global per-user phrase list checked against responses before the Navigator runs. Supports plain-text and regex matching, case-insensitive by default. Matches surfaced to the Navigator as concrete violations
+- **Command Tags** — Per-request pipeline overrides via inline tags: `<VERIFY:off>`, `<SUMMARY:on>`, `<MEMORY:off>`, `<FORBIDDEN:off>`, `<DRIVER:on>`. Optional `:persist` flag saves to conversation memory. `<CMD:reset>` clears persistent overrides. One-off > persistent > GUI precedence
 - **Tagging System** — Activate lorebooks, cantrips, and verification rules via `<#type-name#>` delimiters in persona or message text. Tags are auto-stripped before forwarding to the LLM
 - **Diagnostics** — Automated endpoint and configuration checker for troubleshooting connectivity issues
 - **Web UI** — Full management interface built with Svelte 5 including cantrip tester, verification tester, forbidden word scanner, code editor with syntax highlighting, and log viewer
@@ -235,6 +237,11 @@ context.character.personality += ", additional trait";
 const day = context.chat_data.get('day') || 1;
 context.chat_data.set('day', day + 1);
 
+// Persistent memory (LLM-managed key/value store, per-conversation)
+const location = context.memory.get('location');
+context.memory.set('weather', 'stormy');
+const allKeys = context.memory.keys();
+
 console.log('Debug output visible in cantrip tester');
 ```
 
@@ -335,6 +342,50 @@ Configure in **Settings > Conversation Summarization**:
 | Summarization Prompt | *(default)* | System prompt for the summarization LLM |
 
 Summaries can be viewed and managed on the **Memories** page.
+
+## Command Tags
+
+Command tags are inline directives that override pipeline behavior for a single message or persistently for a conversation. They are placed in the user's message text and are automatically stripped before the request reaches the LLM.
+
+### Syntax
+
+```
+<COMMAND:setting>          One-off (this request only)
+<COMMAND:setting:persist>  Persistent (saved to conversation memory)
+<COMMAND:reset>            Clears persistent override for this command
+```
+
+### Available Commands
+
+| Command | Controls | Examples |
+|---------|----------|----------|
+| `VERIFY` | Verification (Navigator) | `<VERIFY:off>` skip for one message, `<VERIFY:off:persist>` skip until reset |
+| `SUMMARY` | Conversation summarization | `<SUMMARY:off>` skip compression for one message |
+| `FORBIDDEN` | Forbidden words scanner | `<FORBIDDEN:off>` disable forbidden word check |
+| `MEMORY` | Memory injection + extraction | `<MEMORY:off>` skip memory for one message |
+| `DRIVER` | Driver-callable tools | `<DRIVER:off>` disable tool access for one message |
+
+### Precedence
+
+Three tiers, highest to lowest:
+
+1. **One-off** — applies to the current request only, then reverts
+2. **Persistent** — saved to conversation memory, applies to all subsequent messages until `<CMD:reset>`
+3. **GUI setting** — the default configured in the web UI (used when no override exists)
+
+A one-off always overrides a persistent override for that request. The persistent override resumes on the next message.
+
+### Persistence and Reset
+
+```
+User message 1: "Fight the dragon <VERIFY:off:persist>"    -> verification off, saved
+User message 2: "Continue"                                 -> verification still off (persistent)
+User message 3: "Keep going <VERIFY:on>"                   -> verification on (one-off overrides persistent)
+User message 4: "More"                                     -> verification off again (persistent resumes)
+User message 5: "Done <VERIFY:reset>"                      -> persistent cleared, GUI setting resumes
+```
+
+Persistent overrides are scoped per-conversation (tracked via rolling hash). Different chats have independent override state.
 
 ## Development
 

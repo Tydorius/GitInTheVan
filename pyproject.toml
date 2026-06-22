@@ -1,6 +1,6 @@
 [project]
 name = "gitinthevan"
-version = "0.8.1"
+version = "0.9.0"
 description = "Self-hostable MITM LLM router/proxy for roleplay services"
 readme = "README.md"
 license = "MPL-2.0"

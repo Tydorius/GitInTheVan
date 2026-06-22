@@ -22,8 +22,9 @@ GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:
 6. [Verification](#6-verification)
 7. [Forbidden Words](#7-forbidden-words)
 8. [Memories](#8-memories)
-9. [Settings](#9-settings)
-10. [Users](#10-users)
+9. [Command Tags](#9-command-tags)
+10. [Settings](#10-settings)
+11. [Users](#11-users)
 
 ---
 
@@ -400,7 +401,55 @@ Click **View** to expand and read the full summary text. Click **Delete** to rem
 
 ---
 
-## 9. Settings
+## 9. Command Tags
+
+Command tags are inline directives placed in the user's message text that override pipeline behavior. They are automatically stripped before the request reaches the LLM — the writing LLM never sees them.
+
+### Syntax
+
+```
+<COMMAND:setting>          One-off override (this request only)
+<COMMAND:setting:persist>  Persistent override (saved to conversation memory)
+<COMMAND:reset>            Clears persistent override for this command
+```
+
+Tags are case-insensitive: `<verify:off>` works the same as `<VERIFY:OFF>`.
+
+### Available Commands
+
+| Command | Controls | What `off` Does | What `on` Does |
+|---------|----------|-----------------|----------------|
+| `VERIFY` | Verification (Navigator) | Skip verification for this message | Force verification even if GUI setting is off |
+| `SUMMARY` | Conversation summarization | Skip compression for this message | Force summarization check |
+| `FORBIDDEN` | Forbidden words scanner | Skip forbidden word scan | Force scan even if GUI setting is off |
+| `MEMORY` | Memory injection + extraction | Skip memory injection and `<memstore>` extraction | Force memory processing |
+| `DRIVER` | Driver-callable tools | Disable tool access for this message | Force tool access if tools are available |
+
+### Precedence
+
+Three tiers, highest to lowest:
+
+1. **One-off** (no `:persist`) — applies to the current request only, then reverts
+2. **Persistent** (`:persist`) — saved to conversation memory, applies to all subsequent messages until reset
+3. **GUI setting** — the default configured in the web UI (used when no override exists)
+
+A one-off always overrides a persistent override for that single request. The persistent override resumes on the next message.
+
+### Example Session
+
+```
+Message 1: "Fight the dragon <VERIFY:off:persist>"   -> Verification off, saved to chat memory
+Message 2: "Continue"                                -> Verification still off (persistent)
+Message 3: "Keep going <VERIFY:on>"                  -> Verification on for THIS message only
+Message 4: "More"                                    -> Verification off again (persistent resumes)
+Message 5: "Done <VERIFY:reset>"                     -> Persistent cleared, GUI setting resumes
+```
+
+Persistent overrides are scoped per-conversation. Different chats have independent override state. Overrides appear as memory entries with the `__cmd_persist_` prefix on the Memories page.
+
+---
+
+## 10. Settings
 
 ![Settings Page](media/gitv-settings.png)
 *Screenshot: Settings page with proxy, streaming, summarization, and API key sections*
@@ -457,7 +506,7 @@ Use this key as the Bearer token when configuring JanitorAI or other clients.
 
 ---
 
-## 10. Users
+## 11. Users
 
 ![Users Page](media/gitv-users.png)
 *Screenshot: Users page with management actions*
