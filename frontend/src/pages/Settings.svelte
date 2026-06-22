@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, getApiKey } from '../api'
+  import { api, getApiKey, setApiKey } from '../api'
   import { onMount } from 'svelte'
 
   let settings = {
@@ -18,6 +18,8 @@
     summarization_prompt: '',
   }
   let driverCallableTurns = 1
+  let bypassMethod = 'none'
+  let prefillEnabled = false
   let endpoints: any[] = []
   let apiKey: string | null = null
   let error = ''
@@ -25,6 +27,8 @@
   let sumSaved = false
   let showKey = false
   let copied = false
+  let regenerating = false
+  let newKeyNotice = false
 
   async function load() {
     try {
@@ -48,6 +52,8 @@
         if (me.is_admin || true) {
           const s = await api.getSettings()
           driverCallableTurns = (s as any).driver_callable_turns ?? 1
+          bypassMethod = (s as any).bypass_method ?? 'none'
+          prefillEnabled = (s as any).prefill_enabled ?? false
         }
       } catch {}
     } catch (e: any) { error = e.message }
@@ -77,11 +83,30 @@
     } catch (e: any) { error = e.message }
   }
 
+  async function saveBypassPrefill() {
+    error = ''
+    try {
+      await api.updateSettings({ bypass_method: bypassMethod, prefill_enabled: prefillEnabled } as any)
+    } catch (e: any) { error = e.message }
+  }
+
   function copyKey() {
     if (!apiKey) return
     navigator.clipboard.writeText(apiKey)
     copied = true
     setTimeout(() => copied = false, 2000)
+  }
+
+  async function regenerateKey() {
+    if (!confirm('Regenerate your API key? The old key will stop working immediately. The new key will be shown once.')) return
+    error = ''; regenerating = true
+    try {
+      const data = await api.regenerateApiKey()
+      apiKey = data.api_key
+      setApiKey(data.api_key)
+      newKeyNotice = true
+    } catch (e: any) { error = e.message }
+    finally { regenerating = false }
   }
 
   onMount(load)
@@ -207,21 +232,67 @@
 </div>
 
 <div class="card">
+  <h3>Prefill Normalization</h3>
+  <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
+    When a trailing assistant message is detected (prefill pattern), convert it to a system instruction for OpenAI-compatible providers that don't support native prefill. Anthropic and Google endpoints pass through as-is.
+  </p>
+  <div class="form-group">
+    <label>
+      <input type="checkbox" bind:checked={prefillEnabled} style="width: auto;">
+      Enable Prefill Normalization
+    </label>
+  </div>
+  <button class="primary" onclick={saveBypassPrefill}>Save</button>
+</div>
+
+<div class="card">
+  <h3>Content Bypass</h3>
+  <div class="error-msg" style="margin-bottom: 12px; font-size: 11px;">
+    WARNING: Content bypass plugins modify requests to work around provider content filters. These actions may violate your service provider's Terms of Service. Use at your own risk.
+  </div>
+  <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
+    Encodes outgoing user messages to reduce detectability by keyword-based content filters. Response content is decoded before returning to the client.
+  </p>
+  <div class="form-group">
+    <label for="bypass-method">Bypass Method</label>
+    <select id="bypass-method" bind:value={bypassMethod}>
+      <option value="none">None (disabled)</option>
+      <option value="space_separation">Space Separation (zero-width spaces in sensitive words)</option>
+      <option value="dot_separation">Dot Separation (periods between characters)</option>
+      <option value="character_replacement">Character Replacement (homoglyph substitution)</option>
+    </select>
+  </div>
+  <button class="primary" onclick={saveBypassPrefill}>Save</button>
+</div>
+
+<div class="card">
   <h3>API Key</h3>
   <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 8px;">
     Use this key as the Bearer token for proxy requests from JanitorAI or other clients.
   </p>
+  {#if newKeyNotice}
+    <div class="success-msg" style="margin-bottom: 8px;">
+      New API key generated! Save this key now — it will not be shown again.
+    </div>
+  {/if}
+  {#if !apiKey && !newKeyNotice}
+    <p style="color: var(--text-dim); font-size: 11px; margin-bottom: 8px;">
+      Your API key is not available (it was only shown once when your account was created).
+      Click Regenerate to create a new one.
+    </p>
+  {/if}
   <div style="display: flex; gap: 8px; align-items: center;">
     <div class="api-key-display" style="flex: 1; margin: 0;">
       {#if showKey}
         {apiKey || 'Not available'}
       {:else}
-        {'•'.repeat(Math.min((apiKey || '').length, 40))}
+        {apiKey ? '•'.repeat(Math.min(apiKey.length, 40)) : 'Not available'}
       {/if}
     </div>
     <button
       onclick={() => showKey = !showKey}
       title={showKey ? 'Hide' : 'Show'}
+      disabled={!apiKey}
       style="flex-shrink: 0; padding: 8px 12px; font-size: 16px;"
     >{showKey ? '🙈' : '👁'}</button>
     <button
@@ -231,4 +302,7 @@
       style="flex-shrink: 0; padding: 8px 12px; font-size: 16px;"
     >{copied ? '✓' : '⧉'}</button>
   </div>
+  <button class="danger" onclick={regenerateKey} disabled={regenerating} style="margin-top: 8px; font-size: 12px;">
+    {regenerating ? 'Regenerating...' : 'Regenerate API Key'}
+  </button>
 </div>

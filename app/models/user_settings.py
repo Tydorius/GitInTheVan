@@ -50,6 +50,8 @@ class UserSettings(Base):
     forbidden_words_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     forbidden_words_case_sensitive: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     driver_callable_turns: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    bypass_method: Mapped[str] = mapped_column(String(32), default="none", nullable=False)
+    prefill_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

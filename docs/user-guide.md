@@ -23,8 +23,9 @@ GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:
 7. [Forbidden Words](#7-forbidden-words)
 8. [Memories](#8-memories)
 9. [Command Tags](#9-command-tags)
-10. [Settings](#10-settings)
-11. [Users](#11-users)
+10. [Content Packs](#10-content-packs)
+11. [Settings](#11-settings)
+12. [Users](#12-users)
 
 ---
 
@@ -449,7 +450,70 @@ Persistent overrides are scoped per-conversation. Different chats have independe
 
 ---
 
-## 10. Settings
+## 10. Content Packs
+
+![Content Packs](media/gitv-content-packs.png)
+*Screenshot: Content Packs page with linked repos, browser, and installed items*
+
+The Content Packs page lets you browse and install resources from any git repository. GitInTheVan works with any standard git endpoint (GitHub, Gitea, GitLab, local repos, etc.).
+
+**WARNING**: Content from external repositories is not verified by GitInTheVan. Download and install at your own risk.
+
+### Linking a Repository
+
+1. Click **"+ Link Repository"**
+2. Enter a **Name** for the repo
+3. Enter the **Git URL** (HTTPS only)
+4. Optionally set the **Branch** (defaults to main)
+5. Optionally enter a **Token** for private repos
+6. Click **Link**
+
+GitInTheVan clones the repo and reads `descriptions.json` (the manifest). If no manifest exists, it auto-discovers files from the `cantrips/`, `lorebooks/`, `rules/`, and `maps/` folders.
+
+### Browsing Files
+
+After linking or syncing, the browser shows all available files with:
+
+- **Filter by Type**: All, Cantrips, Lorebooks, Rules, Maps
+- **Filter by Author**: Filter to specific creators
+- **Sort by**: Name, Recently Updated, or Type
+
+Each file shows its name, type, author, version, and description.
+
+### Install vs Fork
+
+- **Install**: Creates a linked copy in your account. Tracks the repo for update notifications. You can update to the latest version or pin to a specific commit.
+- **Fork**: Creates an independent copy. No link to the repo. You own and edit it freely.
+
+Both options install the resource in a **disabled** state. You must manually enable it after reviewing.
+
+### Safety Scanner
+
+Before installation, every file is scanned for potential risks:
+
+| Severity | What It Detects | Behavior |
+|----------|----------------|----------|
+| Critical | Network access (fetch, WebSocket), filesystem access, process execution, dynamic imports | Blocks installation |
+| Warning | eval(), external URLs, infinite loops, oversized content | Allows install with alert |
+| Clean | No issues found | Installs normally |
+
+All installed items start disabled regardless of scan result.
+
+### Managing Installed Items
+
+The installed items panel shows everything you've installed from repos:
+
+- **Enable/Disable**: Toggle the resource on/off
+- **Uninstall**: Removes the resource from your account entirely
+- **Scan badge**: Shows the scan result (Clean, Warning, Critical)
+
+### Syncing Repos
+
+Click **Sync** on a repo to re-fetch the latest `descriptions.json` and file list. This checks for new files and updates.
+
+---
+
+## 11. Settings
 
 ![Settings Page](media/gitv-settings.png)
 *Screenshot: Settings page with proxy, streaming, summarization, and API key sections*
@@ -496,6 +560,33 @@ Controls whether the writing LLM (Driver) can invoke cantrips as tools during ge
 
 When enabled, a `[TOOL ACCESS]` block listing available tools is injected into the system prompt. The LLM calls tools with `<call:tool_name arg="value">` tags. Each call decrements the turn counter. When turns reach 0, the notification stops — preventing infinite loops.
 
+### Prefill Normalization
+
+![Prefill Settings](media/gitv-prefill-settings.png)
+*Screenshot: Prefill normalization settings card*
+
+When enabled and a trailing assistant message is detected (the "prefill" pattern), GitInTheVan converts it to a system instruction for OpenAI-compatible providers that don't support native prefill. Anthropic and Google endpoints pass through as-is since they support prefill natively.
+
+Provider is auto-detected from the endpoint URL and model name.
+
+### Content Bypass
+
+![Content Bypass Settings](media/gitv-content-bypass-settings.png)
+*Screenshot: Content bypass settings with ToS warning*
+
+Content bypass plugins encode outgoing user messages to reduce detectability by keyword-based content filters. Response content is decoded before returning to the client.
+
+**WARNING**: Content bypass plugins modify requests to work around provider content filters. These actions may violate your service provider's Terms of Service. Use at your own risk.
+
+Three methods are available:
+
+| Method | How It Works |
+|--------|-------------|
+| **None** | No encoding (disabled) |
+| **Space Separation** | Inserts zero-width spaces between characters in sensitive words. Makes content less detectable while remaining readable to the LLM. |
+| **Dot Separation** | Inserts periods between characters in sensitive words. More aggressive than space separation. |
+| **Character Replacement** | Replaces Latin characters with visually similar Cyrillic homoglyphs. Most aggressive bypass. |
+
 ### API Key
 
 Your `gitv_` API key is displayed with:
@@ -506,7 +597,7 @@ Use this key as the Bearer token when configuring JanitorAI or other clients.
 
 ---
 
-## 11. Users
+## 12. Users
 
 ![Users Page](media/gitv-users.png)
 *Screenshot: Users page with management actions*

@@ -85,6 +85,9 @@ export const api = {
   getMe: () =>
     request<{ id: string; username: string; is_admin: boolean }>('/api/auth/me'),
 
+  regenerateApiKey: () =>
+    request<{ api_key: string }>('/api/auth/regenerate-key', { method: 'POST' }),
+
   // Health
   health: () => request<{ status: string }>('/health'),
 
@@ -215,6 +218,25 @@ export const api = {
     request<void>(`/api/forbidden-words/${id}`, { method: 'DELETE' }),
   testForbiddenWords: (content: string) =>
     request<{ has_matches: boolean; summary: string; match_count: number }>('/api/forbidden-words/test', { method: 'POST', body: JSON.stringify({ content }) }),
+
+  // Content Packs
+  listRepos: () => request<{ repos: any[]; disclaimer: string }>('/api/packs/repos'),
+  linkRepo: (data: { name: string; url: string; branch?: string; token?: string }) =>
+    request<any>('/api/packs/repos', { method: 'POST', body: JSON.stringify(data) }),
+  syncRepo: (id: string) =>
+    request<any>(`/api/packs/repos/${id}/sync`, { method: 'POST' }),
+  browseRepo: (id: string) =>
+    request<any>(`/api/packs/repos/${id}/browse`),
+  deleteRepo: (id: string) =>
+    request<void>(`/api/packs/repos/${id}`, { method: 'DELETE' }),
+  installFile: (data: { repo_id: string; file_path: string; fork?: boolean }) =>
+    request<any>('/api/packs/install', { method: 'POST', body: JSON.stringify(data) }),
+  listInstalled: () =>
+    request<{ items: any[]; disclaimer: string }>('/api/packs/installed'),
+  toggleInstalled: (id: string) =>
+    request<any>(`/api/packs/installed/${id}/toggle`, { method: 'PUT' }),
+  uninstallItem: (id: string) =>
+    request<void>(`/api/packs/installed/${id}`, { method: 'DELETE' }),
 
   // Tags - browse public tagged resources
   listPublicLorebooks: () => request<{ lorebooks: any[] }>('/api/lorebooks/public'),

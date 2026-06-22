@@ -64,7 +64,11 @@ I will stress that I am not going to replicate or 100% replace Lorebary's functi
 - **Conversation Summarization** — Automatically compresses long conversations when token count exceeds a configurable threshold. Older dialogue is summarized by a user-selected LLM and replaced with a `[CONVERSATION SUMMARY]` context block, while recent messages are always forwarded verbatim
 - **Forbidden Words** — Global per-user phrase list checked against responses before the Navigator runs. Supports plain-text and regex matching, case-insensitive by default. Matches surfaced to the Navigator as concrete violations
 - **Command Tags** — Per-request pipeline overrides via inline tags: `<VERIFY:off>`, `<SUMMARY:on>`, `<MEMORY:off>`, `<FORBIDDEN:off>`, `<DRIVER:on>`. Optional `:persist` flag saves to conversation memory. `<CMD:reset>` clears persistent overrides. One-off > persistent > GUI precedence
+- **Embedded Lorebook Extraction** — `<jslorebook>` tags in character card scenario content are automatically extracted, desanitized, and stripped before forwarding. Scripts available for execution alongside user cantrips
+- **Prefill Normalization** — Provider-specific assistant message prefilling. Converts trailing assistant messages to system instructions for OpenAI-compatible endpoints. Anthropic/Google pass through natively
+- **Content Bypass Plugins** — Three encoding methods (space separation, dot separation, character replacement) to work around provider content filters. Includes ToS violation warning
 - **Tagging System** — Activate lorebooks, cantrips, and verification rules via `<#type-name#>` delimiters in persona or message text. Tags are auto-stripped before forwarding to the LLM
+- **Content Discovery and Sync** — Link any git repository as a content pack. Browse, install (linked with update tracking), or fork (independent copy) cantrips, lorebooks, and rules. Safety scanner checks for malicious code. Auto-discovers resources from folder structure. "Download at your own risk" disclaimer
 - **Diagnostics** — Automated endpoint and configuration checker for troubleshooting connectivity issues
 - **Web UI** — Full management interface built with Svelte 5 including cantrip tester, verification tester, forbidden word scanner, code editor with syntax highlighting, and log viewer
 
@@ -72,12 +76,7 @@ I will stress that I am not going to replicate or 100% replace Lorebary's functi
 
 The following are planned for future releases.
 
-- **Embedded Creator Lorebooks** — `<jslorebook>` tag extraction from character cards for plug-and-play cantrip support
-- **Prefill Support** — Provider-specific prefill injection that adapts to each endpoint's capabilities
-- **Command Tags** — Inline tags (`<LORE:name>`, `<VERIFY:off>`) for per-message configuration overrides
-- **Content Bypass Plugins** — Provider-specific encoding/decoding for content filtering
-- **GitHub Repository Sync** — Link GitHub repositories containing structured content packs (cantrips, lorebooks, verification rules) with versioning and one-click install
-- **Per-Server Sharing** — Share resources among users on the same GitInTheVan instance via public flags
+- **Per-server sharing** — Share resources among users on the same GitInTheVan instance via public flags
 - **Cantrip Chaining** — Multi-turn LLM interactions for complex systems like dice resolution and critical tables
 - **Debug Mode** — Preserve last N chat exchanges with full pipeline visibility for development
 - **Natural-Language Cantrip Generator** — Describe what you want in plain English and an LLM generates the cantrip code or lorebook

@@ -7,6 +7,7 @@
   import Lorebooks from './pages/Lorebooks.svelte'
   import Verification from './pages/Verification.svelte'
   import Memories from './pages/Memories.svelte'
+  import Packs from './pages/Packs.svelte'
   import Settings from './pages/Settings.svelte'
   import Users from './pages/Users.svelte'
 
@@ -17,6 +18,7 @@
     { path: '/lorebooks', label: 'Lorebooks', icon: 'L' },
     { path: '/verification', label: 'Verification', icon: 'V' },
     { path: '/memories', label: 'Memories', icon: 'M' },
+    { path: '/packs', label: 'Content Packs', icon: 'P' },
     { path: '/settings', label: 'Settings', icon: 'G' },
     { path: '/users', label: 'Users', icon: 'U', admin: true },
   ]
@@ -84,6 +86,8 @@
         <Verification />
       {:else if page === '/memories'}
         <Memories />
+      {:else if page === '/packs'}
+        <Packs />
       {:else if page === '/settings'}
         <Settings />
       {:else if page === '/users'}

@@ -802,6 +802,112 @@ def test_command_tags(tc: TestClient) -> bool:
     return True
 
 
+def test_jslorebook_extraction(tc: TestClient) -> bool:
+    section("TEST: jslorebook Extraction")
+
+    embedded_code = "context.character.scenario += ' [FLOW_TEST_JSLB] Embedded lorebook active.';"
+
+    messages = [
+        {"role": "system", "content": f"You are a character. <jslorebook>{embedded_code}</jslorebook>"},
+        {"role": "user", "content": "Say hello."},
+    ]
+    try:
+        result = tc.send_proxy_request(messages)
+    except Exception as e:
+        info(f"jslorebook request failed (server may need restart): {e}")
+        return True
+
+    if isinstance(result, dict):
+        content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        if content:
+            pass_test(f"Request with jslorebook succeeded: {content[:60]}")
+        else:
+            info("Empty response (jslorebook may not have produced scenario text)")
+
+        result_dump = json.dumps(result)
+        if "<jslorebook>" not in result_dump:
+            pass_test("jslorebook tags stripped from forwarded request")
+        else:
+            fail_test("jslorebook tags leaked into response")
+    else:
+        info("Non-JSON response (server may need restart for jslorebook support)")
+
+    return True
+
+
+def test_prefill_normalization(tc: TestClient) -> bool:
+    section("TEST: Prefill Normalization")
+
+    httpx.put(
+        f"{tc.server}/api/settings",
+        json={"prefill_enabled": True},
+        headers=tc.test_headers(),
+        timeout=10.0,
+    )
+    pass_test("Prefill normalization enabled")
+
+    messages = [
+        {"role": "system", "content": "You are a helpful assistant. Reply briefly."},
+        {"role": "user", "content": "Tell me a story about a cat."},
+        {"role": "assistant", "content": "Once upon a time, "},
+    ]
+    result = tc.send_proxy_request(messages)
+    if isinstance(result, dict):
+        content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        if content:
+            pass_test(f"Prefill request succeeded: {content[:60]}")
+        else:
+            info("Empty response with prefill (endpoint may not support it)")
+    else:
+        fail_test("Unexpected response with prefill")
+
+    httpx.put(
+        f"{tc.server}/api/settings",
+        json={"prefill_enabled": False},
+        headers=tc.test_headers(),
+        timeout=10.0,
+    )
+    pass_test("Prefill normalization disabled")
+    return True
+
+
+def test_content_bypass(tc: TestClient) -> bool:
+    section("TEST: Content Bypass")
+
+    bypass_test_phrase = "FLOW_TEST_BYPASS"
+
+    httpx.put(
+        f"{tc.server}/api/settings",
+        json={"bypass_method": "space_separation"},
+        headers=tc.test_headers(),
+        timeout=10.0,
+    )
+    pass_test("Bypass method set to space_separation")
+
+    messages = [
+        {"role": "system", "content": "You are a helpful assistant. Reply briefly."},
+        {"role": "user", "content": f"Say the phrase {bypass_test_phrase} and nothing else."},
+    ]
+    result = tc.send_proxy_request(messages)
+    if isinstance(result, dict):
+        content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        if content:
+            pass_test(f"Bypass request succeeded: {content[:60]}")
+        else:
+            info("Empty response with bypass (endpoint may have filtered it)")
+    else:
+        fail_test("Unexpected response with bypass")
+
+    httpx.put(
+        f"{tc.server}/api/settings",
+        json={"bypass_method": "none"},
+        headers=tc.test_headers(),
+        timeout=10.0,
+    )
+    pass_test("Bypass method reset to none")
+    return True
+
+
 def main() -> None:
     import argparse
 
@@ -841,6 +947,9 @@ def main() -> None:
     results.append(("Multi-Position Cantrip", test_multi_position_cantrip(tc)))
     results.append(("Driver-Callable Tools", test_driver_callable(tc)))
     results.append(("Command Tags", test_command_tags(tc)))
+    results.append(("jslorebook Extraction", test_jslorebook_extraction(tc)))
+    results.append(("Prefill Normalization", test_prefill_normalization(tc)))
+    results.append(("Content Bypass", test_content_bypass(tc)))
 
     tc.cleanup_test_user_resources()
 

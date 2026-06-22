@@ -2,6 +2,48 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.11.0] - 2026-06-22
+
+### Added
+
+- **Content Discovery and Sync (Phase 11)**: Link any git repository as a content pack and browse, install, or fork resources
+- **Git repository linking via dulwich**: Pure-Python git library — no system binary dependency, works with any git endpoint (GitHub, Gitea, GitLab, local repos). Supports HTTPS clone with token authentication for private repos
+- **Content pack format**: `descriptions.json` manifest with pack metadata and per-file descriptions. Auto-discovery when manifest is absent (scans type folders: `cantrips/`, `lorebooks/`, `rules/`, `maps/`)
+- **Safety scanner**: Pre-install scan for cantrip JavaScript (network access, filesystem, process execution, eval, external URLs, infinite loops), lorebook entries (script tags, oversized content), and JSON validation. Three severity levels: critical (blocks), warning (allows with alert), info. All installs start disabled
+- **Install vs Fork**: Install creates a linked copy (tracks repo for update notifications). Fork creates an independent copy the user owns and edits freely
+- **Content browser UI**: New "Content Packs" page with repo management, browser panel (filter by type/author, sort by name/updated/type), installed items management (enable/disable, uninstall)
+- **"Download at your own risk" disclaimer**: Prominent warning on every page and API response
+- 21 new safety scanner tests (cantrip network/filesystem/process detection, eval/URL/loop warnings, lorebook script tags, JSON validation, file scanning)
+- Migration 016 creates `linked_repos` and `installed_items` tables
+- Dulwich dependency added
+
+### Changed
+
+- Bumped version to 0.11.0
+
+## [0.10.0] - 2026-06-22
+
+### Added
+
+- **`<jslorebook>` Extraction**: Embedded JavaScript lorebook tags in character card scenario content are automatically extracted, desanitized (HTML entity decoding, newline unescaping), and stripped before forwarding to the LLM. Extracted scripts are available for execution alongside user cantrips
+- **Prefill Normalization**: Provider-specific assistant message prefilling. When enabled and a trailing assistant message is detected, converts it to a system instruction for OpenAI-compatible providers (which don't support native prefill). Anthropic and Google endpoints pass through as-is (native support). Provider auto-detected from endpoint URL and model name
+- **Content Bypass Plugins**: Three encoding methods to work around provider content filters:
+  - Space Separation: inserts zero-width spaces between characters in sensitive words
+  - Dot Separation: inserts periods between characters (more aggressive)
+  - Character Replacement: replaces Latin characters with visually similar Cyrillic homoglyphs (most aggressive)
+  - Includes prominent ToS violation warning in both the UI and API
+  - Encoding applied to outgoing user messages; decoding applied to responses before returning to client
+- Migration 016: `bypass_method` and `prefill_enabled` columns on `user_settings`
+- 31 new Phase 10b tests covering jslorebook extraction (HTML unescaping, multiple blocks, message extraction, position detection), prefill normalization (provider detection, trailing assistant detection, OpenAI conversion, Anthropic passthrough), and bypass plugins (all three methods encode/decode round-trip, message-level application, ToS warning verification)
+- Flow test expanded to 13 test groups: added jslorebook extraction, prefill normalization, and content bypass tests
+
+### Changed
+
+- Proxy pipeline stage 1 now extracts `<jslorebook>` blocks alongside tag/command tag extraction
+- Prefill normalization and bypass encoding applied before forwarding; bypass decoding applied after response
+- Settings API and UI now expose bypass method selector (with ToS warning) and prefill toggle
+- Bumped version to 0.10.0
+
 ## [0.9.0] - 2026-06-21
 
 ### Added

@@ -130,6 +130,13 @@ MIGRATIONS: list[tuple[str, str]] = [
         ALTER TABLE lorebooks ADD COLUMN llm_instructions TEXT DEFAULT '' NOT NULL;
         """,
     ),
+    (
+        "016_add_bypass_and_prefill_settings",
+        """
+        ALTER TABLE user_settings ADD COLUMN bypass_method VARCHAR(32) DEFAULT 'none' NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN prefill_enabled BOOLEAN DEFAULT 0 NOT NULL;
+        """,
+    ),
 ]
 
 

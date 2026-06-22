@@ -6,6 +6,7 @@ from app.models.conversation_hash import ConversationHash
 from app.models.conversation_summary import ConversationSummary
 from app.models.endpoint import Endpoint
 from app.models.forbidden_word import ForbiddenWord
+from app.models.linked_repo import InstalledItem, LinkedRepo
 from app.models.lorebook import Lorebook
 from app.models.lorebook_entry import LorebookEntry
 from app.models.memory import Memory
@@ -26,6 +27,8 @@ __all__ = [
     "ConversationHash",
     "ConversationSummary",
     "ForbiddenWord",
+    "InstalledItem",
+    "LinkedRepo",
     "Memory",
     "VerificationRule",
     "VerificationLog",

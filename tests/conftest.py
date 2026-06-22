@@ -2,6 +2,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+import app.services.bypass as _bypass_module
 import app.services.cantrip as _cantrip_module
 import app.services.command_tags as _command_tags_module
 import app.services.conversation as _conversation_module
@@ -27,6 +28,7 @@ _original_summarization_session = _summarization_module.async_session
 _original_forbidden_words_session = _forbidden_words_module.async_session
 _original_driver_callable_session = _driver_callable_module.async_session
 _original_command_tags_session = _command_tags_module.async_session
+_original_bypass_session = _bypass_module.async_session
 
 
 async def override_get_db():
@@ -48,6 +50,7 @@ async def setup_database():
     _forbidden_words_module.async_session = TestSessionLocal
     _driver_callable_module.async_session = TestSessionLocal
     _command_tags_module.async_session = TestSessionLocal
+    _bypass_module.async_session = TestSessionLocal
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
@@ -60,6 +63,7 @@ async def setup_database():
     _forbidden_words_module.async_session = _original_forbidden_words_session
     _driver_callable_module.async_session = _original_driver_callable_session
     _command_tags_module.async_session = _original_command_tags_session
+    _bypass_module.async_session = _original_bypass_session
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
 

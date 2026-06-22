@@ -23,6 +23,8 @@ class SettingsResponse(BaseModel):
     gitv_status: bool
     simulated_streaming_speed: int
     driver_callable_turns: int
+    bypass_method: str
+    prefill_enabled: bool
 
 
 class SettingsUpdate(BaseModel):
@@ -32,6 +34,8 @@ class SettingsUpdate(BaseModel):
     gitv_status: bool | None = None
     simulated_streaming_speed: int | None = None
     driver_callable_turns: int | None = None
+    bypass_method: str | None = None
+    prefill_enabled: bool | None = None
 
 
 @router.get("")
@@ -54,6 +58,8 @@ async def get_settings(
         gitv_status=user_settings.gitv_status,
         simulated_streaming_speed=user_settings.simulated_streaming_speed,
         driver_callable_turns=user_settings.driver_callable_turns,
+        bypass_method=user_settings.bypass_method,
+        prefill_enabled=user_settings.prefill_enabled,
     )
 
 
@@ -81,6 +87,10 @@ async def update_settings(
         user_settings.simulated_streaming_speed = req.simulated_streaming_speed
     if req.driver_callable_turns is not None:
         user_settings.driver_callable_turns = max(0, req.driver_callable_turns)
+    if req.bypass_method is not None:
+        user_settings.bypass_method = req.bypass_method
+    if req.prefill_enabled is not None:
+        user_settings.prefill_enabled = req.prefill_enabled
 
     await db.commit()
     await db.refresh(user_settings)
@@ -92,4 +102,6 @@ async def update_settings(
         gitv_status=user_settings.gitv_status,
         simulated_streaming_speed=user_settings.simulated_streaming_speed,
         driver_callable_turns=user_settings.driver_callable_turns,
+        bypass_method=user_settings.bypass_method,
+        prefill_enabled=user_settings.prefill_enabled,
     )

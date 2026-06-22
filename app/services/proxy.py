@@ -125,6 +125,7 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
             extract_command_tags_from_messages,
             strip_command_tags_from_messages,
         )
+        from app.services.jslorebook import extract_from_messages as extract_jslorebook
         from app.services.tagging import extract_all_tags_from_messages, strip_tags
 
         tags = extract_all_tags_from_messages(body_json.get("messages", []))
@@ -134,6 +135,12 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
                 content = msg.get("content", "")
                 if isinstance(content, str):
                     msg["content"] = strip_tags(content)
+
+        jslb_scripts, cleaned_msgs = extract_jslorebook(body_json.get("messages", []))
+        if jslb_scripts:
+            logger.info("jslorebook: %d embedded script(s) extracted", len(jslb_scripts))
+            body_json["messages"] = cleaned_msgs
+            body_json["_gitv_jslb_scripts"] = jslb_scripts
 
         message_commands = extract_command_tags_from_messages(body_json.get("messages", []))
         if message_commands:
@@ -215,6 +222,23 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
                 body_json["messages"] = inject_tool_notification_safe(
                     body_json.get("messages", []), notification
                 )
+
+        from app.services.bypass import apply_bypass_encode
+        from app.services.prefill import normalize_prefill
+
+        async with async_session() as db:
+            from app.models.user_settings import UserSettings
+            us_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+            us = us_result.scalar_one_or_none()
+            prefill_on = us.prefill_enabled if us else False
+            bypass_method = us.bypass_method if us else "none"
+
+        if prefill_on:
+            body_json = normalize_prefill(body_json, base_url, enabled=True)
+
+        if bypass_method != "none":
+            body_json = apply_bypass_encode(body_json, bypass_method)
+            body_json["_gitv_bypass_method"] = bypass_method
 
         body = json.dumps(body_json).encode()
 
@@ -610,6 +634,11 @@ async def _forward_non_streaming_verified(
                     response_data = await _extract_response_memories(response_data, user_id, body_json)
 
                 response_data.pop("_gitv_forbidden_summary", None)
+
+                if status_code == 200 and body_json.get("_gitv_bypass_method"):
+                    from app.services.bypass import apply_bypass_decode
+                    response_data = apply_bypass_decode(response_data, body_json["_gitv_bypass_method"])
+
                 return JSONResponse(status_code=status_code, content=response_data)
         except Exception:
             logger.exception("Driver-callable loop failed, falling through to normal forward")
@@ -645,9 +674,14 @@ async def _forward_non_streaming_verified(
             logger.exception("Post-navigator processing failed")
 
     if status_code == 200 and user_id and body_json.get("_gitv_chat_id"):
-        response_data = await _extract_response_memories(response_data, user_id, body_json)
+        if body_json.get("_gitv_command_overrides", {}).get("memory") is not False:
+            response_data = await _extract_response_memories(response_data, user_id, body_json)
 
     response_data.pop("_gitv_forbidden_summary", None)
+
+    if status_code == 200 and body_json.get("_gitv_bypass_method"):
+        from app.services.bypass import apply_bypass_decode
+        response_data = apply_bypass_decode(response_data, body_json["_gitv_bypass_method"])
 
     return JSONResponse(status_code=status_code, content=response_data)
 

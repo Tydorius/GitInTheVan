@@ -56,6 +56,18 @@ async def get_me(
     return MeResponse(id=current_user.id, username=current_user.username, is_admin=current_user.is_admin)
 
 
+@router.post("/regenerate-key", status_code=status.HTTP_200_OK)
+async def regenerate_api_key(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    raw_api_key, key_hash = generate_api_key()
+    current_user.gitv_api_key = key_hash
+    await db.commit()
+    logger.info("API key regenerated for user: %s", current_user.username)
+    return {"api_key": raw_api_key}
+
+
 @router.post("/setup", status_code=status.HTTP_201_CREATED)
 async def setup_admin(
     req: SetupRequest,
