@@ -2,6 +2,12 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.11.4] - 2026-06-22
+
+### Fixed
+
+- **Content Pack repo linking on Windows**: Dulwich leaves `.git/objects/pack/*.idx` file handles locked on Windows, causing `tempfile.TemporaryDirectory.__exit__` to raise `PermissionError` which propagated as 500 Internal Server Error. Replaced with custom `_WinTempDir` using `shutil.rmtree(ignore_errors=True)` to suppress cleanup errors.
+
 ## [0.11.3] - 2026-06-22
 
 ### Fixed
