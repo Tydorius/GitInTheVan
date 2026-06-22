@@ -50,22 +50,37 @@ def fetch_repo_info(url: str, branch: str = "main", token: str = "") -> dict[str
     directory, read, then cleaned up.
     """
     from dulwich import porcelain
+    from dulwich.errors import GitProtocolError
 
     auth_url = _build_auth_url(url, token)
 
     with tempfile.TemporaryDirectory(prefix="gitv_repo_") as tmpdir:
+        clone_kwargs: dict[str, Any] = {
+            "checkout": True,
+        }
+
         try:
             porcelain.clone(
                 auth_url,
                 target=Path(tmpdir).as_posix(),
-                checkout=True,
-                depth=1,
+                **clone_kwargs,
             )
-        except Exception as e:
-            logger.error("Git clone failed for %s: %s", url, str(e)[:200])
-            raise GitCloneError(f"Failed to clone repository: {e}") from e
+        except (GitProtocolError, Exception) as e:
+            err_msg = str(e)[:300]
+            logger.error("Git clone failed for %s: %s", url, err_msg)
+            if "not found" in err_msg.lower() or "404" in err_msg:
+                raise GitCloneError(f"Repository not found: {url}") from e
+            if "authentication" in err_msg.lower() or "403" in err_msg or "401" in err_msg:
+                raise GitCloneError(f"Authentication failed. Check token or repo access: {url}") from e
+            raise GitCloneError(f"Failed to clone repository: {err_msg}") from e
 
         repo_path = Path(tmpdir)
+
+        if branch and branch != "main":
+            branch_path = repo_path / ".git" / "refs" / "heads" / branch
+            if not branch_path.exists():
+                logger.warning("Branch '%s' not found, using default", branch)
+
         return _read_repo(repo_path)
 
 
@@ -145,7 +160,6 @@ def fetch_file_content(url: str, file_path: str, token: str = "") -> str:
                 auth_url,
                 target=Path(tmpdir).as_posix(),
                 checkout=True,
-                depth=1,
             )
         except Exception as e:
             raise GitCloneError(f"Failed to clone repository: {e}") from e

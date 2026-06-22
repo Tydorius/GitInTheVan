@@ -10,6 +10,10 @@ export function setToken(token: string): void {
 
 export function clearToken(): void {
   localStorage.removeItem('gitv_token');
+  // Note: API key is intentionally NOT cleared on logout.
+  // It is a proxy key, not an auth credential. Clearing it forces
+  // the user to regenerate it on every login since the server only
+  // stores the hash and cannot return the original.
 }
 
 export function getApiKey(): string | null {

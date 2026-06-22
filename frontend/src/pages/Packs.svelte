@@ -13,6 +13,19 @@
   let linkForm = { name: '', url: '', branch: 'main', token: '' }
   let linking = false
 
+  function autofillName() {
+    if (linkForm.name.trim()) return
+    const url = linkForm.url.trim()
+    if (!url) return
+    try {
+      const u = new URL(url)
+      const parts = u.pathname.split('/').filter(Boolean)
+      if (parts.length >= 2) {
+        linkForm.name = `${parts[0]}/${parts[1].replace(/\.git$/, '')}`
+      }
+    } catch {}
+  }
+
   let filterRepo = ''
   let filterType = ''
   let filterAuthor = ''
@@ -259,7 +272,7 @@
         </div>
         <div class="form-group">
           <label>Git URL</label>
-          <input bind:value={linkForm.url} placeholder="https://github.com/user/repo or https://gitea.example.com/user/repo" required />
+          <input bind:value={linkForm.url} placeholder="https://github.com/user/repo or https://gitea.example.com/user/repo" required onblur={autofillName} />
         </div>
         <div class="form-row">
           <div class="form-group">

@@ -8,7 +8,11 @@
   let loading = true
   let error = ''
   let showForm = false
-  let form = { name: '', description: '', is_public: false }
+  let form = {
+    name: '', description: '', is_public: false,
+    run_pre_driver: true, run_driver_callable: false,
+    run_pre_navigator: false, run_post_navigator: false,
+  }
 
   let selectedLorebook: any = null
   let showEntryForm = false
@@ -66,8 +70,30 @@
 
   async function handleSubmit() {
     error = ''
-    try { await api.createLorebook(form); showForm = false; form = { name: '', description: '', is_public: false }; await load() }
+    try {
+      await api.createLorebook(form)
+      showForm = false
+      form = { name: '', description: '', is_public: false, run_pre_driver: true, run_driver_callable: false, run_pre_navigator: false, run_post_navigator: false }
+      await load()
+    }
     catch (e: any) { error = e.message }
+  }
+
+  let positionLb: any = null
+
+  async function savePositions() {
+    if (!positionLb) return
+    error = ''
+    try {
+      await api.updateLorebook(positionLb.id, {
+        run_pre_driver: positionLb.run_pre_driver,
+        run_driver_callable: positionLb.run_driver_callable,
+        run_pre_navigator: positionLb.run_pre_navigator,
+        run_post_navigator: positionLb.run_post_navigator,
+      })
+      positionLb = null
+      await load()
+    } catch (e: any) { error = e.message }
   }
 
   async function handleDelete(id: string) {
@@ -369,6 +395,25 @@
           </tbody>
         </table>
       {/if}
+
+      <div class="form-group" style="margin-top: 16px;">
+        <label>Pipeline Positions</label>
+        <div style="display: flex; flex-wrap: wrap; gap: 12px; margin-top: 4px; align-items: center;">
+          <label style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
+            <input type="checkbox" checked={selectedLorebook.run_pre_driver} disabled style="width: auto;"> Pre-Driver
+          </label>
+          <label style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
+            <input type="checkbox" checked={selectedLorebook.run_driver_callable} disabled style="width: auto;"> Driver-Callable
+          </label>
+          <label style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
+            <input type="checkbox" checked={selectedLorebook.run_pre_navigator} disabled style="width: auto;"> Pre-Navigator
+          </label>
+          <label style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
+            <input type="checkbox" checked={selectedLorebook.run_post_navigator} disabled style="width: auto;"> Post-Navigator
+          </label>
+          <button onclick={() => { positionLb = { ...selectedLorebook } }} style="font-size: 11px; padding: 2px 8px;">Edit Positions</button>
+        </div>
+      </div>
     </div>
   {/if}
 {/if}
@@ -466,3 +511,30 @@
   bind:errorMsg={tagError}
   onSave={saveTag}
 />
+
+{#if positionLb}
+  <div class="modal-overlay" role="dialog" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) positionLb = null; }}>
+    <div class="modal">
+      <h3>Edit Pipeline Positions</h3>
+      <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">{positionLb.name}</p>
+      <div class="form-group">
+        <label style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
+          <input type="checkbox" bind:checked={positionLb.run_pre_driver} style="width: auto;"> Pre-Driver
+        </label>
+        <label style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
+          <input type="checkbox" bind:checked={positionLb.run_driver_callable} style="width: auto;"> Driver-Callable
+        </label>
+        <label style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
+          <input type="checkbox" bind:checked={positionLb.run_pre_navigator} style="width: auto;"> Pre-Navigator
+        </label>
+        <label style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
+          <input type="checkbox" bind:checked={positionLb.run_post_navigator} style="width: auto;"> Post-Navigator
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button onclick={() => positionLb = null}>Cancel</button>
+        <button class="primary" onclick={savePositions}>Save</button>
+      </div>
+    </div>
+  </div>
+{/if}

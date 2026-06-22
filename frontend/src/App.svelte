@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { isAuthenticated, currentRoute, logout, isAdmin, checkAdmin } from './stores'
+  import { isAuthenticated, currentRoute, logout, isAdmin, initializeAuth } from './stores'
   import Login from './pages/Login.svelte'
   import Dashboard from './pages/Dashboard.svelte'
   import Endpoints from './pages/Endpoints.svelte'
@@ -23,35 +23,20 @@
     { path: '/users', label: 'Users', icon: 'U', admin: true },
   ]
 
-  let apiKey = null
-
   function handleLogout() {
     logout()
   }
+
   $: route = $currentRoute || '/'
   $: page = route.split('?')[0]
 
-  async function validateToken() {
-    try {
-      const resp = await fetch('/health')
-      if (resp.ok) {
-        const test = await fetch('/api/settings', {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('gitv_token')}` }
-        })
-        if (test.status === 401) {
-          logout()
-        } else {
-          await checkAdmin()
-        }
-      }
-    } catch {}
-  }
-
-  validateToken()
+  initializeAuth()
 </script>
 
 {#if !$isAuthenticated}
   <Login />
+{:else if $isAuthenticated && (page === '/login' || page === '')}
+  <Dashboard />
 {:else}
   <div class="app-layout">
     <aside class="sidebar">

@@ -2,6 +2,29 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.11.3] - 2026-06-22
+
+### Fixed
+
+- **Session expiry redirect**: When JWT expires, the page now properly redirects to Login instead of showing a stale Dashboard with login URL. `initializeAuth()` in stores.ts properly validates the token and triggers `logout()` when 401 is received
+- **Admin sidebar on first login**: `checkAdmin()` now called immediately after login in Login.svelte, no longer requires F5 refresh
+- **Dashboard active state on first login**: Login redirects to `#/` explicitly so the hashchange fires and the Dashboard nav item highlights
+- **Lorebook pipeline positions**: Pipeline position checkboxes now visible in the lorebook detail view with an "Edit Positions" modal
+- **Content Pack repo linking**: Removed unsupported `depth=1` parameter from dulwich clone (caused Internal Server Error). Added better error messages for auth failures and 404s
+- **API key lost on logout**: API key is no longer cleared from localStorage on logout. It's a proxy key (not auth credential) and the server only stores the hash, so clearing it forces regeneration on every session
+- **Svelte 5 event syntax**: Fixed `on:blur` → `onblur` for Vite 8 / Svelte 5 compiler compatibility
+
+### Added
+
+- **Repo name autofill**: When linking a content pack repo, if the Name field is blank it auto-fills from the URL (e.g., `https://github.com/Tydorius/GitInTheVan-Public` → `Tydorius/GitInTheVan-Public`)
+
+## [0.11.2] - 2026-06-22
+
+### Security
+
+- **Vite upgraded to 8.0.16**: Now on the latest Vite release with Rolldown bundler. Resolves all CVEs identified in the supply chain audit. 0 npm vulnerabilities
+- Node.js 24.17.0 detected — full compatibility with Vite 8 and @sveltejs/vite-plugin-svelte 7
+
 ## [0.11.1] - 2026-06-22
 
 ### Security

@@ -23,6 +23,31 @@ export async function checkAdmin() {
   }
 }
 
+export async function initializeAuth() {
+  const token = getToken();
+  if (!token) {
+    isAuthenticated.set(false);
+    isAdmin.set(false);
+    return;
+  }
+  try {
+    const resp = await fetch('/health');
+    if (resp.ok) {
+      const test = await fetch('/api/settings', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (test.status === 401) {
+        logout();
+        return;
+      }
+    }
+    isAuthenticated.set(true);
+    await checkAdmin();
+  } catch {
+    isAuthenticated.set(false);
+  }
+}
+
 window.addEventListener('hashchange', () => {
   currentRoute.set(window.location.hash.slice(1) || '/');
 });

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api, setToken, setApiKey, getToken } from '../api'
-  import { isAuthenticated } from '../stores'
+  import { isAuthenticated, checkAdmin } from '../stores'
 
   let username = ''
   let password = ''
@@ -13,6 +13,7 @@
     const token = getToken()
     if (token) {
       isAuthenticated.set(true)
+      await checkAdmin()
     }
   }
 
@@ -26,10 +27,14 @@
         setApiKey(data.api_key)
         createdApiKey = data.api_key
         isAuthenticated.set(true)
+        await checkAdmin()
+        window.location.hash = '#/'
       } else {
         const data = await api.login(username, password)
         setToken(data.access_token)
         isAuthenticated.set(true)
+        await checkAdmin()
+        window.location.hash = '#/'
       }
     } catch (e: any) {
       error = e.message || 'Authentication failed'
