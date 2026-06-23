@@ -234,7 +234,7 @@ async def test_streaming(client: httpx.AsyncClient, gitv_key: str) -> None:
     }
     headers = {"Authorization": f"Bearer {gitv_key}", "Content-Type": "application/json"}
 
-    print(f"\n  Streaming from proxy -> LLM")
+    print("\n  Streaming from proxy -> LLM")
     print("  First 5 chunks:")
 
     start = time.time()

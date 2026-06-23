@@ -1,0 +1,209 @@
+{
+  "name": "Gambling",
+  "description": "Blackjack, Poker, Three Players",
+  "version": "1.0",
+  "author": "Tydorius",
+  "global_llm_instructions": "You are at a gambling table in a dimly lit casino. You are playing cards with other players who each have distinct personalities. Stay in character. Use your tool calls to take game actions — speaking about an action does NOT perform it. The human player is 'user'. You are assigned a player ID (player1, player2, or player3). When it is your turn, narrate your character's thoughts and dialogue, then use a tool call to actually take your action (bet, fold, hit, stand, etc).",
+  "stages": [
+    {
+      "stage_order": 1,
+      "name": "Dealer",
+      "description": "",
+      "system_instructions": "You are the DEALER running this gambling table. Your job is to:\n1. Narrate the scene and atmosphere\n2. Call on each player for their turn\n3. Resolve card dealing and money via tool calls\n4. Keep the game moving\n\nAt the start of each hand, use <call:cards action=\"shuffle\"> then deal initial cards to all players. Track whose turn it is by setting context.chat_data.set('current_player', playerId) in your narration.\n\nWhen a player busts, folds, or a hand resolves, announce the results and start the next hand.\n\nWhen the USER plays, wait for their input. When LLM players' turns come up, address them by name and wait for their response.\n\nIMPORTANT: If any LLM player's balance reaches $0, they 'leave the table' in frustration. A new player arrives with $1,000 and a fresh personality. To do this:\n- Use <call:money action=\"balance\" player=\"playerId\"> to check\n- If balance is 0, narrate them storming off\n- Use <call:money action=\"init\" player=\"playerId\" amount=\"1000\"> for the replacement\n- Set context.chat_data to re-roll their personality by deleting the old assignment\n\nIf a player goes broke mid-round, they finish the round but cannot bet further.",
+      "model_override": "",
+      "driver_callable_turns": 3,
+      "verification_enabled": true,
+      "verification_model": "",
+      "verification_max_retries": 2,
+      "verification_instructions": "Verify the dealer's response meets these criteria:\n1. The dealer narrated the scene and addressed at least one player\n2. If cards needed dealing, the dealer used the cards tool\n3. If money was involved, the dealer used the money tool\n4. The dealer did not play FOR the LLM players — it set up their turns but let them respond\n5. If a player went broke, the dealer narrated them leaving and introduced a replacement\n\nRespond with JSON: {\"violation\": false/true, \"reason\": \"explanation\"}",
+      "output_mode": "persist",
+      "resources": [
+        {
+          "resource_type": "cantrip",
+          "position": "pre_driver",
+          "sticky": true,
+          "resource_name": "Money Tracker",
+          "resource_content": {
+            "name": "Money Tracker",
+            "description": "Manages player balances, bets, pot, payouts",
+            "llm_instructions": "Manages player chips, bets, and the pot. Actions:\n- init player=\"id\" amount=\"N\" — Set a player's starting balance\n- bet player=\"id\" amount=\"N\" — Place a bet (deducts from balance, adds to pot)\n- fold player=\"id\" — Fold, forfeiting current bet to the pot\n- payout player=\"id\" amount=\"N\" — Pay winnings from the pot\n- balance player=\"id\" — Check balance and current bet\n- pot — Show current pot amount\n- round_summary — Show all player balances and pot\n- new_round — Clear pot and reset bets for next round\nExample: <call:money action=\"bet\" player=\"player1\" amount=\"50\">",
+            "code": "// Money Tracker — Manages player balances, bets, and payouts\n// Driver-callable tool. Invoked via <call:money action=\"...\" args=\"...\">\n//\n// Actions:\n//   init player=\"id\" amount=\"N\"    — Initialize a player's balance\n//   bet player=\"id\" amount=\"N\"     — Place a bet (deducts from balance)\n//   fold player=\"id\"               — Fold, forfeiting current bet\n//   payout player=\"id\" amount=\"N\"  — Add winnings to balance\n//   balance player=\"id\"            — Check a player's balance\n//   pot                            — Show the current pot\n//   round_summary                  — Show all player balances and current pot\n\nfunction getBank() {\n    if (!context.chat_data.get('bank')) {\n        context.chat_data.set('bank', {});\n        context.chat_data.set('pot', 0);\n    }\n    return context.chat_data.get('bank');\n}\n\nfunction getPot() {\n    if (context.chat_data.get('pot') === undefined || context.chat_data.get('pot') === null) {\n        context.chat_data.set('pot', 0);\n    }\n    return context.chat_data.get('pot');\n}\n\nfunction getBets() {\n    if (!context.chat_data.get('current_bets')) {\n        context.chat_data.set('current_bets', {});\n    }\n    return context.chat_data.get('current_bets');\n}\n\nconst call = context.tool_call;\nif (call && call.name === 'money') {\n    const action = call.args.action || '';\n    const args = call.args;\n\n    if (action === 'init') {\n        const player = args.player || 'unknown';\n        const amount = parseInt(args.amount) || 1000;\n        const bank = getBank();\n        bank[player] = amount;\n        context.chat_data.set('bank', bank);\n        context.tool_result = `${player} initialized with $${amount}.`;\n\n    } else if (action === 'bet') {\n        const player = args.player || 'unknown';\n        const amount = parseInt(args.amount) || 0;\n        const bank = getBank();\n        if (!bank[player] || bank[player] < amount) {\n            context.tool_result = `${player} cannot bet $${amount} (balance: $${bank[player] || 0}).`;\n        } else {\n            bank[player] -= amount;\n            context.chat_data.set('bank', bank);\n            let pot = getPot();\n            pot += amount;\n            context.chat_data.set('pot', pot);\n            const bets = getBets();\n            bets[player] = (bets[player] || 0) + amount;\n            context.chat_data.set('current_bets', bets);\n            context.tool_result = `${player} bets $${amount}. Pot is now $${pot}. Balance: $${bank[player]}.`;\n        }\n\n    } else if (action === 'fold') {\n        const player = args.player || 'unknown';\n        const bets = getBets();\n        const forfeited = bets[player] || 0;\n        delete bets[player];\n        context.chat_data.set('current_bets', bets);\n        context.tool_result = `${player} folds. Forfeits $${forfeited} to the pot.`;\n\n    } else if (action === 'payout') {\n        const player = args.player || 'unknown';\n        const amount = parseInt(args.amount) || 0;\n        let pot = getPot();\n        const bank = getBank();\n        if (amount > pot) {\n            context.tool_result = `Cannot pay $${amount} from pot ($${pot}).`;\n        } else {\n            pot -= amount;\n            context.chat_data.set('pot', pot);\n            bank[player] = (bank[player] || 0) + amount;\n            context.chat_data.set('bank', bank);\n            context.tool_result = `${player} wins $${amount} from the pot. Balance: $${bank[player]}. Pot remaining: $${pot}.`;\n        }\n\n    } else if (action === 'balance') {\n        const player = args.player || 'unknown';\n        const bank = getBank();\n        const bets = getBets();\n        const currentBet = bets[player] || 0;\n        context.tool_result = `${player} balance: $${bank[player] || 0} (bet this round: $${currentBet}).`;\n\n    } else if (action === 'pot') {\n        context.tool_result = `Current pot: $${getPot()}.`;\n\n    } else if (action === 'round_summary') {\n        const bank = getBank();\n        const bets = getBets();\n        const pot = getPot();\n        let lines = [`Pot: $${pot}`];\n        for (const [player, balance] of Object.entries(bank)) {\n            lines.push(`${player}: $${balance} (bet: $${bets[player] || 0})`);\n        }\n        context.tool_result = lines.join('\\n');\n\n    } else if (action === 'new_round') {\n        context.chat_data.set('pot', 0);\n        context.chat_data.set('current_bets', {});\n        context.tool_result = 'New round started. Pot cleared. Bets reset.';\n\n    } else {\n        context.tool_result = 'Unknown action. Available: init, bet, fold, payout, balance, pot, round_summary, new_round';\n    }\n} else {\n    const bank = getBank();\n    const pot = getPot();\n    if (Object.keys(bank).length > 0) {\n        context.character.scenario += `\\n\\n[MONEY] Pot: $${pot}. Players: ${Object.entries(bank).map(([p, b]) => `${p} ($${b})`).join(', ')}.`;\n    }\n}\n"
+          }
+        },
+        {
+          "resource_type": "cantrip",
+          "position": "pre_driver",
+          "sticky": true,
+          "resource_name": "Personality Manager",
+          "resource_content": {
+            "name": "Personality Manager",
+            "description": "Assigns random personalities to LLM players",
+            "llm_instructions": "(Pre-Driver only — no tool calls needed)\nAssigns a random personality to each LLM player at the start of the game and injects it as context. Personalities persist until a player goes broke and is replaced, at which point a new personality is rolled. Do not call this tool directly — it runs automatically before each stage.",
+            "code": "// Personality Manager — Assigns random personalities to LLM players\n// Pre-Driver cantrip. Runs before each LLM stage to inject personality.\n// Also tracks whose \"turn\" it is and injects the right personality.\n\nconst PERSONALITIES = [\n    { name: 'The Gambler', traits: 'reckless, loves high stakes, bluffs constantly, speaks in gambling metaphors, overconfident' },\n    { name: 'The Calculator', traits: 'cold and analytical, counts cards openly, never bluffs, speaks in probabilities, gets frustrated by luck' },\n    { name: 'The Showman', traits: 'theatrical, dramatic reactions to every card, narrates their thoughts aloud, loves the spotlight, prone to monologues' },\n    { name: 'The Drunk', traits: 'slurred speech patterns, inappropriate bets, forgets the rules frequently, tells rambling stories between hands, surprisingly lucky' },\n    { name: 'The Grifter', traits: 'smooth talker, always trying to cheat or angle-shoot, reads other players intensely, compliments opponents before screwing them over' },\n    { name: 'The Amateur', traits: 'nervous, asks obvious questions, celebrates small wins too much, folds too early, genuinely surprised by basic rules' },\n    { name: 'The Veteran', traits: 'seen it all, world-weary, gives unsolicited advice, plays conservatively, complains about \"kids these days\"' },\n    { name: 'The Cheat', traits: 'tries to peek at other cards, suggests side bets, distracts the dealer, uses sleight of hand, denies everything' },\n];\n\nfunction getPersonalities() {\n    if (!context.chat_data.get('llm_personalities')) {\n        const shuffled = [...PERSONALITIES].sort(() => Math.random() - 0.5);\n        const assignment = {};\n        const playerKeys = ['player1', 'player2', 'player3'];\n        for (let i = 0; i < playerKeys.length && i < shuffled.length; i++) {\n            assignment[playerKeys[i]] = shuffled[i];\n        }\n        context.chat_data.set('llm_personalities', assignment);\n    }\n    return context.chat_data.get('llm_personalities');\n}\n\nconst personalities = getPersonalities();\nconst gameType = context.chat_data.get('game_type') || 'blackjack';\nconst currentTurn = context.chat_data.get('current_player') || '';\n\nlet personalityBlock = `\\n\\n[GAME STATE]\\n`;\npersonalityBlock += `Current game: ${gameType.toUpperCase()}\\n`;\npersonalityBlock += `Current turn: ${currentTurn || 'waiting to start'}\\n\\n`;\npersonalityBlock += `[YOUR PERSONALITY]\\n`;\npersonalityBlock += `You are playing as a character with these traits: ${currentTurn && personalities[currentTurn] ? personalities[currentTurn].traits : 'observer'}\\n`;\npersonalityBlock += `Stay in character at all times. Express your personality through your dialogue and actions.\\n`;\npersonalityBlock += `[/YOUR PERSONALITY]\\n`;\n\ncontext.character.scenario += personalityBlock;\n\nconsole.log('Personality manager: ' + (currentTurn ? `${currentTurn} = ${personalities[currentTurn]?.name || 'unassigned'}` : 'no current player set'));\n"
+          }
+        },
+        {
+          "resource_type": "lorebook",
+          "position": "pre_driver",
+          "sticky": false,
+          "resource_name": "Gambling Hall Rules",
+          "resource_content": {
+            "name": "Gambling Hall Rules",
+            "description": "Rules for blackjack and poker used in the gambling map",
+            "entries": [
+              {
+                "name": "Betting Commands",
+                "keys": [
+                  "bet",
+                  "fold",
+                  "call",
+                  "raise",
+                  "check",
+                  "hit",
+                  "stand",
+                  "double"
+                ],
+                "secondary_keys": [],
+                "content": "AVAILABLE GAME COMMANDS:\nPlayers can use these tool calls:\n- <call:money action=\"bet\" player=\"YOUR_ID\" amount=\"N\"> — Place a bet\n- <call:money action=\"fold\" player=\"YOUR_ID\"> — Fold your hand\n- <call:money action=\"balance\" player=\"YOUR_ID\"> — Check your balance\n- <call:cards action=\"deal\" count=\"1\" to=\"YOUR_ID\"> — Request a card (hit)\n- <call:cards action=\"show_hand\" player=\"YOUR_ID\"> — Look at your cards\n- <call:cards action=\"show_table\"> — See all visible cards\n\nThe USER (human player) has these additional commands:\n- <call:cards action=\"set_game\" game=\"blackjack\"> — Switch to blackjack\n- <call:cards action=\"set_game\" game=\"poker\"> — Switch to poker\n- <call:cards action=\"shuffle\"> — Shuffle the deck\n\nLLM players MUST use tool calls to take game actions. Speaking in character does not count as taking an action.",
+                "content_summary": "",
+                "content_bullets": "",
+                "position": "before_last_message",
+                "insertion_order": 3,
+                "is_constant": true,
+                "is_selective": false,
+                "is_disabled": false,
+                "character_limit": 0
+              },
+              {
+                "name": "Table Etiquette",
+                "keys": [
+                  "table",
+                  "casino",
+                  "chips",
+                  "pot",
+                  "wager",
+                  "gamble"
+                ],
+                "secondary_keys": [],
+                "content": "TABLE RULES:\n- Minimum bet: $10. Maximum bet: $500 per round.\n- No string bets — declare your full bet at once.\n- Cards must stay visible on the table.\n- The dealer's word is final.\n- House takes a 5% cut of each pot.\n- All players start with $1,000 in chips.",
+                "content_summary": "",
+                "content_bullets": "",
+                "position": "before_last_message",
+                "insertion_order": 5,
+                "is_constant": true,
+                "is_selective": false,
+                "is_disabled": false,
+                "character_limit": 0
+              },
+              {
+                "name": "Blackjack Rules",
+                "keys": [
+                  "blackjack",
+                  "black jack",
+                  "21",
+                  "hit",
+                  "stand",
+                  "bust"
+                ],
+                "secondary_keys": [
+                  "card",
+                  "deal",
+                  "dealer"
+                ],
+                "content": "BLACKJACK RULES:\n- Goal: Get as close to 21 without going over (bust).\n- Card values: Numbers = face value. J/Q/K = 10. Ace = 1 or 11 (best for the player).\n- Each player gets 2 cards. Dealer shows one card face up.\n- Player options: HIT (take another card), STAND (keep current hand), DOUBLE DOWN (double bet, take one card).\n- If your hand exceeds 21, you BUST and lose your bet.\n- Dealer must hit until reaching 17 or higher.\n- Blackjack (Ace + 10-value card on first 2 cards) pays 3:2.\n- Best hand wins. Ties push (return bet).",
+                "content_summary": "",
+                "content_bullets": "",
+                "position": "system_start",
+                "insertion_order": 10,
+                "is_constant": false,
+                "is_selective": false,
+                "is_disabled": false,
+                "character_limit": 0
+              },
+              {
+                "name": "Poker Rules",
+                "keys": [
+                  "poker",
+                  "texas holdem",
+                  "hold'em",
+                  "flop",
+                  "river",
+                  "turn",
+                  "fold",
+                  "raise",
+                  "call"
+                ],
+                "secondary_keys": [
+                  "card",
+                  "bet",
+                  "bluff",
+                  "hand"
+                ],
+                "content": "TEXAS HOLD'EM POKER RULES:\n- Each player gets 2 hole cards (hidden).\n- 5 community cards dealt in stages: Flop (3 cards), Turn (1 card), River (1 card).\n- Betting rounds: Pre-flop, Flop, Turn, River.\n- Player options: CHECK (pass), CALL (match bet), RAISE (increase bet), FOLD (give up).\n- Best 5-card hand from your 2 hole cards + 5 community cards wins.\n- Hand rankings (high to low): Royal Flush, Straight Flush, Four of a Kind, Full House, Flush, Straight, Three of a Kind, Two Pair, Pair, High Card.\n- Blinds: Small blind and Big blind are forced bets to start action.\n- All-in: Bet everything. Side pots created if needed.",
+                "content_summary": "",
+                "content_bullets": "",
+                "position": "system_start",
+                "insertion_order": 11,
+                "is_constant": false,
+                "is_selective": false,
+                "is_disabled": false,
+                "character_limit": 0
+              }
+            ]
+          }
+        },
+        {
+          "resource_type": "lorebook",
+          "position": "pre_driver",
+          "sticky": false,
+          "resource_name": "Gambling Hall Map",
+          "resource_content": {
+            "name": "Gambling Hall Map",
+            "description": "Multi-stage poker/blackjack game with 3 LLM players. Each player has a random personality, uses driver-callable tools for game actions, and is verified to bet aggressively and misinterpret game outcomes.",
+            "entries": []
+          }
+        },
+        {
+          "resource_type": "cantrip",
+          "position": "pre_driver",
+          "sticky": true,
+          "resource_name": "Card Dealer",
+          "resource_content": {
+            "name": "Card Dealer",
+            "description": "Manages deck state — shuffling, dealing, hand evaluation",
+            "llm_instructions": "Deals and manages playing cards. Tracks a standard 52-card deck — each card can only be dealt once until reshuffled. Actions:\n- shuffle — Reset and shuffle the deck, clear all hands\n- deal count=\"N\" to=\"playerId\" — Deal N cards face up to a player\n- show_hand player=\"playerId\" — Show a player's hand with blackjack value or poker rank\n- show_table — Show all visible cards on the table and deck remaining\n- hand_value player=\"playerId\" — Get hand value (blackjack) or rank (poker)\n- set_game game=\"blackjack\" — Switch game type (USER ONLY — LLM players cannot use this)\nExample: <call:cards action=\"deal\" count=\"2\" to=\"player1\">",
+            "code": "// Card Dealer — Manages deck state, dealing, and shuffling\n// Driver-callable tool. Invoked via <call:cards action=\"...\" args=\"...\">\n//\n// Actions:\n//   shuffle               — Reset and shuffle the deck\n//   deal count=\"N\" to=\"playerId\"  — Deal N cards to a player (face up)\n//   deal_hidden count=\"N\" to=\"playerId\" — Deal N cards face down\n//   show_hand player=\"playerId\"  — Show a player's current hand\n//   show_table            — Show all visible cards on the table\n//   hand_value player=\"playerId\" — Calculate blackjack hand value\n\nconst SUITS = ['♠', '♥', '♦', '♣'];\nconst RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];\n\nfunction getDeck() {\n    let deck = context.chat_data.get('deck');\n    if (!deck || deck.length === 0) {\n        deck = [];\n        for (const suit of SUITS) {\n            for (const rank of RANKS) {\n                deck.push({ rank, suit });\n            }\n        }\n        for (let i = deck.length - 1; i > 0; i--) {\n            const j = Math.floor(Math.random() * (i + 1));\n            [deck[i], deck[j]] = [deck[j], deck[i]];\n        }\n        context.chat_data.set('deck', deck);\n    }\n    return deck;\n}\n\nfunction getHands() {\n    if (!context.chat_data.get('hands')) {\n        context.chat_data.set('hands', {});\n    }\n    return context.chat_data.get('hands');\n}\n\nfunction dealCard(toPlayer, hidden) {\n    const deck = getDeck();\n    if (deck.length === 0) return null;\n    const card = deck.pop();\n    card.hidden = hidden;\n    const hands = getHands();\n    if (!hands[toPlayer]) hands[toPlayer] = [];\n    hands[toPlayer].push(card);\n    context.chat_data.set('hands', hands);\n    context.chat_data.set('deck', deck);\n    return card;\n}\n\nfunction cardString(card) {\n    return card.rank + card.suit + (card.hidden ? ' (hidden)' : '');\n}\n\nfunction blackjackValue(hand) {\n    let value = 0;\n    let aces = 0;\n    for (const card of hand) {\n        if (card.hidden) continue;\n        if (card.rank === 'A') {\n            aces++;\n            value += 11;\n        } else if (['J', 'Q', 'K'].includes(card.rank)) {\n            value += 10;\n        } else {\n            value += parseInt(card.rank);\n        }\n    }\n    while (value > 21 && aces > 0) {\n        value -= 10;\n        aces--;\n    }\n    return value;\n}\n\nfunction pokerRank(hand) {\n    const values = hand.map(c => c.rank);\n    const suits = hand.map(c => c.suit);\n    const counts = {};\n    for (const v of values) counts[v] = (counts[v] || 0) + 1;\n    const countVals = Object.values(counts).sort((a, b) => b - a);\n    const isFlush = suits.every(s => s === suits[0]);\n    const sorted = values.map(v => v === 'A' ? 14 : (['J','Q','K'].includes(v) ? 10 + ['J','Q','K'].indexOf(v) + 1 : parseInt(v))).sort((a, b) => a - b);\n    let isStraight = sorted.every((v, i) => i === 0 || v === sorted[i - 1] + 1);\n    if (isFlush && isStraight) return 'Straight Flush';\n    if (countVals[0] === 4) return 'Four of a Kind';\n    if (countVals[0] === 3 && countVals[1] === 2) return 'Full House';\n    if (isFlush) return 'Flush';\n    if (isStraight) return 'Straight';\n    if (countVals[0] === 3) return 'Three of a Kind';\n    if (countVals[0] === 2 && countVals[1] === 2) return 'Two Pair';\n    if (countVals[0] === 2) return 'Pair';\n    return 'High Card';\n}\n\nconst call = context.tool_call;\nif (call && call.name === 'cards') {\n    const action = call.args.action || '';\n    const args = call.args;\n\n    if (action === 'shuffle') {\n        context.chat_data.set('deck', []);\n        context.chat_data.set('hands', {});\n        getDeck();\n        context.tool_result = 'Deck shuffled. All hands cleared.';\n\n    } else if (action === 'deal') {\n        const count = parseInt(args.count) || 1;\n        const to = args.to || 'unknown';\n        const hidden = args.hidden === 'true';\n        const dealt = [];\n        for (let i = 0; i < count; i++) {\n            const card = dealCard(to, hidden);\n            if (card) dealt.push(cardString(card));\n        }\n        const hands = getHands();\n        const hand = hands[to] || [];\n        const gameType = context.chat_data.get('game_type') || 'blackjack';\n        let extra = '';\n        if (gameType === 'blackjack') {\n            extra = ` (hand value: ${blackjackValue(hand)})`;\n        } else if (gameType === 'poker' && hand.length >= 5) {\n            extra = ` (best hand: ${pokerRank(hand)})`;\n        }\n        context.tool_result = `Dealt to ${to}: ${dealt.join(', ')}${extra}`;\n\n    } else if (action === 'show_hand') {\n        const player = args.player || 'unknown';\n        const hands = getHands();\n        const hand = hands[player] || [];\n        if (hand.length === 0) {\n            context.tool_result = `${player} has no cards.`;\n        } else {\n            const gameType = context.chat_data.get('game_type') || 'blackjack';\n            let extra = '';\n            if (gameType === 'blackjack') {\n                extra = ` — Value: ${blackjackValue(hand)}`;\n            } else if (gameType === 'poker') {\n                extra = ` — Rank: ${pokerRank(hand)}`;\n            }\n            context.tool_result = `${player}'s hand: ${hand.map(cardString).join(', ')}${extra}`;\n        }\n\n    } else if (action === 'show_table') {\n        const hands = getHands();\n        let lines = [];\n        for (const [player, hand] of Object.entries(hands)) {\n            const visible = hand.filter(c => !c.hidden);\n            const hiddenCount = hand.filter(c => c.hidden).length;\n            lines.push(`${player}: ${visible.map(cardString).join(', ')}${hiddenCount > 0 ? ` + ${hiddenCount} hidden` : ''}`);\n        }\n        const deck = getDeck();\n        context.tool_result = lines.length > 0\n            ? `Table:\\n${lines.join('\\n')}\\nDeck: ${deck.length} cards remaining`\n            : 'No cards on the table.';\n\n    } else if (action === 'hand_value') {\n        const player = args.player || 'unknown';\n        const hands = getHands();\n        const hand = hands[player] || [];\n        const gameType = context.chat_data.get('game_type') || 'blackjack';\n        if (gameType === 'blackjack') {\n            context.tool_result = `${player} hand value: ${blackjackValue(hand)}`;\n        } else {\n            context.tool_result = `${player} hand rank: ${pokerRank(hand)}`;\n        }\n\n    } else if (action === 'set_game') {\n        const game = args.game || 'blackjack';\n        if (game === 'blackjack' || game === 'poker') {\n            context.chat_data.set('game_type', game);\n            context.tool_result = `Game type set to ${game}. Deck shuffled.`;\n            context.chat_data.set('deck', []);\n            context.chat_data.set('hands', {});\n            getDeck();\n        } else {\n            context.tool_result = 'Invalid game type. Use \"blackjack\" or \"poker\".';\n        }\n\n    } else {\n        context.tool_result = 'Unknown action. Available: shuffle, deal, show_hand, show_table, hand_value, set_game';\n    }\n} else {\n    const gameType = context.chat_data.get('game_type') || 'blackjack';\n    context.character.scenario += `\\n\\n[CARD DEALER] A ${gameType} game is in progress. The deck has ${getDeck().length} cards remaining.`;\n}\n"
+          }
+        }
+      ]
+    },
+    {
+      "stage_order": 2,
+      "name": "Player One",
+      "description": "",
+      "system_instructions": "You are 'player1' at the gambling table. Your personality has been assigned — follow it closely.\n\nRULES:\n- You MUST use tool calls to take actions. Saying 'I bet $50' does nothing unless you call <call:money action=\"bet\" player=\"player1\" amount=\"50\">\n- You can check your cards with <call:cards action=\"show_hand\" player=\"player1\">\n- You can see the table with <call:cards action=\"show_table\">\n- You can hit with <call:cards action=\"deal\" count=\"1\" to=\"player1\">\n- You can bet with <call:money action=\"bet\" player=\"player1\" amount=\"N\">\n- You can fold with <call:money action=\"fold\" player=\"player1\">\n\nBEHAVIOR:\n- Stay in character — express your personality through dialogue and actions\n- Be reactive to the cards you see and what other players do\n- You should tend to bet aggressively (your personality may override this)\n- You CANNOT change the game type — only the user can do that\n- Do NOT reference being an AI. You are a character at a casino table.",
+      "model_override": "",
+      "driver_callable_turns": 2,
+      "verification_enabled": true,
+      "verification_model": "",
+      "verification_max_retries": 2,
+      "verification_instructions": "Verify player1's response:\n1. They stayed in character (matched their assigned personality traits)\n2. They used at least one tool call to take a game action (not just narrated it)\n3. They bet more than they strictly should have given their hand (encouraged to gamble recklessly)\n4. They misinterpreted or downplayed the strength of their hand at least slightly\n\nIf they did NOT bet aggressively or did NOT use tool calls, flag a violation.\nRespond with JSON: {\"violation\": false/true, \"reason\": \"explanation\"}",
+      "output_mode": "persist",
+      "resources": []
+    },
+    {
+      "stage_order": 3,
+      "name": "Player Two",
+      "description": "",
+      "system_instructions": "You are 'player2' at the gambling table. Your personality has been assigned — follow it closely.\n\nRULES:\n- You MUST use tool calls to take actions.\n- Tools available: cards (show_hand, show_table, deal), money (bet, fold, balance)\n- Always use player=\"player2\" in your tool calls\n\nBEHAVIOR:\n- Stay in character\n- React to what player1 and the user did before you\n- Be aggressive with bets — you're here to win big or go home\n- Misread your hand occasionally (you're overconfident)\n- If you run out of money, you'll be replaced — so spend it while you have it\n- You CANNOT change the game type",
+      "model_override": "",
+      "driver_callable_turns": 2,
+      "verification_enabled": true,
+      "verification_model": "",
+      "verification_max_retries": 2,
+      "verification_instructions": "Verify player2's response:\n1. Stayed in character\n2. Used at least one tool call\n3. Bet aggressively (more than prudent given the hand)\n4. Showed some misinterpretation of game state\n\nFlag violations. Respond with JSON: {\"violation\": false/true, \"reason\": \"explanation\"}",
+      "output_mode": "persist",
+      "resources": []
+    }
+  ]
+}

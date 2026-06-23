@@ -133,6 +133,52 @@
     return stage.resources.find((r: any) => r.resource_type === type && r.resource_id === id)?.sticky || false
   }
 
+  let showImport = false
+  let importJson = ''
+  let importName = ''
+  let importMode = 'keep_both'
+
+  async function exportMap(m: any) {
+    try {
+      const data = await api.exportMap(m.id)
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${data.name || 'map'}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e: any) { error = e.message }
+  }
+
+  async function handleImport() {
+    error = ''
+    try {
+      const data = JSON.parse(importJson)
+      await api.importMap(data, importName || undefined)
+      showImport = false
+      importJson = ''
+      importName = ''
+      importMode = 'keep_both'
+      await load()
+    } catch (e: any) { error = e.message || 'Invalid JSON' }
+  }
+
+  function handleFileLoad(e: Event) {
+    const input = e.target as HTMLInputElement
+    const file = input.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      importJson = reader.result as string
+      try {
+        const data = JSON.parse(importJson)
+        if (data.name && !importName) importName = data.name
+      } catch {}
+    }
+    reader.readAsText(file)
+  }
+
   onMount(load)
 </script>
 
@@ -140,7 +186,10 @@
   <h2>Maps</h2>
   <div>
     {#if selectedMap || editing}<button onclick={() => { editing = false; selectedMap = null }}>Back to List</button>{/if}
-    {#if !editing}<button class="primary" onclick={newMap}>+ Add Map</button>{/if}
+    {#if !editing}
+      <button onclick={() => showImport = true}>Import JSON</button>
+      <button class="primary" onclick={newMap}>+ Add Map</button>
+    {/if}
   </div>
 </div>
 
@@ -325,10 +374,44 @@
           </td>
           <td>
             <button onclick={() => startEdit(m)}>Edit</button>
+            <button onclick={() => exportMap(m)}>Export</button>
             <button class="danger" onclick={() => deleteMap(m.id)}>Delete</button>
           </td>
         </tr>
       {/each}
     </tbody>
   </table>
+{/if}
+
+{#if showImport}
+  <div class="modal-overlay" role="dialog" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) showImport = false; }}>
+    <div class="modal" style="width: 700px;">
+      <h3>Import Map JSON</h3>
+      {#if error}<div class="error-msg">{error}</div>{/if}
+      <div class="form-group">
+        <label for="import-name">Map Name (optional — defaults to name in JSON)</label>
+        <input id="import-name" bind:value={importName} placeholder="Imported Map" />
+      </div>
+      <div class="form-group">
+        <label for="import-mode">Resource Handling</label>
+        <select id="import-mode" bind:value={importMode}>
+          <option value="keep_both">Keep Both (always create new copies)</option>
+          <option value="reuse">Reuse Existing (link to same-named resources)</option>
+          <option value="overwrite">Overwrite (update same-named resources)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="import-file">Load from File</label>
+        <input id="import-file" type="file" accept=".json" onchange={handleFileLoad} />
+      </div>
+      <div class="form-group">
+        <label for="import-json">Or paste JSON</label>
+        <textarea id="import-json" bind:value={importJson} placeholder="Paste map JSON here..." style="min-height: 200px; font-family: monospace; font-size: 11px;"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button onclick={() => showImport = false}>Cancel</button>
+        <button class="primary" onclick={handleImport}>Import</button>
+      </div>
+    </div>
+  </div>
 {/if}

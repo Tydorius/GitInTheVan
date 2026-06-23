@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -481,7 +482,7 @@ context.character.scenario += " [FLOW_TEST_MEMORY] The time of day is evening.";
         memories = tc.list_memories(conv_id)
         has_time = any(m["key"] == "time" for m in memories)
         if has_time:
-            pass_test(f"Memory 'time' saved to database")
+            pass_test("Memory 'time' saved to database")
         else:
             info("No memories found yet (LLM may not have emitted tags)")
 
@@ -908,6 +909,149 @@ def test_content_bypass(tc: TestClient) -> bool:
     return True
 
 
+def test_map_pipeline(tc: TestClient) -> bool:
+    section("TEST: Map Pipeline (Multi-Stage)")
+
+    map_json_path = Path(__file__).parent.parent / "tests" / "Gambling.json"
+    if not map_json_path.exists():
+        fail_test(f"Gambling.json not found at {map_json_path}")
+        return False
+
+    map_data = json.loads(map_json_path.read_text(encoding="utf-8"))
+    pass_test(f"Loaded map JSON: {map_data['name']} ({len(map_data.get('stages', []))} stages)")
+
+    resp = httpx.post(
+        f"{tc.server}/api/maps/import",
+        json={"data": map_data, "name": "FLOW_TEST_Gambling"},
+        headers=tc.test_headers(),
+        timeout=30.0,
+    )
+    if resp.status_code != 201:
+        fail_test(f"Map import failed: {resp.status_code} {resp.text[:200]}")
+        return False
+
+    map_id = resp.json()["id"]
+    stage_count = len(resp.json().get("stages", []))
+    pass_test(f"Map imported: {map_id[:8]}... ({stage_count} stages)")
+
+    update_resp = httpx.put(
+        f"{tc.server}/api/maps/{map_id}",
+        json={"tag": "flow-test-gambling", "is_active": True},
+        headers=tc.test_headers(),
+        timeout=10.0,
+    )
+    if update_resp.status_code == 200 and update_resp.json().get("tag") == "flow-test-gambling":
+        pass_test("Map tagged as 'flow-test-gambling' and activated")
+    else:
+        fail_test(f"Map tag/update failed: {update_resp.status_code}")
+        httpx.delete(f"{tc.server}/api/maps/{map_id}", headers=tc.test_headers(), timeout=10.0)
+        return False
+
+    v_settings = httpx.get(
+        f"{tc.server}/api/verification/settings",
+        headers=tc.test_headers(),
+        timeout=10.0,
+    )
+    if not v_settings.json().get("verification_endpoint_id"):
+        httpx.put(
+            f"{tc.server}/api/verification/settings",
+            json={
+                "verification_enabled": True,
+                "verification_endpoint_id": tc.endpoint_id,
+                "verification_model": tc.model,
+            },
+            headers=tc.test_headers(),
+            timeout=10.0,
+        )
+        pass_test("Enabled verification for map test (using test endpoint)")
+    else:
+        pass_test("Verification already configured")
+
+    section("TEST: Map Pipeline — Sending Gambling Request")
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are at a casino gambling table. The game is blackjack. "
+                "Keep responses under 150 words. Use tool calls for all game actions."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "I sit down at the table. Deal me in. "
+                "<call:cards action=\"set_game\" game=\"blackjack\">"
+                "<call:cards action=\"shuffle\">"
+                "<call:money action=\"init\" player=\"user\" amount=\"1000\">"
+                "<call:money action=\"init\" player=\"player1\" amount=\"1000\">"
+                "<call:money action=\"init\" player=\"player2\" amount=\"1000\">"
+            ),
+        },
+    ]
+
+    info("Sending request through map pipeline (3 stages: Dealer + 2 LLM players)...")
+    info("This may take 30-60 seconds due to multiple LLM calls...")
+
+    try:
+        result = tc.send_proxy_request(messages)
+    except Exception as e:
+        fail_test(f"Map pipeline request failed: {e}")
+        httpx.delete(f"{tc.server}/api/maps/{map_id}", headers=tc.test_headers(), timeout=10.0)
+        return False
+
+    if isinstance(result, dict):
+        content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        if content:
+            pass_test(f"Map pipeline produced response ({len(content)} chars)")
+            info(f"Response preview: {content[:200]}...")
+
+            has_error = result.get("error") is not None
+            if has_error:
+                fail_test(f"Map returned error: {result.get('error')}")
+            else:
+                pass_test("No errors in map pipeline response")
+        else:
+            fail_test("Empty response from map pipeline")
+            info(f"Full response: {json.dumps(result)[:300]}")
+    else:
+        fail_test(f"Unexpected response type: {str(result)[:200]}")
+
+    export_resp = httpx.get(
+        f"{tc.server}/api/maps/{map_id}/export",
+        headers=tc.test_headers(),
+        timeout=10.0,
+    )
+    if export_resp.status_code == 200:
+        exported = export_resp.json()
+        if exported.get("name") and len(exported.get("stages", [])) > 0:
+            pass_test(f"Map export works ({len(exported['stages'])} stages)")
+            has_resources = any(
+                len(s.get("resources", [])) > 0 for s in exported.get("stages", [])
+            )
+            if has_resources:
+                pass_test("Exported map contains embedded resources (cantrips/lorebooks)")
+            else:
+                info("Exported map has no embedded resources")
+        else:
+            fail_test("Map export returned incomplete data")
+    else:
+        fail_test(f"Map export failed: {export_resp.status_code}")
+
+    httpx.delete(f"{tc.server}/api/maps/{map_id}", headers=tc.test_headers(), timeout=10.0)
+    pass_test("Cleaned up test map")
+
+    for endpoint in ["/api/cantrips", "/api/lorebooks"]:
+        resp_list = httpx.get(f"{tc.server}{endpoint}", headers=tc.test_headers(), timeout=10.0)
+        resource_key = endpoint.split("/")[-1]
+        for item in resp_list.json().get(resource_key, []):
+            name = item.get("name", "")
+            if name in ("Card Dealer", "Money Tracker", "Personality Manager", "Gambling Hall Rules", "Gambling Hall Map"):
+                httpx.delete(f"{tc.server}{endpoint}/{item['id']}", headers=tc.test_headers(), timeout=10.0)
+    pass_test("Cleaned up imported cantrips and lorebooks")
+
+    return True
+
+
 def main() -> None:
     import argparse
 
@@ -920,7 +1064,7 @@ def main() -> None:
     server_url = args.server
 
     print(f"\n{'=' * 70}")
-    print(f"  GitInTheVan - Flow-Based Integration Tests")
+    print("  GitInTheVan - Flow-Based Integration Tests")
     print(f"  Server: {server_url}")
     print(f"  Admin: {args.admin_user}")
     print(f"{'=' * 70}")
@@ -950,6 +1094,7 @@ def main() -> None:
     results.append(("jslorebook Extraction", test_jslorebook_extraction(tc)))
     results.append(("Prefill Normalization", test_prefill_normalization(tc)))
     results.append(("Content Bypass", test_content_bypass(tc)))
+    results.append(("Map Pipeline", test_map_pipeline(tc)))
 
     tc.cleanup_test_user_resources()
 

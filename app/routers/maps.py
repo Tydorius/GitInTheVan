@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Annotated, Any
 
@@ -56,7 +57,7 @@ class MapUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     tag: str | None = None
-    is_public: str | None = None
+    is_public: bool | None = None
     is_active: bool | None = None
     version: str | None = None
     author: str | None = None
@@ -332,3 +333,295 @@ async def delete_map(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Map not found")
     await db.delete(m)
     await db.commit()
+
+
+@router.get("/{map_id}/export")
+async def export_map(
+    map_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Export a map as a self-contained JSON with embedded lorebook and cantrip content."""
+    result = await db.execute(
+        select(Map)
+        .where(Map.id == map_id)
+        .options(selectinload(Map.stages).selectinload(MapStage.resources))
+    )
+    m = result.scalar_one_or_none()
+    if m is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Map not found")
+    if m.user_id != current_user.id and not m.is_public:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    export_data: dict[str, Any] = {
+        "name": m.name,
+        "description": m.description,
+        "version": m.version,
+        "author": m.author,
+        "global_llm_instructions": m.global_llm_instructions,
+        "stages": [],
+    }
+
+    for stage in sorted(m.stages, key=lambda s: s.stage_order):
+        stage_data: dict[str, Any] = {
+            "stage_order": stage.stage_order,
+            "name": stage.name,
+            "description": stage.description,
+            "system_instructions": stage.system_instructions,
+            "model_override": stage.model_override,
+            "driver_callable_turns": stage.driver_callable_turns,
+            "verification_enabled": stage.verification_enabled,
+            "verification_model": stage.verification_model,
+            "verification_max_retries": stage.verification_max_retries,
+            "verification_instructions": stage.verification_instructions,
+            "output_mode": stage.output_mode,
+            "resources": [],
+        }
+
+        for res in stage.resources:
+            res_data: dict[str, Any] = {
+                "resource_type": res.resource_type,
+                "position": res.position,
+                "sticky": res.sticky,
+            }
+
+            if res.resource_type == "lorebook":
+                from app.models.lorebook import Lorebook
+                lb_result = await db.execute(
+                    select(Lorebook)
+                    .where(Lorebook.id == res.resource_id)
+                    .options(selectinload(Lorebook.entries))
+                )
+                lb = lb_result.scalar_one_or_none()
+                if lb:
+                    res_data["resource_name"] = lb.name
+                    res_data["resource_content"] = {
+                        "name": lb.name,
+                        "description": lb.description,
+                        "entries": [
+                            {
+                                "name": e.name,
+                                "keys": json.loads(e.keys) if e.keys else [],
+                                "secondary_keys": json.loads(e.secondary_keys) if e.secondary_keys else [],
+                                "content": e.content,
+                                "content_summary": e.content_summary,
+                                "content_bullets": e.content_bullets,
+                                "position": e.position,
+                                "insertion_order": e.insertion_order,
+                                "is_constant": e.is_constant,
+                                "is_selective": e.is_selective,
+                                "is_disabled": e.is_disabled,
+                                "character_limit": e.character_limit,
+                            }
+                            for e in lb.entries
+                        ],
+                    }
+
+            elif res.resource_type == "cantrip":
+                from app.models.cantrip import Cantrip
+                c_result = await db.execute(
+                    select(Cantrip).where(Cantrip.id == res.resource_id)
+                )
+                c = c_result.scalar_one_or_none()
+                if c:
+                    res_data["resource_name"] = c.name
+                    res_data["resource_content"] = {
+                        "name": c.name,
+                        "description": c.description,
+                        "llm_instructions": c.llm_instructions,
+                        "code": c.code,
+                    }
+
+            stage_data["resources"].append(res_data)
+
+        export_data["stages"].append(stage_data)
+
+    return export_data
+
+
+class MapImportRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    data: dict[str, Any]
+    resource_mode: str = "keep_both"  # keep_both | reuse | overwrite
+
+
+@router.post("/import", response_model=MapResponse, status_code=status.HTTP_201_CREATED)
+async def import_map(
+    req: MapImportRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Import a map from exported JSON. Creates copies of embedded lorebooks and cantrips.
+
+    resource_mode controls how duplicate resources are handled:
+    - keep_both (default): Always create new copies
+    - reuse: Link to existing resource with same name+content if found
+    - overwrite: Update existing resource with same name
+    """
+    data = req.data
+    mode = req.resource_mode
+
+    async def _find_existing_lorebook(name: str, user_id: str):
+        from app.models.lorebook import Lorebook
+        result = await db.execute(
+            select(Lorebook).where(Lorebook.user_id == user_id, Lorebook.name == name)
+        )
+        return result.scalar_one_or_none()
+
+    async def _find_existing_cantrip(name: str, user_id: str):
+        from app.models.cantrip import Cantrip
+        result = await db.execute(
+            select(Cantrip).where(Cantrip.user_id == user_id, Cantrip.name == name)
+        )
+        return result.scalar_one_or_none()
+
+    m = Map(
+        user_id=current_user.id,
+        name=req.name or data.get("name", "Imported Map"),
+        description=req.description or data.get("description", ""),
+        tag="",
+        is_public=False,
+        is_active=True,
+        version=data.get("version", "1.0"),
+        author=data.get("author", ""),
+        global_llm_instructions=data.get("global_llm_instructions", ""),
+    )
+    db.add(m)
+    await db.flush()
+
+    for stage_data in data.get("stages", []):
+        stage = MapStage(
+            map_id=m.id,
+            stage_order=stage_data.get("stage_order", 1),
+            name=stage_data.get("name", "Stage"),
+            description=stage_data.get("description", ""),
+            system_instructions=stage_data.get("system_instructions", ""),
+            model_override=stage_data.get("model_override", ""),
+            driver_callable_turns=stage_data.get("driver_callable_turns", 0),
+            verification_enabled=stage_data.get("verification_enabled", False),
+            verification_model=stage_data.get("verification_model", ""),
+            verification_max_retries=stage_data.get("verification_max_retries", 2),
+            verification_instructions=stage_data.get("verification_instructions", ""),
+            output_mode=stage_data.get("output_mode", "persist"),
+        )
+        db.add(stage)
+        await db.flush()
+
+        for res_data in stage_data.get("resources", []):
+            res_type = res_data.get("resource_type", "")
+            content = res_data.get("resource_content", {})
+
+            if res_type == "lorebook" and content:
+                from app.models.lorebook import Lorebook
+                from app.models.lorebook_entry import LorebookEntry
+                lb_name = content.get("name", "Imported Lorebook")
+
+                resource_id = None
+                if mode != "keep_both":
+                    existing_lb = await _find_existing_lorebook(lb_name, current_user.id)
+                    if existing_lb:
+                        if mode == "reuse":
+                            resource_id = existing_lb.id
+                        elif mode == "overwrite":
+                            existing_lb.description = content.get("description", "")
+                            await db.flush()
+                            from sqlalchemy import delete as sa_delete
+                            await db.execute(sa_delete(LorebookEntry).where(LorebookEntry.lorebook_id == existing_lb.id))
+                            for entry_data in content.get("entries", []):
+                                db.add(LorebookEntry(
+                                    lorebook_id=existing_lb.id,
+                                    name=entry_data.get("name", ""),
+                                    keys=json.dumps(entry_data.get("keys", [])),
+                                    secondary_keys=json.dumps(entry_data.get("secondary_keys", entry_data.get("secondary_key", []))),
+                                    content=entry_data.get("content", ""),
+                                    content_summary=entry_data.get("content_summary", ""),
+                                    content_bullets=entry_data.get("content_bullets", ""),
+                                    position=entry_data.get("position", "before_last_message"),
+                                    insertion_order=entry_data.get("insertion_order", 10),
+                                    is_constant=entry_data.get("is_constant", False),
+                                    is_selective=entry_data.get("is_selective", False),
+                                    is_disabled=entry_data.get("is_disabled", False),
+                                    character_limit=entry_data.get("character_limit", 0),
+                                ))
+                            resource_id = existing_lb.id
+
+                if not resource_id:
+                    lb = Lorebook(
+                        user_id=current_user.id,
+                        name=lb_name,
+                        description=content.get("description", ""),
+                        is_active=True,
+                    )
+                    db.add(lb)
+                    await db.flush()
+
+                    for entry_data in content.get("entries", []):
+                        db.add(LorebookEntry(
+                            lorebook_id=lb.id,
+                            name=entry_data.get("name", ""),
+                            keys=json.dumps(entry_data.get("keys", [])),
+                            secondary_keys=json.dumps(entry_data.get("secondary_keys", entry_data.get("secondary_key", []))),
+                            content=entry_data.get("content", ""),
+                            content_summary=entry_data.get("content_summary", ""),
+                            content_bullets=entry_data.get("content_bullets", ""),
+                            position=entry_data.get("position", "before_last_message"),
+                            insertion_order=entry_data.get("insertion_order", 10),
+                            is_constant=entry_data.get("is_constant", False),
+                            is_selective=entry_data.get("is_selective", False),
+                            is_disabled=entry_data.get("is_disabled", False),
+                            character_limit=entry_data.get("character_limit", 0),
+                        ))
+                    resource_id = lb.id
+
+            elif res_type == "cantrip" and content:
+                from app.models.cantrip import Cantrip
+                c_name = content.get("name", "Imported Cantrip")
+
+                resource_id = None
+                if mode != "keep_both":
+                    existing_c = await _find_existing_cantrip(c_name, current_user.id)
+                    if existing_c:
+                        if mode == "reuse":
+                            resource_id = existing_c.id
+                        elif mode == "overwrite":
+                            existing_c.description = content.get("description", "")
+                            existing_c.llm_instructions = content.get("llm_instructions", "")
+                            existing_c.code = content.get("code", "")
+                            await db.flush()
+                            resource_id = existing_c.id
+
+                if not resource_id:
+                    c = Cantrip(
+                        user_id=current_user.id,
+                        name=c_name,
+                        description=content.get("description", ""),
+                        llm_instructions=content.get("llm_instructions", ""),
+                        code=content.get("code", ""),
+                        is_active=True,
+                        run_driver_callable=True,
+                    )
+                    db.add(c)
+                    await db.flush()
+                    resource_id = c.id
+
+            else:
+                resource_id = ""
+
+            if resource_id:
+                db.add(MapStageResource(
+                    map_stage_id=stage.id,
+                    resource_type=res_type,
+                    resource_id=resource_id,
+                    position=res_data.get("position", "pre_driver"),
+                    sticky=res_data.get("sticky", False),
+                ))
+
+    await db.commit()
+
+    result = await db.execute(
+        select(Map)
+        .where(Map.id == m.id)
+        .options(selectinload(Map.stages).selectinload(MapStage.resources))
+    )
+    return _map_to_response(result.scalar_one())

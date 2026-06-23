@@ -215,6 +215,10 @@ export const api = {
     request<any>(`/api/maps/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteMap: (id: string) =>
     request<void>(`/api/maps/${id}`, { method: 'DELETE' }),
+  exportMap: (id: string) =>
+    request<any>(`/api/maps/${id}/export`),
+  importMap: (data: any, name?: string) =>
+    request<any>('/api/maps/import', { method: 'POST', body: JSON.stringify({ data, name }) }),
 
   // API Keys (Per-Endpoint)
   listApiKeys: () =>
