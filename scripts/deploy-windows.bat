@@ -15,7 +15,7 @@ set "PYTHON_CMD="
 set PYOK=0
 
 python --version >nul 2>&1
-if errorlevel 1 goto :check_python_install
+if errorlevel 1 goto :python_not_found
 
 python --version
 for /f "tokens=2" %%v in ('python --version 2^>^&1') do set PYVER=%%v
@@ -25,14 +25,57 @@ for /f "tokens=1,2 delims=." %%a in ("!PYVER!") do (
 )
 if !PYMAJOR! GTR 3 goto :python_ok_init
 if !PYMAJOR! EQU 3 if !PYMINOR! GEQ 12 goto :python_ok_init
-goto :check_python_install
 
-:python_ok_init
-for /f "delims=" %%p in ('python -c "import sys; print(sys.executable)" 2^>^&1') do set "PYTHON_CMD=%%p"
-set PYOK=1
-goto :python_done
+REM python found but too old — search for a newer version
+echo.
+echo Python !PYMAJOR!.!PYMINOR! found but 3.12+ required.
+echo Searching for newer Python installations...
 
-:check_python_install
+REM Try py launcher first
+py -3.12 --version >nul 2>&1
+if not errorlevel 1 (
+    echo Found Python 3.12 via py launcher.
+    for /f "delims=" %%p in ('py -3.12 -c "import sys; print(sys.executable)" 2^>^&1') do set "PYTHON_CMD=%%p"
+    goto :python_done
+)
+py -3.13 --version >nul 2>&1
+if not errorlevel 1 (
+    echo Found Python 3.13 via py launcher.
+    for /f "delims=" %%p in ('py -3.13 -c "import sys; print(sys.executable)" 2^>^&1') do set "PYTHON_CMD=%%p"
+    goto :python_done
+)
+
+REM Search user APPDATA (per-user installs)
+for %%P in (312 313 314) do (
+    if exist "%LOCALAPPDATA%\Programs\Python\Python%%P\python.exe" (
+        set "PYTHON_CMD=%LOCALAPPDATA%\Programs\Python\Python%%P\python.exe"
+        echo Found Python at !PYTHON_CMD!
+        goto :python_done
+    )
+)
+
+REM Search Program Files (system-wide installs)
+for %%P in (312 313 314) do (
+    if exist "C:\Program Files\Python%%P\python.exe" (
+        set "PYTHON_CMD=C:\Program Files\Python%%P\python.exe"
+        echo Found Python at !PYTHON_CMD!
+        goto :python_done
+    )
+    if exist "C:\Program Files (x86)\Python%%P\python.exe" (
+        set "PYTHON_CMD=C:\Program Files (x86)\Python%%P\python.exe"
+        echo Found Python at !PYTHON_CMD!
+        goto :python_done
+    )
+)
+
+REM No newer version found — offer to install
+goto :python_offer_install
+
+:python_not_found
+REM No python at all in PATH
+echo Python not found in PATH.
+
+:python_offer_install
 echo.
 where winget >nul 2>&1
 if errorlevel 1 (

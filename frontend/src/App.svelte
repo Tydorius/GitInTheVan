@@ -13,16 +13,16 @@
   import Admin from './pages/Admin.svelte'
 
   const navItems = [
-    { path: '/', label: 'Dashboard', icon: 'D' },
-    { path: '/endpoints', label: 'Endpoints', icon: 'E' },
-    { path: '/cantrips', label: 'Cantrips', icon: 'C' },
-    { path: '/lorebooks', label: 'Lorebooks', icon: 'L' },
-    { path: '/verification', label: 'Verification', icon: 'V' },
-    { path: '/memories', label: 'Memories', icon: 'M' },
-    { path: '/maps', label: 'Maps', icon: 'A' },
-    { path: '/packs', label: 'Content Packs', icon: 'P' },
-    { path: '/settings', label: 'Settings', icon: 'S' },
-    { path: '/admin', label: 'Admin', icon: 'X', admin: true },
+    { path: '/', label: 'Dashboard', icon: '◧' },
+    { path: '/endpoints', label: 'Endpoints', icon: '⇄' },
+    { path: '/cantrips', label: 'Cantrips', icon: '⚡' },
+    { path: '/lorebooks', label: 'Lorebooks', icon: '📖' },
+    { path: '/verification', label: 'Verification', icon: '✓' },
+    { path: '/memories', label: 'Memories', icon: '🧠' },
+    { path: '/maps', label: 'Maps', icon: '🗺' },
+    { path: '/packs', label: 'Content Packs', icon: '📦' },
+    { path: '/settings', label: 'Settings', icon: '⚙' },
+    { path: '/admin', label: 'Admin', icon: '🛡', admin: true },
   ]
 
   let sidebarCollapsed = true

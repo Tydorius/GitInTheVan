@@ -20,29 +20,60 @@ if command -v python3 &> /dev/null; then
 fi
 
 if [ -z "$PYTHON_CMD" ]; then
-    echo "Python 3.12+ is required but was not found."
-    if command -v brew &> /dev/null; then
-        read -p "Would you like to install Python 3.12 via Homebrew? [y/n]: " INSTALL_PY
-        if [[ "$INSTALL_PY" =~ ^[Yy]$ ]]; then
-            echo "Installing Python 3.12..."
-            brew install python@3.12
-            hash -r 2>/dev/null
-            if command -v python3.12 &> /dev/null; then
-                PYTHON_CMD="python3.12"
+    echo "Python 3.12+ is required. Searching for newer Python installations..."
+
+    for PY_CAND in python3.14 python3.13 python3.12; do
+        if command -v "$PY_CAND" &> /dev/null; then
+            echo "Found $PY_CAND"
+            PYTHON_CMD="$PY_CAND"
+            break
+        fi
+    done
+
+    if [ -z "$PYTHON_CMD" ]; then
+        for PY_PATH in \
+            /opt/homebrew/bin/python3.12 /opt/homebrew/bin/python3.13 /opt/homebrew/bin/python3.14 \
+            /usr/local/bin/python3.12 /usr/local/bin/python3.13 /usr/local/bin/python3.14 \
+            /Library/Frameworks/Python.framework/Versions/3.12/bin/python3 \
+            /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 \
+            /Library/Frameworks/Python.framework/Versions/3.14/bin/python3; do
+            if [ -x "$PY_PATH" ]; then
+                echo "Found Python at $PY_PATH"
+                PYTHON_CMD="$PY_PATH"
+                break
+            fi
+        done
+    fi
+
+    if [ -z "$PYTHON_CMD" ]; then
+        echo "Python 3.12+ not found."
+        if command -v brew &> /dev/null; then
+            read -p "Would you like to install Python 3.12 via Homebrew? [y/n]: " INSTALL_PY
+            if [[ "$INSTALL_PY" =~ ^[Yy]$ ]]; then
+                echo "Installing Python 3.12..."
+                brew install python@3.12
+                hash -r 2>/dev/null
+                if command -v python3.12 &> /dev/null; then
+                    PYTHON_CMD="python3.12"
+                elif [ -x /opt/homebrew/bin/python3.12 ]; then
+                    PYTHON_CMD="/opt/homebrew/bin/python3.12"
+                elif [ -x /usr/local/bin/python3.12 ]; then
+                    PYTHON_CMD="/usr/local/bin/python3.12"
+                else
+                    echo "Installation completed but python3.12 not found."
+                    echo "Please open a new terminal window and re-run this script."
+                    exit 1
+                fi
             else
-                echo "Installation completed but python3.12 not found in PATH."
-                echo "Please open a new terminal window and re-run this script."
+                echo "Please install Python 3.12+ from https://python.org or: brew install python@3.12"
                 exit 1
             fi
         else
-            echo "Please install Python 3.12+ from https://python.org or: brew install python@3.12"
+            echo "Homebrew is not installed."
+            echo "Please install Python 3.12+ from https://python.org"
+            echo "Or install Homebrew first: https://brew.sh"
             exit 1
         fi
-    else
-        echo "Homebrew is not installed."
-        echo "Please install Python 3.12+ from https://python.org"
-        echo "Or install Homebrew first: https://brew.sh"
-        exit 1
     fi
 fi
 echo

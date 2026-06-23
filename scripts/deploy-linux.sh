@@ -20,20 +20,44 @@ if command -v python3 &> /dev/null; then
 fi
 
 if [ -z "$PYTHON_CMD" ]; then
-    echo "Python 3.12+ is required but was not found."
+    echo "Python 3.12+ is required. Searching for newer Python installations..."
 
-    PKG_MGR=""
-    INSTALL_CMD=""
-    if command -v apt-get &> /dev/null; then
-        PKG_MGR="apt-get"
-        INSTALL_CMD="sudo apt-get update && sudo apt-get install -y python3.12 python3.12-venv"
-    elif command -v dnf &> /dev/null; then
-        PKG_MGR="dnf"
-        INSTALL_CMD="sudo dnf install -y python3.12"
-    elif command -v pacman &> /dev/null; then
-        PKG_MGR="pacman"
-        INSTALL_CMD="sudo pacman -S --noconfirm python"
+    for PY_CAND in python3.14 python3.13 python3.12; do
+        if command -v "$PY_CAND" &> /dev/null; then
+            echo "Found $PY_CAND"
+            PYTHON_CMD="$PY_CAND"
+            break
+        fi
+    done
+
+    if [ -z "$PYTHON_CMD" ]; then
+        for PY_PATH in \
+            /usr/bin/python3.12 /usr/bin/python3.13 /usr/bin/python3.14 \
+            /usr/local/bin/python3.12 /usr/local/bin/python3.13 /usr/local/bin/python3.14 \
+            /opt/python3.12/bin/python3 /opt/python3.13/bin/python3; do
+            if [ -x "$PY_PATH" ]; then
+                echo "Found Python at $PY_PATH"
+                PYTHON_CMD="$PY_PATH"
+                break
+            fi
+        done
     fi
+
+    if [ -z "$PYTHON_CMD" ]; then
+        echo "Python 3.12+ not found."
+
+        PKG_MGR=""
+        INSTALL_CMD=""
+        if command -v apt-get &> /dev/null; then
+            PKG_MGR="apt-get"
+            INSTALL_CMD="sudo apt-get update && sudo apt-get install -y python3.12 python3.12-venv"
+        elif command -v dnf &> /dev/null; then
+            PKG_MGR="dnf"
+            INSTALL_CMD="sudo dnf install -y python3.12"
+        elif command -v pacman &> /dev/null; then
+            PKG_MGR="pacman"
+            INSTALL_CMD="sudo pacman -S --noconfirm python"
+        fi
 
     if [ -n "$PKG_MGR" ]; then
         read -p "Would you like to install Python 3.12 via $PKG_MGR? [y/n]: " INSTALL_PY
