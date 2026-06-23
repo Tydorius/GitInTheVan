@@ -125,7 +125,7 @@
   onMount(load)
 </script>
 
-<div class="page-header"><h2>Settings</h2></div>
+<div class="page-header"><h2>Settings <a class="help-link" href="/help/user-guide.html#settings" target="_blank" title="Open documentation">?</a></h2></div>
 
 {#if error}<div class="error-msg">{error}</div>{/if}
 {#if saved}<div class="success-msg">Settings saved.</div>{/if}

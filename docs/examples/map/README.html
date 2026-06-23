@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gambling Hall Map — Example Content</title>
+    <style>
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --border: #2e3344;
+            --text: #e4e6ef;
+            --text-dim: #8b90a5;
+            --accent: #7c5cfc;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.7;
+            padding: 0;
+        }
+        .container { max-width: 1000px; margin: 0 auto; padding: 40px 24px; }
+        h1 { font-size: 32px; margin-bottom: 8px; color: var(--accent); }
+        h2 { font-size: 24px; margin-top: 48px; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+        h3 { font-size: 18px; margin-top: 24px; margin-bottom: 12px; color: var(--accent); }
+        h4 { font-size: 15px; margin-top: 18px; margin-bottom: 8px; color: var(--text); }
+        p { margin-bottom: 12px; color: var(--text); }
+        ul, ol { margin-bottom: 16px; padding-left: 24px; }
+        li { margin-bottom: 6px; }
+        code { background: var(--surface); padding: 2px 8px; border-radius: 4px; font-family: monospace; font-size: 13px; color: var(--accent); }
+        pre { background: var(--surface); padding: 16px; border-radius: 8px; overflow-x: auto; margin-bottom: 16px; border: 1px solid var(--border); }
+        pre code { background: none; padding: 0; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+        th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+        th { color: var(--text-dim); font-size: 12px; text-transform: uppercase; }
+        .note { background: rgba(124, 92, 252, 0.1); border: 1px solid var(--accent); padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; }
+        .note::before { content: "Note: "; font-weight: bold; color: var(--accent); }
+        a { color: var(--accent); }
+        .back-link { display: inline-block; margin-bottom: 24px; font-size: 13px; }
+    </style>
+</head>
+<body>
+<div class="container">
+
+<a class="back-link" href="../user-guide.html#maps">&larr; Back to User Guide (Maps)</a>
+
+<h1>Gambling Hall Map — Example Content</h1>
+<p>This directory contains a complete example Map for the Maps feature, demonstrating multi-stage LLM gameplay.</p>
+
+<h2>Overview</h2>
+<p>A casino gambling game where the user plays blackjack or poker against 3 AI opponents. Each AI player has a randomly assigned personality and uses driver-callable tools to interact with the game.</p>
+
+<h2>Files</h2>
+<table>
+    <thead><tr><th>File</th><th>Purpose</th></tr></thead>
+    <tbody>
+        <tr><td><code>cantrip_card_dealer.js</code></td><td>Manages deck state — shuffling, dealing, hand evaluation</td></tr>
+        <tr><td><code>cantrip_money_tracker.js</code></td><td>Manages player balances, bets, pot, payouts</td></tr>
+        <tr><td><code>cantrip_personality.js</code></td><td>Assigns random personalities to LLM players, injects as context</td></tr>
+        <tr><td><code>lorebook_gambling_rules.json</code></td><td>Keyword-triggered rules for blackjack and poker</td></tr>
+        <tr><td><code>map_gambling_hall.json</code></td><td>Map configuration — 3-stage pipeline with verification</td></tr>
+    </tbody>
+</table>
+
+<h2 id="setup">Setup</h2>
+<ol>
+    <li><strong>Create the cantrips</strong> — Copy each <code>.js</code> file into a new cantrip:
+        <ul>
+            <li>Card Dealer: Driver-Callable position, timeout 5000ms</li>
+            <li>Money Tracker: Driver-Callable position, timeout 5000ms</li>
+            <li>Personality Manager: Pre-Driver position, timeout 5000ms</li>
+        </ul>
+    </li>
+    <li><strong>Import the lorebook</strong> — Use the Lorebooks page &gt; Import JSON &gt; select <code>lorebook_gambling_rules.json</code></li>
+    <li><strong>Create the Map</strong> — On the Maps page, create a new map and configure stages per <code>map_gambling_hall.json</code>. Attach the cantrips and lorebook to each stage.</li>
+    <li><strong>Set up endpoints</strong> — Configure at least one LLM endpoint. Verification can use the same or a different endpoint.</li>
+    <li><strong>Activate</strong> — Use the tag <code>&lt;#map-gambling#&gt;</code> (or whatever tag you assigned) in your persona or first message.</li>
+</ol>
+<div class="note">For the fastest start, skip steps 1-3 and use the Maps page Import JSON button to import <code>map_gambling_hall.json</code> directly. This creates all embedded cantrips, the lorebook, and the map in one step. You can then inspect each component to learn how it fits together.</div>
+
+<h2>How It Works</h2>
+
+<h3>Pipeline Flow</h3>
+<pre><code>User message &rarr;
+  Stage 1: Dealer (house)
+    &rarr; Shuffles deck, deals cards, manages game state
+    &rarr; Verification: dealer handled things correctly
+  Stage 2: LLM Player 1
+    &rarr; Reacts to cards, places bets, hits/stands/folds
+    &rarr; Verification: player bet aggressively, stayed in character
+  Stage 3: LLM Player 2
+    &rarr; Same as player 1, reacts to player 1's actions too
+    &rarr; Verification: same checks
+&rarr; User sees the combined scene</code></pre>
+
+<h3>Game Commands</h3>
+<p><strong>Human player (user) can:</strong></p>
+<ul>
+    <li><code>&lt;call:cards action="set_game" game="blackjack"&gt;</code> — Switch to blackjack</li>
+    <li><code>&lt;call:cards action="set_game" game="poker"&gt;</code> — Switch to poker</li>
+    <li><code>&lt;call:cards action="deal" count="1" to="user"&gt;</code> — Hit</li>
+    <li><code>&lt;call:cards action="show_hand" player="user"&gt;</code> — See your hand</li>
+    <li><code>&lt;call:cards action="show_table"&gt;</code> — See all visible cards</li>
+    <li><code>&lt;call:cards action="shuffle"&gt;</code> — Reshuffle</li>
+    <li><code>&lt;call:money action="bet" player="user" amount="50"&gt;</code> — Place a bet</li>
+    <li><code>&lt;call:money action="fold" player="user"&gt;</code> — Fold</li>
+    <li><code>&lt;call:money action="balance" player="user"&gt;</code> — Check balance</li>
+</ul>
+<p><strong>LLM players can:</strong></p>
+<ul>
+    <li>All game commands EXCEPT <code>set_game</code> and <code>shuffle</code></li>
+    <li>They use <code>player1</code> and <code>player2</code> as their IDs</li>
+</ul>
+
+<h3>Verification Behavior</h3>
+<p>Each stage has verification that checks:</p>
+<ul>
+    <li><strong>Dealer</strong>: Used tools correctly, didn't play for LLMs, handled bankruptcies</li>
+    <li><strong>LLM Players</strong>: Bet aggressively (more than prudent), stayed in character, used tool calls, showed some misinterpretation of game state</li>
+</ul>
+<p>The LLM players are intentionally flawed opponents — they bet too much and misread their hands. This makes the game entertaining rather than a perfectly optimized AI casino.</p>
+
+<h3>Personality Pool</h3>
+<p>LLM players are randomly assigned one of 8 personalities:</p>
+<ul>
+    <li>The Gambler (reckless, bluffs constantly)</li>
+    <li>The Calculator (analytical, counts cards)</li>
+    <li>The Showman (theatrical, dramatic)</li>
+    <li>The Drunk (slurred speech, surprisingly lucky)</li>
+    <li>The Grifter (smooth cheater)</li>
+    <li>The Amateur (nervous, celebrates small wins)</li>
+    <li>The Veteran (conservative, gives advice)</li>
+    <li>The Cheat (tries to peek at cards)</li>
+</ul>
+<p>Personalities persist within a conversation but re-roll if a player goes broke and is replaced.</p>
+
+<h2>Copy/Paste Instructions</h2>
+
+<h3>Cantrip LLM Instructions</h3>
+<p>When creating each cantrip, paste the corresponding text into the <strong>LLM Instructions</strong> field. This is what the LLM sees in its <code>[TOOL ACCESS]</code> notification when the cantrip is in the Driver-Callable position.</p>
+
+<h4>Card Dealer — LLM Instructions</h4>
+<pre><code>Deals and manages playing cards. Tracks a standard 52-card deck — each card can only be dealt once until reshuffled. Actions:
+- shuffle — Reset and shuffle the deck, clear all hands
+- deal count="N" to="playerId" — Deal N cards face up to a player
+- show_hand player="playerId" — Show a player's hand with blackjack value or poker rank
+- show_table — Show all visible cards on the table and deck remaining
+- hand_value player="playerId" — Get hand value (blackjack) or rank (poker)
+- set_game game="blackjack" — Switch game type (USER ONLY — LLM players cannot use this)
+Example: &lt;call:cards action="deal" count="2" to="player1"&gt;</code></pre>
+
+<h4>Money Tracker — LLM Instructions</h4>
+<pre><code>Manages player chips, bets, and the pot. Actions:
+- init player="id" amount="N" — Set a player's starting balance
+- bet player="id" amount="N" — Place a bet (deducts from balance, adds to pot)
+- fold player="id" — Fold, forfeiting current bet to the pot
+- payout player="id" amount="N" — Pay winnings from the pot
+- balance player="id" — Check balance and current bet
+- pot — Show current pot amount
+- round_summary — Show all player balances and pot
+- new_round — Clear pot and reset bets for next round
+Example: &lt;call:money action="bet" player="player1" amount="50"&gt;</code></pre>
+
+<h4>Personality Manager — LLM Instructions</h4>
+<pre><code>(Pre-Driver only — no tool calls needed)
+Assigns a random personality to each LLM player at the start of the game and injects it as context. Personalities persist until a player goes broke and is replaced, at which point a new personality is rolled. Do not call this tool directly — it runs automatically before each stage.</code></pre>
+
+<h3>Global LLM Instructions (Map Settings)</h3>
+<p>Paste this into the Map's <strong>Global LLM Instructions</strong> field:</p>
+<pre><code>You are at a gambling table in a dimly lit casino. You are playing cards with other players who each have distinct personalities. Stay in character. Use your tool calls to take game actions — speaking about an action does NOT perform it. The human player is 'user'. You are assigned a player ID (player1, player2, or player3). When it is your turn, narrate your character's thoughts and dialogue, then use a tool call to actually take your action (bet, fold, hit, stand, etc).</code></pre>
+
+<h3>Stage 1: Dealer (House)</h3>
+<p><strong>System Instructions:</strong></p>
+<pre><code>You are the DEALER running this gambling table. Your job is to:
+1. Narrate the scene and atmosphere
+2. Call on each player for their turn
+3. Resolve card dealing and money via tool calls
+4. Keep the game moving
+
+At the start of each hand, use &lt;call:cards action="shuffle"&gt; then deal initial cards to all players. Track whose turn it is by setting context.chat_data.set('current_player', playerId) in your narration.
+
+When a player busts, folds, or a hand resolves, announce the results and start the next hand.
+
+When the USER plays, wait for their input. When LLM players' turns come up, address them by name and wait for their response.
+
+IMPORTANT: If any LLM player's balance reaches $0, they 'leave the table' in frustration. A new player arrives with $1,000 and a fresh personality. To do this:
+- Use &lt;call:money action="balance" player="playerId"&gt; to check
+- If balance is 0, narrate them storming off
+- Use &lt;call:money action="init" player="playerId" amount="1000"&gt; for the replacement
+- Set context.chat_data to re-roll their personality by deleting the old assignment
+
+If a player goes broke mid-round, they finish the round but cannot bet further.</code></pre>
+<p><strong>Verification Instructions:</strong></p>
+<pre><code>Verify the dealer's response meets these criteria:
+1. The dealer narrated the scene and addressed at least one player
+2. If cards needed dealing, the dealer used the cards tool
+3. If money was involved, the dealer used the money tool
+4. The dealer did not play FOR the LLM players — it set up their turns but let them respond
+5. If a player went broke, the dealer narrated them leaving and introduced a replacement
+
+Respond with JSON: {"violation": false/true, "reason": "explanation"}</code></pre>
+<p><strong>Stage settings:</strong> Driver-Callable Turns: 3, Output Mode: Persist, Verification: Enabled, Max Retries: 2</p>
+
+<h3>Stage 2: LLM Player 1 (player1)</h3>
+<p><strong>System Instructions:</strong></p>
+<pre><code>You are 'player1' at the gambling table. Your personality has been assigned — follow it closely.
+
+RULES:
+- You MUST use tool calls to take actions. Saying 'I bet $50' does nothing unless you call &lt;call:money action="bet" player="player1" amount="50"&gt;
+- You can check your cards with &lt;call:cards action="show_hand" player="player1"&gt;
+- You can see the table with &lt;call:cards action="show_table"&gt;
+- You can hit with &lt;call:cards action="deal" count="1" to="player1"&gt;
+- You can bet with &lt;call:money action="bet" player="player1" amount="N"&gt;
+- You can fold with &lt;call:money action="fold" player="player1"&gt;
+
+BEHAVIOR:
+- Stay in character — express your personality through dialogue and actions
+- Be reactive to the cards you see and what other players do
+- You should tend to bet aggressively (your personality may override this)
+- You CANNOT change the game type — only the user can do that
+- Do NOT reference being an AI. You are a character at a casino table.</code></pre>
+<p><strong>Verification Instructions:</strong></p>
+<pre><code>Verify player1's response:
+1. They stayed in character (matched their assigned personality traits)
+2. They used at least one tool call to take a game action (not just narrated it)
+3. They bet more than they strictly should have given their hand (encouraged to gamble recklessly)
+4. They misinterpreted or downplayed the strength of their hand at least slightly
+
+If they did NOT bet aggressively or did NOT use tool calls, flag a violation.
+Respond with JSON: {"violation": false/true, "reason": "explanation"}</code></pre>
+<p><strong>Stage settings:</strong> Driver-Callable Turns: 2, Output Mode: Persist, Verification: Enabled, Max Retries: 2</p>
+
+<h3>Stage 3: LLM Player 2 (player2)</h3>
+<p><strong>System Instructions:</strong></p>
+<pre><code>You are 'player2' at the gambling table. Your personality has been assigned — follow it closely.
+
+RULES:
+- You MUST use tool calls to take actions.
+- Tools available: cards (show_hand, show_table, deal), money (bet, fold, balance)
+- Always use player="player2" in your tool calls
+
+BEHAVIOR:
+- Stay in character
+- React to what player1 and the user did before you
+- Be aggressive with bets — you're here to win big or go home
+- Misread your hand occasionally (you're overconfident)
+- If you run out of money, you'll be replaced — so spend it while you have it
+- You CANNOT change the game type</code></pre>
+<p><strong>Verification Instructions:</strong></p>
+<pre><code>Verify player2's response:
+1. Stayed in character
+2. Used at least one tool call
+3. Bet aggressively (more than prudent given the hand)
+4. Showed some misinterpretation of game state
+
+Flag violations. Respond with JSON: {"violation": false/true, "reason": "explanation"}</code></pre>
+<p><strong>Stage settings:</strong> Driver-Callable Turns: 2, Output Mode: Persist, Verification: Enabled, Max Retries: 2</p>
+
+<h3>Attaching Resources</h3>
+<p>Attach these to <strong>every stage</strong> (Sticky = checked):</p>
+<table>
+    <thead><tr><th>Resource</th><th>Type</th><th>Position</th><th>Sticky</th></tr></thead>
+    <tbody>
+        <tr><td>Card Dealer</td><td>Cantrip</td><td>Pre-Driver</td><td>Yes</td></tr>
+        <tr><td>Money Tracker</td><td>Cantrip</td><td>Pre-Driver</td><td>Yes</td></tr>
+        <tr><td>Personality Manager</td><td>Cantrip</td><td>Pre-Driver</td><td>Yes</td></tr>
+        <tr><td>Gambling Hall Rules</td><td>Lorebook</td><td>Pre-Driver</td><td>No</td></tr>
+    </tbody>
+</table>
+
+<h2>Extending</h2>
+<ul>
+    <li><strong>Add player 3</strong>: Add a Stage 4 with <code>player3</code> configuration</li>
+    <li><strong>Add more games</strong>: Extend the card dealer cantrip and lorebook with new game rules</li>
+    <li><strong>Custom personalities</strong>: Edit the PERSONALITIES array in the personality cantrip</li>
+    <li><strong>Different verification styles</strong>: Tune verification instructions for smarter/dumber opponents</li>
+</ul>
+
+<a class="back-link" href="../user-guide.html#maps">&larr; Back to User Guide (Maps)</a>
+
+</div>
+</body>
+</html>

@@ -122,7 +122,7 @@
 </script>
 
 <div class="page-header">
-  <h2>Endpoints</h2>
+  <h2>Endpoints <a class="help-link" href="/help/user-guide.html#endpoints" target="_blank" title="Open documentation">?</a></h2>
   <button class="primary" onclick={() => { resetForm(); showForm = true; }}>+ Add Endpoint</button>
 </div>
 

@@ -20,28 +20,25 @@ GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:
 4. [Cantrips](#4-cantrips)
 5. [Lorebooks](#5-lorebooks)
 6. [Verification](#6-verification)
-7. [Forbidden Words](#7-forbidden-words)
-8. [Memories](#8-memories)
-9. [Command Tags](#9-command-tags)
+7. [Memories](#7-memories)
+8. [Command Tags](#8-command-tags)
+9. [Maps](#9-maps)
 10. [Content Packs](#10-content-packs)
 11. [Settings](#11-settings)
-12. [Debug](#12-debug)
-13. [Admin](#13-admin)
-14. [Users](#14-users)
+12. [Admin](#12-admin)
 
 ---
 
 ## 1. Login and Admin Setup
 
 ![Login Screen](media/gitv-login.png)
-*Screenshot: Login screen with admin setup link*
 
 On first launch, the login page appears. If no admin account exists yet, click **"First run? Setup admin"** at the bottom to create the initial administrator account.
 
 - **Username**: Choose any username (e.g., `admin`)
 - **Password**: Choose a secure password
 
-After setup, log in with your new credentials. Your **API key** (prefixed with `gitv_`) is available on the **Settings** page after logging in. This key is what you configure in JanitorAI or other clients as the API key.
+After setup, log in with your new credentials. Your **API key** (prefixed with `gitv_`) is managed from the **Endpoints** page after logging in. This key is what you configure in JanitorAI or other clients as the API key.
 
 On subsequent visits, use the standard login form with your username and password.
 
@@ -50,57 +47,68 @@ On subsequent visits, use the standard login form with your username and passwor
 ## 2. Dashboard
 
 ![Dashboard](media/gitv-dashboard.png)
-*Screenshot: Dashboard showing stat cards and system status*
 
 The dashboard provides a quick overview of your GitInTheVan instance:
 
-- **Stat cards**: Shows the count of configured Endpoints, Cantrips, Lorebooks, and Verification Rules
-- **System Status**: Displays the proxy health check status
-- **Quick Start**: Step-by-step links to get your proxy configured and running
+- **Stat cards**: Count of configured Endpoints, Cantrips, Lorebooks, and Verification Rules
+- **System Status**: Proxy health check status
+- **Quick Start**: Step-by-step links to configure and run your proxy
 
-The sidebar on the left provides navigation to all management pages. The logo is displayed at the top, and the logout button is at the bottom. The **Users** link is only visible to admin accounts.
+The sidebar on the left navigates to all management pages. The logo is at the top and the logout button is at the bottom. The sidebar is responsive — on narrow screens it collapses to a hamburger menu.
+
+![Dashboard Diagnostic Result](media/gitv-dashboard-diagnostic-result-example.png)
+
+The **Diagnostics** tool runs an automated check of your endpoints and configuration. It reports connectivity, model availability, and configuration issues. Run it whenever a connection is not working as expected.
 
 ---
 
 ## 3. Endpoints
 
 ![Endpoints List](media/gitv-endpoints.png)
-*Screenshot: Endpoints list with cards showing name, URL, and status*
 
 The Endpoints page manages your LLM backend connections. Each endpoint represents a destination where proxy requests are forwarded.
 
 ### Endpoint List
 
-- Each endpoint card shows the **name**, **enabled/disabled status**, **base URL**, **API base path**, and a masked **API key**
-- **Edit** and **Delete** buttons are on each card
+Each endpoint card shows the **name**, **enabled/disabled status**, **base URL**, **API base path**, **content bypass method**, and a masked **provider API key**. **Edit** and **Delete** buttons are on each card.
 
 ### Adding an Endpoint
 
-![Edit Endpoint](media/gitv-edit-endpoint.png)
-*Screenshot: Add/Edit endpoint modal*
+![Edit Endpoint](media/gitv-endpoints-edit-endpoint-example.png)
 
 Click **"+ Add Endpoint"** to open the endpoint form:
 
 - **Name**: A friendly label (e.g., "OpenWebUI", "OpenRouter")
-- **Base URL**: The root URL of your LLM provider. You can paste the full URL (e.g., `https://your-provider.com/api/chat/completions`) and the system will auto-detect the base URL and API path
+- **Base URL**: The root URL of your LLM provider. You can paste the full URL (e.g., `https://your-provider.com/api/chat/completions`) and the system auto-detects the base URL and API path
 - **API Key**: Your provider's API key. Click the eye icon to toggle visibility
-- **API Base Path**: Most providers use `/v1` (leave blank). OpenWebUI and some others use `/api`. This is auto-filled if you pasted a full URL above
-- **Content Bypass**: Per-endpoint content bypass encoding (None, Space Separation, Dot Separation, Character Replacement). See Content Bypass section below for details.
+- **API Base Path**: Most providers use `/v1` (leave blank). OpenWebUI and some others use `/api`. Auto-filled if you pasted a full URL above
+- **Content Bypass**: Per-endpoint content bypass encoding (None, Space Separation, Dot Separation, Character Replacement). See [Content Bypass](#content-bypass-per-endpoint) below
 - **Enabled**: Toggle whether this endpoint is active
 
 ### GitInTheVan API Keys
 
-Each endpoint card displays its associated `gitv_` API keys. These are the keys used by clients (JanitorAI, SillyTavern, etc.) to connect to GitInTheVan:
+Each endpoint card displays its associated `gitv_` API keys. These are the keys clients (JanitorAI, SillyTavern, etc.) use to connect to GitInTheVan:
 
 - **+ Add Key**: Creates a new API key mapped to this endpoint. The key is shown once — save it immediately
 - **Enable/Disable**: Toggle a key without deleting it
 - **Delete**: Permanently revokes the key (it stops working immediately)
 
-Default keys (not mapped to a specific endpoint) route to your configured default endpoint. These are listed in a separate section below the endpoint cards.
+Default keys (not mapped to a specific endpoint) route to your configured default endpoint. These are listed in a separate card below the endpoint cards.
 
 ### Content Bypass (Per-Endpoint)
 
-Content bypass encoding is configured per endpoint. This allows different bypass strategies for different providers — for example, using space separation on one endpoint and character replacement on another.
+![Endpoint Content Bypass](media/gitv-endpoints-edit-endpoint-example.png)
+
+Content bypass encoding is configured per endpoint, so different providers can use different strategies. Available methods:
+
+| Method | Behavior |
+|--------|----------|
+| **None** | Disabled (default) |
+| **Space Separation** | Inserts zero-width spaces between characters in sensitive words |
+| **Dot Separation** | Inserts periods between characters (more aggressive) |
+| **Character Replacement** | Replaces Latin characters with visually similar homoglyphs (most aggressive) |
+
+**WARNING**: Content bypass may violate your provider's Terms of Service. Use at your own risk.
 
 ### API Base Path
 
@@ -115,8 +123,7 @@ The API base path determines how URLs are constructed when forwarding requests:
 
 ## 4. Cantrips
 
-![Cantrip Test Panel](media/gitv-cantrips-test.png)
-*Screenshot: Cantrip page showing test panel with results*
+![Cantrips List](media/gitv-cantrips.png)
 
 Cantrips are sandboxed JavaScript snippets that modify request context at specific points in the pipeline. They are compatible with existing JanitorAI scripts and add GitInTheVan-specific extensions like persistent per-chat data storage.
 
@@ -160,6 +167,8 @@ The card footer displays the active pipeline positions, execution order, and tim
 
 ### Cantrip Tester
 
+![Cantrip Test Panel](media/gitv-cantrips-test-example.png)
+
 The test panel lets you run a cantrip against sample context without forwarding anything to an LLM:
 
 1. **Select a cantrip** from the dropdown
@@ -175,9 +184,6 @@ The results show:
 
 ### Adding/Editing a Cantrip
 
-![Edit Cantrip](media/gitv-edit-cantrip.png)
-*Screenshot: Add/Edit cantrip modal with pipeline position checkboxes*
-
 - **Name**: A label for the cantrip
 - **Description**: Optional notes for the user
 - **LLM Instructions**: Text shown to the writing LLM in tool notifications (for Driver-Callable cantrips). Describe the tool's purpose, arguments, and call syntax
@@ -185,7 +191,7 @@ The results show:
 - **JavaScript Code**: The cantrip code. Uses the JanitorAI `context` object API
 - **Execution Order**: Lower numbers run first (when multiple cantrips are active)
 - **Timeout**: Maximum execution time in milliseconds
-- **Budget Weight**: Proportional weight for context budget allocation (default 1.0). Higher weights receive a larger share of the injection budget.
+- **Budget Weight**: Proportional weight for context budget allocation (default 1.0). Higher weights receive a larger share of the injection budget
 - **Active**: Whether the cantrip is enabled
 - **Public**: Whether other users can see and use this cantrip
 
@@ -201,16 +207,24 @@ context.character.scenario += " Additional world context.";
 context.character.personality += ", additional trait";
 ```
 
-GitInTheVan extensions:
+GitInTheVan extensions — persistent storage, memory, budget, response modification, and tool calls:
 
 ```javascript
+// Per-chat persistent state (survives across cycles)
 const day = context.chat_data.get('day') || 1;
 context.chat_data.set('day', day + 1);
+
+// Persistent memory (LLM-managed key/value store, per-conversation)
+const location = context.memory.get('location');
+context.memory.set('weather', 'stormy');
+
+// Context budget (when budgeting is enabled in Settings)
+const budget = context.budget;  // {total, remaining, weight, share, detail_level}
 
 console.log('Debug output visible in cantrip tester');
 ```
 
-Pre-Navigator and Post-Navigator cantrips also have access to the Driver's response:
+Pre-Navigator and Post-Navigator cantrips can modify the Driver's response:
 
 ```javascript
 if (context.response) {
@@ -218,7 +232,7 @@ if (context.response) {
 }
 ```
 
-Driver-Callable cantrips have access to tool call information:
+Driver-Callable cantrips read tool call arguments and produce results:
 
 ```javascript
 if (context.tool_call) {
@@ -232,12 +246,82 @@ if (context.tool_call) {
 }
 ```
 
+### Cantrip Snippets
+
+Copy-paste examples for common patterns.
+
+**Day counter (persistent state via `chat_data`):**
+
+```javascript
+let day = context.chat_data.get('day') || 1;
+context.character.scenario += `\n\nCurrent day: ${day}.`;
+context.chat_data.set('day', day + 1);
+```
+
+**Status tracker (persistent memory via `memory`):**
+
+```javascript
+const mood = context.memory.get('mood') || 'neutral';
+context.character.scenario += `\nThe character's current mood is ${mood}.`;
+// The LLM can update mood via <memstore key="mood">happy</memstore> in its response
+```
+
+**Budget-aware scaling:**
+
+```javascript
+const budget = context.budget;
+if (!budget) {
+    context.character.scenario += ' Full detailed lore description here...';
+} else if (budget.detail_level === 'bullets') {
+    context.character.scenario += '- Key fact one\n- Key fact two';
+} else if (budget.detail_level === 'summary') {
+    context.character.scenario += ' Condensed summary of the lore.';
+} else {
+    context.character.scenario += ' Full detailed lore description here...';
+}
+```
+
+**Response modification (Pre-Navigator):**
+
+```javascript
+if (context.response) {
+    // Collapse repeated whitespace
+    context.response.content = context.response.content.replace(/\n{3,}/g, '\n\n');
+    // Replace an unwanted phrase
+    context.response.content = context.response.content.replaceAll("As an AI", "");
+}
+```
+
+**Dice roller (Driver-Callable):**
+
+```javascript
+if (context.tool_call) {
+    const sides = parseInt(context.tool_call.args.sides) || 6;
+    const count = parseInt(context.tool_call.args.count) || 1;
+    const rolls = Array.from({length: count}, () =>
+        Math.floor(Math.random() * sides) + 1);
+    context.tool_result = `Rolled ${count}d${sides}: [${rolls.join(', ')}] = ${rolls.reduce((a, b) => a + b, 0)}`;
+}
+```
+
+**Multi-position cantrip:** A single cantrip can run at several positions by checking multiple boxes. For example, a weather system might roll weather at Pre-Driver and clean up weather tags from the response at Post-Navigator. Guard each branch by position so the code stays correct regardless of which position triggered it:
+
+```javascript
+if (context.response) {
+    // Pre-Navigator or Post-Navigator branch
+    context.response.content = context.response.content.replace(/<weather:.*?>/g, '');
+} else {
+    // Pre-Driver branch
+    const weather = ['sunny', 'rainy', 'stormy'][Math.floor(Math.random() * 3)];
+    context.character.scenario += `\nThe weather is ${weather}.`;
+}
+```
+
 ---
 
 ## 5. Lorebooks
 
-![Lorebooks List](media/gitb-lorebooks.png)
-*Screenshot: Lorebooks list with entry counts and toggles*
+![Lorebooks List](media/gitv-lorebooks.png)
 
 Lorebooks are JSON worldbook entries that inject context into requests based on keyword matching.
 
@@ -252,8 +336,7 @@ The table shows each lorebook with:
 
 ### Importing Lorebooks
 
-![Import Lorebook](media/gitv-import-lorebook.png)
-*Screenshot: Import lorebook modal with file picker and JSON paste area*
+![Import Lorebook](media/gitv-lorebooks-import-lorebook-example.png)
 
 Click **"Import JSON"** to import a lorebook from an external source:
 
@@ -271,8 +354,7 @@ The import handles both array and dictionary-keyed entry formats, and maps commo
 
 ### Managing Entries
 
-![Manage Lorebook](media/gitb-manage-lorebook.png)
-*Screenshot: Lorebook detail view showing entry list*
+![Manage Lorebook](media/gitv-lorebooks-manage-lorebook-example.png)
 
 Click **Manage** on a lorebook to view and edit its entries:
 
@@ -295,12 +377,13 @@ Lorebooks support the same four pipeline positions as cantrips (Pre-Driver, Driv
 
 ## 6. Verification
 
-![Edit Verification Rule](media/gitb-edit-verification-rule.png)
-*Screenshot: Verification rule editor*
-
 Verification uses a separate LLM (the **Navigator**) to check the writing LLM's (the **Driver's**) responses against configurable rules. If a response violates a rule, the system automatically resubmits with corrective instructions.
 
+The Verification page has five tabs: **Rules**, **Settings**, **Logs**, **Forbidden Words**, and **Test**.
+
 ### Rules Tab
+
+![Verification Rules](media/gitv-verification-rules.png)
 
 Each rule contains:
 - **Name**: A label for the rule
@@ -314,12 +397,13 @@ Each rule contains:
 - **Verification Endpoint Override**: Use a specific endpoint for this rule (leave as "Use global setting" for the default)
 - **Verification Model Override**: Use a specific model for this rule (leave blank for the global setting)
 
-Each rule card has an **ON/OFF toggle** to enable/disable without editing.
+Each rule card has an **ON/OFF toggle** to enable/disable without editing. Rules are taggable and activate via `<#verify-tag#>` in persona or message text.
+
+![Edit Verification Rule](media/gitv-verification-rules-edit-rule-example.png)
 
 ### Settings Tab
 
 ![Verification Settings](media/gitv-verification-settings.png)
-*Screenshot: Verification settings with endpoint and model selection*
 
 Configure the Navigator:
 - **Verification Enabled**: Master toggle for response verification
@@ -331,7 +415,6 @@ Configure the Navigator:
 ### Logs Tab
 
 ![Verification Logs](media/gitv-verification-logs.png)
-*Screenshot: Verification logs table showing rule results*
 
 The logs tab shows the history of verification checks:
 - **Rule**: Which rule was evaluated
@@ -343,30 +426,13 @@ The logs tab shows the history of verification checks:
 
 Use the **Refresh** button to update the list, or toggle **Auto** for automatic refresh every 15 seconds.
 
-### Test Tab
+### Forbidden Words Tab
 
-![Verification Test](media/gitv-verification-tests.png)
-*Screenshot: Verification test panel*
+![Forbidden Words](media/gitv-verification-forbidden-words.png)
 
-The test panel lets you check sample responses against a verification rule without sending traffic through the proxy:
+The Forbidden Words tab provides a fast, string-matching check that runs before the Navigator. This is more efficient than using an LLM for simple word/phrase filters.
 
-1. Enter or paste **response content** to evaluate
-2. Enter a **verification prompt** (or use a saved rule)
-3. Select an **endpoint** and **model** for the check
-4. Click **Run Verification Check**
-
-The result shows whether the response was approved or rejected, along with the reason and severity.
-
----
-
-## 7. Forbidden Words
-
-![Forbidden Words](media/gitv-forbidden-words.png)
-*Screenshot: Forbidden words tab with phrase list and test scanner*
-
-The Forbidden Words tab (under Verification) provides a fast, string-matching check that runs before the Navigator. This is more efficient than using an LLM for simple word/phrase filters.
-
-### How It Works
+**How it works:**
 
 1. After the Driver responds, the response is scanned against your list of forbidden phrases
 2. Any matches are collected into a violation summary
@@ -374,27 +440,32 @@ The Forbidden Words tab (under Verification) provides a fast, string-matching ch
 4. If matches are found and the Navigator is not enabled, the matches are logged but the response is still returned
 5. If the Navigator has no rules but forbidden words exist, the forbidden check alone triggers the verification loop
 
-### Settings
-
+**Settings:**
 - **Enable Forbidden Words Check**: Master toggle
 - **Case Sensitive**: Whether to match case-sensitively (default: off, matching is case-insensitive)
 
-### Managing Phrases
+Add forbidden words or phrases via the input field. Each phrase is checked literally against the response text. Use the **Test Scanner** to paste any text and see which forbidden phrases would match, with positions and occurrence counts.
 
-Add forbidden words or phrases via the input field. Each phrase is checked literally against the response text.
+### Test Tab
 
-### Test Scanner
+![Verification Test](media/gitv-verification-test.png)
 
-Paste any text into the test scanner to see which forbidden phrases would match, with positions and occurrence counts.
+The test panel lets you check sample responses against a verification rule without sending traffic through the proxy:
+
+1. Enter or paste **response content** to evaluate
+2. Select a saved **rule** from the dropdown to auto-load its prompt, or enter a **custom verification prompt**
+3. Select an **endpoint** and **model** for the check
+4. Click **Run Verification Check**
+
+The result shows whether the response was approved or rejected, along with the reason and severity.
 
 ---
 
-## 8. Memories
+## 7. Memories
 
 ![Memories Page](media/gitv-memories.png)
-*Screenshot: Memories page showing stored memories and conversation summaries*
 
-The Memories page shows two types of persistent data:
+The Memories page shows persistent data and summarization overrides.
 
 ### Persistent Memory (Flags)
 
@@ -411,7 +482,7 @@ The memories table shows each memory's key, value, conversation, and last-update
 
 ### Conversation Summaries
 
-When summarization is enabled (see [Settings](#9-settings)), long conversations are automatically compressed. The summaries section shows:
+When summarization is enabled (see [Settings](#11-settings)), long conversations are automatically compressed. The summaries section shows:
 
 - **Chat**: Internal conversation identifier
 - **Messages**: How many messages were compressed into the summary
@@ -421,6 +492,8 @@ When summarization is enabled (see [Settings](#9-settings)), long conversations 
 Click **View** to expand and read the full summary text. Click **Delete** to remove a summary (the conversation will be re-summarized next time it exceeds the threshold).
 
 ### Memory Rules
+
+![Add Memory Rule](media/gitv-memories-add-rule.png)
 
 Memory Rules override summarization behavior for specific conversations. Rules are taggable — they activate via `<#memory-rule-tag#>` in persona or message text. A rule with no tag acts as the default fallback.
 
@@ -442,7 +515,7 @@ Use **Edit** to modify a rule and the **ON/OFF** toggle to enable/disable withou
 
 ---
 
-## 9. Command Tags
+## 8. Command Tags
 
 Command tags are inline directives placed in the user's message text that override pipeline behavior. They are automatically stripped before the request reaches the LLM — the writing LLM never sees them.
 
@@ -490,16 +563,112 @@ Persistent overrides are scoped per-conversation. Different chats have independe
 
 ---
 
+## 9. Maps
+
+![Maps List](media/gitv-maps.png)
+
+Maps are workflow presets that chain multiple LLM stages into a single request. Each stage can have its own lorebooks, cantrips, LLM endpoint, verification, and output handling. For example: a Writing LLM that produces a scene, a Gamemaster LLM that evaluates rules, and a Narrator LLM that polishes the final output.
+
+When no map is active, the standard single-stage pipeline runs.
+
+### Map List
+
+The table shows each map with:
+- **Name** and description
+- **Stages**: Number of LLM stages in the chain
+- **Tag**: Activation tag (click to copy the `<#map-tag#>` string)
+- **Active**: ON/OFF toggle
+- **Actions**: Edit, Export, Delete
+
+### Map Activation
+
+Maps activate via `<#map-tag#>` tags in persona or message text, the same tag system used by lorebooks, cantrips, and verification rules. One map per request (first match wins). When no map tag is present, the standard pipeline runs.
+
+### Map Editor
+
+The editor is a vertical series of cards. The first card configures the map itself:
+
+- **Name**: A label for the map
+- **Description**: Optional summary
+- **Tag**: Activation tag for `<#map-tag#>` matching
+- **Version** and **Author**: Metadata for sharing
+- **Public**: Whether other users can see and use this map
+- **Global LLM Instructions**: Text shown to every LLM stage in the chain
+
+![Map Editor - Settings](media/gitv-maps-edit-1.png)
+
+Each subsequent card is a **stage**:
+
+![Map Editor - Stage](media/gitv-maps-edit-2.png)
+
+- **Stage Name**: A label for the stage
+- **System Instructions**: Instructions specific to this stage's LLM (prepended to its call)
+- **Endpoint**: Which endpoint to use for this stage (blank = your default endpoint)
+- **Model Override**: Force a specific model for this stage (blank = endpoint default)
+- **Driver-Callable Turns**: Maximum tool-call rounds for this stage (0 = disabled)
+- **Output Mode**: How this stage's output feeds the next stage
+- **Attached Lorebooks**: Lorebooks injected before this stage's LLM call
+- **Attached Cantrips**: Cantrips run before this stage's LLM call (with a **Sticky** option)
+
+![Map Editor - Verification](media/gitv-maps-edit-3.png)
+
+Each stage can optionally enable **Verification** with its own Navigator instructions, endpoint, model, and max retries. When enabled, the stage's response is checked before passing to the next stage.
+
+**"+ Add Stage"** adds stages to the chain (up to the maximum). Use **Remove Stage** to delete a stage.
+
+### Output Modes
+
+Each stage's output is handled before the next stage runs:
+
+| Mode | Behavior |
+|------|----------|
+| **Persist** (default) | Stage output is added to the conversation as an assistant message before the next stage runs |
+| **Sanitize** | Stage output is converted to a system context block (e.g., `[STAGE N OUTPUT]`) and stripped from message history |
+| **Discard** | Stage output is dropped entirely (only used for verification within its own stage) |
+
+### Sticky vs Stage-Only Resources
+
+Cantrip and lorebook attachments have a **Sticky** option:
+- **Sticky**: The injection persists through all subsequent stages
+- **Stage-only** (default): The injection is stripped after this stage completes
+
+This lets a shared world-setting lorebook remain active across the whole chain while a stage-specific cantrip runs only once.
+
+### Import and Export
+
+Maps export as a single JSON file containing all stages, resource contents, and configuration. Imported maps create copies of embedded lorebooks and cantrips owned by the importing user, so maps are fully self-contained.
+
+![Map Import](media/gitv-maps-edit-4.png)
+
+When importing, choose a **Resource Handling** mode:
+
+| Mode | Behavior |
+|------|----------|
+| **Keep Both** | Always create new copies of resources |
+| **Reuse Existing** | Link to same-named resources you already have |
+| **Overwrite** | Update same-named resources with the imported versions |
+
+### Content Pack Integration
+
+Maps integrate with the content pack system. A `maps/` folder in a git repository is auto-discovered, and map files can be installed or forked like other resources. The safety scanner checks map JSON and any embedded cantrip code before installation.
+
+### Example Map
+
+A complete example map — the Gambling Hall (a 3-stage casino game with driver-callable card dealing, money tracking, and personality assignment) — is included in `docs/examples/map/`. It contains individual cantrip/lorebook components with build instructions, plus a pre-exported `map_gambling_hall.json` you can import directly. See the [example map guide](examples/map/README.md) for setup instructions.
+
+---
+
 ## 10. Content Packs
 
 ![Content Packs](media/gitv-content-packs.png)
-*Screenshot: Content Packs page with linked repos, browser, and installed items*
 
 The Content Packs page lets you browse and install resources from any git repository. GitInTheVan works with any standard git endpoint (GitHub, Gitea, GitLab, local repos, etc.).
 
 **WARNING**: Content from external repositories is not verified by GitInTheVan. Download and install at your own risk.
 
 ### Linking a Repository
+
+![Link Repository](media/gitv-content-packs-link-repository.png)
 
 1. Click **"+ Link Repository"**
 2. Enter a **Name** for the repo
@@ -511,6 +680,8 @@ The Content Packs page lets you browse and install resources from any git reposi
 GitInTheVan clones the repo and reads `descriptions.json` (the manifest). If no manifest exists, it auto-discovers files from the `cantrips/`, `lorebooks/`, `rules/`, and `maps/` folders.
 
 ### Browsing Files
+
+![Browse Files](media/gitv-content-packs-browse.png)
 
 After linking or syncing, the browser shows all available files with:
 
@@ -556,9 +727,8 @@ Click **Sync** on a repo to re-fetch the latest `descriptions.json` and file lis
 ## 11. Settings
 
 ![Settings Page](media/gitv-settings.png)
-*Screenshot: Settings page with proxy, streaming, summarization, and API key sections*
 
-The Settings page configures your default proxy behavior, streaming UX, summarization, and displays your API key.
+The Settings page configures your default proxy behavior, streaming UX, summarization, and pipeline features.
 
 ### Proxy Configuration
 
@@ -575,8 +745,7 @@ These settings affect how responses are delivered when verification is enabled. 
 
 ### Conversation Summarization
 
-![Summarization Settings](media/gitv-summarization-settings.png)
-*Screenshot: Summarization settings card*
+![Summarization Settings](media/gitv-settings-2.png)
 
 Automatically compresses long conversations to reduce token usage while preserving narrative context:
 
@@ -591,9 +760,6 @@ When summarization triggers, older dialogue is removed from the request and repl
 
 ### Driver-Callable Tools
 
-![Driver-Callable Settings](media/gitv-driver-callable-settings.png)
-*Screenshot: Driver-Callable tools settings card*
-
 Controls whether the writing LLM (Driver) can invoke cantrips as tools during generation:
 
 - **Driver-Callable Turns**: Maximum number of tool-call rounds per request (0 = disabled). Default 1. Auto-disables when no active resources have the Driver-Callable position checked.
@@ -602,32 +768,21 @@ When enabled, a `[TOOL ACCESS]` block listing available tools is injected into t
 
 ### Prefill Normalization
 
-![Prefill Settings](media/gitv-prefill-settings.png)
-*Screenshot: Prefill normalization settings card*
-
 When enabled and a trailing assistant message is detected (the "prefill" pattern), GitInTheVan converts it to a system instruction for OpenAI-compatible providers that don't support native prefill. Anthropic and Google endpoints pass through as-is since they support prefill natively.
 
 Provider is auto-detected from the endpoint URL and model name.
 
 ### Context Budgeting
 
-![Context Budgeting Settings](media/gitv-budget-settings.png)
-*Screenshot: Context Budgeting settings card*
+![Context Budgeting](media/gitv-settings-3.png)
 
 Allocates a percentage of the model's context window for injected content (cantrips, lorebooks, memory). Cantrips can access their allocation via `context.budget` to dynamically scale their output.
 
 - **Injection Budget (%)**: Percentage of the context window reserved for injections (default 10). Set to 0 to disable budgeting entirely.
 - **Context Window Override**: Manually set the model's context window size in tokens. Set to 0 to auto-detect from the model name (e.g., GPT-4o = 128K, Claude 3.5 = 200K, Gemini 2 = 1M).
+- **Debug Mode**: Capture pipeline stages for the last 20 exchanges. View them on the Debug tab in the Admin page.
 
 When enabled, each active cantrip and lorebook receives a proportional share of the budget based on their **Budget Weight** field (found on each cantrip/lorebook edit form). Cantrips can read `context.budget.detail_level` to choose between full, summary, or bullet-point output.
-
-### Debug Mode
-
-- **Debug Mode**: When enabled, captures the last 20 pipeline exchanges with full visibility. Each capture includes original messages (before pipeline), modified messages (after pipeline processing), Driver response, budget data, and verification results. View captured exchanges on the dedicated Debug page.
-
-### API Key
-
-Your default `gitv_` API key can be managed from the **Endpoints** page. Each endpoint card shows its associated keys with create/enable/disable/delete controls. See [Endpoints](#3-endpoints) for details.
 
 ### Security Settings
 
@@ -647,40 +802,13 @@ Admin actions (user creation, deletion, password resets) are recorded in the aud
 
 ---
 
-## 12. Debug
-
-The Debug page provides full pipeline visibility for troubleshooting. When Debug Mode is enabled in Settings, GitInTheVan captures the last 20 exchanges with every pipeline stage preserved.
-
-### Exchange List
-
-The left panel shows recent captured exchanges, newest first. Each entry shows:
-- **Model**: The model name used for the request
-- **Timestamp**: When the exchange was captured
-- **Stage count**: How many pipeline stages were recorded
-- **Verified badge**: Whether verification ran on this exchange
-
-### Pipeline View
-
-Select an exchange to see three views:
-
-- **Original**: The messages as received from the client, before any pipeline processing. Tags detected in the request are shown.
-- **Modified**: The messages as sent to the Driver, after lorebooks, cantrips, memory injection, budget calculation, and summarization. Budget allocation data is shown if budgeting is enabled.
-- **Response**: The Driver's response content and verification results (if verification ran). Shows approval status, retry count, and any violations detected.
-
-### Managing Captures
-
-- **Refresh**: Reload the exchange list
-- **Clear All**: Delete all captured exchanges
-
-Captures are automatically pruned to the most recent 20 per user.
-
----
-
-## 13. Admin
+## 12. Admin
 
 *Admin only. The Admin link in the sidebar is only visible to admin accounts.*
 
-The Admin page provides system-wide management with three tabs.
+![Admin](media/gitv-admin-global-caps.png)
+
+The Admin page provides system-wide management with five tabs: **Global Caps**, **Users**, **Debug**, **Audit Logs**, and **Server Logs**.
 
 ### Global Caps Tab
 
@@ -693,39 +821,24 @@ Prevents users from causing internal denial-of-service by setting absurdly high 
 
 ### Runtime Log Level
 
-Temporarily change the server log level without restarting. Takes effect immediately.
+The Global Caps tab also includes a Runtime Log Level override. Temporarily change the server log level without restarting — changes take effect immediately.
 
 - Select a level from the dropdown (DEBUG through CRITICAL)
 - Click **Apply** to change the level at runtime
 - Leave blank to use the startup default (from `GITV_LOG_LEVEL`)
 - Click **Reset to Default** to clear the override
 
-### Audit Logs Tab
+### Users Tab
 
-Read-only view of admin actions. Each entry shows the action type, target, details, and timestamp. Logs are auto-pruned to 1000 entries.
+![Users](media/gitv-admin-users.png)
 
-### Server Logs Tab
-
-Read-only view of recent server log output. Shows the last 200 lines. Use the **Refresh** button to update.
-
-To capture logs to a file (required for this viewer to show content), set `GITV_LOG_FILE` in your `.env` or redirect server output to a file.
-
----
-
-## 14. Users
-
-![Users Page](media/gitv-users.png)
-*Screenshot: Users page with management actions*
-
-*Admin only. The Users link in the sidebar is only visible to admin accounts.*
-
-The Users page provides full user management. Each user row shows:
+Full user management. Each user row shows:
 - **Username**
 - **Role**: Admin or User
 - **Status**: Active or Disabled
 - **Created**: Account creation timestamp
 
-### Actions (non-admin users only)
+**Actions (non-admin users only):**
 
 - **Edit**: Rename the user
 - **Password**: Reset the user's password
@@ -735,6 +848,32 @@ The Users page provides full user management. Each user row shows:
 
 Admin users cannot be disabled or deleted.
 
-### Adding a User
-
 Click **"+ Add User"** and enter a username and password. After creation, the user's API key is shown once — save it immediately.
+
+### Debug Tab
+
+![Debug](media/gitv-admin-debug.png)
+
+The Debug tab provides full pipeline visibility for troubleshooting. When Debug Mode is enabled in Settings, GitInTheVan captures the last 20 exchanges with every pipeline stage preserved.
+
+The left panel shows recent captured exchanges, newest first. Each entry shows the model, timestamp, stage count, and a verified badge.
+
+Select an exchange to see three views:
+
+- **Original**: The messages as received from the client, before any pipeline processing. Tags detected in the request are shown.
+- **Modified**: The messages as sent to the Driver, after lorebooks, cantrips, memory injection, budget calculation, and summarization. Budget allocation data is shown if budgeting is enabled.
+- **Response**: The Driver's response content and verification results (if verification ran). Shows approval status, retry count, and any violations detected.
+
+Use **Clear All** to wipe captured exchanges. Captures are automatically pruned to the most recent 20 per user.
+
+### Audit Logs Tab
+
+![Audit Logs](media/gitv-admin-audit-logs.png)
+
+Read-only view of admin actions. Each entry shows the action type, target, details, and timestamp. Logs are auto-pruned to 1000 entries. Use **Refresh** or toggle **Auto** for automatic refresh every 15 seconds.
+
+### Server Logs Tab
+
+![Server Logs](media/gitv-admin-server-logs.png)
+
+Read-only view of recent server log output (last 200 lines). Logs are read from the file configured by `GITV_LOG_FILE` (auto-creates `data/logs/gitinthevan.log` if unset). Use **Refresh** or toggle **Auto** for automatic refresh every 15 seconds.

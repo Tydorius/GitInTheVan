@@ -22,7 +22,8 @@ Licensed under Mozilla Public License 2.0.
 [Memory Rules](#Memory-Rules)  
 [Debug Mode](#Debug-Mode)  
 [Command Tags](#Command-Tags)  
-[Development](#Development)  
+[Maps](#Maps)  
+[Development](#Development)
 [Starting Out With Cantrips](#Starting-Out-With-Cantrips)  
 [Geting Support](#Getting-Support)  
 [Giving Support](#Giving-Support)  
@@ -75,7 +76,8 @@ I will stress that I am not going to replicate or 100% replace Lorebary's functi
 - **Diagnostics** — Automated endpoint and configuration checker for troubleshooting connectivity issues
 - **Security Hardening** — Rate limiting (proxy + management API), configurable CORS origins, password strength validation, request body size limits, audit logging for admin actions, configurable JWT expiration, global caps for driver-callable turns and verification retries
 - **Per-Endpoint API Keys** — Create multiple `gitv_` API keys per user, each mapped to a specific endpoint for multi-platform routing. Managed on each endpoint card in the UI
-- **Admin Panel** — Global caps (turns/retries use min of user/global), read-only audit logs, read-only server logs with runtime log level override without restart
+- **Admin Panel** — Global caps (turns/retries use min of user/global), Users tab (create, edit, disable, delete, password reset, key regeneration), Debug tab (pipeline capture viewer), read-only audit logs, read-only server logs with runtime log level override without restart. All in a single Admin page with five tabs
+- **Maps** — Multi-stage LLM pipelines that chain multiple Driver passes (e.g., Writing LLM > Gamemaster LLM > Narrator LLM) into a single request. Each stage has its own lorebooks, cantrips, endpoint, model, driver-callable turns, and verification. Output modes (persist/sanitize/discard) control how stage output feeds the next stage. Sticky vs stage-only resource attachments. Activated via `<#map-tag#>` tags. Export/import as self-contained JSON with resource dedup options (keep_both/reuse/overwrite)
 - **Web UI** — Full management interface built with Svelte 5 including cantrip tester, verification tester, forbidden word scanner, code editor with syntax highlighting, jump-to-top/bottom navigation, and log viewer
 - **Context Budgeting** — Weighted token budget allocation across cantrips and lorebooks. Cantrips access their share via `context.budget` and can dynamically scale output detail (full/summary/bullets) based on remaining tokens. Configurable per-user budget percentage and context window override
 - **Memory Rules** — Taggable per-conversation summarization overrides. Rules can override the token threshold, keep-recent count, prompt, or disable summarization entirely for specific conversations. Activate via `<#memory-rule-tag#>` tags
@@ -203,6 +205,9 @@ Open `http://localhost:8000` in your browser to access the management UI.
 | `GITV_MAX_REQUEST_BODY_SIZE` | `10485760` | Maximum request body size in bytes (10MB) |
 | `GITV_JWT_EXPIRATION_HOURS` | `24` | JWT token expiration time |
 | `GITV_MIN_PASSWORD_LENGTH` | `8` | Minimum password length |
+| `GITV_LOG_FILE` | *(auto)* | Path to log file. If empty, auto-creates `data/logs/gitinthevan.log` |
+| `GITV_LOG_MAX_SIZE_MB` | `1` | Max log file size in MB before rotation |
+| `GITV_LOG_RETENTION_DAYS` | `30` | Days to retain rotated log files |
 
 ### Endpoints
 
@@ -435,6 +440,38 @@ Memory Rules allow overriding summarization behavior per conversation. Rules are
 - **Custom prompt per character**: Different summarization focus (e.g., track relationship status vs. plot events)
 
 Memory Rules are managed on the **Memories** page.
+
+## Maps
+
+Maps are workflow presets that chain multiple LLM stages into a single request. Each stage can have its own lorebooks, cantrips, endpoint, model, driver-callable turns, and verification, enabling multi-pass pipelines like Writing LLM > Gamemaster LLM > Narrator LLM.
+
+### How It Works
+
+1. A map is activated via a `<#map-tag#>` tag in persona or message text (one map per request, first match wins)
+2. The standard single-stage pipeline runs when no map is active
+3. Each stage executes in order: inject stage lorebooks and system instructions, run pre-driver cantrips, forward to the stage's LLM (with optional driver-callable tool loop), run post-driver cantrips, and optionally verify with the Navigator
+4. Between stages, the output mode determines how the response feeds forward:
+   - **Persist**: response becomes an assistant message for the next stage (default)
+   - **Sanitize**: response wrapped in a `[STAGE N OUTPUT]` system block
+   - **Discard**: response dropped (only used for verification within its own stage)
+5. The final stage's response becomes the HTTP response
+
+### Resource Attachments
+
+Lorebooks and cantrips attach to specific stages. Each attachment has a **Sticky** option:
+- **Sticky**: the injection persists through all subsequent stages
+- **Stage-only** (default): the injection is stripped after this stage completes
+
+`context.chat_data` and `context.memory` are shared across all stages, so state written in an early stage is readable later.
+
+### Import/Export
+
+Maps export as a single JSON file containing all stages, embedded resource contents, and configuration. Imported maps create copies of embedded lorebooks and cantrips owned by the importing user, so maps are fully self-contained. Three resource-handling modes on import:
+- **Keep Both**: always create new copies
+- **Reuse Existing**: link to same-named resources you already have
+- **Overwrite**: update same-named resources
+
+Maps are managed on the **Maps** page and integrate with content packs (`maps/` folder auto-discovered in git repos).
 
 ## Debug Mode
 

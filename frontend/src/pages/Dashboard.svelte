@@ -56,7 +56,7 @@
 </script>
 
 <div class="page-header">
-  <h2>Dashboard</h2>
+  <h2>Dashboard <a class="help-link" href="/help/user-guide.html#dashboard" target="_blank" title="Open documentation">?</a></h2>
 </div>
 
 <div class="stats-grid">

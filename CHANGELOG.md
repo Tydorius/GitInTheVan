@@ -2,6 +2,29 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.14.0] - 2026-06-23
+
+### Added
+
+- **Maps (Multi-Stage Pipelines)**: Workflow presets that chain multiple LLM stages (e.g., Writing LLM > Gamemaster LLM > Narrator LLM) into a single request. Each stage has its own lorebooks, cantrips, endpoint, model, driver-callable turns, and verification. Three output modes (persist/sanitize/discard) control how stage output feeds forward. Sticky vs stage-only resource attachments. Activated via `<#map-tag#>` tags. Global cap for max map stages in Admin settings.
+  - `map_pipeline.py` stage execution engine (`resolve_map`, `run_map_pipeline`)
+  - `maps` table, `map_stages` table, `map_stage_resources` table with migrations
+  - Maps CRUD API and Maps editor UI (stages as cards, resource selectors, per-stage verification)
+  - Export/import as self-contained JSON with resource dedup modes (keep_both/reuse/overwrite)
+  - Content pack integration (`maps/` folder auto-discovery, safety scanner for map files)
+- **In-App Documentation**: User guide now served as HTML at `/help`. Each management page has a `?` icon linking to the relevant guide section. HTML mirror of the markdown user guide with anchored section headers.
+- **File Logging**: Auto-creates `data/logs/gitinthevan.log` when `GITV_LOG_FILE` is unset. Log rotation by size (`GITV_LOG_MAX_SIZE_MB`, default 1MB) and retention by age (`GITV_LOG_RETENTION_DAYS`, default 30 days). Server Logs tab reads from this file.
+- **Mobile Responsive Sidebar**: Sidebar collapses to a hamburger menu on narrow screens.
+- **Menu Icons**: Navigation items now have icons.
+
+### Changed
+
+- Admin page now has five tabs: Global Caps, Users, Debug, Audit Logs, Server Logs. Users and Debug are no longer standalone sidebar pages.
+- Debug Mode toggle moved to Settings > Context Budgeting card; Debug viewer is the Admin > Debug tab.
+- User guide rewritten with all 12 sections, correct screenshot paths, and Cantrip Snippets section.
+- Cantrip authoring guide updated to document database-backed persistence (`context.chat_data`, `context.memory`, `context.budget`, `context.response`, `context.tool_call`) and Maps integration.
+- Verification Test tab now has a rule dropdown to auto-load rule prompts.
+
 ## [0.13.1] - 2026-06-22
 
 ### Added

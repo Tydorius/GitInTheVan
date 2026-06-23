@@ -108,7 +108,7 @@
 </script>
 
 <div class="page-header">
-  <h2>Memories</h2>
+  <h2>Memories <a class="help-link" href="/help/user-guide.html#memories" target="_blank" title="Open documentation">?</a></h2>
   <button onclick={load}>Refresh</button>
 </div>
 

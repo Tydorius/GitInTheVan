@@ -172,7 +172,7 @@
 </script>
 
 <div class="page-header">
-  <h2>Verification</h2>
+  <h2>Verification <a class="help-link" href="/help/user-guide.html#verification" target="_blank" title="Open documentation">?</a></h2>
   <div>
     <button onclick={() => tab = 'rules'} class={tab === 'rules' ? 'primary' : ''}>Rules</button>
     <button onclick={() => tab = 'settings'} class={tab === 'settings' ? 'primary' : ''}>Settings</button>

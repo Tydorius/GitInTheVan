@@ -117,7 +117,7 @@
 </script>
 
 <div class="page-header">
-  <h2>Content Packs</h2>
+  <h2>Content Packs <a class="help-link" href="/help/user-guide.html#content-packs" target="_blank" title="Open documentation">?</a></h2>
   <button class="primary" onclick={() => showLinkForm = true}>+ Link Repository</button>
 </div>
 

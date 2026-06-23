@@ -283,7 +283,7 @@
 </script>
 
 <div class="page-header">
-  <h2>Lorebooks</h2>
+  <h2>Lorebooks <a class="help-link" href="/help/user-guide.html#lorebooks" target="_blank" title="Open documentation">?</a></h2>
   <div>
     <button onclick={() => showImport = true}>Import JSON</button>
     <button class="primary" onclick={() => showForm = true}>+ Add Lorebook</button>

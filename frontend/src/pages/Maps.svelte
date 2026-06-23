@@ -183,7 +183,7 @@
 </script>
 
 <div class="page-header">
-  <h2>Maps</h2>
+  <h2>Maps <a class="help-link" href="/help/user-guide.html#maps" target="_blank" title="Open documentation">?</a></h2>
   <div>
     {#if selectedMap || editing}<button onclick={() => { editing = false; selectedMap = null }}>Back to List</button>{/if}
     {#if !editing}

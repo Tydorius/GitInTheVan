@@ -192,7 +192,7 @@
 </script>
 
 <div class="page-header">
-  <h2>Admin</h2>
+  <h2>Admin <a class="help-link" href="/help/user-guide.html#admin" target="_blank" title="Open documentation">?</a></h2>
   <div>
     <button onclick={() => tab = 'caps'} class={tab === 'caps' ? 'primary' : ''}>Global Caps</button>
     <button onclick={() => tab = 'users'} class={tab === 'users' ? 'primary' : ''}>Users</button>

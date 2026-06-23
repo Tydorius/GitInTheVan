@@ -161,7 +161,7 @@
 </script>
 
 <div class="page-header">
-  <h2>Cantrips</h2>
+  <h2>Cantrips <a class="help-link" href="/help/user-guide.html#cantrips" target="_blank" title="Open documentation">?</a></h2>
   <div>
     <button onclick={() => { loadTemplates(); showTemplates = !showTemplates; }}>Templates</button>
     <button onclick={() => { showTest = !showTest; testResults = null; }}>Test Panel</button>

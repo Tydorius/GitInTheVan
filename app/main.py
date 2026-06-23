@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="GitInTheVan",
     description="Self-hostable MITM LLM router/proxy for roleplay services",
-    version="0.13.0",
+    version="0.14.0",
     lifespan=lifespan,
 )
 
@@ -137,3 +137,8 @@ if _static_dir.exists() and (_static_dir / "index.html").exists():
         if file_path.exists():
             return FileResponse(file_path)
         raise HTTPException(status_code=404)
+
+
+_docs_dir = Path(__file__).resolve().parent.parent / "docs"
+if _docs_dir.exists():
+    app.mount("/help", StaticFiles(directory=_docs_dir, html=True), name="docs")
