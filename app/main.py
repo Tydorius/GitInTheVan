@@ -4,11 +4,14 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import init_db
+from app.routers.admin import router as admin_router
+from app.routers.api_keys import router as api_keys_router
+from app.routers.audit import router as audit_router
 from app.routers.auth import router as auth_router
 from app.routers.cantrips import router as cantrips_router
 from app.routers.debug import router as debug_router
@@ -43,22 +46,55 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="GitInTheVan",
     description="Self-hostable MITM LLM router/proxy for roleplay services",
-    version="0.12.0",
+    version="0.13.0",
     lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=settings.cors_origin_list,
+    allow_credentials=settings.cors_origins != "*",
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def request_size_limit(request: Request, call_next):
+    content_length = request.headers.get("content-length", "")
+    if content_length and content_length.isdigit():
+        if int(content_length) > settings.max_request_body_size:
+            return JSONResponse(
+                status_code=413,
+                content={"detail": "Request body too large"},
+            )
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    from app.services.rate_limiter import check_api_rate_limit, check_proxy_rate_limit
+
+    path = request.url.path
+    if path.startswith("/v1/"):
+        try:
+            await check_proxy_rate_limit(request)
+        except HTTPException as e:
+            return JSONResponse(status_code=e.status_code, content={"detail": e.detail})
+    elif path.startswith("/api/"):
+        try:
+            await check_api_rate_limit(request)
+        except HTTPException as e:
+            return JSONResponse(status_code=e.status_code, content={"detail": e.detail})
+
+    return await call_next(request)
+
 
 app.include_router(proxy_router)
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(endpoints_router)
+app.include_router(api_keys_router)
 app.include_router(settings_router)
 app.include_router(lorebook_router)
 app.include_router(memories_router)
@@ -70,6 +106,8 @@ app.include_router(verification_router)
 app.include_router(summarization_router)
 app.include_router(forbidden_words_router)
 app.include_router(packs_router)
+app.include_router(audit_router)
+app.include_router(admin_router)
 
 
 @app.get("/health")

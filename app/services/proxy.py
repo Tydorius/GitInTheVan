@@ -69,7 +69,7 @@ async def _resolve_target(request: Request) -> tuple[str, str, str | None, str] 
             async with async_session() as db:
                 result = await resolve_routing(token, db)
                 if result:
-                    return result.base_url, result.api_key, result.user_id, result.api_base_path
+                    return result.base_url, result.api_key, result.user_id, result.api_base_path, result.bypass_method
                 return None
             return None
 
@@ -77,7 +77,7 @@ async def _resolve_target(request: Request) -> tuple[str, str, str | None, str] 
     api_key = settings.default_endpoint_api_key
     api_base_path = settings.default_endpoint_api_base_path
     if base_url:
-        return base_url, api_key, None, api_base_path
+        return base_url, api_key, None, api_base_path, "none"
     return None
 
 
@@ -95,7 +95,7 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
             },
         )
 
-    base_url, api_key, user_id, api_base_path = target
+    base_url, api_key, user_id, api_base_path, endpoint_bypass = target
 
     body = await request.body()
     path = request.url.path
@@ -225,6 +225,9 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
             dc_config.enabled = True
 
         if dc_config.enabled:
+            from app.services.admin import get_caps
+            caps = await get_caps()
+            dc_config.turns = min(dc_config.turns, caps["max_driver_callable_turns"])
             notification = build_tool_notification(dc_config.tools, dc_config.turns)
             if notification:
                 body_json["_gitv_driver_callable"] = True
@@ -244,7 +247,8 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
             us_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
             us = us_result.scalar_one_or_none()
             prefill_on = us.prefill_enabled if us else False
-            bypass_method = us.bypass_method if us else "none"
+
+        bypass_method = endpoint_bypass
 
         if prefill_on:
             body_json = normalize_prefill(body_json, base_url, enabled=True)

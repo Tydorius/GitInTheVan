@@ -259,26 +259,6 @@
 </div>
 
 <div class="card">
-  <h3>Content Bypass</h3>
-  <div class="error-msg" style="margin-bottom: 12px; font-size: 11px;">
-    WARNING: Content bypass plugins modify requests to work around provider content filters. These actions may violate your service provider's Terms of Service. Use at your own risk.
-  </div>
-  <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
-    Encodes outgoing user messages to reduce detectability by keyword-based content filters. Response content is decoded before returning to the client.
-  </p>
-  <div class="form-group">
-    <label for="bypass-method">Bypass Method</label>
-    <select id="bypass-method" bind:value={bypassMethod}>
-      <option value="none">None (disabled)</option>
-      <option value="space_separation">Space Separation (zero-width spaces in sensitive words)</option>
-      <option value="dot_separation">Dot Separation (periods between characters)</option>
-      <option value="character_replacement">Character Replacement (homoglyph substitution)</option>
-    </select>
-  </div>
-  <button class="primary" onclick={saveBypassPrefill}>Save</button>
-</div>
-
-<div class="card">
   <h3>Context Budgeting</h3>
   <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
     Allocates a percentage of the context window for injected content (cantrips, lorebooks, memory). Cantrips can access their allocation via <code>context.budget</code> to dynamically scale their output (full / summary / bullets). Set to 0 to disable.
@@ -300,46 +280,4 @@
     </label>
   </div>
   <button class="primary" onclick={saveBudget}>Save</button>
-</div>
-
-<div class="card">
-  <h3>API Key</h3>
-  <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 8px;">
-    Use this key as the Bearer token for proxy requests from JanitorAI or other clients.
-  </p>
-  {#if newKeyNotice}
-    <div class="success-msg" style="margin-bottom: 8px;">
-      New API key generated! Save this key now — it will not be shown again.
-    </div>
-  {/if}
-  {#if !apiKey && !newKeyNotice}
-    <p style="color: var(--text-dim); font-size: 11px; margin-bottom: 8px;">
-      Your API key is not available (it was only shown once when your account was created).
-      Click Regenerate to create a new one.
-    </p>
-  {/if}
-  <div style="display: flex; gap: 8px; align-items: center;">
-    <div class="api-key-display" style="flex: 1; margin: 0;">
-      {#if showKey}
-        {apiKey || 'Not available'}
-      {:else}
-        {apiKey ? '•'.repeat(Math.min(apiKey.length, 40)) : 'Not available'}
-      {/if}
-    </div>
-    <button
-      onclick={() => showKey = !showKey}
-      title={showKey ? 'Hide' : 'Show'}
-      disabled={!apiKey}
-      style="flex-shrink: 0; padding: 8px 12px; font-size: 16px;"
-    >{showKey ? '🙈' : '👁'}</button>
-    <button
-      onclick={copyKey}
-      title="Copy"
-      disabled={!apiKey}
-      style="flex-shrink: 0; padding: 8px 12px; font-size: 16px;"
-    >{copied ? '✓' : '⧉'}</button>
-  </div>
-  <button class="danger" onclick={regenerateKey} disabled={regenerating} style="margin-top: 8px; font-size: 12px;">
-    {regenerating ? 'Regenerating...' : 'Regenerate API Key'}
-  </button>
 </div>

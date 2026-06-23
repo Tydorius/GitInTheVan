@@ -204,6 +204,30 @@ export const api = {
   deleteMemoryRule: (id: string) =>
     request<void>(`/api/memory-rules/${id}`, { method: 'DELETE' }),
 
+  // API Keys (Per-Endpoint)
+  listApiKeys: () =>
+    request<{ keys: any[] }>('/api/api-keys'),
+  createApiKey: (data: any) =>
+    request<any>('/api/api-keys', { method: 'POST', body: JSON.stringify(data) }),
+  deleteApiKey: (id: string) =>
+    request<void>(`/api/api-keys/${id}`, { method: 'DELETE' }),
+  toggleApiKey: (id: string) =>
+    request<any>(`/api/api-keys/${id}/toggle`, { method: 'PUT' }),
+
+  // Audit Logs
+  listAuditLogs: (limit = 100, offset = 0) =>
+    request<{ logs: any[]; total: number }>(`/api/audit?limit=${limit}&offset=${offset}`),
+
+  // Admin (admin only)
+  getAdminSettings: () =>
+    request<any>('/api/admin/settings'),
+  updateAdminSettings: (data: any) =>
+    request<any>('/api/admin/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  getAdminAuditLogs: (limit = 100, offset = 0) =>
+    request<{ logs: any[]; total: number }>(`/api/admin/audit?limit=${limit}&offset=${offset}`),
+  getServerLogs: (lines = 200) =>
+    request<{ lines: string[]; total: number }>(`/api/admin/logs?lines=${lines}`),
+
   // Debug
   listDebugExchanges: () =>
     request<{ exchanges: any[] }>('/api/debug'),

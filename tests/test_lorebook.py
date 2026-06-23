@@ -470,10 +470,10 @@ class TestPublicLorebooks:
 
         await client.post(
             "/api/users",
-            json={"username": "other", "password": "pass123"},
+            json={"username": "other", "password": "pass1234"},
             headers={"Authorization": f"Bearer {admin_token}"},
         )
-        login = await client.post("/api/auth/login", json={"username": "other", "password": "pass123"})
+        login = await client.post("/api/auth/login", json={"username": "other", "password": "pass1234"})
         other_token = login.json()["access_token"]
 
         resp = await client.get(
@@ -493,10 +493,10 @@ class TestPublicLorebooks:
 
         await client.post(
             "/api/users",
-            json={"username": "other2", "password": "pass123"},
+            json={"username": "other2", "password": "pass1234"},
             headers={"Authorization": f"Bearer {admin_token}"},
         )
-        login = await client.post("/api/auth/login", json={"username": "other2", "password": "pass123"})
+        login = await client.post("/api/auth/login", json={"username": "other2", "password": "pass1234"})
         other_token = login.json()["access_token"]
 
         resp = await client.get(

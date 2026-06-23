@@ -322,6 +322,10 @@ async def load_verification_config(
 
     max_retries = max(r.max_retries for r in rules)
 
+    from app.services.admin import get_caps
+    caps = await get_caps()
+    max_retries = min(max_retries, caps["max_verification_retries"])
+
     return rules, endpoint, user_settings.verification_model, max_retries
 
 

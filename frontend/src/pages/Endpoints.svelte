@@ -3,13 +3,23 @@
   import { onMount } from 'svelte'
 
   let endpoints: any[] = []
+  let apiKeys: any[] = []
   let loading = true
   let error = ''
   let showForm = false
   let editingId: string | null = null
 
-  let form = { name: '', base_url: '', api_key: '', api_base_path: '', enabled: true }
+  let form = { name: '', base_url: '', api_key: '', api_base_path: '', bypass_method: 'none', enabled: true }
   let showApiKey = false
+  let visibleKeys: Record<string, boolean> = {}
+  let copiedKeyId: string | null = null
+
+  let showKeyForm = false
+  let keyFormEndpointId: string | null = null
+  let keyFormIsDefault = false
+  let keyFormLabel = ''
+  let newKeyResult = ''
+  let newKeyId = ''
 
   function autoParseUrl() {
     const url = form.base_url.trim()
@@ -30,20 +40,21 @@
   async function load() {
     loading = true
     try {
-      const data = await api.listEndpoints()
+      const [data, keys] = await Promise.all([api.listEndpoints(), api.listApiKeys()])
       endpoints = data.endpoints
+      apiKeys = keys.keys
     } catch (e: any) { error = e.message }
     finally { loading = false }
   }
 
   function resetForm() {
-    form = { name: '', base_url: '', api_key: '', api_base_path: '', enabled: true }
+    form = { name: '', base_url: '', api_key: '', api_base_path: '', bypass_method: 'none', enabled: true }
     editingId = null
   }
 
   function startEdit(ep: any) {
     editingId = ep.id
-    form = { name: ep.name, base_url: ep.base_url, api_key: ep.api_key, api_base_path: ep.api_base_path || '', enabled: ep.enabled }
+    form = { name: ep.name, base_url: ep.base_url, api_key: ep.api_key, api_base_path: ep.api_base_path || '', bypass_method: ep.bypass_method || 'none', enabled: ep.enabled }
     showForm = true
   }
 
@@ -65,6 +76,46 @@
     if (!confirm('Delete this endpoint?')) return
     try { await api.deleteEndpoint(id); await load() }
     catch (e: any) { error = e.message }
+  }
+
+  function getKeysForEndpoint(epId: string) {
+    return apiKeys.filter((k: any) => k.endpoint_id === epId)
+  }
+
+  function openKeyForm(epId: string | null) {
+    keyFormEndpointId = epId
+    keyFormIsDefault = epId === null
+    keyFormLabel = ''
+    newKeyResult = ''
+    newKeyId = ''
+    showKeyForm = true
+  }
+
+  async function handleCreateKey() {
+    error = ''
+    try {
+      const result = await api.createApiKey({ label: keyFormLabel || 'default', endpoint_id: keyFormEndpointId })
+      newKeyResult = result.api_key
+      newKeyId = result.id
+      await load()
+    } catch (e: any) { error = e.message }
+  }
+
+  async function deleteKey(keyId: string) {
+    if (!confirm('Delete this API key? It will stop working immediately.')) return
+    try { await api.deleteApiKey(keyId); await load() }
+    catch (e: any) { error = e.message }
+  }
+
+  async function toggleKey(keyId: string) {
+    try { await api.toggleApiKey(keyId); await load() }
+    catch (e: any) { error = e.message }
+  }
+
+  function copyKey(text: string, id: string) {
+    navigator.clipboard.writeText(text)
+    copiedKeyId = id
+    setTimeout(() => copiedKeyId = null, 2000)
   }
 
   onMount(load)
@@ -95,17 +146,64 @@
           <button class="danger" onclick={() => handleDelete(ep.id)}>Delete</button>
         </div>
       </div>
-      <div style="color: var(--text-dim); font-size: 12px;">
+      <div style="color: var(--text-dim); font-size: 12px; margin-bottom: 12px;">
         <div>URL: {ep.base_url}</div>
         <div>API Path: {ep.api_base_path || '/v1 (default)'}</div>
-        <div>Key: {ep.api_key ? ep.api_key.slice(0, 8) + '...' : 'none'}</div>
+        <div>Provider Key: {ep.api_key ? ep.api_key.slice(0, 8) + '...' : 'none'}</div>
+        <div>Bypass: {ep.bypass_method || 'none'}</div>
+      </div>
+
+      <div style="border-top: 1px solid var(--border); padding-top: 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <strong style="font-size: 13px;">GitInTheVan API Keys</strong>
+          <button onclick={() => openKeyForm(ep.id)} style="font-size: 11px; padding: 2px 8px;">+ Add Key</button>
+        </div>
+        {#each getKeysForEndpoint(ep.id) as k}
+          <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px; font-size: 12px;">
+            <span class="badge {k.is_active ? 'active' : 'inactive'}" style="font-size: 10px;">{k.is_active ? 'ON' : 'OFF'}</span>
+            <span style="color: var(--text-dim); min-width: 80px;">{k.label}</span>
+            <div class="api-key-display" style="flex: 1; font-size: 10px; padding: 2px 6px; cursor: pointer;"
+                 onclick={() => copyKey(`gitv_${k.id}`, k.id)}
+                 title="Click to copy key ID">
+              {copiedKeyId === k.id ? 'Copied!' : `gitv_••••••••${k.id.slice(-4)}`}
+            </div>
+            <button onclick={() => toggleKey(k.id)} style="padding: 2px 8px; font-size: 11px;" title="Enable/Disable">{k.is_active ? 'Disable' : 'Enable'}</button>
+            <button class="danger" onclick={() => deleteKey(k.id)} style="padding: 2px 8px; font-size: 11px;">Delete</button>
+          </div>
+        {/each}
+        {#if getKeysForEndpoint(ep.id).length === 0}
+          <p style="color: var(--text-dim); font-size: 11px;">No endpoint-specific keys. Requests using your default key will route here based on your Settings default.</p>
+        {/if}
       </div>
     </div>
   {/each}
+
+  <div class="card" style="margin-top: 16px;">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <div>
+        <strong>Default API Keys</strong>
+        <p style="color: var(--text-dim); font-size: 12px;">Routes to your default endpoint when no endpoint-specific key matches.</p>
+      </div>
+      <button onclick={() => openKeyForm(null)} style="font-size: 11px;">+ Add Default Key</button>
+    </div>
+    {#each apiKeys.filter((k: any) => !k.endpoint_id) as k}
+      <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px; font-size: 12px;">
+        <span class="badge {k.is_active ? 'active' : 'inactive'}" style="font-size: 10px;">{k.is_active ? 'ON' : 'OFF'}</span>
+        <span style="color: var(--text-dim); min-width: 80px;">{k.label}</span>
+        <div class="api-key-display" style="flex: 1; font-size: 10px; padding: 2px 6px; cursor: pointer;"
+             onclick={() => copyKey(`gitv_${k.id}`, k.id)}
+             title="Click to copy key ID">
+          {copiedKeyId === k.id ? 'Copied!' : `gitv_••••••••${k.id.slice(-4)}`}
+        </div>
+        <button onclick={() => toggleKey(k.id)} style="padding: 2px 8px; font-size: 11px;">{k.is_active ? 'Disable' : 'Enable'}</button>
+        <button class="danger" onclick={() => deleteKey(k.id)} style="padding: 2px 8px; font-size: 11px;">Delete</button>
+      </div>
+    {/each}
+  </div>
 {/if}
 
 {#if showForm}
-  <div class="modal-overlay" role="dialog" onclick={(e) => { if (e.target === e.currentTarget) showForm = false; }}>
+  <div class="modal-overlay" role="dialog" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) showForm = false; }}>
     <div class="modal">
       <h3>{editingId ? 'Edit Endpoint' : 'Add Endpoint'}</h3>
       {#if error}<div class="error-msg">{error}</div>{/if}
@@ -127,7 +225,7 @@
           />
         </div>
         <div class="form-group">
-          <label for="ep-key">API Key</label>
+          <label for="ep-key">Provider API Key</label>
           <div style="display: flex; gap: 8px; align-items: center;">
             <input
               id="ep-key"
@@ -150,6 +248,18 @@
           <input id="ep-path" autocomplete="off" spellcheck="false" bind:value={form.api_base_path} placeholder="/api" />
         </div>
         <div class="form-group">
+          <label for="ep-bypass">Content Bypass</label>
+          <select id="ep-bypass" bind:value={form.bypass_method}>
+            <option value="none">None (disabled)</option>
+            <option value="space_separation">Space Separation (zero-width spaces)</option>
+            <option value="dot_separation">Dot Separation (periods between characters)</option>
+            <option value="character_replacement">Character Replacement (homoglyph substitution)</option>
+          </select>
+          <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+            WARNING: May violate your provider's ToS. Use at your own risk.
+          </p>
+        </div>
+        <div class="form-group">
           <label for="ep-enabled">
             <input id="ep-enabled" type="checkbox" bind:checked={form.enabled} style="width: auto;"> Enabled
           </label>
@@ -159,6 +269,40 @@
           <button type="submit" class="primary">{editingId ? 'Update' : 'Create'}</button>
         </div>
       </form>
+    </div>
+  </div>
+{/if}
+
+{#if showKeyForm}
+  <div class="modal-overlay" role="dialog" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget && !newKeyResult) showKeyForm = false; }}>
+    <div class="modal">
+      {#if newKeyResult}
+        <h3>API Key Created</h3>
+        <div class="success-msg" style="margin-bottom: 12px;">
+          Save this key now — it will not be shown again.
+        </div>
+        <div class="form-group">
+          <div class="api-key-display" style="cursor: pointer; user-select: all;" onclick={() => copyKey(newKeyResult, 'new')}>
+            {copiedKeyId === 'new' ? 'Copied!' : newKeyResult}
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="primary" onclick={() => { showKeyForm = false; newKeyResult = ''; }}>Done</button>
+        </div>
+      {:else}
+        <h3>{keyFormIsDefault ? 'Add Default API Key' : 'Add Endpoint API Key'}</h3>
+        {#if error}<div class="error-msg">{error}</div>{/if}
+        <form onsubmit={(e) => { e.preventDefault(); handleCreateKey(); }}>
+          <div class="form-group">
+            <label for="key-label">Label</label>
+            <input id="key-label" autocomplete="off" bind:value={keyFormLabel} placeholder={keyFormIsDefault ? 'Default' : 'JanitorAI'} />
+          </div>
+          <div class="modal-actions">
+            <button onclick={() => showKeyForm = false}>Cancel</button>
+            <button type="submit" class="primary">Create Key</button>
+          </div>
+        </form>
+      {/if}
     </div>
   </div>
 {/if}

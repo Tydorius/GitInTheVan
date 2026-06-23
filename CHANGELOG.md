@@ -2,6 +2,49 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.13.1] - 2026-06-22
+
+### Added
+
+- **Per-Endpoint API Keys in UI**: Each endpoint card now shows its associated GitInTheVan API keys with enable/disable/delete controls. Default keys (no endpoint mapping) shown in a separate section. API Key card removed from Settings.
+- **Admin Panel**: New Admin page (visible to admins only) with three tabs:
+  - **Global Caps**: Set max driver-callable turns (default 2), max verification retries (default 3), and per-server rate limits. Uses `min(user_setting, global_cap)` — doesn't overwrite user preferences.
+  - **Audit Logs**: Read-only view of admin actions (user creation, deletion).
+  - **Server Logs**: Read-only view of recent server log output with runtime log level override (DEBUG/INFO/WARNING/ERROR/CRITICAL). Takes effect immediately without restart.
+- **Per-Endpoint Content Bypass**: Bypass method moved from a global user setting to individual endpoint configuration. Each endpoint card shows its bypass method. The global Content Bypass card has been removed from Settings.
+
+### Changed
+
+- Content bypass is now resolved per-endpoint via routing, not from UserSettings
+- `_resolve_target` returns `bypass_method` from the endpoint record
+- Rate limit values from admin settings override env var defaults at runtime
+
+### Fixed
+
+- Deploy scripts: pip upgrade before install, Python version enforcement, auto-install prompt
+
+### Added
+
+- **Per-Endpoint API Keys**: Create multiple `gitv_` API keys per user, each mapped to a specific endpoint. Enables multi-platform routing from a single GitInTheVan instance (e.g., one key for JanitorAI routing to endpoint A, another for SillyTavern routing to endpoint B). Managed via new API Keys section in Settings.
+- **Rate Limiting**: In-memory sliding window rate limiter on proxy endpoints (default 60/min) and management API (default 120/min). Configurable via `GITV_RATE_LIMIT_ENABLED`, `GITV_RATE_LIMIT_PROXY_PER_MIN`, `GITV_RATE_LIMIT_API_PER_MIN`. Returns HTTP 429 with `Retry-After` header when exceeded.
+- **Request Body Size Limit**: Rejects requests exceeding configurable maximum (default 10MB) with HTTP 413. Set via `GITV_MAX_REQUEST_BODY_SIZE`.
+- **Password Strength Validation**: Passwords must be at least 8 characters (configurable via `GITV_MIN_PASSWORD_LENGTH`) and contain at least one letter and one number. Enforced on setup, user creation, and password reset.
+- **Audit Logging**: Admin actions (user creation, user deletion, password reset) are logged with timestamp, action type, and target. Viewable via `/api/audit` endpoint. Auto-pruned to 1000 entries per user.
+- **CORS Configuration**: Origins are now configurable via `GITV_CORS_ORIGINS` environment variable (comma-separated, default `*`). When non-wildcard, `allow_credentials` is properly enforced.
+- **JWT Expiration Configuration**: Token lifetime now configurable via `GITV_JWT_EXPIRATION_HOURS` (default 24).
+
+### Changed
+
+- CORS middleware now uses configurable origins instead of hardcoded wildcard
+- API key table (`api_keys`) now wired into routing — checked before legacy `User.gitv_api_key` fallback
+
+### Security
+
+- Default secret key warning: deployments should set `GITV_SECRET_KEY` to a strong value
+- Rate limiting prevents brute-force attacks on proxy and management API
+- Password strength requirements prevent weak passwords
+- CORS origins are configurable instead of hardcoded wildcard
+
 ## [0.12.0] - 2026-06-22
 
 ### Added

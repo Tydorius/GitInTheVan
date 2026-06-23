@@ -134,7 +134,7 @@ async def test_admin_can_create_user(admin_client):
 async def test_admin_can_list_users(admin_client):
     client, _, _ = admin_client
 
-    await client.post("/api/users", json={"username": "user1", "password": "pass1"})
+    await client.post("/api/users", json={"username": "user1", "password": "password1"})
 
     resp = await client.get("/api/users")
     assert resp.status_code == 200
@@ -148,9 +148,9 @@ async def test_admin_can_list_users(admin_client):
 @pytest.mark.asyncio
 async def test_non_admin_cannot_create_user(client, admin_client):
     _, _, _ = admin_client
-    await client.post("/api/users", json={"username": "regular", "password": "pass123"})
+    await client.post("/api/users", json={"username": "regular", "password": "pass1234"})
     regular_login = await client.post(
-        "/api/auth/login", json={"username": "regular", "password": "pass123"}
+        "/api/auth/login", json={"username": "regular", "password": "pass1234"}
     )
     token = regular_login.json()["access_token"]
 

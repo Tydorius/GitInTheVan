@@ -10,7 +10,7 @@
   import Memories from './pages/Memories.svelte'
   import Packs from './pages/Packs.svelte'
   import Settings from './pages/Settings.svelte'
-  import Users from './pages/Users.svelte'
+  import Admin from './pages/Admin.svelte'
 
   const navItems = [
     { path: '/', label: 'Dashboard', icon: 'D' },
@@ -22,7 +22,7 @@
     { path: '/debug', label: 'Debug', icon: 'B' },
     { path: '/packs', label: 'Content Packs', icon: 'P' },
     { path: '/settings', label: 'Settings', icon: 'G' },
-    { path: '/users', label: 'Users', icon: 'U', admin: true },
+    { path: '/admin', label: 'Admin', icon: 'A', admin: true },
   ]
 
   function handleLogout() {
@@ -79,8 +79,8 @@
         <Packs />
       {:else if page === '/settings'}
         <Settings />
-      {:else if page === '/users'}
-        <Users />
+      {:else if page === '/admin'}
+        <Admin />
       {:else}
         <Dashboard />
       {/if}

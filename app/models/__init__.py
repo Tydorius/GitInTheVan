@@ -1,4 +1,6 @@
+from app.models.admin_settings import AdminSettings
 from app.models.api_key import ApiKey
+from app.models.audit_log import AuditLog
 from app.models.base import Base
 from app.models.cantrip import Cantrip
 from app.models.chat_data import ChatData
@@ -21,7 +23,9 @@ __all__ = [
     "User",
     "Endpoint",
     "UserSettings",
+    "AdminSettings",
     "ApiKey",
+    "AuditLog",
     "Lorebook",
     "LorebookEntry",
     "Cantrip",

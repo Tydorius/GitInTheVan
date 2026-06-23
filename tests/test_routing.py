@@ -100,20 +100,20 @@ async def test_different_users_different_endpoints(client):
 
     await client.post(
         "/api/users",
-        json={"username": "user1", "password": "pass1"},
+        json={"username": "user1", "password": "pass1234"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
 
     await client.post(
         "/api/users",
-        json={"username": "user2", "password": "pass2"},
+        json={"username": "user2", "password": "pass4567"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
 
-    login1 = await client.post("/api/auth/login", json={"username": "user1", "password": "pass1"})
+    login1 = await client.post("/api/auth/login", json={"username": "user1", "password": "pass1234"})
     token1 = login1.json()["access_token"]
 
-    login2 = await client.post("/api/auth/login", json={"username": "user2", "password": "pass2"})
+    login2 = await client.post("/api/auth/login", json={"username": "user2", "password": "pass4567"})
     token2 = login2.json()["access_token"]
 
     await client.post(

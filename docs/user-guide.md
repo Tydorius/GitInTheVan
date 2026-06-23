@@ -26,7 +26,8 @@ GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:
 10. [Content Packs](#10-content-packs)
 11. [Settings](#11-settings)
 12. [Debug](#12-debug)
-13. [Users](#13-users)
+13. [Admin](#13-admin)
+14. [Users](#14-users)
 
 ---
 
@@ -84,7 +85,22 @@ Click **"+ Add Endpoint"** to open the endpoint form:
 - **Base URL**: The root URL of your LLM provider. You can paste the full URL (e.g., `https://your-provider.com/api/chat/completions`) and the system will auto-detect the base URL and API path
 - **API Key**: Your provider's API key. Click the eye icon to toggle visibility
 - **API Base Path**: Most providers use `/v1` (leave blank). OpenWebUI and some others use `/api`. This is auto-filled if you pasted a full URL above
+- **Content Bypass**: Per-endpoint content bypass encoding (None, Space Separation, Dot Separation, Character Replacement). See Content Bypass section below for details.
 - **Enabled**: Toggle whether this endpoint is active
+
+### GitInTheVan API Keys
+
+Each endpoint card displays its associated `gitv_` API keys. These are the keys used by clients (JanitorAI, SillyTavern, etc.) to connect to GitInTheVan:
+
+- **+ Add Key**: Creates a new API key mapped to this endpoint. The key is shown once — save it immediately
+- **Enable/Disable**: Toggle a key without deleting it
+- **Delete**: Permanently revokes the key (it stops working immediately)
+
+Default keys (not mapped to a specific endpoint) route to your configured default endpoint. These are listed in a separate section below the endpoint cards.
+
+### Content Bypass (Per-Endpoint)
+
+Content bypass encoding is configured per endpoint. This allows different bypass strategies for different providers — for example, using space separation on one endpoint and character replacement on another.
 
 ### API Base Path
 
@@ -593,24 +609,6 @@ When enabled and a trailing assistant message is detected (the "prefill" pattern
 
 Provider is auto-detected from the endpoint URL and model name.
 
-### Content Bypass
-
-![Content Bypass Settings](media/gitv-content-bypass-settings.png)
-*Screenshot: Content bypass settings with ToS warning*
-
-Content bypass plugins encode outgoing user messages to reduce detectability by keyword-based content filters. Response content is decoded before returning to the client.
-
-**WARNING**: Content bypass plugins modify requests to work around provider content filters. These actions may violate your service provider's Terms of Service. Use at your own risk.
-
-Three methods are available:
-
-| Method | How It Works |
-|--------|-------------|
-| **None** | No encoding (disabled) |
-| **Space Separation** | Inserts zero-width spaces between characters in sensitive words. Makes content less detectable while remaining readable to the LLM. |
-| **Dot Separation** | Inserts periods between characters in sensitive words. More aggressive than space separation. |
-| **Character Replacement** | Replaces Latin characters with visually similar Cyrillic homoglyphs. Most aggressive bypass. |
-
 ### Context Budgeting
 
 ![Context Budgeting Settings](media/gitv-budget-settings.png)
@@ -629,11 +627,23 @@ When enabled, each active cantrip and lorebook receives a proportional share of 
 
 ### API Key
 
-Your `gitv_` API key is displayed with:
-- **Show/Hide toggle** (eye icon): Reveal or mask the key
-- **Copy button** (copy icon): Copy the key to clipboard
+Your default `gitv_` API key can be managed from the **Endpoints** page. Each endpoint card shows its associated keys with create/enable/disable/delete controls. See [Endpoints](#3-endpoints) for details.
 
-Use this key as the Bearer token when configuring JanitorAI or other clients.
+### Security Settings
+
+The following security features are configured via environment variables (`.env` file):
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `GITV_CORS_ORIGINS` | `*` | Allowed CORS origins (comma-separated) |
+| `GITV_RATE_LIMIT_ENABLED` | `true` | Enable rate limiting |
+| `GITV_RATE_LIMIT_PROXY_PER_MIN` | `60` | Max proxy requests per minute per client |
+| `GITV_RATE_LIMIT_API_PER_MIN` | `120` | Max management API requests per minute |
+| `GITV_MAX_REQUEST_BODY_SIZE` | `10485760` | Max request body size (10MB) |
+| `GITV_JWT_EXPIRATION_HOURS` | `24` | JWT token lifetime |
+| `GITV_MIN_PASSWORD_LENGTH` | `8` | Minimum password length (requires letter + number) |
+
+Admin actions (user creation, deletion, password resets) are recorded in the audit log, viewable via the **Admin** page. Global caps for driver-callable turns and verification retries are also configured in the Admin page.
 
 ---
 
@@ -666,7 +676,43 @@ Captures are automatically pruned to the most recent 20 per user.
 
 ---
 
-## 13. Users
+## 13. Admin
+
+*Admin only. The Admin link in the sidebar is only visible to admin accounts.*
+
+The Admin page provides system-wide management with three tabs.
+
+### Global Caps Tab
+
+Prevents users from causing internal denial-of-service by setting absurdly high turn or retry counts. The effective limit is the lower of the user's setting and the global cap — user preferences are not overwritten.
+
+- **Max Driver-Callable Turns**: Global cap for driver-callable tool turns per request (default 2)
+- **Max Verification Retries**: Global cap for verification resubmission retries (default 3)
+- **Rate Limit: Proxy**: Max proxy requests per minute (default 60)
+- **Rate Limit: Management API**: Max management API requests per minute (default 120)
+
+### Runtime Log Level
+
+Temporarily change the server log level without restarting. Takes effect immediately.
+
+- Select a level from the dropdown (DEBUG through CRITICAL)
+- Click **Apply** to change the level at runtime
+- Leave blank to use the startup default (from `GITV_LOG_LEVEL`)
+- Click **Reset to Default** to clear the override
+
+### Audit Logs Tab
+
+Read-only view of admin actions. Each entry shows the action type, target, details, and timestamp. Logs are auto-pruned to 1000 entries.
+
+### Server Logs Tab
+
+Read-only view of recent server log output. Shows the last 200 lines. Use the **Refresh** button to update.
+
+To capture logs to a file (required for this viewer to show content), set `GITV_LOG_FILE` in your `.env` or redirect server output to a file.
+
+---
+
+## 14. Users
 
 ![Users Page](media/gitv-users.png)
 *Screenshot: Users page with management actions*

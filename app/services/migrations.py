@@ -191,6 +191,54 @@ MIGRATIONS: list[tuple[str, str]] = [
         ALTER TABLE verification_rules ADD COLUMN verification_model VARCHAR(128) DEFAULT '' NOT NULL;
         """,
     ),
+    (
+        "021_add_api_key_endpoint_mapping",
+        """
+        ALTER TABLE api_keys ADD COLUMN endpoint_id VARCHAR(36) REFERENCES endpoints(id) ON DELETE SET NULL;
+        ALTER TABLE api_keys ADD COLUMN is_active BOOLEAN DEFAULT 1 NOT NULL;
+        ALTER TABLE api_keys ADD COLUMN last_used_at TIMESTAMP;
+        """,
+    ),
+    (
+        "022_add_security_hardening_fields",
+        """
+        ALTER TABLE user_settings ADD COLUMN allowed_origins TEXT DEFAULT '' NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN max_request_size INTEGER DEFAULT 0 NOT NULL;
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            id VARCHAR(36) PRIMARY KEY,
+            user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            action VARCHAR(128) NOT NULL,
+            target_type VARCHAR(64) DEFAULT '' NOT NULL,
+            target_id VARCHAR(36) DEFAULT '' NOT NULL,
+            details TEXT DEFAULT '' NOT NULL,
+            ip_address VARCHAR(64) DEFAULT '' NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS ix_audit_logs_user_id ON audit_logs (user_id);
+        CREATE INDEX IF NOT EXISTS ix_audit_logs_created_at ON audit_logs (created_at);
+        """,
+    ),
+    (
+        "023_add_admin_settings_and_caps",
+        """
+        CREATE TABLE IF NOT EXISTS admin_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            max_driver_callable_turns INTEGER DEFAULT 2 NOT NULL,
+            max_verification_retries INTEGER DEFAULT 3 NOT NULL,
+            rate_limit_proxy_per_min INTEGER DEFAULT 60 NOT NULL,
+            rate_limit_api_per_min INTEGER DEFAULT 120 NOT NULL,
+            runtime_log_level VARCHAR(16) DEFAULT '' NOT NULL,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO admin_settings (id) SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM admin_settings WHERE id = 1);
+        """,
+    ),
+    (
+        "024_add_endpoint_bypass_method",
+        """
+        ALTER TABLE endpoints ADD COLUMN bypass_method VARCHAR(32) DEFAULT 'none' NOT NULL;
+        """,
+    ),
 ]
 
 

@@ -14,6 +14,7 @@ from app.services.auth import (
     create_access_token,
     generate_api_key,
     hash_password,
+    validate_password_strength,
     verify_password,
 )
 
@@ -76,6 +77,10 @@ async def setup_admin(
     result = await db.execute(select(User).where(User.is_admin.is_(True)))
     if result.scalar_one_or_none() is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Admin user already exists")
+
+    pw_error = validate_password_strength(req.password)
+    if pw_error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=pw_error)
 
     raw_api_key, key_hash = generate_api_key()
     user = User(

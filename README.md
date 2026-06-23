@@ -69,10 +69,13 @@ I will stress that I am not going to replicate or 100% replace Lorebary's functi
 - **Command Tags** — Per-request pipeline overrides via inline tags: `<VERIFY:off>`, `<SUMMARY:on>`, `<MEMORY:off>`, `<FORBIDDEN:off>`, `<DRIVER:on>`. Optional `:persist` flag saves to conversation memory. `<CMD:reset>` clears persistent overrides. One-off > persistent > GUI precedence
 - **Embedded Lorebook Extraction** — `<jslorebook>` tags in character card scenario content are automatically extracted, desanitized, and stripped before forwarding. Scripts available for execution alongside user cantrips
 - **Prefill Normalization** — Provider-specific assistant message prefilling. Converts trailing assistant messages to system instructions for OpenAI-compatible endpoints. Anthropic/Google pass through natively
-- **Content Bypass Plugins** — Three encoding methods (space separation, dot separation, character replacement) to work around provider content filters. Includes ToS violation warning
+- **Content Bypass Plugins** — Three encoding methods (space separation, dot separation, character replacement) configurable per endpoint. Each endpoint can have its own bypass strategy. Includes ToS violation warning
 - **Tagging System** — Activate lorebooks, cantrips, and verification rules via `<#type-name#>` delimiters in persona or message text. Tags are auto-stripped before forwarding to the LLM
 - **Content Discovery and Sync** — Link any git repository as a content pack. Browse, install (linked with update tracking), or fork (independent copy) cantrips, lorebooks, and rules. Safety scanner checks for malicious code. Auto-discovers resources from folder structure. "Download at your own risk" disclaimer
 - **Diagnostics** — Automated endpoint and configuration checker for troubleshooting connectivity issues
+- **Security Hardening** — Rate limiting (proxy + management API), configurable CORS origins, password strength validation, request body size limits, audit logging for admin actions, configurable JWT expiration, global caps for driver-callable turns and verification retries
+- **Per-Endpoint API Keys** — Create multiple `gitv_` API keys per user, each mapped to a specific endpoint for multi-platform routing. Managed on each endpoint card in the UI
+- **Admin Panel** — Global caps (turns/retries use min of user/global), read-only audit logs, read-only server logs with runtime log level override without restart
 - **Web UI** — Full management interface built with Svelte 5 including cantrip tester, verification tester, forbidden word scanner, code editor with syntax highlighting, jump-to-top/bottom navigation, and log viewer
 - **Context Budgeting** — Weighted token budget allocation across cantrips and lorebooks. Cantrips access their share via `context.budget` and can dynamically scale output detail (full/summary/bullets) based on remaining tokens. Configurable per-user budget percentage and context window override
 - **Memory Rules** — Taggable per-conversation summarization overrides. Rules can override the token threshold, keep-recent count, prompt, or disable summarization entirely for specific conversations. Activate via `<#memory-rule-tag#>` tags
@@ -85,8 +88,6 @@ The following are planned for future releases.
 - **Per-server sharing** — Share resources among users on the same GitInTheVan instance via public flags
 - **Cantrip Chaining** — Multi-turn LLM interactions for complex systems like dice resolution and critical tables
 - **Natural-Language Cantrip Generator** — Describe what you want in plain English and an LLM generates the cantrip code or lorebook
-- **Per-Endpoint API Keys** — Endpoint-key mapping table for multi-platform users who need different API keys per service
-- **Security Hardening** — Rate limiting, per-user quotas, CORS hardening, JWT refresh tokens, audit logging
 - **Docker Distribution** — Multi-platform container images and docker-compose for production deployment
 
 ## Quick Start
@@ -195,6 +196,13 @@ Open `http://localhost:8000` in your browser to access the management UI.
 | `GITV_DEFAULT_ENDPOINT_MODEL` | *(empty)* | Fallback model name |
 | `GITV_DEFAULT_ENDPOINT_API_BASE_PATH` | *(empty)* | Fallback API base path (e.g. `/api` for OpenWebUI) |
 | `GITV_REQUEST_TIMEOUT` | `300` | Request timeout in seconds |
+| `GITV_CORS_ORIGINS` | `*` | Comma-separated allowed CORS origins |
+| `GITV_RATE_LIMIT_ENABLED` | `true` | Enable/disable rate limiting |
+| `GITV_RATE_LIMIT_PROXY_PER_MIN` | `60` | Max proxy requests per minute |
+| `GITV_RATE_LIMIT_API_PER_MIN` | `120` | Max management API requests per minute |
+| `GITV_MAX_REQUEST_BODY_SIZE` | `10485760` | Maximum request body size in bytes (10MB) |
+| `GITV_JWT_EXPIRATION_HOURS` | `24` | JWT token expiration time |
+| `GITV_MIN_PASSWORD_LENGTH` | `8` | Minimum password length |
 
 ### Endpoints
 

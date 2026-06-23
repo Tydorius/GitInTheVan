@@ -19,7 +19,7 @@ from app.models.memory import Memory
 from app.models.user import User
 from app.models.user_settings import UserSettings
 from app.models.verification import VerificationLog, VerificationRule
-from app.services.auth import generate_api_key, hash_password
+from app.services.auth import generate_api_key, hash_password, validate_password_strength
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +90,10 @@ async def create_user(
     if result.scalar_one_or_none() is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists")
 
+    pw_error = validate_password_strength(req.password)
+    if pw_error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=pw_error)
+
     raw_api_key, key_hash = generate_api_key()
     user = User(
         username=req.username,
@@ -106,6 +110,9 @@ async def create_user(
     await db.refresh(user)
 
     logger.info("User created: %s by admin: %s", user.username, admin.username)
+    from app.services.audit import log_action
+    await log_action(db, admin.id, "create_user", "user", user.id, f"Created user: {user.username}")
+    await db.commit()
     return CreateUserResponse(
         id=user.id,
         username=user.username,
@@ -165,6 +172,10 @@ async def reset_password(
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+    pw_error = validate_password_strength(req.password)
+    if pw_error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=pw_error)
+
     user.password_hash = hash_password(req.password)
     await db.commit()
     logger.info("Password reset for user: %s by admin: %s", user.username, admin.username)
@@ -211,6 +222,9 @@ async def delete_user(
     await db.delete(user)
     await db.commit()
     logger.info("User deleted: %s by admin: %s", user.username, admin.username)
+    from app.services.audit import log_action
+    await log_action(db, admin.id, "delete_user", "user", user_id, f"Deleted user: {user.username}")
+    await db.commit()
 
 
 async def _cascade_delete_user_data(db: AsyncSession, user_id: str) -> None:

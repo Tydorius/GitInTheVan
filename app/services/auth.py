@@ -8,7 +8,6 @@ from jose import JWTError, jwt
 from app.config import settings
 
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRATION_HOURS = 24
 API_KEY_PREFIX = "gitv_"
 
 
@@ -20,8 +19,25 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
 
 
+def validate_password_strength(password: str) -> str | None:
+    """Validate password meets minimum strength requirements.
+
+    Returns an error message string if invalid, None if valid.
+    """
+    min_len = settings.min_password_length
+    if len(password) < min_len:
+        return f"Password must be at least {min_len} characters long"
+    if len(password) > 128:
+        return "Password must be 128 characters or fewer"
+    if not any(c.isalpha() for c in password):
+        return "Password must contain at least one letter"
+    if not any(c.isdigit() for c in password):
+        return "Password must contain at least one number"
+    return None
+
+
 def create_access_token(user_id: str, username: str, is_admin: bool) -> str:
-    expire = datetime.now(UTC) + timedelta(hours=JWT_EXPIRATION_HOURS)
+    expire = datetime.now(UTC) + timedelta(hours=settings.jwt_expiration_hours)
     payload = {
         "sub": user_id,
         "username": username,
