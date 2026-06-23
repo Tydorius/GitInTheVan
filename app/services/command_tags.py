@@ -195,6 +195,7 @@ class ResolvedOverrides:
     forbidden: bool | None = None
     memory: bool | None = None
     driver_callable: bool | None = None
+    map: bool | None = None
 
     def get(self, command: str) -> bool | None:
         mapping = {
@@ -203,6 +204,7 @@ class ResolvedOverrides:
             "FORBIDDEN": self.forbidden,
             "MEMORY": self.memory,
             "DRIVER": self.driver_callable,
+            "MAP": self.map,
         }
         return mapping.get(command.upper())
 
@@ -213,6 +215,7 @@ class ResolvedOverrides:
             "forbidden": self.forbidden,
             "memory": self.memory,
             "driver_callable": self.driver_callable,
+            "map": self.map,
         }
 
 
@@ -235,6 +238,7 @@ async def resolve_command_overrides(
         "FORBIDDEN": "forbidden",
         "MEMORY": "memory",
         "DRIVER": "driver_callable",
+        "MAP": "map",
     }
 
     async with async_session() as db:

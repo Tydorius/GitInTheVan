@@ -204,6 +204,18 @@ export const api = {
   deleteMemoryRule: (id: string) =>
     request<void>(`/api/memory-rules/${id}`, { method: 'DELETE' }),
 
+  // Maps
+  listMaps: () =>
+    request<{ maps: any[] }>('/api/maps'),
+  getMap: (id: string) =>
+    request<any>(`/api/maps/${id}`),
+  createMap: (data: any) =>
+    request<any>('/api/maps', { method: 'POST', body: JSON.stringify(data) }),
+  updateMap: (id: string, data: any) =>
+    request<any>(`/api/maps/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteMap: (id: string) =>
+    request<void>(`/api/maps/${id}`, { method: 'DELETE' }),
+
   // API Keys (Per-Endpoint)
   listApiKeys: () =>
     request<{ keys: any[] }>('/api/api-keys'),

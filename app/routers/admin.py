@@ -25,6 +25,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 class AdminSettingsResponse(BaseModel):
     max_driver_callable_turns: int
     max_verification_retries: int
+    max_map_stages: int
     rate_limit_proxy_per_min: int
     rate_limit_api_per_min: int
     runtime_log_level: str
@@ -34,6 +35,7 @@ class AdminSettingsResponse(BaseModel):
 class AdminSettingsUpdate(BaseModel):
     max_driver_callable_turns: int | None = None
     max_verification_retries: int | None = None
+    max_map_stages: int | None = None
     rate_limit_proxy_per_min: int | None = None
     rate_limit_api_per_min: int | None = None
     runtime_log_level: str | None = None
@@ -70,6 +72,7 @@ async def get_settings(
     return AdminSettingsResponse(
         max_driver_callable_turns=s.max_driver_callable_turns,
         max_verification_retries=s.max_verification_retries,
+        max_map_stages=s.max_map_stages,
         rate_limit_proxy_per_min=s.rate_limit_proxy_per_min,
         rate_limit_api_per_min=s.rate_limit_api_per_min,
         runtime_log_level=s.runtime_log_level,
@@ -88,6 +91,8 @@ async def update_settings(
         updates["max_driver_callable_turns"] = max(0, req.max_driver_callable_turns)
     if req.max_verification_retries is not None:
         updates["max_verification_retries"] = max(0, req.max_verification_retries)
+    if req.max_map_stages is not None:
+        updates["max_map_stages"] = max(1, req.max_map_stages)
     if req.rate_limit_proxy_per_min is not None:
         updates["rate_limit_proxy_per_min"] = max(0, req.rate_limit_proxy_per_min)
     if req.rate_limit_api_per_min is not None:
@@ -106,6 +111,7 @@ async def update_settings(
     return AdminSettingsResponse(
         max_driver_callable_turns=s.max_driver_callable_turns,
         max_verification_retries=s.max_verification_retries,
+        max_map_stages=s.max_map_stages,
         rate_limit_proxy_per_min=s.rate_limit_proxy_per_min,
         rate_limit_api_per_min=s.rate_limit_api_per_min,
         runtime_log_level=s.runtime_log_level,

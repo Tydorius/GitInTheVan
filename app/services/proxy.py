@@ -202,6 +202,37 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
         from app.services.budget import prepare_budget
         await prepare_budget(body_json, user_id, tags)
 
+        from app.services.map_pipeline import resolve_map, run_map_pipeline
+        cmd_overrides_map = body_json.get("_gitv_command_overrides", {})
+        map_active = None
+        if cmd_overrides_map.get("map") is not False:
+            map_active = await resolve_map(user_id, tags)
+
+        if map_active:
+            import httpx as _httpx
+            map_timeout = _httpx.Timeout(settings.request_timeout, connect=10.0)
+            logger.info("Map '%s' active — routing to map pipeline", map_active.name)
+            body_json["_gitv_chat_id"] = internal_chat_id
+            body_json = await process_cantrips(body_json, user_id, request_headers, tags, internal_chat_id=internal_chat_id)
+            response_data = await run_map_pipeline(body_json, user_id, request_headers, map_active, map_timeout)
+
+            if body_json.get("_gitv_chat_id"):
+                response_data = await _extract_response_memories(response_data, user_id, body_json)
+
+            if body_json.get("_gitv_debug") and user_id:
+                await _save_debug_exchange(response_data, body_json, user_id)
+
+            if stream:
+                ux_settings = await _load_ux_settings(user_id)
+                return _convert_to_sse(
+                    JSONResponse(status_code=200, content=response_data),
+                    model or body_json.get("model", ""),
+                    gitv_status=ux_settings.get("gitv_status", False),
+                    simulated_speed=ux_settings.get("simulated_streaming_speed", 0),
+                )
+
+            return JSONResponse(status_code=200, content=response_data)
+
         body_json = await process_cantrips(body_json, user_id, request_headers, tags, internal_chat_id=internal_chat_id)
 
         body_json["_gitv_chat_id"] = internal_chat_id

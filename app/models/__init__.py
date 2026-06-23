@@ -12,6 +12,7 @@ from app.models.forbidden_word import ForbiddenWord
 from app.models.linked_repo import InstalledItem, LinkedRepo
 from app.models.lorebook import Lorebook
 from app.models.lorebook_entry import LorebookEntry
+from app.models.map import Map, MapStage, MapStageResource
 from app.models.memory import Memory
 from app.models.memory_rule import MemoryRule
 from app.models.user import User
@@ -36,6 +37,9 @@ __all__ = [
     "ForbiddenWord",
     "InstalledItem",
     "LinkedRepo",
+    "Map",
+    "MapStage",
+    "MapStageResource",
     "Memory",
     "MemoryRule",
     "VerificationRule",

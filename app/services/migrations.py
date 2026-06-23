@@ -239,6 +239,61 @@ MIGRATIONS: list[tuple[str, str]] = [
         ALTER TABLE endpoints ADD COLUMN bypass_method VARCHAR(32) DEFAULT 'none' NOT NULL;
         """,
     ),
+    (
+        "025_create_maps_tables",
+        """
+        CREATE TABLE IF NOT EXISTS maps (
+            id VARCHAR(36) PRIMARY KEY,
+            user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            name VARCHAR(128) NOT NULL,
+            description TEXT DEFAULT '' NOT NULL,
+            tag VARCHAR(128) DEFAULT '' NOT NULL,
+            is_public BOOLEAN DEFAULT 0 NOT NULL,
+            is_active BOOLEAN DEFAULT 1 NOT NULL,
+            version VARCHAR(32) DEFAULT '1.0' NOT NULL,
+            author VARCHAR(128) DEFAULT '' NOT NULL,
+            global_llm_instructions TEXT DEFAULT '' NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS ix_maps_user_id ON maps (user_id);
+        CREATE TABLE IF NOT EXISTS map_stages (
+            id VARCHAR(36) PRIMARY KEY,
+            map_id VARCHAR(36) NOT NULL REFERENCES maps(id) ON DELETE CASCADE,
+            stage_order INTEGER NOT NULL,
+            name VARCHAR(128) NOT NULL,
+            description TEXT DEFAULT '' NOT NULL,
+            system_instructions TEXT DEFAULT '' NOT NULL,
+            endpoint_id VARCHAR(36) REFERENCES endpoints(id) ON DELETE SET NULL,
+            model_override VARCHAR(128) DEFAULT '' NOT NULL,
+            driver_callable_turns INTEGER DEFAULT 0 NOT NULL,
+            verification_enabled BOOLEAN DEFAULT 0 NOT NULL,
+            verification_endpoint_id VARCHAR(36) REFERENCES endpoints(id) ON DELETE SET NULL,
+            verification_model VARCHAR(128) DEFAULT '' NOT NULL,
+            verification_max_retries INTEGER DEFAULT 2 NOT NULL,
+            verification_instructions TEXT DEFAULT '' NOT NULL,
+            output_mode VARCHAR(16) DEFAULT 'persist' NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS ix_map_stages_map_id ON map_stages (map_id);
+        CREATE TABLE IF NOT EXISTS map_stage_resources (
+            id VARCHAR(36) PRIMARY KEY,
+            map_stage_id VARCHAR(36) NOT NULL REFERENCES map_stages(id) ON DELETE CASCADE,
+            resource_type VARCHAR(16) NOT NULL,
+            resource_id VARCHAR(36) NOT NULL,
+            position VARCHAR(32) DEFAULT 'pre_driver' NOT NULL,
+            sticky BOOLEAN DEFAULT 0 NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS ix_map_stage_resources_stage_id ON map_stage_resources (map_stage_id);
+        """,
+    ),
+    (
+        "026_add_max_map_stages",
+        """
+        ALTER TABLE admin_settings ADD COLUMN max_map_stages INTEGER DEFAULT 3 NOT NULL;
+        """,
+    ),
 ]
 
 

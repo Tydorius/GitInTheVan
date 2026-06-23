@@ -19,6 +19,7 @@ from app.routers.diagnostics import router as diagnostics_router
 from app.routers.endpoints import router as endpoints_router
 from app.routers.forbidden_words import router as forbidden_words_router
 from app.routers.lorebook import router as lorebook_router
+from app.routers.maps import router as maps_router
 from app.routers.memories import router as memories_router
 from app.routers.memory_rules import router as memory_rules_router
 from app.routers.packs import router as packs_router
@@ -97,6 +98,7 @@ app.include_router(endpoints_router)
 app.include_router(api_keys_router)
 app.include_router(settings_router)
 app.include_router(lorebook_router)
+app.include_router(maps_router)
 app.include_router(memories_router)
 app.include_router(memory_rules_router)
 app.include_router(cantrips_router)
