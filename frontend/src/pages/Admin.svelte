@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from '../api'
   import { onMount, onDestroy } from 'svelte'
+  import Debug from './Debug.svelte'
 
   let tab = 'caps'
   let loading = true
@@ -195,6 +196,7 @@
   <div>
     <button onclick={() => tab = 'caps'} class={tab === 'caps' ? 'primary' : ''}>Global Caps</button>
     <button onclick={() => tab = 'users'} class={tab === 'users' ? 'primary' : ''}>Users</button>
+    <button onclick={() => tab = 'debug'} class={tab === 'debug' ? 'primary' : ''}>Debug</button>
     <button onclick={() => tab = 'audit'} class={tab === 'audit' ? 'primary' : ''}>Audit Logs</button>
     <button onclick={() => tab = 'logs'} class={tab === 'logs' ? 'primary' : ''}>Server Logs</button>
   </div>
@@ -357,6 +359,8 @@
       white-space: pre-wrap; word-break: break-all;
     ">{#each serverLogs as line}{line}\n{/each}</div>
   </div>
+{:else if tab === 'debug'}
+  <Debug />
 {/if}
 
 {#if showUserForm}

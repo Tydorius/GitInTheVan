@@ -4,10 +4,10 @@
   import Dashboard from './pages/Dashboard.svelte'
   import Endpoints from './pages/Endpoints.svelte'
   import Cantrips from './pages/Cantrips.svelte'
-  import Debug from './pages/Debug.svelte'
   import Lorebooks from './pages/Lorebooks.svelte'
   import Verification from './pages/Verification.svelte'
   import Memories from './pages/Memories.svelte'
+  import Maps from './pages/Maps.svelte'
   import Packs from './pages/Packs.svelte'
   import Settings from './pages/Settings.svelte'
   import Admin from './pages/Admin.svelte'
@@ -19,14 +19,24 @@
     { path: '/lorebooks', label: 'Lorebooks', icon: 'L' },
     { path: '/verification', label: 'Verification', icon: 'V' },
     { path: '/memories', label: 'Memories', icon: 'M' },
-    { path: '/debug', label: 'Debug', icon: 'B' },
+    { path: '/maps', label: 'Maps', icon: 'A' },
     { path: '/packs', label: 'Content Packs', icon: 'P' },
-    { path: '/settings', label: 'Settings', icon: 'G' },
-    { path: '/admin', label: 'Admin', icon: 'A', admin: true },
+    { path: '/settings', label: 'Settings', icon: 'S' },
+    { path: '/admin', label: 'Admin', icon: 'X', admin: true },
   ]
+
+  let sidebarCollapsed = true
 
   function handleLogout() {
     logout()
+  }
+
+  function toggleSidebar() {
+    sidebarCollapsed = !sidebarCollapsed
+  }
+
+  function closeSidebar() {
+    sidebarCollapsed = true
   }
 
   $: route = $currentRoute || '/'
@@ -40,22 +50,22 @@
 {:else if $isAuthenticated && (page === '/login' || page === '')}
   <Dashboard />
 {:else}
-  <div class="app-layout">
+  <div class="app-layout" class:sidebar-collapsed={sidebarCollapsed}>
     <aside class="sidebar">
-      <div class="sidebar-header">
-        <img src="/gitinthevan-full.svg" alt="GitInTheVan" style="width: 100%; margin-bottom: 8px;" />
-        <p>LLM Proxy Router</p>
+      <div class="sidebar-header" onclick={toggleSidebar} role="button" tabindex="0">
+        <img src="/gitinthevan-full.svg" alt="GitInTheVan LLM Router & Proxy" style="max-width: 100%;" />
+        <span class="mobile-header">{sidebarCollapsed ? '☰' : '✕'}</span>
       </div>
       <nav class="sidebar-nav">
         {#each navItems as item}
           {#if !item.admin || $isAdmin}
-            <a href={`#${item.path}`} class={page === item.path ? 'active' : ''}>
+            <a href={`#${item.path}`} class={page === item.path ? 'active' : ''} onclick={closeSidebar}>
               <span>{item.icon}</span> {item.label}
             </a>
           {/if}
         {/each}
       </nav>
-      <div style="padding: 16px 20px; border-top: 1px solid var(--border);">
+      <div class="sidebar-footer">
         <button onclick={handleLogout} style="width: 100%;">Logout</button>
       </div>
     </aside>
@@ -73,8 +83,8 @@
         <Verification />
       {:else if page === '/memories'}
         <Memories />
-      {:else if page === '/debug'}
-        <Debug />
+      {:else if page === '/maps'}
+        <Maps />
       {:else if page === '/packs'}
         <Packs />
       {:else if page === '/settings'}

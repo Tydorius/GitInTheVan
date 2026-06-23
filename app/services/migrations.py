@@ -230,7 +230,7 @@ MIGRATIONS: list[tuple[str, str]] = [
             runtime_log_level VARCHAR(16) DEFAULT '' NOT NULL,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
-        INSERT INTO admin_settings (id) SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM admin_settings WHERE id = 1);
+        INSERT OR IGNORE INTO admin_settings (id, max_driver_callable_turns, max_verification_retries, rate_limit_proxy_per_min, rate_limit_api_per_min, runtime_log_level) VALUES (1, 2, 3, 60, 120, '');
         """,
     ),
     (
@@ -285,8 +285,15 @@ async def run_migrations(engine: AsyncEngine) -> None:
                         await conn.execute(text(stmt))
                     except Exception as e:
                         err_lower = str(e).lower()
-                        if "duplicate column name" in err_lower or "no such column" in err_lower:
-                            logger.debug("Migration %s: skipping: %s", name, stmt[:80])
+                        tolerable = [
+                            "duplicate column name",
+                            "no such column",
+                            "already exists",
+                            "no such table",
+                            "object name already exists",
+                        ]
+                        if any(t in err_lower for t in tolerable):
+                            logger.debug("Migration %s: skipping (already applied): %s", name, stmt[:80])
                         else:
                             raise
             await _mark_migration_applied(engine, name)
