@@ -1,6 +1,4 @@
 import logging
-import os
-from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -139,36 +137,8 @@ async def get_server_logs(
     db: Annotated[AsyncSession, Depends(get_db)],
     lines: int = 200,
 ):
-    """Read recent server log output. Attempts to find a log file, falls back to empty."""
-    target_lines = max(1, min(lines, 1000))
-    log_lines: list[str] = []
-
-    log_candidates = [
-        Path("data/gitinthevan.log"),
-        Path("gitinthevan.log"),
-        Path("/var/log/gitinthevan/gitinthevan.log"),
-    ]
-
-    env_log = os.environ.get("GITV_LOG_FILE", "")
-    if env_log:
-        log_candidates.insert(0, Path(env_log))
-
-    for log_path in log_candidates:
-        if log_path.exists():
-            try:
-                all_lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-                log_lines = all_lines[-target_lines:] if len(all_lines) > target_lines else all_lines
-                break
-            except Exception:
-                continue
-
-    if not log_lines:
-        from app.services.admin import get_effective_log_level
-        effective_level = await get_effective_log_level()
-        log_lines = [
-            "No log file found. Logs are written to stdout/stderr.",
-            f"Current log level: {effective_level}",
-            "To capture logs to a file, set GITV_LOG_FILE in your .env or redirect output.",
-        ]
+    """Read recent server log output."""
+    from app.services.log_manager import read_recent_logs
+    log_lines = read_recent_logs(max(1, min(lines, 1000)))
 
     return ServerLogResponse(lines=log_lines, total=len(log_lines))

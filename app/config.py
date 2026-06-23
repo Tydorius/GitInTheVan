@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     max_request_body_size: int = 10 * 1024 * 1024
     jwt_expiration_hours: int = 24
     min_password_length: int = 8
+    log_file: str = ""
+    log_max_size_mb: int = 1
+    log_retention_days: int = 30
 
     @field_validator("default_endpoint_url")
     @classmethod

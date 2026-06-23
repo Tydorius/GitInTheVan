@@ -38,6 +38,8 @@ async def lifespan(app: FastAPI):
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    from app.services.log_manager import setup_file_logging
+    setup_file_logging()
     logger.info("GitInTheVan starting up")
     await init_db()
     yield

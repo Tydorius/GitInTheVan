@@ -26,7 +26,7 @@
 
   let vSettings = { verification_enabled: false, verification_endpoint_id: '' as string | null, verification_model: '' }
 
-  let testForm = { content: '', prompt: '', endpoint_id: '', model: '' }
+  let testForm = { content: '', prompt: '', rule_id: '', endpoint_id: '', model: '' }
   let testResult: any = null
   let testing = false
 
@@ -350,7 +350,14 @@
       <textarea bind:value={testForm.content} placeholder="Paste the LLM response to verify..." style="min-height: 100px;"></textarea>
     </div>
     <div class="form-group">
-      <label>Verification Prompt (optional if rule_id used)</label>
+      <label>Use Rule (optional — loads rule prompt automatically)</label>
+      <select bind:value={testForm.rule_id}>
+        <option value="">No rule — use custom prompt below</option>
+        {#each rules as r}<option value={r.id}>{r.name}</option>{/each}
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Verification Prompt (ignored if rule selected above)</label>
       <textarea bind:value={testForm.prompt} placeholder="The character must never mention being an AI..."></textarea>
     </div>
     <div class="form-row">

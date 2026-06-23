@@ -357,7 +357,7 @@
       font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
       font-size: 11px; line-height: 1.6; color: #c8c9d3;
       white-space: pre-wrap; word-break: break-all;
-    ">{#each serverLogs as line}{line}\n{/each}</div>
+    ">{serverLogs.join('\n')}</div>
   </div>
 {:else if tab === 'debug'}
   <Debug />
