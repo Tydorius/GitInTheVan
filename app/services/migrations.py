@@ -7,8 +7,22 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 logger = logging.getLogger(__name__)
 
+_MIGRATION_LOCK_ID = 784523
 
-MIGRATIONS: list[tuple[str, str]] = [
+# ---------------------------------------------------------------------------
+# Migration definitions
+#
+# Each entry is (name, sql) where sql is either:
+#   - A plain string executed on every dialect, or
+#   - A dict keyed by dialect name ("sqlite", "postgresql", "mysql") so that
+#     dialect-incompatible DDL can be resolved at runtime.
+#
+# Migrations are forward-only (ADD COLUMN / CREATE TABLE IF NOT EXISTS).
+# Existing SQLite databases skip already-applied migrations via the _migrations
+# table; new databases on any dialect run them from scratch.
+# ---------------------------------------------------------------------------
+
+MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
     (
         "001_add_lorebook_is_active",
         "ALTER TABLE lorebooks ADD COLUMN is_active BOOLEAN DEFAULT 1 NOT NULL;",
@@ -43,17 +57,66 @@ MIGRATIONS: list[tuple[str, str]] = [
     ),
     (
         "006_seed_default_tags",
-        """
-        UPDATE lorebooks SET tag = (
-            SELECT COUNT(*) FROM lorebooks AS l2 WHERE l2.rowid < lorebooks.rowid
-        ) + 1 WHERE tag = '' OR tag IS NULL;
-        UPDATE cantrips SET tag = (
-            SELECT COUNT(*) FROM cantrips AS c2 WHERE c2.rowid < cantrips.rowid
-        ) + 1 WHERE tag = '' OR tag IS NULL;
-        UPDATE verification_rules SET tag = (
-            SELECT COUNT(*) FROM verification_rules AS v2 WHERE v2.rowid < verification_rules.rowid
-        ) + 1 WHERE tag = '' OR tag IS NULL;
-        """,
+        {
+            "sqlite": """
+                UPDATE lorebooks SET tag = (
+                    SELECT COUNT(*) FROM lorebooks AS l2 WHERE l2.rowid < lorebooks.rowid
+                ) + 1 WHERE tag = '' OR tag IS NULL;
+                UPDATE cantrips SET tag = (
+                    SELECT COUNT(*) FROM cantrips AS c2 WHERE c2.rowid < cantrips.rowid
+                ) + 1 WHERE tag = '' OR tag IS NULL;
+                UPDATE verification_rules SET tag = (
+                    SELECT COUNT(*) FROM verification_rules AS v2 WHERE v2.rowid < verification_rules.rowid
+                ) + 1 WHERE tag = '' OR tag IS NULL;
+            """,
+            "postgresql": """
+                WITH numbered AS (
+                    SELECT id, (ROW_NUMBER() OVER (ORDER BY created_at) - 1) AS preceding_count
+                    FROM lorebooks
+                )
+                UPDATE lorebooks SET tag = numbered.preceding_count + 1
+                FROM numbered WHERE lorebooks.id = numbered.id
+                AND (lorebooks.tag = '' OR lorebooks.tag IS NULL);
+
+                WITH numbered AS (
+                    SELECT id, (ROW_NUMBER() OVER (ORDER BY created_at) - 1) AS preceding_count
+                    FROM cantrips
+                )
+                UPDATE cantrips SET tag = numbered.preceding_count + 1
+                FROM numbered WHERE cantrips.id = numbered.id
+                AND (cantrips.tag = '' OR cantrips.tag IS NULL);
+
+                WITH numbered AS (
+                    SELECT id, (ROW_NUMBER() OVER (ORDER BY created_at) - 1) AS preceding_count
+                    FROM verification_rules
+                )
+                UPDATE verification_rules SET tag = numbered.preceding_count + 1
+                FROM numbered WHERE verification_rules.id = numbered.id
+                AND (verification_rules.tag = '' OR verification_rules.tag IS NULL);
+            """,
+            "mysql": """
+                UPDATE lorebooks INNER JOIN (
+                    SELECT id, (ROW_NUMBER() OVER (ORDER BY created_at) - 1) AS preceding_count
+                    FROM lorebooks
+                ) AS numbered ON lorebooks.id = numbered.id
+                SET lorebooks.tag = numbered.preceding_count + 1
+                WHERE lorebooks.tag = '' OR lorebooks.tag IS NULL;
+
+                UPDATE cantrips INNER JOIN (
+                    SELECT id, (ROW_NUMBER() OVER (ORDER BY created_at) - 1) AS preceding_count
+                    FROM cantrips
+                ) AS numbered ON cantrips.id = numbered.id
+                SET cantrips.tag = numbered.preceding_count + 1
+                WHERE cantrips.tag = '' OR cantrips.tag IS NULL;
+
+                UPDATE verification_rules INNER JOIN (
+                    SELECT id, (ROW_NUMBER() OVER (ORDER BY created_at) - 1) AS preceding_count
+                    FROM verification_rules
+                ) AS numbered ON verification_rules.id = numbered.id
+                SET verification_rules.tag = numbered.preceding_count + 1
+                WHERE verification_rules.tag = '' OR verification_rules.tag IS NULL;
+            """,
+        },
     ),
     (
         "007_fix_double_prefixed_tags",
@@ -220,18 +283,46 @@ MIGRATIONS: list[tuple[str, str]] = [
     ),
     (
         "023_add_admin_settings_and_caps",
-        """
-        CREATE TABLE IF NOT EXISTS admin_settings (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            max_driver_callable_turns INTEGER DEFAULT 2 NOT NULL,
-            max_verification_retries INTEGER DEFAULT 3 NOT NULL,
-            rate_limit_proxy_per_min INTEGER DEFAULT 60 NOT NULL,
-            rate_limit_api_per_min INTEGER DEFAULT 120 NOT NULL,
-            runtime_log_level VARCHAR(16) DEFAULT '' NOT NULL,
-            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
-        INSERT OR IGNORE INTO admin_settings (id, max_driver_callable_turns, max_verification_retries, rate_limit_proxy_per_min, rate_limit_api_per_min, runtime_log_level) VALUES (1, 2, 3, 60, 120, '');
-        """,
+        {
+            "sqlite": """
+                CREATE TABLE IF NOT EXISTS admin_settings (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    max_driver_callable_turns INTEGER DEFAULT 2 NOT NULL,
+                    max_verification_retries INTEGER DEFAULT 3 NOT NULL,
+                    rate_limit_proxy_per_min INTEGER DEFAULT 60 NOT NULL,
+                    rate_limit_api_per_min INTEGER DEFAULT 120 NOT NULL,
+                    runtime_log_level VARCHAR(16) DEFAULT '' NOT NULL,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                INSERT OR IGNORE INTO admin_settings (id, max_driver_callable_turns, max_verification_retries, rate_limit_proxy_per_min, rate_limit_api_per_min, runtime_log_level, updated_at) VALUES (1, 2, 3, 60, 120, '', CURRENT_TIMESTAMP);
+            """,
+            "postgresql": """
+                CREATE TABLE IF NOT EXISTS admin_settings (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    max_driver_callable_turns INTEGER DEFAULT 2 NOT NULL,
+                    max_verification_retries INTEGER DEFAULT 3 NOT NULL,
+                    rate_limit_proxy_per_min INTEGER DEFAULT 60 NOT NULL,
+                    rate_limit_api_per_min INTEGER DEFAULT 120 NOT NULL,
+                    runtime_log_level VARCHAR(16) DEFAULT '' NOT NULL,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                INSERT INTO admin_settings (id, max_driver_callable_turns, max_verification_retries, rate_limit_proxy_per_min, rate_limit_api_per_min, runtime_log_level, updated_at)
+                VALUES (1, 2, 3, 60, 120, '', CURRENT_TIMESTAMP)
+                ON CONFLICT (id) DO NOTHING;
+            """,
+            "mysql": """
+                CREATE TABLE IF NOT EXISTS admin_settings (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    max_driver_callable_turns INTEGER DEFAULT 2 NOT NULL,
+                    max_verification_retries INTEGER DEFAULT 3 NOT NULL,
+                    rate_limit_proxy_per_min INTEGER DEFAULT 60 NOT NULL,
+                    rate_limit_api_per_min INTEGER DEFAULT 120 NOT NULL,
+                    runtime_log_level VARCHAR(16) DEFAULT '' NOT NULL,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                INSERT IGNORE INTO admin_settings (id, max_driver_callable_turns, max_verification_retries, rate_limit_proxy_per_min, rate_limit_api_per_min, runtime_log_level, updated_at) VALUES (1, 2, 3, 60, 120, '', CURRENT_TIMESTAMP);
+            """,
+        },
     ),
     (
         "024_add_endpoint_bypass_method",
@@ -300,20 +391,95 @@ MIGRATIONS: list[tuple[str, str]] = [
         ALTER TABLE user_settings ADD COLUMN default_map_id VARCHAR(36) REFERENCES maps(id) ON DELETE SET NULL;
         """,
     ),
+    (
+        "028_create_user_data_table",
+        """
+        CREATE TABLE IF NOT EXISTS user_data (
+            id VARCHAR(36) PRIMARY KEY,
+            user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            key VARCHAR(256) NOT NULL,
+            value_json TEXT DEFAULT '' NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS ix_user_data_user_id ON user_data (user_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_user_data_key ON user_data (user_id, key);
+        """,
+    ),
+    (
+        "029_create_cantrip_data_table",
+        """
+        CREATE TABLE IF NOT EXISTS cantrip_data (
+            id VARCHAR(36) PRIMARY KEY,
+            user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            cantrip_id VARCHAR(36) NOT NULL REFERENCES cantrips(id) ON DELETE CASCADE,
+            key VARCHAR(256) NOT NULL,
+            value_json TEXT DEFAULT '' NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS ix_cantrip_data_user_cantrip ON cantrip_data (user_id, cantrip_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_cantrip_data_key ON cantrip_data (user_id, cantrip_id, key);
+        """,
+    ),
 ]
 
 
-async def _ensure_migrations_table(engine: AsyncEngine) -> None:
+# Error substrings that indicate a migration statement is a no-op because the
+# schema element already exists (create_all may have pre-created it).  These are
+# matched case-insensitively against the exception message.
+_TOLERABLE_ERROR_FRAGMENTS: list[str] = [
+    # SQLite / MySQL -- column already exists
+    "duplicate column name",
+    # PostgreSQL -- "column \"x\" of relation \"y\" already exists"
+    "already exists",
+    # SQLite -- table or index name conflict
+    "object name already exists",
+    # SQLite -- defensive (should not occur with IF NOT EXISTS)
+    "no such column",
+    "no such table",
+    # Unique constraint violations (seed inserts already present)
+    # SQLite: "UNIQUE constraint failed: ..."
+    # PostgreSQL: "duplicate key value violates unique constraint"
+    "unique constraint",
+    # MySQL / MariaDB -- "Duplicate entry '...' for key"
+    "duplicate entry",
+]
+
+
+def _is_tolerable_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(fragment in msg for fragment in _TOLERABLE_ERROR_FRAGMENTS)
+
+
+def _resolve_sql(sql_def: str | dict[str, str], dialect: str) -> str:
+    """Return the SQL string for the given dialect."""
+    if isinstance(sql_def, str):
+        return sql_def
+    return sql_def.get(dialect, sql_def.get("default", ""))
+
+
+def _migrations_table_ddl(dialect: str) -> str:
+    """Dialect-appropriate DDL for the migration tracking table."""
+    if dialect == "sqlite":
+        id_col = "id INTEGER PRIMARY KEY AUTOINCREMENT"
+    elif dialect == "postgresql":
+        id_col = "id SERIAL PRIMARY KEY"
+    else:
+        id_col = "id INT AUTO_INCREMENT PRIMARY KEY"
+
+    return (
+        f"CREATE TABLE IF NOT EXISTS _migrations ("
+        f"{id_col}, "
+        f"name VARCHAR(128) UNIQUE NOT NULL, "
+        f"applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        f");"
+    )
+
+
+async def _ensure_migrations_table(engine: AsyncEngine, dialect: str) -> None:
     async with engine.begin() as conn:
-        await conn.execute(
-            text(
-                "CREATE TABLE IF NOT EXISTS _migrations ("
-                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-                "name VARCHAR(128) UNIQUE NOT NULL, "
-                "applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
-                ");"
-            )
-        )
+        await conn.execute(text(_migrations_table_ddl(dialect)))
 
 
 async def _get_applied_migrations(engine: AsyncEngine) -> set[str]:
@@ -330,35 +496,83 @@ async def _mark_migration_applied(engine: AsyncEngine, name: str) -> None:
         )
 
 
-async def run_migrations(engine: AsyncEngine) -> None:
-    await _ensure_migrations_table(engine)
-    applied = await _get_applied_migrations(engine)
+async def _acquire_lock(engine: AsyncEngine, dialect: str) -> None:
+    """Acquire a database-level lock to serialise concurrent migrations.
 
-    for name, sql in MIGRATIONS:
-        if name in applied:
-            continue
+    SQLite is single-writer and needs no lock.  PostgreSQL and MariaDB/MySQL
+    use advisory/named locks so that multiple application instances sharing one
+    database do not race during startup.
+    """
+    if dialect == "sqlite":
+        return
 
-        statements = [s.strip() for s in sql.split(";") if s.strip()]
+    async with engine.connect() as conn:
+        if dialect == "postgresql":
+            await conn.execute(text(f"SELECT pg_advisory_lock({_MIGRATION_LOCK_ID})"))
+            await conn.commit()
+        elif dialect == "mysql":
+            result = await conn.execute(text("SELECT GET_LOCK('gitv_migrations', 30)"))
+            if result.scalar() != 1:
+                raise RuntimeError("Could not acquire migration lock within 30 seconds")
+            await conn.commit()
+
+
+async def _release_lock(engine: AsyncEngine, dialect: str) -> None:
+    if dialect == "sqlite":
+        return
+
+    async with engine.connect() as conn:
+        if dialect == "postgresql":
+            await conn.execute(text(f"SELECT pg_advisory_unlock({_MIGRATION_LOCK_ID})"))
+            await conn.commit()
+        elif dialect == "mysql":
+            await conn.execute(text("SELECT RELEASE_LOCK('gitv_migrations')"))
+            await conn.commit()
+
+
+async def _apply_migration(engine: AsyncEngine, name: str, sql: str, dialect: str) -> None:
+    """Execute a single migration, splitting on semicolons into per-statement transactions.
+
+    Each statement runs in its own transaction.  This is required because
+    PostgreSQL poisons the entire transaction when any statement errors, making
+    per-statement error tolerance impossible inside a shared transaction.
+    """
+    statements = [s.strip() for s in sql.split(";") if s.strip()]
+    for stmt in statements:
         try:
             async with engine.begin() as conn:
-                for stmt in statements:
-                    try:
-                        await conn.execute(text(stmt))
-                    except Exception as e:
-                        err_lower = str(e).lower()
-                        tolerable = [
-                            "duplicate column name",
-                            "no such column",
-                            "already exists",
-                            "no such table",
-                            "object name already exists",
-                        ]
-                        if any(t in err_lower for t in tolerable):
-                            logger.debug("Migration %s: skipping (already applied): %s", name, stmt[:80])
-                        else:
-                            raise
-            await _mark_migration_applied(engine, name)
-            logger.info("Migration applied: %s", name)
-        except Exception:
-            logger.exception("Migration failed: %s", name)
-            raise
+                await conn.execute(text(stmt))
+        except Exception as exc:
+            if _is_tolerable_error(exc):
+                logger.debug("Migration %s: tolerable error, skipping: %s", name, stmt[:80])
+            else:
+                raise
+
+
+async def run_migrations(engine: AsyncEngine) -> None:
+    dialect = engine.dialect.name
+    await _ensure_migrations_table(engine, dialect)
+
+    await _acquire_lock(engine, dialect)
+    try:
+        applied = await _get_applied_migrations(engine)
+
+        for name, sql_def in MIGRATIONS:
+            if name in applied:
+                continue
+
+            sql = _resolve_sql(sql_def, dialect)
+            if not sql:
+                logger.debug("Migration %s: no SQL for dialect %s, marking applied", name, dialect)
+                await _mark_migration_applied(engine, name)
+                continue
+
+            try:
+                await _apply_migration(engine, name, sql, dialect)
+                await _mark_migration_applied(engine, name)
+                logger.info("Migration applied: %s", name)
+            except Exception:
+                logger.exception("Migration failed: %s", name)
+                raise
+    finally:
+        await _release_lock(engine, dialect)

@@ -279,6 +279,154 @@ class TestChatData:
 
 
 # ============================================================================
+# Deno Runner: Per-user global memory (user_data)
+# ============================================================================
+
+class TestUserData:
+    @pytest.mark.asyncio
+    async def test_user_data_set_and_get(self):
+        code = (
+            'const theme = context.user_data.get("theme") || "default";\n'
+            'context.user_data.set("theme", "dark");\n'
+            'context.character.scenario += " Theme was " + theme;'
+        )
+        result = await run_cantrip(code, _make_context())
+        assert "Theme was default" in result.scenario
+        assert result.user_data.get("theme") == "dark"
+
+    @pytest.mark.asyncio
+    async def test_user_data_with_existing_values(self):
+        code = (
+            'const visits = context.user_data.get("visits") || 0;\n'
+            'context.user_data.set("visits", visits + 1);\n'
+            'context.character.scenario += " Visits: " + (visits + 1);'
+        )
+        result = await run_cantrip(
+            code, _make_context(),
+            user_data={"visits": 5},
+        )
+        assert "Visits: 6" in result.scenario
+        assert result.user_data["visits"] == 6
+
+    @pytest.mark.asyncio
+    async def test_user_data_keys(self):
+        code = (
+            'const keys = context.user_data.keys();\n'
+            'console.log("UserKeys: " + keys.join(", "));'
+        )
+        result = await run_cantrip(
+            code, _make_context(),
+            user_data={"alpha": 1, "beta": 2},
+        )
+        assert any("UserKeys: alpha, beta" in log for log in result.debug_logs)
+
+    @pytest.mark.asyncio
+    async def test_user_data_delete(self):
+        code = (
+            'context.user_data.delete("temp");\n'
+            'console.log("After delete: " + context.user_data.keys().length + " keys");'
+        )
+        result = await run_cantrip(
+            code, _make_context(),
+            user_data={"temp": "x", "perm": "y"},
+        )
+        assert "temp" not in result.user_data
+        assert "perm" in result.user_data
+
+    @pytest.mark.asyncio
+    async def test_user_data_get_missing_returns_null(self):
+        code = (
+            'const val = context.user_data.get("nonexistent");\n'
+            'console.log("UserData missing: " + val);'
+        )
+        result = await run_cantrip(code, _make_context())
+        assert any("UserData missing: null" in log for log in result.debug_logs)
+
+
+# ============================================================================
+# Deno Runner: Per-cantrip memory (cantrip_data)
+# ============================================================================
+
+class TestCantripData:
+    @pytest.mark.asyncio
+    async def test_cantrip_data_set_and_get(self):
+        code = (
+            'const level = context.cantrip_data.get("level") || 1;\n'
+            'context.cantrip_data.set("level", level + 1);\n'
+            'context.character.scenario += " Level " + level;'
+        )
+        result = await run_cantrip(code, _make_context())
+        assert "Level 1" in result.scenario
+        assert result.cantrip_data.get("level") == 2
+
+    @pytest.mark.asyncio
+    async def test_cantrip_data_with_existing_values(self):
+        code = (
+            'const gold = context.cantrip_data.get("gold") || 0;\n'
+            'context.cantrip_data.set("gold", gold + 100);\n'
+            'context.character.scenario += " Gold: " + (gold + 100);'
+        )
+        result = await run_cantrip(
+            code, _make_context(),
+            cantrip_data={"gold": 500},
+        )
+        assert "Gold: 600" in result.scenario
+        assert result.cantrip_data["gold"] == 600
+
+    @pytest.mark.asyncio
+    async def test_cantrip_data_keys(self):
+        code = (
+            'const keys = context.cantrip_data.keys();\n'
+            'console.log("CantripKeys: " + keys.join(", "));'
+        )
+        result = await run_cantrip(
+            code, _make_context(),
+            cantrip_data={"kingdom": "north", "population": 1000},
+        )
+        assert "kingdom" in result.debug_logs[0] if result.debug_logs else True
+        assert result.cantrip_data.get("kingdom") == "north"
+
+    @pytest.mark.asyncio
+    async def test_cantrip_data_delete(self):
+        code = (
+            'context.cantrip_data.delete("temp_state");\n'
+            'console.log("Remaining: " + context.cantrip_data.keys().length);'
+        )
+        result = await run_cantrip(
+            code, _make_context(),
+            cantrip_data={"temp_state": "x", "perm_state": "y"},
+        )
+        assert "temp_state" not in result.cantrip_data
+        assert "perm_state" in result.cantrip_data
+
+    @pytest.mark.asyncio
+    async def test_cantrip_data_get_missing_returns_null(self):
+        code = (
+            'const val = context.cantrip_data.get("nonexistent");\n'
+            'console.log("CantripData missing: " + val);'
+        )
+        result = await run_cantrip(code, _make_context())
+        assert any("CantripData missing: null" in log for log in result.debug_logs)
+
+    @pytest.mark.asyncio
+    async def test_all_three_scopes_isolated(self):
+        """chat_data, user_data, and cantrip_data are separate namespaces."""
+        code = (
+            'context.chat_data.set("key", "chat");\n'
+            'context.user_data.set("key", "user");\n'
+            'context.cantrip_data.set("key", "cantrip");\n'
+            'console.log("C:" + context.chat_data.get("key") + '
+            '" U:" + context.user_data.get("key") + '
+            '" K:" + context.cantrip_data.get("key"));'
+        )
+        result = await run_cantrip(code, _make_context())
+        assert result.chat_data["key"] == "chat"
+        assert result.user_data["key"] == "user"
+        assert result.cantrip_data["key"] == "cantrip"
+        assert any("C:chat U:user K:cantrip" in log for log in result.debug_logs)
+
+
+# ============================================================================
 # Deno Runner: Error handling and sandboxing
 # ============================================================================
 

@@ -3,6 +3,7 @@ from app.models.api_key import ApiKey
 from app.models.audit_log import AuditLog
 from app.models.base import Base
 from app.models.cantrip import Cantrip
+from app.models.cantrip_data import CantripData
 from app.models.chat_data import ChatData
 from app.models.conversation_hash import ConversationHash
 from app.models.conversation_summary import ConversationSummary
@@ -16,6 +17,7 @@ from app.models.map import Map, MapStage, MapStageResource
 from app.models.memory import Memory
 from app.models.memory_rule import MemoryRule
 from app.models.user import User
+from app.models.user_data import UserData
 from app.models.user_settings import UserSettings
 from app.models.verification import VerificationLog, VerificationRule
 
@@ -30,6 +32,7 @@ __all__ = [
     "Lorebook",
     "LorebookEntry",
     "Cantrip",
+    "CantripData",
     "ChatData",
     "ConversationHash",
     "ConversationSummary",
@@ -42,6 +45,7 @@ __all__ = [
     "MapStageResource",
     "Memory",
     "MemoryRule",
+    "UserData",
     "VerificationRule",
     "VerificationLog",
 ]

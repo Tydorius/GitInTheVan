@@ -13,6 +13,7 @@ Licensed under Mozilla Public License 2.0.
 [Upcoming Features](#Upcoming-Features)  
 [Quick Start](#Quick-Start)  
 [Configuration](#Configuration)  
+[Database Support](#Database-Support)  
 [Using with JanitorAI](#Using-with-JanitorAI)  
 [Cantrips](#Cantrips)  
 [Verification](#Verification)  
@@ -65,6 +66,7 @@ I will stress that I am not going to replicate or 100% replace Lorebary's functi
 - **Driver-Callable Tools** — Writing LLM can invoke cantrips as tools during generation via a notification-based, turn-tracked approach that works with any model. No OpenAI function-calling support required. Auto-disables when no tools are active. Infinite-loop prevention via turn budget
 - **Verification** — LLM-based response checking (Navigator) with configurable rules, automatic resubmission with retry limits, verification logs, and per-rule endpoint/model overrides
 - **Persistent Memory** — Database-backed memory system using `<memstore>` tags. LLM responses are scanned for key/value pairs, stored per-conversation, and injected as a `[PERSISTENT MEMORY]` context block on subsequent requests. No zero-width character encoding — the database is the source of truth
+- **Expanded Memory Scopes** — Beyond per-chat memory, cantrips have access to two additional persistent stores: `context.user_data` (per-user global, shared across all chats and cantrips) and `context.cantrip_data` (per-user per-cantrip, persists across chats but isolated to one cantrip). Same get/set/keys/delete API as `chat_data`
 - **Conversation Summarization** — Automatically compresses long conversations when token count exceeds a configurable threshold. Older dialogue is summarized by a user-selected LLM and replaced with a `[CONVERSATION SUMMARY]` context block, while recent messages are always forwarded verbatim
 - **Forbidden Words** — Global per-user phrase list checked against responses before the Navigator runs. Supports plain-text and regex matching, case-insensitive by default. Matches surfaced to the Navigator as concrete violations
 - **Command Tags** — Per-request pipeline overrides via inline tags: `<VERIFY:off>`, `<SUMMARY:on>`, `<MEMORY:off>`, `<FORBIDDEN:off>`, `<DRIVER:on>`. Optional `:persist` flag saves to conversation memory. `<CMD:reset>` clears persistent overrides. One-off > persistent > GUI precedence
@@ -79,9 +81,52 @@ I will stress that I am not going to replicate or 100% replace Lorebary's functi
 - **Admin Panel** — Global caps (turns/retries use min of user/global), Users tab (create, edit, disable, delete, password reset, key regeneration), Debug tab (pipeline capture viewer), read-only audit logs, read-only server logs with runtime log level override without restart. All in a single Admin page with five tabs
 - **Maps** — Multi-stage LLM pipelines that chain multiple Driver passes (e.g., Writing LLM > Gamemaster LLM > Narrator LLM) into a single request. Each stage has its own lorebooks, cantrips, endpoint, model, driver-callable turns, and verification. Output modes (persist/sanitize/discard) control how stage output feeds the next stage. Sticky vs stage-only resource attachments. Activated via `<#map-tag#>` tags. Export/import as self-contained JSON with resource dedup options (keep_both/reuse/overwrite)
 - **Web UI** — Full management interface built with Svelte 5 including cantrip tester, verification tester, forbidden word scanner, code editor with syntax highlighting, jump-to-top/bottom navigation, and log viewer
+- **Multi-Database Support** — SQLite (default), PostgreSQL, and MariaDB/MySQL backends. SQLite for single-instance self-hosting; PostgreSQL or MariaDB for multi-instance horizontal scaling with a shared database server
 - **Context Budgeting** — Weighted token budget allocation across cantrips and lorebooks. Cantrips access their share via `context.budget` and can dynamically scale output detail (full/summary/bullets) based on remaining tokens. Configurable per-user budget percentage and context window override
 - **Memory Rules** — Taggable per-conversation summarization overrides. Rules can override the token threshold, keep-recent count, prompt, or disable summarization entirely for specific conversations. Activate via `<#memory-rule-tag#>` tags
 - **Debug Mode** — Captures the last 20 pipeline exchanges with full visibility (original messages, modified messages after pipeline processing, Driver response, and verification results). Dedicated Debug page for troubleshooting pipeline behavior
+
+## Database Support
+
+GitInTheVan supports three database backends:
+
+| Backend | Driver | Use Case |
+|---------|--------|----------|
+| **SQLite** (default) | `aiosqlite` | Single-instance self-hosting. Zero configuration. |
+| **PostgreSQL** | `asyncpg` | Multi-instance deployments, horizontal scaling, high concurrency. |
+| **MariaDB / MySQL** | `aiomysql` | Multi-instance deployments on existing MySQL infrastructure. |
+
+SQLite is included by default. PostgreSQL or MariaDB drivers are optional extras:
+
+```bash
+pip install -e ".[postgres]"   # PostgreSQL (asyncpg)
+pip install -e ".[mysql]"      # MariaDB / MySQL (aiomysql)
+```
+
+Set the database URL in your `.env`:
+
+```
+# SQLite (default)
+GITV_DATABASE_URL=sqlite+aiosqlite:///./data/gitinthevan.db
+
+# PostgreSQL
+GITV_DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/gitinthevan
+
+# MariaDB / MySQL
+GITV_DATABASE_URL=mysql+aiomysql://user:password@localhost:3306/gitinthevan
+```
+
+**Connection pool settings** (PostgreSQL / MariaDB only, ignored by SQLite):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GITV_DB_POOL_SIZE` | `10` | Number of persistent connections in the pool |
+| `GITV_DB_MAX_OVERFLOW` | `20` | Additional connections allowed beyond pool size under load |
+| `GITV_DB_POOL_RECYCLE` | `3600` | Seconds before a connection is recycled (prevents stale connections) |
+
+**Migrations** are dialect-aware and run automatically on startup. Advisory locking prevents concurrent migration races when multiple application instances start against the same database simultaneously.
+
+> **Note:** PostgreSQL and MariaDB support is implemented and unit-tested but has **not yet been tested against live database servers**. SQLite is the battle-tested default. Docker Compose configurations for all three backends are planned as part of the Docker distribution.
 
 ## Upcoming Features
 
@@ -90,7 +135,7 @@ The following are planned for future releases.
 - **Per-server sharing** — Share resources among users on the same GitInTheVan instance via public flags
 - **Cantrip Chaining** — Multi-turn LLM interactions for complex systems like dice resolution and critical tables
 - **Natural-Language Cantrip Generator** — Describe what you want in plain English and an LLM generates the cantrip code or lorebook
-- **Docker Distribution** — Multi-platform container images and docker-compose for production deployment
+- **Docker Distribution** — Multi-platform container images with three docker-compose configurations (SQLite, MariaDB, PostgreSQL)
 
 ## Quick Start
 
@@ -191,7 +236,10 @@ Open `http://localhost:8000` in your browser to access the management UI.
 | `GITV_SECRET_KEY` | `change-me` | JWT signing secret. Change in production. |
 | `GITV_DEBUG` | `false` | Enable debug logging |
 | `GITV_LOG_LEVEL` | `INFO` | Log level (DEBUG, INFO, WARNING, ERROR) |
-| `GITV_DATABASE_URL` | `sqlite+aiosqlite:///./data/gitinthevan.db` | Database URL |
+| `GITV_DATABASE_URL` | `sqlite+aiosqlite:///./data/gitinthevan.db` | Database URL (SQLite, PostgreSQL, or MariaDB) |
+| `GITV_DB_POOL_SIZE` | `10` | Connection pool size (PostgreSQL / MariaDB only) |
+| `GITV_DB_MAX_OVERFLOW` | `20` | Max overflow connections beyond pool size (PostgreSQL / MariaDB only) |
+| `GITV_DB_POOL_RECYCLE` | `3600` | Connection recycle interval in seconds (PostgreSQL / MariaDB only) |
 | `GITV_DENO_PATH` | *(auto)* | Path to Deno binary for cantrip sandbox |
 | `GITV_DEFAULT_ENDPOINT_URL` | *(empty)* | Fallback endpoint URL (used when no `gitv_` API key is provided) |
 | `GITV_DEFAULT_ENDPOINT_API_KEY` | *(empty)* | Fallback endpoint API key |
@@ -256,6 +304,14 @@ context.character.personality += ", additional trait";
 // Per-chat persistent storage (survives across cycles)
 const day = context.chat_data.get('day') || 1;
 context.chat_data.set('day', day + 1);
+
+// Per-user global storage (shared across all chats and cantrips)
+const theme = context.user_data.get('theme') || 'default';
+context.user_data.set('theme', 'dark');
+
+// Per-cantrip storage (persists across chats, isolated to this cantrip)
+const level = context.cantrip_data.get('level') || 1;
+context.cantrip_data.set('level', level + 1);
 
 // Persistent memory (LLM-managed key/value store, per-conversation)
 const location = context.memory.get('location');

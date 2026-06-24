@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     debug: bool = False
     secret_key: str = "change-me-in-production"
     database_url: str = "sqlite+aiosqlite:///./data/gitinthevan.db"
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
+    db_pool_recycle: int = 3600
     log_level: str = "INFO"
 
     default_endpoint_url: str = ""

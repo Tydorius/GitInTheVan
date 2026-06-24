@@ -9,7 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
 from app.models.cantrip import Cantrip
+from app.models.cantrip_data import CantripData
 from app.models.chat_data import ChatData
+from app.models.user_data import UserData
 from app.services.cantrip_context import apply_cantrip_result_to_messages, build_context, extract_context_params
 from app.services.deno_runner import CantripResult, run_cantrip
 
@@ -59,6 +61,93 @@ async def _save_chat_data(
                 ChatData(
                     user_id=user_id,
                     conversation_id=conversation_id,
+                    key=key,
+                    value_json=value_json,
+                )
+            )
+
+    await db.commit()
+
+
+async def _load_user_data(db: AsyncSession, user_id: str) -> dict[str, Any]:
+    result = await db.execute(
+        select(UserData).where(UserData.user_id == user_id)
+    )
+    rows = result.scalars().all()
+    data: dict[str, Any] = {}
+    for row in rows:
+        try:
+            data[row.key] = json.loads(row.value_json) if row.value_json else None
+        except (json.JSONDecodeError, TypeError):
+            data[row.key] = row.value_json
+    return data
+
+
+async def _save_user_data(
+    db: AsyncSession, user_id: str, user_data: dict[str, Any]
+) -> None:
+    existing_result = await db.execute(
+        select(UserData).where(UserData.user_id == user_id)
+    )
+    existing = {row.key: row for row in existing_result.scalars().all()}
+
+    for key, value in user_data.items():
+        value_json = json.dumps(value)
+        if key in existing:
+            if existing[key].value_json != value_json:
+                existing[key].value_json = value_json
+        else:
+            db.add(
+                UserData(
+                    user_id=user_id,
+                    key=key,
+                    value_json=value_json,
+                )
+            )
+
+    await db.commit()
+
+
+async def _load_cantrip_data(
+    db: AsyncSession, user_id: str, cantrip_id: str
+) -> dict[str, Any]:
+    result = await db.execute(
+        select(CantripData).where(
+            CantripData.user_id == user_id,
+            CantripData.cantrip_id == cantrip_id,
+        )
+    )
+    rows = result.scalars().all()
+    data: dict[str, Any] = {}
+    for row in rows:
+        try:
+            data[row.key] = json.loads(row.value_json) if row.value_json else None
+        except (json.JSONDecodeError, TypeError):
+            data[row.key] = row.value_json
+    return data
+
+
+async def _save_cantrip_data(
+    db: AsyncSession, user_id: str, cantrip_id: str, cantrip_data: dict[str, Any]
+) -> None:
+    existing_result = await db.execute(
+        select(CantripData).where(
+            CantripData.user_id == user_id,
+            CantripData.cantrip_id == cantrip_id,
+        )
+    )
+    existing = {row.key: row for row in existing_result.scalars().all()}
+
+    for key, value in cantrip_data.items():
+        value_json = json.dumps(value)
+        if key in existing:
+            if existing[key].value_json != value_json:
+                existing[key].value_json = value_json
+        else:
+            db.add(
+                CantripData(
+                    user_id=user_id,
+                    cantrip_id=cantrip_id,
                     key=key,
                     value_json=value_json,
                 )
@@ -125,6 +214,7 @@ async def process_cantrips(
 
         conversation_id = params.get("conversation_id", "")
         chat_data = await _load_chat_data(db, user_id, conversation_id)
+        user_data = await _load_user_data(db, user_id)
 
         context = build_context(messages, **params)
 
@@ -149,6 +239,8 @@ async def process_cantrips(
                     budget_allocations, cantrip.id, cantrip.budget_weight
                 )
 
+            cantrip_data = await _load_cantrip_data(db, user_id, cantrip.id)
+
             try:
                 if internal_chat_id and accumulated_memories:
                     context["__memories"] = {**context.get("__memories", {}), **accumulated_memories}
@@ -157,6 +249,8 @@ async def process_cantrips(
                     code=cantrip.code,
                     context=context,
                     chat_data=chat_data,
+                    user_data=user_data,
+                    cantrip_data=cantrip_data,
                     timeout_ms=cantrip.timeout_ms,
                 )
             except Exception:
@@ -177,9 +271,15 @@ async def process_cantrips(
             accumulated_memories.update(result.memories)
 
             chat_data = result.chat_data
+            user_data = result.user_data
+
+            if result.cantrip_data != cantrip_data:
+                await _save_cantrip_data(db, user_id, cantrip.id, result.cantrip_data)
 
         if conversation_id:
             await _save_chat_data(db, user_id, conversation_id, chat_data)
+
+        await _save_user_data(db, user_id, user_data)
 
     if internal_chat_id and accumulated_memories:
         from app.services.conversation import save_memories_for_chat
@@ -208,9 +308,11 @@ async def test_cantrip(
     code: str,
     context: dict[str, Any],
     chat_data: dict[str, Any] | None = None,
+    user_data: dict[str, Any] | None = None,
+    cantrip_data: dict[str, Any] | None = None,
     timeout_ms: int = 5000,
 ) -> CantripResult:
-    return await run_cantrip(code, context, chat_data, timeout_ms)
+    return await run_cantrip(code, context, chat_data, user_data, cantrip_data, timeout_ms)
 
 
 async def process_cantrips_post_driver(
@@ -254,6 +356,7 @@ async def process_cantrips_post_driver(
 
         conversation_id = params.get("conversation_id", "")
         chat_data = await _load_chat_data(db, user_id, conversation_id)
+        user_data = await _load_user_data(db, user_id)
 
         context = build_context(messages, **params)
         context["response"] = {
@@ -265,12 +368,16 @@ async def process_cantrips_post_driver(
         current_content = response_content
 
         for cantrip in cantrips:
+            cantrip_data = await _load_cantrip_data(db, user_id, cantrip.id)
+
             try:
                 context["response"]["content"] = current_content
                 result = await run_cantrip(
                     code=cantrip.code,
                     context=context,
                     chat_data=chat_data,
+                    user_data=user_data,
+                    cantrip_data=cantrip_data,
                     timeout_ms=cantrip.timeout_ms,
                 )
             except Exception:
@@ -291,9 +398,15 @@ async def process_cantrips_post_driver(
                 context["response"]["modified"] = True
 
             chat_data = result.chat_data
+            user_data = result.user_data
+
+            if result.cantrip_data != cantrip_data:
+                await _save_cantrip_data(db, user_id, cantrip.id, result.cantrip_data)
 
         if conversation_id:
             await _save_chat_data(db, user_id, conversation_id, chat_data)
+
+        await _save_user_data(db, user_id, user_data)
 
     if current_content != response_content:
         logger.info(

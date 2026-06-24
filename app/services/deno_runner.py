@@ -47,6 +47,8 @@ class CantripResult:
     response_content: str | None = None
     tool_result: str = ""
     chat_data: dict = field(default_factory=dict)
+    user_data: dict = field(default_factory=dict)
+    cantrip_data: dict = field(default_factory=dict)
     memories: dict = field(default_factory=dict)
     debug_logs: list[str] = field(default_factory=list)
     error: str | None = None
@@ -68,16 +70,22 @@ class CantripExecutionError(Exception):
     pass
 
 
-def _build_runner_script(context: dict, chat_data: dict, user_code: str) -> str:
+def _build_runner_script(
+    context: dict, chat_data: dict, user_data: dict, cantrip_data: dict, user_code: str
+) -> str:
     template = _TEMPLATE_PATH.read_text(encoding="utf-8")
     context_b64 = base64.b64encode(json.dumps(context).encode("utf-8")).decode("ascii")
     chatdata_b64 = base64.b64encode(json.dumps(chat_data).encode("utf-8")).decode("ascii")
+    userdata_b64 = base64.b64encode(json.dumps(user_data).encode("utf-8")).decode("ascii")
+    cantripdata_b64 = base64.b64encode(json.dumps(cantrip_data).encode("utf-8")).decode("ascii")
     usercode_b64 = base64.b64encode(user_code.encode("utf-8")).decode("ascii")
 
     return (
         template
         .replace("__GITV_CONTEXT__", context_b64)
         .replace("__GITV_CHATDATA__", chatdata_b64)
+        .replace("__GITV_USERDATA__", userdata_b64)
+        .replace("__GITV_CANTRIPDATA__", cantripdata_b64)
         .replace("__GITV_USERCODE__", usercode_b64)
     )
 
@@ -86,6 +94,8 @@ async def run_cantrip(
     code: str,
     context: dict,
     chat_data: dict | None = None,
+    user_data: dict | None = None,
+    cantrip_data: dict | None = None,
     timeout_ms: int = 5000,
 ) -> CantripResult:
     if not DENO_PATH:
@@ -94,7 +104,9 @@ async def run_cantrip(
         )
 
     chat_data = chat_data or {}
-    runner_script = _build_runner_script(context, chat_data, code)
+    user_data = user_data or {}
+    cantrip_data = cantrip_data or {}
+    runner_script = _build_runner_script(context, chat_data, user_data, cantrip_data, code)
 
     fd, temp_path = tempfile.mkstemp(suffix=".mjs", prefix="gitv_cantrip_")
     try:
@@ -129,6 +141,8 @@ async def run_cantrip(
             response_content=result_data.get("response_content"),
             tool_result=result_data.get("tool_result", ""),
             chat_data=result_data.get("chat_data", {}),
+            user_data=result_data.get("user_data", {}),
+            cantrip_data=result_data.get("cantrip_data", {}),
             memories=result_data.get("memories", {}),
             debug_logs=result_data.get("debug_logs", []),
             error=result_data.get("error"),

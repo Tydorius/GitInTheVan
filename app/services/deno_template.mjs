@@ -11,6 +11,8 @@ console.error = console.warn = console.log;
 
 const context = JSON.parse(atob("__GITV_CONTEXT__"));
 const __chatData = JSON.parse(atob("__GITV_CHATDATA__"));
+const __userData = JSON.parse(atob("__GITV_USERDATA__"));
+const __cantripData = JSON.parse(atob("__GITV_CANTRIPDATA__"));
 const __userCode = atob("__GITV_USERCODE__");
 
 context.chat_data = {
@@ -18,6 +20,20 @@ context.chat_data = {
     set: (key, value) => { __chatData[key] = value; },
     keys: () => Object.keys(__chatData),
     delete: (key) => { delete __chatData[key]; }
+};
+
+context.user_data = {
+    get: (key) => key in __userData ? __userData[key] : null,
+    set: (key, value) => { __userData[key] = value; },
+    keys: () => Object.keys(__userData),
+    delete: (key) => { delete __userData[key]; }
+};
+
+context.cantrip_data = {
+    get: (key) => key in __cantripData ? __cantripData[key] : null,
+    set: (key, value) => { __cantripData[key] = value; },
+    keys: () => Object.keys(__cantripData),
+    delete: (key) => { delete __cantripData[key]; }
 };
 
 const __memories = context.__memories || {};
@@ -71,6 +87,8 @@ const __result = {
     response_content: __hasResponse ? (context.response.content || null) : null,
     tool_result: context.tool_result || "",
     chat_data: Object.assign({}, __chatData),
+    user_data: Object.assign({}, __userData),
+    cantrip_data: Object.assign({}, __cantripData),
     memories: Object.assign({}, __memories),
     debug_logs: __debugLogs,
     error: __error

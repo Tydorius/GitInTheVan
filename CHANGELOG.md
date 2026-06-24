@@ -2,6 +2,24 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Expanded Memory System**: Two new persistent memory scopes for cantrips:
+  - `context.user_data` — per-user global key-value store, shared across all chats and all cantrips for that user
+  - `context.cantrip_data` — per-user per-cantrip key-value store, persists across chats but scoped to one specific cantrip
+  - Same `get`/`set`/`keys`/`delete` API as `chat_data`
+  - `user_data` is shared across all cantrips in a pipeline run; `cantrip_data` is isolated per cantrip
+  - `cantrip_data` cascade-deletes when the cantrip is deleted
+- **Multi-Database Support**: PostgreSQL and MariaDB/MySQL backends in addition to the default SQLite. Enables horizontal scaling with multiple application instances sharing a single database server.
+  - Optional driver dependencies: `pip install -e ".[postgres]"` (asyncpg) or `pip install -e ".[mysql]"` (aiomysql)
+  - Connection pooling with configurable pool size, overflow, and recycle (`GITV_DB_POOL_SIZE`, `GITV_DB_MAX_OVERFLOW`, `GITV_DB_POOL_RECYCLE`)
+  - Dialect-aware migrations: SQLite `rowid` replaced with `ROW_NUMBER()` for PostgreSQL/MariaDB; `INSERT OR IGNORE` replaced with `ON CONFLICT DO NOTHING` / `INSERT IGNORE`
+  - Advisory locking during migrations prevents concurrent migration races when multiple instances start simultaneously (PostgreSQL `pg_advisory_lock`, MariaDB `GET_LOCK`)
+  - WAL mode enabled for SQLite file databases for improved read concurrency
+  - Server-side defaults added to `AdminSettings` model for cross-dialect INSERT compatibility
+
 ## [0.14.0] - 2026-06-23
 
 ### Added
