@@ -23,6 +23,8 @@
   let budgetPercent = 10.0
   let contextWindowOverride = 0
   let debugMode = false
+  let defaultMapId: string | null = null
+  let maps: any[] = []
   let endpoints: any[] = []
   let apiKey: string | null = null
   let error = ''
@@ -35,13 +37,15 @@
 
   async function load() {
     try {
-      const [s, e, sum] = await Promise.all([api.getSettings(), api.listEndpoints(), api.getSummarizationSettings()])
+      const [s, e, sum] = await Promise.all([api.getSettings(), api.listEndpoints(), api.getSummarizationSettings(), api.listMaps()])
       settings.default_endpoint_id = s.default_endpoint_id || ''
       settings.default_model = s.default_model || ''
       settings.preserve_thinking = s.preserve_thinking
       settings.gitv_status = s.gitv_status
       settings.simulated_streaming_speed = s.simulated_streaming_speed || 0
       endpoints = e.endpoints
+      const mapData = await api.listMaps()
+      maps = mapData.maps
       apiKey = getApiKey()
       summarization.summarization_enabled = sum.summarization_enabled
       summarization.summarization_endpoint_id = sum.summarization_endpoint_id || ''
@@ -60,6 +64,7 @@
           budgetPercent = (s as any).context_budget_percent ?? 10.0
           contextWindowOverride = (s as any).context_window_override ?? 0
           debugMode = (s as any).debug_mode ?? false
+          defaultMapId = (s as any).default_map_id ?? null
         }
       } catch {}
     } catch (e: any) { error = e.message }
@@ -99,7 +104,7 @@
   async function saveBudget() {
     error = ''
     try {
-      await api.updateSettings({ context_budget_percent: budgetPercent, context_window_override: contextWindowOverride, debug_mode: debugMode } as any)
+      await api.updateSettings({ context_budget_percent: budgetPercent, context_window_override: contextWindowOverride, debug_mode: debugMode, default_map_id: defaultMapId } as any)
     } catch (e: any) { error = e.message }
   }
 
@@ -278,6 +283,13 @@
       <input type="checkbox" bind:checked={debugMode} style="width: auto;">
       Debug Mode (capture pipeline stages for last 20 exchanges)
     </label>
+  </div>
+  <div class="form-group">
+    <label for="default-map">Default Map (applied when no <code>&lt;#map-tag#&gt;</code> is present)</label>
+    <select id="default-map" bind:value={defaultMapId}>
+      <option value={null}>No default map (standard pipeline)</option>
+      {#each maps as m}<option value={m.id}>{m.name} ({m.stage_count} stages)</option>{/each}
+    </select>
   </div>
   <button class="primary" onclick={saveBudget}>Save</button>
 </div>

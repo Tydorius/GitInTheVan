@@ -294,6 +294,12 @@ MIGRATIONS: list[tuple[str, str]] = [
         ALTER TABLE admin_settings ADD COLUMN max_map_stages INTEGER DEFAULT 3 NOT NULL;
         """,
     ),
+    (
+        "027_add_default_map_id",
+        """
+        ALTER TABLE user_settings ADD COLUMN default_map_id VARCHAR(36) REFERENCES maps(id) ON DELETE SET NULL;
+        """,
+    ),
 ]
 
 

@@ -28,6 +28,7 @@ class SettingsResponse(BaseModel):
     context_budget_percent: float
     context_window_override: int
     debug_mode: bool
+    default_map_id: str | None
 
 
 class SettingsUpdate(BaseModel):
@@ -42,6 +43,7 @@ class SettingsUpdate(BaseModel):
     context_budget_percent: float | None = None
     context_window_override: int | None = None
     debug_mode: bool | None = None
+    default_map_id: str | None = None
 
 
 @router.get("")
@@ -69,6 +71,7 @@ async def get_settings(
         context_budget_percent=user_settings.context_budget_percent,
         context_window_override=user_settings.context_window_override,
         debug_mode=user_settings.debug_mode,
+        default_map_id=user_settings.default_map_id,
     )
 
 
@@ -106,6 +109,8 @@ async def update_settings(
         user_settings.context_window_override = max(0, req.context_window_override)
     if req.debug_mode is not None:
         user_settings.debug_mode = req.debug_mode
+    if req.default_map_id is not None:
+        user_settings.default_map_id = req.default_map_id or None
 
     await db.commit()
     await db.refresh(user_settings)
@@ -122,4 +127,5 @@ async def update_settings(
         context_budget_percent=user_settings.context_budget_percent,
         context_window_override=user_settings.context_window_override,
         debug_mode=user_settings.debug_mode,
+        default_map_id=user_settings.default_map_id,
     )

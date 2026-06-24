@@ -67,6 +67,21 @@
     } catch (e: any) { error = e.message }
   }
 
+  async function checkUpdates(id: string) {
+    error = ''
+    try {
+      const result = await api.checkUpdates(id)
+      if (result.updates_available > 0) {
+        alert(`Updates available for ${result.updates_available} of ${result.checked} installed item(s).\n\nSync the repo and reinstall to update.`)
+      } else if (result.checked > 0) {
+        alert(`No updates found. Checked ${result.checked} item(s).`)
+      } else {
+        alert('No installed items from this repo to check.')
+      }
+      await load()
+    } catch (e: any) { error = e.message }
+  }
+
   async function install(repoId: string, filePath: string, fork: boolean) {
     error = ''
     try {
@@ -145,6 +160,7 @@
               <td>
                 <button onclick={() => browse(r.id)} style="font-size: 12px;">Browse</button>
                 <button onclick={() => sync(r.id)} style="font-size: 12px;">Sync</button>
+                <button onclick={() => checkUpdates(r.id)} style="font-size: 12px;">Updates</button>
                 <button class="danger" onclick={() => deleteRepo(r.id)} style="font-size: 12px;">Remove</button>
               </td>
             </tr>
@@ -164,6 +180,12 @@
         <div class="error-msg" style="font-size: 11px; margin-bottom: 12px;">
           No descriptions.json found. Files auto-discovered from folder structure.
         </div>
+      {/if}
+      {#if browseData.readme}
+        <details style="margin-bottom: 16px;">
+          <summary style="cursor: pointer; font-size: 13px; color: var(--accent);">Readme</summary>
+          <div style="margin-top: 8px; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; font-size: 12px; line-height: 1.6; white-space: pre-wrap; max-height: 400px; overflow-y: auto;">{browseData.readme}</div>
+        </details>
       {/if}
 
       <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
@@ -222,7 +244,7 @@
         <tbody>
           {#each installed as i}
             <tr>
-              <td><strong>{i.name}</strong></td>
+              <td><strong>{i.name}</strong>{#if i.update_available} <span style="color: var(--accent); font-size: 10px;">Update!</span>{/if}</td>
               <td style="font-size: 11px;">{i.type}</td>
               <td style="font-size: 11px;">{i.author || '—'}</td>
               <td style="font-size: 11px;">{i.installed_version}</td>

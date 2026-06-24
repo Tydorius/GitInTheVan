@@ -47,6 +47,17 @@ async def resolve_map(user_id: str, tags: list | None) -> Map | None:
         if tagged_map:
             return tagged_map
 
+        from app.models.user_settings import UserSettings
+        us_result = await db.execute(
+            select(UserSettings).where(UserSettings.user_id == user_id)
+        )
+        us = us_result.scalar_one_or_none()
+        if us and us.default_map_id:
+            default_map = next((m for m in all_maps if m.id == us.default_map_id), None)
+            if default_map:
+                logger.info("Using default map '%s' for user %s", default_map.name, user_id[:8])
+                return default_map
+
         return None
 
 

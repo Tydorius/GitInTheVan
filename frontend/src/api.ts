@@ -293,6 +293,8 @@ export const api = {
     request<any>(`/api/packs/repos/${id}/browse`),
   deleteRepo: (id: string) =>
     request<void>(`/api/packs/repos/${id}`, { method: 'DELETE' }),
+  checkUpdates: (id: string) =>
+    request<any>(`/api/packs/repos/${id}/check-updates`, { method: 'POST' }),
   installFile: (data: { repo_id: string; file_path: string; fork?: boolean }) =>
     request<any>('/api/packs/install', { method: 'POST', body: JSON.stringify(data) }),
   listInstalled: () =>

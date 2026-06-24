@@ -336,6 +336,21 @@ class TestClient:
         return resp.json().get("summaries", [])
 
 
+def _check_upstream_error(result: dict) -> bool:
+    """Check if the response is an upstream LLM error. Reports and returns True if so."""
+    if result.get("detail") or result.get("error"):
+        detail = result.get("detail") or result.get("error")
+        if isinstance(detail, dict):
+            msg = detail.get("message", str(detail))[:200]
+        else:
+            msg = str(detail)[:200]
+        fail_test(f"Upstream LLM error: {msg}")
+        info("This is an endpoint/LLM issue, not a GitInTheVan bug.")
+        info("Check that your LLM endpoint is running and has enough resources.")
+        return True
+    return False
+
+
 def test_passthrough(tc: TestClient) -> bool:
     section("TEST: Basic Passthrough")
     messages = [
@@ -344,6 +359,8 @@ def test_passthrough(tc: TestClient) -> bool:
     ]
     result = tc.send_proxy_request(messages)
     if isinstance(result, dict):
+        if _check_upstream_error(result):
+            return False
         content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
         if content:
             pass_test(f"Got response: {content[:100]}")
@@ -373,9 +390,12 @@ console.log("Flow test cantrip ran");
     ]
     result = tc.send_proxy_request(messages)
     if isinstance(result, dict):
-        content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-        pass_test(f"Got response: {content[:80]}")
-        info("(Check server logs for 'Cantrips processed' message)")
+        if _check_upstream_error(result):
+            pass
+        else:
+            content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            pass_test(f"Got response: {content[:80]}")
+            info("(Check server logs for 'Cantrips processed' message)")
     else:
         fail_test(f"Unexpected response: {str(result)[:200]}")
 
@@ -537,6 +557,9 @@ def test_summarization(tc: TestClient) -> bool:
     ]
     result = tc.send_proxy_request(messages)
     if isinstance(result, dict):
+        if _check_upstream_error(result):
+            tc.set_summarization_settings({"summarization_enabled": False})
+            return False
         content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
         if content:
             pass_test(f"Summarized request succeeded, response: {content[:80]}")
@@ -768,6 +791,8 @@ def test_command_tags(tc: TestClient) -> bool:
     ]
     result = tc.send_proxy_request(messages)
     if isinstance(result, dict):
+        if _check_upstream_error(result):
+            return False
         content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
         if content:
             pass_test(f"One-off <SUMMARY:off> request succeeded: {content[:60]}")
@@ -1000,6 +1025,9 @@ def test_map_pipeline(tc: TestClient) -> bool:
         return False
 
     if isinstance(result, dict):
+        if _check_upstream_error(result):
+            httpx.delete(f"{tc.server}/api/maps/{map_id}", headers=tc.test_headers(), timeout=10.0)
+            return False
         content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
         if content:
             pass_test(f"Map pipeline produced response ({len(content)} chars)")

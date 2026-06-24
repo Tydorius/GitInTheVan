@@ -63,6 +63,7 @@ class RepoBrowseResponse(BaseModel):
     files: list[FileEntryResponse]
     has_manifest: bool
     disclaimer: str
+    readme: str = ""
 
 
 class InstallRequest(BaseModel):
@@ -195,6 +196,7 @@ async def sync_repo(
         files=info["files"],
         has_manifest=info["has_manifest"],
         disclaimer=DISCLAIMER,
+        readme=info.get("readme", ""),
     ).model_dump()
 
 
@@ -231,6 +233,7 @@ async def browse_repo(
         files=info["files"],
         has_manifest=info["has_manifest"],
         disclaimer=DISCLAIMER,
+        readme=info.get("readme", ""),
     ).model_dump()
 
 
@@ -414,6 +417,58 @@ async def uninstall_item(
 
     await db.delete(item)
     await db.commit()
+
+
+@router.post("/repos/{repo_id}/check-updates")
+async def check_updates(
+    repo_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Check if any installed items from this repo have updates available."""
+    from app.services.git_sync import check_for_updates as do_check
+
+    result = await db.execute(
+        select(LinkedRepo).where(
+            LinkedRepo.id == repo_id, LinkedRepo.user_id == current_user.id
+        )
+    )
+    repo = result.scalar_one_or_none()
+    if repo is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repo not found")
+
+    items_result = await db.execute(
+        select(InstalledItem).where(
+            InstalledItem.user_id == current_user.id,
+            InstalledItem.repo_id == repo_id,
+            InstalledItem.is_fork.is_(False),
+        )
+    )
+    items = items_result.scalars().all()
+
+    if not items:
+        return {"checked": 0, "updates_available": 0, "results": []}
+
+    item_dicts = [
+        {"file_path": i.file_path, "installed_version": i.installed_version, "name": i.name}
+        for i in items
+    ]
+
+    results = do_check(repo.url, repo.branch, repo.token, item_dicts)
+
+    update_count = 0
+    for item, result_data in zip(items, results, strict=False):
+        item.update_available = result_data["has_update"]
+        if result_data["has_update"]:
+            update_count += 1
+
+    await db.commit()
+
+    return {
+        "checked": len(items),
+        "updates_available": update_count,
+        "results": results,
+    }
 
 
 async def _create_local_resource(

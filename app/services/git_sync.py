@@ -86,6 +86,7 @@ def _read_repo(repo_path: Path) -> dict[str, Any]:
 
     files: list[dict[str, Any]] = []
     manifest_data: dict[str, Any] = {}
+    readme_content = ""
 
     if manifest_path.exists():
         try:
@@ -97,6 +98,15 @@ def _read_repo(repo_path: Path) -> dict[str, Any]:
     if not files:
         files = _auto_scan_repo(repo_path)
 
+    for readme_name in ["README.md", "readme.md", "README", "readme.txt", "README.txt"]:
+        readme_path = repo_path / readme_name
+        if readme_path.exists():
+            try:
+                readme_content = readme_path.read_text(encoding="utf-8")[:10000]
+            except OSError:
+                pass
+            break
+
     return {
         "pack_name": manifest_data.get("pack_name", repo_path.name),
         "pack_author": manifest_data.get("pack_author", ""),
@@ -104,7 +114,54 @@ def _read_repo(repo_path: Path) -> dict[str, Any]:
         "pack_description": manifest_data.get("pack_description", ""),
         "files": files,
         "has_manifest": manifest_path.exists(),
+        "readme": readme_content,
     }
+
+
+def check_for_updates(
+    repo_url: str,
+    branch: str,
+    token: str,
+    installed_items: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    """Check if installed items have updates available.
+
+    Re-fetches repo info and compares file paths/versions.
+    Returns list of {file_path, has_update, new_version, current_version}.
+    """
+    try:
+        repo_info = fetch_repo_info(repo_url, branch, token)
+    except GitCloneError:
+        return []
+
+    repo_files = {f["path"]: f for f in repo_info.get("files", [])}
+    results = []
+
+    for item in installed_items:
+        file_path = item.get("file_path", "")
+        current_version = item.get("installed_version", "")
+        result = {"file_path": file_path, "has_update": False, "new_version": "", "current_version": current_version}
+
+        if file_path in repo_files:
+            repo_file = repo_files[file_path]
+            new_version = repo_file.get("version", "")
+            result["new_version"] = new_version
+            if new_version and new_version != current_version:
+                result["has_update"] = True
+            elif not new_version and current_version:
+                pass
+            else:
+                repo_name = repo_file.get("name", "")
+                installed_name = item.get("name", "")
+                if repo_name and installed_name and repo_name != installed_name:
+                    result["has_update"] = True
+        else:
+            result["has_update"] = False
+            result["new_version"] = "(removed from repo)"
+
+        results.append(result)
+
+    return results
 
 
 def _auto_scan_repo(repo_path: Path) -> list[dict[str, Any]]:

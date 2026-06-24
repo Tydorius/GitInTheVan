@@ -15,6 +15,7 @@
   let capsForm = {
     max_driver_callable_turns: 2,
     max_verification_retries: 3,
+    max_map_stages: 3,
     rate_limit_proxy_per_min: 60,
     rate_limit_api_per_min: 120,
     runtime_log_level: '',
@@ -44,6 +45,7 @@
       capsForm = {
         max_driver_callable_turns: adminSettings.max_driver_callable_turns,
         max_verification_retries: adminSettings.max_verification_retries,
+        max_map_stages: adminSettings.max_map_stages,
         rate_limit_proxy_per_min: adminSettings.rate_limit_proxy_per_min,
         rate_limit_api_per_min: adminSettings.rate_limit_api_per_min,
         runtime_log_level: adminSettings.runtime_log_level || '',
@@ -221,6 +223,10 @@
       <div class="form-group">
         <label for="cap-retries">Max Verification Retries</label>
         <input id="cap-retries" type="number" bind:value={capsForm.max_verification_retries} min="0" />
+      </div>
+      <div class="form-group">
+        <label for="cap-stages">Max Map Stages</label>
+        <input id="cap-stages" type="number" bind:value={capsForm.max_map_stages} min="1" />
       </div>
     </div>
     <div class="form-row">
