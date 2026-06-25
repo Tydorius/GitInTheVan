@@ -7,7 +7,13 @@ echo   GitInTheVan - Windows Deploy
 echo ============================================
 echo.
 
+echo Working directory: %CD%
+echo Script location: %~dp0
+echo.
+
 cd /d "%~dp0\.."
+echo Changed to: %CD%
+echo.
 
 REM Check Python version (3.12+ required)
 echo [1/6] Checking Python...
@@ -23,7 +29,9 @@ for /f "tokens=1,2 delims=." %%a in ("!PYVER!") do (
     set PYMAJOR=%%a
     set PYMINOR=%%b
 )
-if !PYMAJOR! GTR 3 goto :python_done
+echo DEBUG: PYVER=!PYVER! PYMAJOR=!PYMAJOR! PYMINOR=!PYMINOR!
+
+if !PYMAJOR! GTR 3 goto :python_found_default
 if !PYMAJOR! EQU 3 if !PYMINOR! GEQ 12 goto :python_found_default
 
 REM python found but too old — search for a newer version
@@ -129,20 +137,33 @@ exit /b 1
 
 :python_found_default
 set "PYTHON_CMD=python"
+echo DEBUG: Using default python from PATH
 
 :python_done
+echo DEBUG: PYTHON_CMD=[!PYTHON_CMD!]
+if "!PYTHON_CMD!"=="" (
+    echo ERROR: PYTHON_CMD is empty. Python was not detected properly.
+    echo Please report this error with the debug output above.
+    pause
+    exit /b 1
+)
 echo.
 
 REM Check for existing venv or create it
 echo [2/6] Setting up Python environment...
 if not exist ".venv\Scripts\python.exe" (
     echo Creating virtual environment...
+    echo DEBUG: Running command: "!PYTHON_CMD!" -m venv .venv
     "!PYTHON_CMD!" -m venv .venv
     if errorlevel 1 (
         echo ERROR: Failed to create virtual environment.
+        echo DEBUG: PYTHON_CMD was [!PYTHON_CMD!]
+        echo DEBUG: errorlevel was !errorlevel!
         pause
         exit /b 1
     )
+) else (
+    echo DEBUG: .venv already exists, skipping creation
 )
 echo Upgrading pip...
 ".venv\Scripts\python" -m pip install --upgrade pip -q
