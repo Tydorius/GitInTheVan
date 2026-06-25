@@ -79,21 +79,20 @@ async def rate_limit_middleware(request: Request, call_next):
     from app.services.rate_limiter import check_api_rate_limit, check_proxy_rate_limit
 
     path = request.url.path
-    if path.startswith("/v1/"):
-        try:
-            await check_proxy_rate_limit(request)
-        except HTTPException as e:
-            return JSONResponse(status_code=e.status_code, content={"detail": e.detail})
-    elif path.startswith("/api/"):
+    if path.startswith("/api/"):
         try:
             await check_api_rate_limit(request)
+        except HTTPException as e:
+            return JSONResponse(status_code=e.status_code, content={"detail": e.detail})
+    elif path not in ("/", "/health") and not path.startswith(("/help", "/assets", "/app", "/gitinthevan")):
+        try:
+            await check_proxy_rate_limit(request)
         except HTTPException as e:
             return JSONResponse(status_code=e.status_code, content={"detail": e.detail})
 
     return await call_next(request)
 
 
-app.include_router(proxy_router)
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(endpoints_router)
@@ -142,3 +141,7 @@ if _static_dir.exists() and (_static_dir / "index.html").exists():
 _docs_dir = Path(__file__).resolve().parent.parent / "docs"
 if _docs_dir.exists():
     app.mount("/help", StaticFiles(directory=_docs_dir, html=True), name="docs")
+
+# Proxy catch-all MUST be registered last so management API, health,
+# static files, and docs routes are matched first.
+app.include_router(proxy_router)
