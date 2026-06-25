@@ -24,7 +24,7 @@ for /f "tokens=1,2 delims=." %%a in ("!PYVER!") do (
     set PYMINOR=%%b
 )
 if !PYMAJOR! GTR 3 goto :python_done
-if !PYMAJOR! EQU 3 if !PYMINOR! GEQ 12 goto :python_done
+if !PYMAJOR! EQU 3 if !PYMINOR! GEQ 12 goto :python_found_default
 
 REM python found but too old — search for a newer version
 echo.
@@ -126,6 +126,9 @@ echo Python installed but not found in expected locations.
 echo Please close this window, open a new command prompt, and re-run this script.
 pause
 exit /b 1
+
+:python_found_default
+set "PYTHON_CMD=python"
 
 :python_done
 echo.

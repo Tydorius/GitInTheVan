@@ -136,11 +136,32 @@ The following are planned for future releases.
 - **Per-server sharing** — Share resources among users on the same GitInTheVan instance via public flags
 - **Cantrip Chaining** — Multi-turn LLM interactions for complex systems like dice resolution and critical tables
 - **Natural-Language Cantrip Generator** — Describe what you want in plain English and an LLM generates the cantrip code or lorebook
-- **Docker Distribution** — Multi-platform container images with three docker-compose configurations (SQLite, MariaDB, PostgreSQL)
 
 ## Quick Start
 
-### Easy Deploy (Recommended)
+### Docker (Recommended for self-hosting)
+
+Choose one of three configurations based on your needs:
+
+```bash
+# Option 1: SQLite (simplest, single-instance, zero-config)
+docker compose -f docker-compose.sqlite.yml up -d
+
+# Option 2: MariaDB (multi-instance scaling, persistent database)
+docker compose -f docker-compose.mariadb.yml up -d
+
+# Option 3: PostgreSQL (multi-instance scaling, persistent database)
+docker compose -f docker-compose.postgres.yml up -d
+```
+
+Once running, open `http://localhost:8000` in your browser. Data persists in mounted volumes (`./data/`, `./.deno/`).
+
+To stop:
+```bash
+docker compose -f docker-compose.sqlite.yml down      # (or mariadb/postgres)
+```
+
+### Easy Deploy (Non-Docker)
 
 For non-technical users, a deploy script handles everything: Python setup, Deno download, frontend build, configuration, and server startup.
 

@@ -20,7 +20,7 @@ class Memory(Base):
         String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     conversation_id: Mapped[str] = mapped_column(String(256), nullable=False, default="", index=True)
-    key: Mapped[str] = mapped_column(String(256), nullable=False)
+    key: Mapped[str] = mapped_column("key", String(256), nullable=False, quote=True)
     value: Mapped[str] = mapped_column(Text, nullable=False, default="")
     memory_type: Mapped[str] = mapped_column(String(32), default="flag", nullable=False)
     created_at: Mapped[datetime] = mapped_column(

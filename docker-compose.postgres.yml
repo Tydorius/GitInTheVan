@@ -1,0 +1,36 @@
+services:
+  gitinthevan:
+    build: .
+    image: gitinthevan/server:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./.deno:/app/.deno
+    environment:
+      - GITV_SECRET_KEY=${GITV_SECRET_KEY:-change-me-in-production}
+      - GITV_DATABASE_URL=postgresql+asyncpg://gitv:${GITV_DB_PASSWORD:-gitv_password}@postgres:5432/gitinthevan
+      - GITV_DB_POOL_SIZE=10
+      - GITV_DB_MAX_OVERFLOW=20
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17
+    environment:
+      - POSTGRES_DB=gitinthevan
+      - POSTGRES_USER=gitv
+      - POSTGRES_PASSWORD=${GITV_DB_PASSWORD:-gitv_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gitv -d gitinthevan"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

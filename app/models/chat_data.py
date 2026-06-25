@@ -20,7 +20,7 @@ class ChatData(Base):
         String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     conversation_id: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
-    key: Mapped[str] = mapped_column(String(256), nullable=False)
+    key: Mapped[str] = mapped_column("key", String(256), nullable=False, quote=True)
     value_json: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
