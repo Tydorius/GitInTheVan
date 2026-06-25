@@ -1,0 +1,37 @@
+services:
+  gitinthevan:
+    build: .
+    image: gitinthevan/server:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./.deno:/app/.deno
+    environment:
+      - GITV_SECRET_KEY=${GITV_SECRET_KEY:-change-me-in-production}
+      - GITV_DATABASE_URL=mysql+aiomysql://gitv:${GITV_DB_PASSWORD:-gitv_password}@mariadb:3306/gitinthevan
+      - GITV_DB_POOL_SIZE=10
+      - GITV_DB_MAX_OVERFLOW=20
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mariadb:
+    image: mariadb:11
+    environment:
+      - MARIADB_ROOT_PASSWORD=${MARIADB_ROOT_PASSWORD:-root_password}
+      - MARIADB_DATABASE=gitinthevan
+      - MARIADB_USER=gitv
+      - MARIADB_PASSWORD=${GITV_DB_PASSWORD:-gitv_password}
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "healthcheck.sh --connect --innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  mariadb_data:

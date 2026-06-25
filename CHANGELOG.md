@@ -6,6 +6,12 @@ All notable changes to GitInTheVan are documented in this file.
 
 ### Added
 
+- **Docker Distribution**: Multi-stage Dockerfile with three docker-compose configurations for production deployment:
+  - `docker-compose.sqlite.yml` — Single-instance with SQLite (default, zero-config)
+  - `docker-compose.mariadb.yml` — App + MariaDB container with persistent volume
+  - `docker-compose.postgres.yml` — App + PostgreSQL container with persistent volume
+  - All three tested and verified: builds succeed, health checks pass, all 26 tables and 30 migrations apply cleanly
+  - Image includes Deno binary, PostgreSQL/MariaDB client tools, and built frontend
 - **LiteLLM Provider Compatibility**: Endpoints can now select a provider (Gemini, OpenAI, Anthropic, OpenRouter, DeepSeek, xAI, Ollama, OpenAI-Compatible) to enable LiteLLM integration. LiteLLM handles per-provider parameter translation (e.g., stripping unsupported `top_k` for Gemini), auth format differences, response normalization, and error handling for 100+ LLM providers. Endpoints without a provider set continue to use raw HTTP passthrough (fully backward compatible).
   - Pinned `litellm==1.89.4` (MIT licensed)
   - Provider dropdown added to endpoint form in UI

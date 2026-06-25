@@ -393,34 +393,91 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
     ),
     (
         "028_create_user_data_table",
-        """
-        CREATE TABLE IF NOT EXISTS user_data (
-            id VARCHAR(36) PRIMARY KEY,
-            user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            key VARCHAR(256) NOT NULL,
-            value_json TEXT DEFAULT '' NOT NULL,
-            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE INDEX IF NOT EXISTS ix_user_data_user_id ON user_data (user_id);
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_user_data_key ON user_data (user_id, key);
-        """,
+        {
+            "sqlite": """
+                CREATE TABLE IF NOT EXISTS user_data (
+                    id VARCHAR(36) PRIMARY KEY,
+                    user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    key VARCHAR(256) NOT NULL,
+                    value_json TEXT DEFAULT '' NOT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS ix_user_data_user_id ON user_data (user_id);
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_user_data_key ON user_data (user_id, key);
+            """,
+            "postgresql": """
+                CREATE TABLE IF NOT EXISTS user_data (
+                    id VARCHAR(36) PRIMARY KEY,
+                    user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    key VARCHAR(256) NOT NULL,
+                    value_json TEXT DEFAULT '' NOT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS ix_user_data_user_id ON user_data (user_id);
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_user_data_key ON user_data (user_id, key);
+            """,
+            "mysql": """
+                CREATE TABLE IF NOT EXISTS user_data (
+                    id VARCHAR(36) PRIMARY KEY,
+                    user_id VARCHAR(36) NOT NULL,
+                    `key` VARCHAR(256) NOT NULL,
+                    value_json TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+                CREATE INDEX ix_user_data_user_id ON user_data (user_id);
+                CREATE UNIQUE INDEX uq_user_data_key ON user_data (user_id, `key`);
+            """,
+        },
     ),
     (
         "029_create_cantrip_data_table",
-        """
-        CREATE TABLE IF NOT EXISTS cantrip_data (
-            id VARCHAR(36) PRIMARY KEY,
-            user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            cantrip_id VARCHAR(36) NOT NULL REFERENCES cantrips(id) ON DELETE CASCADE,
-            key VARCHAR(256) NOT NULL,
-            value_json TEXT DEFAULT '' NOT NULL,
-            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE INDEX IF NOT EXISTS ix_cantrip_data_user_cantrip ON cantrip_data (user_id, cantrip_id);
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_cantrip_data_key ON cantrip_data (user_id, cantrip_id, key);
-        """,
+        {
+            "sqlite": """
+                CREATE TABLE IF NOT EXISTS cantrip_data (
+                    id VARCHAR(36) PRIMARY KEY,
+                    user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    cantrip_id VARCHAR(36) NOT NULL REFERENCES cantrips(id) ON DELETE CASCADE,
+                    key VARCHAR(256) NOT NULL,
+                    value_json TEXT DEFAULT '' NOT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS ix_cantrip_data_user_cantrip ON cantrip_data (user_id, cantrip_id);
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_cantrip_data_key ON cantrip_data (user_id, cantrip_id, key);
+            """,
+            "postgresql": """
+                CREATE TABLE IF NOT EXISTS cantrip_data (
+                    id VARCHAR(36) PRIMARY KEY,
+                    user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    cantrip_id VARCHAR(36) NOT NULL REFERENCES cantrips(id) ON DELETE CASCADE,
+                    key VARCHAR(256) NOT NULL,
+                    value_json TEXT DEFAULT '' NOT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS ix_cantrip_data_user_cantrip ON cantrip_data (user_id, cantrip_id);
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_cantrip_data_key ON cantrip_data (user_id, cantrip_id, key);
+            """,
+            "mysql": """
+                CREATE TABLE IF NOT EXISTS cantrip_data (
+                    id VARCHAR(36) PRIMARY KEY,
+                    user_id VARCHAR(36) NOT NULL,
+                    cantrip_id VARCHAR(36) NOT NULL,
+                    `key` VARCHAR(256) NOT NULL,
+                    value_json TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY (cantrip_id) REFERENCES cantrips(id) ON DELETE CASCADE
+                );
+                CREATE INDEX ix_cantrip_data_user_cantrip ON cantrip_data (user_id, cantrip_id);
+                CREATE UNIQUE INDEX uq_cantrip_data_key ON cantrip_data (user_id, cantrip_id, `key`);
+            """,
+        },
     ),
     (
         "030_add_endpoint_provider",
@@ -450,6 +507,8 @@ _TOLERABLE_ERROR_FRAGMENTS: list[str] = [
     "unique constraint",
     # MySQL / MariaDB -- "Duplicate entry '...' for key"
     "duplicate entry",
+    # MySQL / MariaDB -- duplicate index name
+    "duplicate key name",
 ]
 
 
