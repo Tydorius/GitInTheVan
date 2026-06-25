@@ -23,8 +23,8 @@ for /f "tokens=1,2 delims=." %%a in ("!PYVER!") do (
     set PYMAJOR=%%a
     set PYMINOR=%%b
 )
-if !PYMAJOR! GTR 3 goto :python_ok_init
-if !PYMAJOR! EQU 3 if !PYMINOR! GEQ 12 goto :python_ok_init
+if !PYMAJOR! GTR 3 goto :python_done
+if !PYMAJOR! EQU 3 if !PYMINOR! GEQ 12 goto :python_done
 
 REM python found but too old — search for a newer version
 echo.
