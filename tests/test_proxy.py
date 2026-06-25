@@ -215,3 +215,35 @@ async def test_generic_route_forwarding(client, httpx_mock):
     assert response.status_code == 200
     data = response.json()
     assert data["data"][0]["id"] == "test-model"
+
+
+@pytest.mark.asyncio
+async def test_v1beta_chat_completions_forwarded(client, httpx_mock):
+    """Requests to /v1beta/chat/completions should be forwarded through the proxy."""
+    httpx_mock.add_response(
+        url=f"{MOCK_ENDPOINT_URL}/v1beta/chat/completions",
+        json={"choices": [{"message": {"content": "v1beta response"}}]},
+        status_code=200,
+    )
+
+    response = await client.post(
+        "/v1beta/chat/completions",
+        json=_make_request(),
+    )
+    assert response.status_code == 200
+    assert response.json()["choices"][0]["message"]["content"] == "v1beta response"
+
+
+@pytest.mark.asyncio
+async def test_v1beta_generic_route_forwarding(client, httpx_mock):
+    """Generic routes under /v1beta/ should be forwarded (e.g. models endpoint)."""
+    httpx_mock.add_response(
+        url=f"{MOCK_ENDPOINT_URL}/v1beta/models",
+        json={"object": "list", "data": [{"id": "gemini-model", "object": "model"}]},
+        status_code=200,
+    )
+
+    response = await client.get("/v1beta/models")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["data"][0]["id"] == "gemini-model"

@@ -161,12 +161,14 @@ async def run_audit(
         try:
             import httpx
 
+            from app.services.proxy import _build_upstream_url
+
             api_base_path = target_ep.api_base_path or ""
             if api_base_path.endswith("/chat/completions"):
-                test_url = f"{target_ep.base_url}{api_base_path}"
+                base = api_base_path[: -len("/chat/completions")]
+                test_url = _build_upstream_url(target_ep.base_url, "/v1/models", base)
             else:
-                path_prefix = api_base_path or "/v1"
-                test_url = f"{target_ep.base_url}{path_prefix}/models"
+                test_url = _build_upstream_url(target_ep.base_url, "/v1/models", api_base_path)
 
             headers = {"Authorization": f"Bearer {target_ep.api_key}"}
             async with httpx.AsyncClient(timeout=10.0) as client:
