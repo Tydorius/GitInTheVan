@@ -6,6 +6,11 @@ All notable changes to GitInTheVan are documented in this file.
 
 ### Added
 
+- **LiteLLM Provider Compatibility**: Endpoints can now select a provider (Gemini, OpenAI, Anthropic, OpenRouter, DeepSeek, xAI, Ollama, OpenAI-Compatible) to enable LiteLLM integration. LiteLLM handles per-provider parameter translation (e.g., stripping unsupported `top_k` for Gemini), auth format differences, response normalization, and error handling for 100+ LLM providers. Endpoints without a provider set continue to use raw HTTP passthrough (fully backward compatible).
+  - Pinned `litellm==1.89.4` (MIT licensed)
+  - Provider dropdown added to endpoint form in UI
+  - Diagnostics connectivity test uses LiteLLM when provider is set
+  - All outbound calls (Driver, Navigator, Summarizer, Map stages) benefit from LiteLLM when provider is set
 - **Expanded Memory System**: Two new persistent memory scopes for cantrips:
   - `context.user_data` — per-user global key-value store, shared across all chats and all cantrips for that user
   - `context.cantrip_data` — per-user per-cantrip key-value store, persists across chats but scoped to one specific cantrip

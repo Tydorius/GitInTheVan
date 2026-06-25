@@ -21,6 +21,7 @@ class EndpointCreate(BaseModel):
     base_url: str
     api_key: str = ""
     api_base_path: str = ""
+    provider: str = ""
     bypass_method: str = "none"
     enabled: bool = True
 
@@ -35,6 +36,7 @@ class EndpointUpdate(BaseModel):
     base_url: str | None = None
     api_key: str | None = None
     api_base_path: str | None = None
+    provider: str | None = None
     bypass_method: str | None = None
     enabled: bool | None = None
 
@@ -50,6 +52,7 @@ class EndpointResponse(BaseModel):
     base_url: str
     api_key: str
     api_base_path: str
+    provider: str
     bypass_method: str
     enabled: bool
 
@@ -71,7 +74,7 @@ async def list_endpoints(
         endpoints=[
             EndpointResponse(
                 id=e.id, name=e.name, base_url=e.base_url, api_key=e.api_key,
-                api_base_path=e.api_base_path, bypass_method=e.bypass_method, enabled=e.enabled,
+                api_base_path=e.api_base_path, provider=e.provider, bypass_method=e.bypass_method, enabled=e.enabled,
             )
             for e in endpoints
         ]
@@ -90,6 +93,7 @@ async def create_endpoint(
         base_url=req.base_url,
         api_key=req.api_key,
         api_base_path=req.api_base_path,
+        provider=req.provider,
         bypass_method=req.bypass_method,
         enabled=req.enabled,
     )
@@ -103,6 +107,7 @@ async def create_endpoint(
         base_url=endpoint.base_url,
         api_key=endpoint.api_key,
         api_base_path=endpoint.api_base_path,
+        provider=endpoint.provider,
         bypass_method=endpoint.bypass_method,
         enabled=endpoint.enabled,
     )
@@ -130,6 +135,8 @@ async def update_endpoint(
         endpoint.api_key = req.api_key
     if req.api_base_path is not None:
         endpoint.api_base_path = req.api_base_path
+    if req.provider is not None:
+        endpoint.provider = req.provider
     if req.bypass_method is not None:
         endpoint.bypass_method = req.bypass_method
     if req.enabled is not None:
@@ -143,6 +150,7 @@ async def update_endpoint(
         base_url=endpoint.base_url,
         api_key=endpoint.api_key,
         api_base_path=endpoint.api_base_path,
+        provider=endpoint.provider,
         bypass_method=endpoint.bypass_method,
         enabled=endpoint.enabled,
     )

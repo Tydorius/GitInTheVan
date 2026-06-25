@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Annotated
 
@@ -161,51 +162,92 @@ async def run_audit(
         try:
             import httpx
 
-            from app.services.proxy import _build_upstream_url
+            from app.services.proxy import _build_upstream_url, _do_forward_litellm
 
-            api_base_path = target_ep.api_base_path or ""
-            if api_base_path.endswith("/chat/completions"):
-                test_url = _build_upstream_url(target_ep.base_url, "/v1/chat/completions", api_base_path)
+            provider = getattr(target_ep, "provider", "") or ""
+            test_body_bytes = None
+
+            if provider:
+                test_body = {"model": "test", "messages": [{"role": "user", "content": "test"}], "max_tokens": 1, "stream": False}
+                test_body_bytes = json.dumps(test_body).encode()
+                timeout = httpx.Timeout(15.0, connect=10.0)
+
+                logger.debug(
+                    "Diagnostics connectivity test (litellm): endpoint='%s' provider='%s' api_key_present=%s",
+                    target_ep.name, provider, bool(target_ep.api_key),
+                )
+
+                response_data, status_code = await _do_forward_litellm(
+                    test_body_bytes, provider, target_ep.base_url, target_ep.api_key, timeout,
+                )
+
+                logger.debug(
+                    "Diagnostics connectivity response (litellm): status=%d response=%.500s",
+                    status_code, str(response_data)[:500],
+                )
+
+                if status_code in (401, 403):
+                    results.append(DiagnosticResult(
+                        check="Endpoint Connectivity",
+                        passed=False,
+                        message=f"Endpoint returned {status_code}",
+                        detail=f"Auth error - check API key for '{target_ep.name}'",
+                    ))
+                elif status_code == 200:
+                    results.append(DiagnosticResult(
+                        check="Endpoint Connectivity",
+                        passed=True,
+                        message="Endpoint responded with 200",
+                        detail="Connection and auth verified.",
+                    ))
+                else:
+                    results.append(DiagnosticResult(
+                        check="Endpoint Connectivity",
+                        passed=True,
+                        message=f"Endpoint responded with {status_code}",
+                        detail="Connection and auth verified (test model may not exist).",
+                    ))
             else:
+                api_base_path = target_ep.api_base_path or ""
                 test_url = _build_upstream_url(target_ep.base_url, "/v1/chat/completions", api_base_path)
 
-            headers = {"Authorization": f"Bearer {target_ep.api_key}", "Content-Type": "application/json"}
-            test_body = {"model": "test", "messages": [{"role": "user", "content": "test"}], "max_tokens": 1}
+                headers = {"Authorization": f"Bearer {target_ep.api_key}", "Content-Type": "application/json"}
+                test_body = {"model": "test", "messages": [{"role": "user", "content": "test"}], "max_tokens": 1}
 
-            logger.debug(
-                "Diagnostics connectivity test: endpoint='%s' url='%s' api_key_present=%s",
-                target_ep.name, test_url, bool(target_ep.api_key),
-            )
+                logger.debug(
+                    "Diagnostics connectivity test: endpoint='%s' url='%s' api_key_present=%s",
+                    target_ep.name, test_url, bool(target_ep.api_key),
+                )
 
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(test_url, headers=headers, json=test_body)
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.post(test_url, headers=headers, json=test_body)
 
-            logger.debug(
-                "Diagnostics connectivity response: status=%d body=%.500s",
-                resp.status_code, resp.text[:500] if resp.text else "",
-            )
+                logger.debug(
+                    "Diagnostics connectivity response: status=%d body=%.500s",
+                    resp.status_code, resp.text[:500] if resp.text else "",
+                )
 
-            if resp.status_code in (401, 403):
-                results.append(DiagnosticResult(
-                    check="Endpoint Connectivity",
-                    passed=False,
-                    message=f"Endpoint returned {resp.status_code}",
-                    detail=f"Auth error - check API key for '{target_ep.name}'",
-                ))
-            elif resp.status_code == 200:
-                results.append(DiagnosticResult(
-                    check="Endpoint Connectivity",
-                    passed=True,
-                    message="Endpoint responded with 200",
-                    detail="Connection and auth verified.",
-                ))
-            else:
-                results.append(DiagnosticResult(
-                    check="Endpoint Connectivity",
-                    passed=True,
-                    message=f"Endpoint responded with {resp.status_code}",
-                    detail="Connection and auth verified (test model may not exist).",
-                ))
+                if resp.status_code in (401, 403):
+                    results.append(DiagnosticResult(
+                        check="Endpoint Connectivity",
+                        passed=False,
+                        message=f"Endpoint returned {resp.status_code}",
+                        detail=f"Auth error - check API key for '{target_ep.name}'",
+                    ))
+                elif resp.status_code == 200:
+                    results.append(DiagnosticResult(
+                        check="Endpoint Connectivity",
+                        passed=True,
+                        message="Endpoint responded with 200",
+                        detail="Connection and auth verified.",
+                    ))
+                else:
+                    results.append(DiagnosticResult(
+                        check="Endpoint Connectivity",
+                        passed=True,
+                        message=f"Endpoint responded with {resp.status_code}",
+                        detail="Connection and auth verified (test model may not exist).",
+                    ))
         except Exception as e:
             results.append(DiagnosticResult(
                 check="Endpoint Connectivity",

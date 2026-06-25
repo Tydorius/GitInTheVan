@@ -64,7 +64,7 @@ def _log_response(status_code: int, elapsed: float, response_body: str = "") -> 
         logger.debug("proxy error response body: %.500s", response_body[:500])
 
 
-async def _resolve_target(request: Request) -> tuple[str, str, str | None, str] | None:
+async def _resolve_target(request: Request) -> tuple[str, str, str | None, str, str, str] | None:
     auth_header = request.headers.get("authorization", "")
     if auth_header.lower().startswith("bearer "):
         token = auth_header[7:]
@@ -72,7 +72,7 @@ async def _resolve_target(request: Request) -> tuple[str, str, str | None, str] 
             async with async_session() as db:
                 result = await resolve_routing(token, db)
                 if result:
-                    return result.base_url, result.api_key, result.user_id, result.api_base_path, result.bypass_method
+                    return result.base_url, result.api_key, result.user_id, result.api_base_path, result.bypass_method, result.provider
                 return None
             return None
 
@@ -80,11 +80,27 @@ async def _resolve_target(request: Request) -> tuple[str, str, str | None, str] 
     api_key = settings.default_endpoint_api_key
     api_base_path = settings.default_endpoint_api_base_path
     if base_url:
-        return base_url, api_key, None, api_base_path, "none"
+        return base_url, api_key, None, api_base_path, "none", ""
     return None
 
 
 async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
+    try:
+        return await _forward_request_impl(request)
+    except Exception as exc:
+        logger.exception("Unhandled error in proxy pipeline")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": {
+                    "message": f"Internal proxy error: {type(exc).__name__}: {exc}",
+                    "type": "proxy_error",
+                }
+            },
+        )
+
+
+async def _forward_request_impl(request: Request) -> JSONResponse | StreamingResponse:
     target = await _resolve_target(request)
 
     if target is None:
@@ -98,7 +114,7 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
             },
         )
 
-    base_url, api_key, user_id, api_base_path, endpoint_bypass = target
+    base_url, api_key, user_id, api_base_path, endpoint_bypass, provider = target
 
     body = await request.body()
     path = request.url.path
@@ -110,8 +126,8 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
     headers = _build_forward_headers(request, api_key)
 
     logger.debug(
-        "proxy resolved: base_url=%s path=%s api_base_path=%s upstream_url=%s api_key_present=%s",
-        base_url, path, api_base_path, upstream_url, bool(api_key),
+        "proxy resolved: base_url=%s path=%s api_base_path=%s upstream_url=%s api_key_present=%s provider=%s",
+        base_url, path, api_base_path, upstream_url, bool(api_key), provider or "(none)",
     )
 
     body_json: dict[str, Any] = {}
@@ -123,6 +139,11 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
 
     model = body_json.get("model")
     stream = body_json.get("stream", False)
+
+    body_json["_gitv_provider"] = provider
+    body_json["_gitv_base_url"] = base_url
+    body_json["_gitv_api_key"] = api_key
+
     _log_request(request.method, upstream_url, model, stream)
 
     request_headers: dict[str, str] = {}
@@ -304,7 +325,7 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
                 debug_data["budget"] = body_json["_gitv_budget"]
             body_json["_gitv_debug"] = debug_data
 
-        body = json.dumps(body_json).encode()
+        body = json.dumps({k: v for k, v in body_json.items() if not k.startswith("_gitv")}).encode()
 
     timeout = httpx.Timeout(settings.request_timeout, connect=10.0)
 
@@ -327,7 +348,9 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
             ux_settings = await _load_ux_settings(user_id)
             body_json_verified = dict(body_json)
             body_json_verified["stream"] = False
-            body_verified = json.dumps(body_json_verified).encode()
+            body_verified = json.dumps(
+                {k: v for k, v in body_json_verified.items() if not k.startswith("_gitv")}
+            ).encode()
             if dc_active:
                 logger.info("Driver-callable active: converting streaming to non-streaming for tool loop")
             elif verification_on:
@@ -490,7 +513,12 @@ async def _forward_non_streaming(
     method: str, url: str, headers: dict[str, str], body: bytes, timeout: httpx.Timeout,
     user_id: str | None = None, body_json: dict[str, Any] | None = None,
 ) -> JSONResponse:
-    response_data, status_code = await _do_forward(method, url, headers, body, timeout)
+    response_data, status_code = await _do_forward(
+        method, url, headers, body, timeout,
+        provider=body_json.get("_gitv_provider", "") if body_json else "",
+        base_url=body_json.get("_gitv_base_url", "") if body_json else "",
+        api_key=body_json.get("_gitv_api_key", "") if body_json else "",
+    )
 
     if status_code == 200 and user_id and body_json and body_json.get("_gitv_chat_id"):
         if body_json.get("_gitv_command_overrides", {}).get("memory") is not False:
@@ -584,7 +612,11 @@ async def _run_driver_callable_loop(
 
     while rounds < max_rounds:
         body_bytes = json.dumps(loop_body).encode()
-        response_data, status_code = await _do_forward(method, url, headers, body_bytes, timeout)
+        response_data, status_code = await _do_forward(method, url, headers, body_bytes, timeout,
+            provider=body_json.get("_gitv_provider", ""),
+            base_url=body_json.get("_gitv_base_url", ""),
+            api_key=body_json.get("_gitv_api_key", ""),
+        )
 
         if status_code != 200:
             logger.warning("Driver-callable loop: forward returned %d", status_code)
@@ -634,7 +666,11 @@ async def _run_driver_callable_loop(
         loop_body["messages"] = loop_messages
 
     body_bytes = json.dumps(loop_body).encode()
-    response_data, status_code = await _do_forward(method, url, headers, body_bytes, timeout)
+    response_data, status_code = await _do_forward(method, url, headers, body_bytes, timeout,
+        provider=body_json.get("_gitv_provider", ""),
+        base_url=body_json.get("_gitv_base_url", ""),
+        api_key=body_json.get("_gitv_api_key", ""),
+    )
 
     if status_code == 200:
         choices = response_data.get("choices", [])
@@ -697,7 +733,8 @@ async def _forward_non_streaming_verified(
                 if status_code == 200 and body_json.get("_gitv_chat_id"):
                     response_data = await _extract_response_memories(response_data, user_id, body_json)
 
-                response_data.pop("_gitv_forbidden_summary", None)
+                if isinstance(response_data, dict):
+                    response_data.pop("_gitv_forbidden_summary", None)
 
                 if status_code == 200 and body_json.get("_gitv_bypass_method"):
                     from app.services.bypass import apply_bypass_decode
@@ -710,7 +747,11 @@ async def _forward_non_streaming_verified(
         except Exception:
             logger.exception("Driver-callable loop failed, falling through to normal forward")
 
-    response_data, status_code = await _do_forward(method, url, headers, body, timeout)
+    response_data, status_code = await _do_forward(method, url, headers, body, timeout,
+        provider=body_json.get("_gitv_provider", ""),
+        base_url=body_json.get("_gitv_base_url", ""),
+        api_key=body_json.get("_gitv_api_key", ""),
+    )
 
     if status_code == 200 and user_id:
         response_data = await _apply_post_driver_processing(
@@ -744,7 +785,8 @@ async def _forward_non_streaming_verified(
         if body_json.get("_gitv_command_overrides", {}).get("memory") is not False:
             response_data = await _extract_response_memories(response_data, user_id, body_json)
 
-    response_data.pop("_gitv_forbidden_summary", None)
+    if isinstance(response_data, dict):
+        response_data.pop("_gitv_forbidden_summary", None)
 
     if status_code == 200 and body_json.get("_gitv_bypass_method"):
         from app.services.bypass import apply_bypass_decode
@@ -768,7 +810,7 @@ async def _save_debug_exchange(
     debug_data = body_json.get("_gitv_debug", {})
 
     response_content = ""
-    choices = response_data.get("choices", [])
+    choices = response_data.get("choices", []) if isinstance(response_data, dict) else []
     if choices:
         response_content = choices[0].get("message", {}).get("content", "")
 
@@ -884,8 +926,12 @@ async def _apply_post_navigator_processing(
 
 
 async def _do_forward(
-    method: str, url: str, headers: dict[str, str], body: bytes, timeout: httpx.Timeout
+    method: str, url: str, headers: dict[str, str], body: bytes, timeout: httpx.Timeout,
+    provider: str = "", base_url: str = "", api_key: str = "",
 ) -> tuple[dict[str, Any], int]:
+    if provider:
+        return await _do_forward_litellm(body, provider, base_url, api_key, timeout)
+
     async with httpx.AsyncClient(timeout=timeout) as client:
         try:
             response = await client.request(method, url, headers=headers, content=body)
@@ -912,6 +958,117 @@ async def _do_forward(
             {"error": {"message": response.text, "type": "upstream_error"}},
             response.status_code,
         )
+
+
+async def _do_forward_litellm(
+    body: bytes, provider: str, base_url: str, api_key: str, timeout: httpx.Timeout
+) -> tuple[dict[str, Any], int]:
+    """Forward request via LiteLLM for provider-specific compatibility."""
+    import litellm
+
+    try:
+        body_json = json.loads(body)
+    except Exception:
+        return {"error": {"message": "Invalid JSON body", "type": "proxy_error"}}, 400
+
+    model = body_json.get("model", "")
+    messages = body_json.get("messages", [])
+    stream = body_json.get("stream", False)
+
+    if not model:
+        return {"error": {"message": "Model not specified", "type": "proxy_error"}}, 400
+
+    litellm_model = f"{provider}/{model}" if not model.startswith(f"{provider}/") else model
+
+    kwargs: dict[str, Any] = {"api_key": api_key}
+
+    if provider in ("openai_compatible", "custom_openai"):
+        litellm_model = f"openai/{model}"
+        kwargs["api_base"] = base_url
+
+    litellm_params = (
+        "temperature", "max_tokens", "top_p", "top_k", "stream",
+        "stop", "frequency_penalty", "presence_penalty", "seed",
+        "n", "logprobs", "user",
+    )
+    for param in litellm_params:
+        if param in body_json:
+            kwargs[param] = body_json[param]
+
+    if stream:
+        kwargs["stream"] = True
+
+    timeout_seconds = timeout.read if hasattr(timeout, "read") and timeout.read else settings.request_timeout
+
+    logger.info("litellm forward: provider=%s model=%s stream=%s", provider, model, stream)
+
+    try:
+        response = await litellm.acompletion(
+            model=litellm_model,
+            messages=messages,
+            timeout=timeout_seconds,
+            **kwargs,
+        )
+
+        if stream:
+            chunks: list[dict[str, Any]] = []
+            content_parts: list[str] = []
+            final_metadata: dict[str, Any] = {}
+            async for chunk in response:
+                chunk_dict = chunk.model_dump() if hasattr(chunk, "model_dump") else chunk
+                chunks.append(chunk_dict)
+                if chunk_dict.get("choices"):
+                    delta = chunk_dict["choices"][0].get("delta", {})
+                    if delta.get("content"):
+                        content_parts.append(delta["content"])
+                if chunk_dict.get("usage"):
+                    final_metadata["usage"] = chunk_dict["usage"]
+                if chunk_dict.get("model"):
+                    final_metadata["model"] = chunk_dict["model"]
+
+            combined = {
+                "id": chunks[0].get("id", "chatcmpl-litellm") if chunks else "chatcmpl-litellm",
+                "object": "chat.completion",
+                "model": final_metadata.get("model", model),
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "".join(content_parts)},
+                    "finish_reason": chunks[-1]["choices"][0].get("finish_reason", "stop") if chunks and chunks[-1].get("choices") else "stop",
+                }],
+                **final_metadata,
+            }
+            _log_response(200, 0.0)
+            return combined, 200
+
+        result = response.model_dump() if hasattr(response, "model_dump") else dict(response)
+        _log_response(200, 0.0)
+        return result, 200
+
+    except Exception as exc:
+        import litellm as _litellm
+        logger.exception("litellm forward error: %s", exc)
+
+        status_code = 500
+        error_msg = str(exc)
+        error_type = type(exc).__name__
+
+        for exc_class, code, msg in [
+            ("AuthenticationError", 401, "Authentication failed"),
+            ("RateLimitError", 429, "Rate limited"),
+            ("BadRequestError", 400, None),
+            ("NotFoundError", 404, None),
+            ("Timeout", 504, "Request timed out"),
+            ("APIConnectionError", 502, "Failed to connect to provider"),
+            ("InternalServerError", 500, None),
+        ]:
+            exc_cls = getattr(_litellm.exceptions, exc_class, None)
+            if exc_cls and isinstance(exc, exc_cls):
+                status_code = code
+                error_msg = msg or str(exc)
+                break
+
+        _log_response(status_code, 0.0, error_msg)
+        return {"error": {"message": error_msg, "type": error_type}}, status_code
 
 
 async def _forward_streaming(
@@ -986,7 +1143,11 @@ async def _forward_streaming_with_memory(
     """Buffer a streaming response, extract and strip <memstore> tags,
     record the post-hash, then re-emit as SSE. Memory tags span content
     chunks so they can't be reliably extracted from individual chunks."""
-    response_data, status_code = await _do_forward(method, url, headers, body, timeout)
+    response_data, status_code = await _do_forward(method, url, headers, body, timeout,
+        provider=body_json.get("_gitv_provider", "") if body_json else "",
+        base_url=body_json.get("_gitv_base_url", "") if body_json else "",
+        api_key=body_json.get("_gitv_api_key", "") if body_json else "",
+    )
 
     if status_code == 200:
         response_data = await _extract_response_memories(response_data, user_id, body_json)

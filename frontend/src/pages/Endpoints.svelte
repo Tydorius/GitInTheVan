@@ -9,10 +9,22 @@
   let showForm = false
   let editingId: string | null = null
 
-  let form = { name: '', base_url: '', api_key: '', api_base_path: '', bypass_method: 'none', enabled: true }
+  let form = { name: '', base_url: '', api_key: '', api_base_path: '', provider: '', bypass_method: 'none', enabled: true }
   let showApiKey = false
   let visibleKeys: Record<string, boolean> = {}
   let copiedKeyId: string | null = null
+
+  const providers = [
+    { value: '', label: 'Custom (raw passthrough)' },
+    { value: 'gemini', label: 'Google Gemini' },
+    { value: 'openai', label: 'OpenAI' },
+    { value: 'anthropic', label: 'Anthropic' },
+    { value: 'openrouter', label: 'OpenRouter' },
+    { value: 'openai_compatible', label: 'OpenAI-Compatible (OpenWebUI, vLLM, etc.)' },
+    { value: 'deepseek', label: 'DeepSeek' },
+    { value: 'ollama', label: 'Ollama' },
+    { value: 'xai', label: 'xAI' },
+  ]
 
   let showKeyForm = false
   let keyFormEndpointId: string | null = null
@@ -54,7 +66,7 @@
 
   function startEdit(ep: any) {
     editingId = ep.id
-    form = { name: ep.name, base_url: ep.base_url, api_key: ep.api_key, api_base_path: ep.api_base_path || '', bypass_method: ep.bypass_method || 'none', enabled: ep.enabled }
+    form = { name: ep.name, base_url: ep.base_url, api_key: ep.api_key, api_base_path: ep.api_base_path || '', provider: ep.provider || '', bypass_method: ep.bypass_method || 'none', enabled: ep.enabled }
     showForm = true
   }
 
@@ -150,6 +162,7 @@
         <div>URL: {ep.base_url}</div>
         <div>API Path: {ep.api_base_path || '/v1 (default)'}</div>
         <div>Provider Key: {ep.api_key ? ep.api_key.slice(0, 8) + '...' : 'none'}</div>
+        <div>Provider: {ep.provider ? providers.find(p => p.value === ep.provider)?.label || ep.provider : 'Custom (passthrough)'}</div>
         <div>Bypass: {ep.bypass_method || 'none'}</div>
       </div>
 
@@ -254,6 +267,23 @@
           <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
             WARNING: May violate your provider's ToS. Use at your own risk.
           </p>
+        </div>
+        <div class="form-group">
+          <label for="ep-provider">Provider <span style="color: var(--text-dim);">(enables LiteLLM compatibility)</span></label>
+          <select id="ep-provider" bind:value={form.provider}>
+            {#each providers as p}
+              <option value={p.value}>{p.label}</option>
+            {/each}
+          </select>
+          {#if form.provider}
+            <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+              LiteLLM handles parameter compatibility, auth format, and response normalization automatically.
+            </p>
+          {:else}
+            <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+              Raw HTTP passthrough. Use API base path for path rewriting if needed.
+            </p>
+          {/if}
         </div>
         <div class="form-group">
           <label for="ep-enabled">

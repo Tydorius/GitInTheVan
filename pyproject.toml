@@ -16,6 +16,7 @@ dependencies = [
     "python-jose[cryptography]==3.5.0",
     "bcrypt==5.0.0",
     "dulwich==1.2.6",
+    "litellm==1.89.4",
 ]
 
 [project.optional-dependencies]

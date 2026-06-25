@@ -14,15 +14,16 @@ logger = logging.getLogger(__name__)
 
 
 class RoutingResult:
-    __slots__ = ("base_url", "api_key", "model", "user_id", "api_base_path", "bypass_method")
+    __slots__ = ("base_url", "api_key", "model", "user_id", "api_base_path", "bypass_method", "provider")
 
-    def __init__(self, base_url: str, api_key: str, model: str, user_id: str, api_base_path: str = "", bypass_method: str = "none"):
+    def __init__(self, base_url: str, api_key: str, model: str, user_id: str, api_base_path: str = "", bypass_method: str = "none", provider: str = ""):
         self.base_url = base_url
         self.api_key = api_key
         self.model = model
         self.user_id = user_id
         self.api_base_path = api_base_path
         self.bypass_method = bypass_method
+        self.provider = provider
 
 
 async def resolve_routing(bearer_token: str, db: AsyncSession) -> RoutingResult | None:
@@ -71,6 +72,7 @@ async def resolve_routing(bearer_token: str, db: AsyncSession) -> RoutingResult 
             user_id=user.id,
             api_base_path=endpoint.api_base_path or "",
             bypass_method=endpoint.bypass_method or "none",
+            provider=endpoint.provider or "",
         )
 
     result = await db.execute(select(User).where(User.gitv_api_key == key_hash))
@@ -123,6 +125,7 @@ async def resolve_routing(bearer_token: str, db: AsyncSession) -> RoutingResult 
         user_id=user.id,
         api_base_path=endpoint.api_base_path or "",
         bypass_method=endpoint.bypass_method or "none",
+        provider=endpoint.provider or "",
     )
 
 

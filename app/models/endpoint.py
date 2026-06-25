@@ -24,6 +24,7 @@ class Endpoint(Base):
     base_url: Mapped[str] = mapped_column(String(512), nullable=False)
     api_key: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     api_base_path: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="", server_default="")
     bypass_method: Mapped[str] = mapped_column(String(32), nullable=False, default="none")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

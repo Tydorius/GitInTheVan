@@ -422,6 +422,12 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
         CREATE UNIQUE INDEX IF NOT EXISTS uq_cantrip_data_key ON cantrip_data (user_id, cantrip_id, key);
         """,
     ),
+    (
+        "030_add_endpoint_provider",
+        """
+        ALTER TABLE endpoints ADD COLUMN provider VARCHAR(32) DEFAULT '' NOT NULL;
+        """,
+    ),
 ]
 
 
