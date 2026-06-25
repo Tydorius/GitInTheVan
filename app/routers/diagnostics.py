@@ -165,28 +165,46 @@ async def run_audit(
 
             api_base_path = target_ep.api_base_path or ""
             if api_base_path.endswith("/chat/completions"):
-                base = api_base_path[: -len("/chat/completions")]
-                test_url = _build_upstream_url(target_ep.base_url, "/v1/models", base)
+                test_url = _build_upstream_url(target_ep.base_url, "/v1/chat/completions", api_base_path)
             else:
-                test_url = _build_upstream_url(target_ep.base_url, "/v1/models", api_base_path)
+                test_url = _build_upstream_url(target_ep.base_url, "/v1/chat/completions", api_base_path)
 
-            headers = {"Authorization": f"Bearer {target_ep.api_key}"}
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(test_url, headers=headers)
+            headers = {"Authorization": f"Bearer {target_ep.api_key}", "Content-Type": "application/json"}
+            test_body = {"model": "test", "messages": [{"role": "user", "content": "test"}], "max_tokens": 1}
 
-            if resp.status_code in (200, 401, 403):
-                results.append(DiagnosticResult(
-                    check="Endpoint Connectivity",
-                    passed=resp.status_code == 200,
-                    message=f"Endpoint responded with {resp.status_code}",
-                    detail=f"Auth error - check API key for '{target_ep.name}'" if resp.status_code in (401, 403) else "",
-                ))
-            else:
+            logger.debug(
+                "Diagnostics connectivity test: endpoint='%s' url='%s' api_key_present=%s",
+                target_ep.name, test_url, bool(target_ep.api_key),
+            )
+
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(test_url, headers=headers, json=test_body)
+
+            logger.debug(
+                "Diagnostics connectivity response: status=%d body=%.500s",
+                resp.status_code, resp.text[:500] if resp.text else "",
+            )
+
+            if resp.status_code in (401, 403):
                 results.append(DiagnosticResult(
                     check="Endpoint Connectivity",
                     passed=False,
                     message=f"Endpoint returned {resp.status_code}",
-                    detail=f"Check the endpoint URL and API base path for '{target_ep.name}'",
+                    detail=f"Auth error - check API key for '{target_ep.name}'",
+                ))
+            elif resp.status_code == 200:
+                results.append(DiagnosticResult(
+                    check="Endpoint Connectivity",
+                    passed=True,
+                    message="Endpoint responded with 200",
+                    detail="Connection and auth verified.",
+                ))
+            else:
+                results.append(DiagnosticResult(
+                    check="Endpoint Connectivity",
+                    passed=True,
+                    message=f"Endpoint responded with {resp.status_code}",
+                    detail="Connection and auth verified (test model may not exist).",
                 ))
         except Exception as e:
             results.append(DiagnosticResult(

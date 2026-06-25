@@ -55,10 +55,13 @@ def _build_upstream_url(base_url: str, path: str, api_base_path: str = "") -> st
 
 def _log_request(method: str, url: str, model: str | None, stream: bool) -> None:
     logger.info("proxy %s %s model=%s stream=%s", method, url, model, stream)
+    logger.debug("proxy headers: api_key_present=%s", "<redacted>" if "sk-" in str(url) else "check")
 
 
-def _log_response(status_code: int, elapsed: float) -> None:
+def _log_response(status_code: int, elapsed: float, response_body: str = "") -> None:
     logger.info("proxy response status=%d elapsed=%.2fs", status_code, elapsed)
+    if status_code >= 400 and response_body:
+        logger.debug("proxy error response body: %.500s", response_body[:500])
 
 
 async def _resolve_target(request: Request) -> tuple[str, str, str | None, str] | None:
@@ -105,6 +108,11 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
         upstream_url = f"{upstream_url}?{query}"
 
     headers = _build_forward_headers(request, api_key)
+
+    logger.debug(
+        "proxy resolved: base_url=%s path=%s api_base_path=%s upstream_url=%s api_key_present=%s",
+        base_url, path, api_base_path, upstream_url, bool(api_key),
+    )
 
     body_json: dict[str, Any] = {}
     if body:
@@ -894,7 +902,8 @@ async def _do_forward(
                 504,
             )
 
-    _log_response(response.status_code, response.elapsed.total_seconds())
+    _log_response(response.status_code, response.elapsed.total_seconds(),
+                  response.text if response.status_code >= 400 else "")
 
     try:
         return response.json(), response.status_code
