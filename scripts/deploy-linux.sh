@@ -134,20 +134,29 @@ fi
 echo
 
 # Check Node and build frontend
-echo "[4/6] Checking frontend..."
-if [ -f "static/index.html" ]; then
-    echo "Frontend already built. Skipping."
-elif command -v node &> /dev/null; then
-    echo "Building frontend..."
+echo "[4/6] Building frontend..."
+if ! command -v node &> /dev/null; then
+    if [ -f "static/index.html" ]; then
+        echo "WARNING: Node.js not found. Using existing frontend build."
+        echo "To update the UI after upgrades, install Node.js 24+ from https://nodejs.org or your package manager"
+    else
+        echo "WARNING: Node.js not found. Frontend will not be built."
+        echo "Install Node.js 24+ from https://nodejs.org or your package manager and run:"
+        echo "  cd frontend && npm install && npm run build"
+    fi
+else
     cd frontend
-    npm install -q
+    if [ ! -d "node_modules" ]; then
+        echo "Installing frontend dependencies..."
+        npm install -q
+    else
+        echo "Updating frontend dependencies..."
+        npm install -q
+    fi
+    echo "Building frontend..."
     npm run build
     cd ..
     echo "Frontend built."
-else
-    echo "WARNING: Node.js not found. Frontend will not be built."
-    echo "Install Node.js 24+ from https://nodejs.org or your package manager and run:"
-    echo "  cd frontend && npm install && npm run build"
 fi
 echo
 

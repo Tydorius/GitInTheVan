@@ -180,23 +180,30 @@ if exist ".deno\deno.exe" (
 echo.
 
 REM Check Node and build frontend
-echo [4/6] Checking frontend...
-if exist "static\index.html" (
-    echo Frontend already built. Skipping.
-) else (
-    where node >nul 2>&1
-    if errorlevel 1 (
+echo [4/6] Building frontend...
+where node >nul 2>&1
+if errorlevel 1 (
+    if exist "static\index.html" (
+        echo WARNING: Node.js not found. Using existing frontend build.
+        echo To update the UI after upgrades, install Node.js 24+ from https://nodejs.org
+    ) else (
         echo WARNING: Node.js not found. Frontend will not be built.
         echo Install Node.js 24+ from https://nodejs.org and run:
         echo   cd frontend ^&^& npm install ^&^& npm run build
-    ) else (
-        echo Building frontend...
-        cd frontend
-        call npm install -q
-        call npm run build
-        cd ..
-        echo Frontend built.
     )
+) else (
+    cd frontend
+    if not exist "node_modules" (
+        echo Installing frontend dependencies...
+        call npm install -q
+    ) else (
+        echo Updating frontend dependencies...
+        call npm install -q
+    )
+    echo Building frontend...
+    call npm run build
+    cd ..
+    echo Frontend built.
 )
 echo.
 
