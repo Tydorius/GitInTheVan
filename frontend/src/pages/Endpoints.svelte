@@ -162,11 +162,9 @@
           <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px; font-size: 12px;">
             <span class="badge {k.is_active ? 'active' : 'inactive'}" style="font-size: 10px;">{k.is_active ? 'ON' : 'OFF'}</span>
             <span style="color: var(--text-dim); min-width: 80px;">{k.label}</span>
-            <div class="api-key-display" style="flex: 1; font-size: 10px; padding: 2px 6px; cursor: pointer;"
-                 onclick={() => copyKey(`gitv_${k.id}`, k.id)}
-                 title="Click to copy key ID">
-              {copiedKeyId === k.id ? 'Copied!' : `gitv_••••••••${k.id.slice(-4)}`}
-            </div>
+            <span style="flex: 1; font-size: 10px; padding: 2px 6px; color: var(--text-dim);">
+              gitv_•••••••• (shown only at creation)
+            </span>
             <button onclick={() => toggleKey(k.id)} style="padding: 2px 8px; font-size: 11px;" title="Enable/Disable">{k.is_active ? 'Disable' : 'Enable'}</button>
             <button class="danger" onclick={() => deleteKey(k.id)} style="padding: 2px 8px; font-size: 11px;">Delete</button>
           </div>
@@ -190,11 +188,9 @@
       <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px; font-size: 12px;">
         <span class="badge {k.is_active ? 'active' : 'inactive'}" style="font-size: 10px;">{k.is_active ? 'ON' : 'OFF'}</span>
         <span style="color: var(--text-dim); min-width: 80px;">{k.label}</span>
-        <div class="api-key-display" style="flex: 1; font-size: 10px; padding: 2px 6px; cursor: pointer;"
-             onclick={() => copyKey(`gitv_${k.id}`, k.id)}
-             title="Click to copy key ID">
-          {copiedKeyId === k.id ? 'Copied!' : `gitv_••••••••${k.id.slice(-4)}`}
-        </div>
+        <span style="flex: 1; font-size: 10px; padding: 2px 6px; color: var(--text-dim);">
+          gitv_•••••••• (shown only at creation)
+        </span>
         <button onclick={() => toggleKey(k.id)} style="padding: 2px 8px; font-size: 11px;">{k.is_active ? 'Disable' : 'Enable'}</button>
         <button class="danger" onclick={() => deleteKey(k.id)} style="padding: 2px 8px; font-size: 11px;">Delete</button>
       </div>
@@ -279,7 +275,7 @@
       {#if newKeyResult}
         <h3>API Key Created</h3>
         <div class="success-msg" style="margin-bottom: 12px;">
-          Save this key now — it will not be shown again.
+          Copy this key now — for security, only a hash is stored and the full key cannot be recovered.
         </div>
         <div class="form-group">
           <div class="api-key-display" style="cursor: pointer; user-select: all;" onclick={() => copyKey(newKeyResult, 'new')}>
