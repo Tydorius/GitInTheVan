@@ -9,12 +9,38 @@
   let auditDone = false
   let endpoints: any[] = []
   let selectedEndpoint = ''
+  let endpointModels: string[] = []
+  let selectedModel = ''
+  let loadingModels = false
+
+  async function loadModels() {
+    endpointModels = []
+    selectedModel = ''
+    if (!selectedEndpoint) return
+    loadingModels = true
+    try {
+      const data = await fetch(`/api/endpoints/${selectedEndpoint}/models`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('gitv_token')}` }
+      }).then(r => r.json())
+      endpointModels = data.models || []
+      const ep = endpoints.find(e => e.id === selectedEndpoint)
+      if (ep?.default_model) {
+        selectedModel = ep.default_model
+      } else if (endpointModels.length > 0) {
+        selectedModel = endpointModels[0]
+      }
+    } catch {}
+    finally { loadingModels = false }
+  }
 
   async function runAudit() {
     auditRunning = true; auditDone = false
     try {
-      const params = selectedEndpoint ? `?endpoint_id=${selectedEndpoint}` : ''
-      const data = await fetch(`/api/diagnostics/audit${params}`, {
+      const params = new URLSearchParams()
+      if (selectedEndpoint) params.set('endpoint_id', selectedEndpoint)
+      if (selectedModel) params.set('model', selectedModel)
+      const qs = params.toString()
+      const data = await fetch(`/api/diagnostics/audit${qs ? '?' + qs : ''}`, {
         headers: { 'Authorization': `Bearer ${localStorage.getItem('gitv_token')}` }
       }).then(r => r.json())
       auditResults = data.results
@@ -35,6 +61,7 @@
       endpoints = eps.endpoints
       if (endpoints.length > 0 && !selectedEndpoint) {
         selectedEndpoint = endpoints[0].id
+        await loadModels()
       }
     } catch {}
 
@@ -87,11 +114,20 @@
   <h3>Diagnostics</h3>
   <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 12px;">Run a quick check of your endpoint, cantrip, and verification configuration.</p>
   {#if endpoints.length > 0}
-    <div class="form-group">
-      <label for="diag-ep">Endpoint to Test</label>
-      <select id="diag-ep" bind:value={selectedEndpoint}>
-        {#each endpoints as ep}<option value={ep.id}>{ep.name}</option>{/each}
-      </select>
+    <div class="form-row">
+      <div class="form-group" style="flex: 1;">
+        <label for="diag-ep">Endpoint to Test</label>
+        <select id="diag-ep" bind:value={selectedEndpoint} onchange={loadModels}>
+          {#each endpoints as ep}<option value={ep.id}>{ep.name}</option>{/each}
+        </select>
+      </div>
+      <div class="form-group" style="flex: 1;">
+        <label for="diag-model">Model {#if loadingModels}(loading...){/if}</label>
+        <select id="diag-model" bind:value={selectedModel}>
+          <option value="">Use endpoint default</option>
+          {#each endpointModels as m}<option value={m}>{m}</option>{/each}
+        </select>
+      </div>
     </div>
   {/if}
   <button class="primary" onclick={runAudit} disabled={auditRunning}>{auditRunning ? 'Checking...' : 'Run Diagnostic'}</button>

@@ -64,7 +64,7 @@ def _log_response(status_code: int, elapsed: float, response_body: str = "") -> 
         logger.debug("proxy error response body: %.500s", response_body[:500])
 
 
-async def _resolve_target(request: Request) -> tuple[str, str, str | None, str, str, str] | None:
+async def _resolve_target(request: Request) -> tuple[str, str, str | None, str, str, str, str] | None:
     auth_header = request.headers.get("authorization", "")
     if auth_header.lower().startswith("bearer "):
         token = auth_header[7:]
@@ -72,7 +72,7 @@ async def _resolve_target(request: Request) -> tuple[str, str, str | None, str, 
             async with async_session() as db:
                 result = await resolve_routing(token, db)
                 if result:
-                    return result.base_url, result.api_key, result.user_id, result.api_base_path, result.bypass_method, result.provider
+                    return result.base_url, result.api_key, result.user_id, result.api_base_path, result.bypass_method, result.provider, result.model
                 return None
             return None
 
@@ -80,7 +80,7 @@ async def _resolve_target(request: Request) -> tuple[str, str, str | None, str, 
     api_key = settings.default_endpoint_api_key
     api_base_path = settings.default_endpoint_api_base_path
     if base_url:
-        return base_url, api_key, None, api_base_path, "none", ""
+        return base_url, api_key, None, api_base_path, "none", "", ""
     return None
 
 
@@ -114,7 +114,7 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
             },
         )
 
-    base_url, api_key, user_id, api_base_path, endpoint_bypass, provider = target
+    base_url, api_key, user_id, api_base_path, endpoint_bypass, provider, endpoint_model = target
 
     body = await request.body()
     path = request.url.path
@@ -138,6 +138,9 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
             pass
 
     model = body_json.get("model")
+    if not model and endpoint_model:
+        body_json["model"] = endpoint_model
+        model = endpoint_model
     stream = body_json.get("stream", False)
 
     body_json["_gitv_provider"] = provider

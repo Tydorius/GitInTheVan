@@ -36,6 +36,7 @@ async def run_audit(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     endpoint_id: str | None = None,
+    model: str | None = None,
 ):
     results: list[DiagnosticResult] = []
 
@@ -195,13 +196,14 @@ async def run_audit(
                     all_passed = all(r.passed for r in results)
                     return AuditResponse(results=results, all_passed=all_passed)
 
-                test_body = {"model": "test", "messages": [{"role": "user", "content": "test"}], "max_tokens": 1, "stream": False}
+                test_model = model or (getattr(target_ep, "default_model", "") or "") or "test"
+                test_body = {"model": test_model, "messages": [{"role": "user", "content": "test"}], "max_tokens": 1, "stream": False}
                 test_body_bytes = json.dumps(test_body).encode()
                 timeout = httpx.Timeout(15.0, connect=10.0)
 
                 logger.debug(
-                    "Diagnostics connectivity test (litellm): endpoint='%s' provider='%s' api_key_present=%s",
-                    target_ep.name, provider, bool(target_ep.api_key),
+                    "Diagnostics connectivity test (litellm): endpoint='%s' provider='%s' model='%s' api_key_present=%s",
+                    target_ep.name, provider, test_model, bool(target_ep.api_key),
                 )
 
                 response_data, status_code = await _do_forward_litellm(
@@ -232,18 +234,18 @@ async def run_audit(
                         check="Endpoint Connectivity",
                         passed=True,
                         message=f"Endpoint responded with {status_code}",
-                        detail="Connection and auth verified (test model may not exist).",
+                        detail="Connection and auth verified. Set a default model in Settings for a full test." if test_model == "test" else "Connection and auth verified (test model may not exist).",
                     ))
-            else:
                 api_base_path = target_ep.api_base_path or ""
                 test_url = _build_upstream_url(target_ep.base_url, "/v1/chat/completions", api_base_path)
 
+                test_model = model or (getattr(target_ep, "default_model", "") or "") or "test"
                 headers = {"Authorization": f"Bearer {target_ep.api_key}", "Content-Type": "application/json"}
-                test_body = {"model": "test", "messages": [{"role": "user", "content": "test"}], "max_tokens": 1}
+                test_body = {"model": test_model, "messages": [{"role": "user", "content": "test"}], "max_tokens": 1}
 
                 logger.debug(
-                    "Diagnostics connectivity test: endpoint='%s' url='%s' api_key_present=%s",
-                    target_ep.name, test_url, bool(target_ep.api_key),
+                    "Diagnostics connectivity test: endpoint='%s' url='%s' model='%s' api_key_present=%s",
+                    target_ep.name, test_url, test_model, bool(target_ep.api_key),
                 )
 
                 async with httpx.AsyncClient(timeout=15.0) as client:
@@ -273,7 +275,7 @@ async def run_audit(
                         check="Endpoint Connectivity",
                         passed=True,
                         message=f"Endpoint responded with {resp.status_code}",
-                        detail="Connection and auth verified (test model may not exist).",
+                        detail="Connection and auth verified. Set a default model in Settings for a full test." if test_model == "test" else "Connection and auth verified (test model may not exist).",
                     ))
         except Exception as e:
             results.append(DiagnosticResult(
