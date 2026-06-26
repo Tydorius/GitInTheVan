@@ -4,7 +4,6 @@
 
   let settings = {
     default_endpoint_id: '' as string | null,
-    default_model: '',
     preserve_thinking: true,
     gitv_status: false,
     simulated_streaming_speed: 0,
@@ -39,7 +38,6 @@
     try {
       const [s, e, sum] = await Promise.all([api.getSettings(), api.listEndpoints(), api.getSummarizationSettings(), api.listMaps()])
       settings.default_endpoint_id = s.default_endpoint_id || ''
-      settings.default_model = s.default_model || ''
       settings.preserve_thinking = s.preserve_thinking
       settings.gitv_status = s.gitv_status
       settings.simulated_streaming_speed = s.simulated_streaming_speed || 0
@@ -143,10 +141,6 @@
       <option value="">None</option>
       {#each endpoints as ep}<option value={ep.id}>{ep.name}</option>{/each}
     </select>
-  </div>
-  <div class="form-group">
-    <label for="default-model">Default Model Override</label>
-    <input id="default-model" autocomplete="off" bind:value={settings.default_model} placeholder="Leave blank to use client's model" />
   </div>
   <button class="primary" onclick={save}>Save Settings</button>
 </div>

@@ -119,6 +119,8 @@ export const api = {
     request<any>(`/api/endpoints/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteEndpoint: (id: string) =>
     request<void>(`/api/endpoints/${id}`, { method: 'DELETE' }),
+  listEndpointModels: (id: string) =>
+    request<{ models: string[] }>(`/api/endpoints/${id}/models`),
 
   // Settings
   getSettings: () => request<{ default_endpoint_id: string | null; default_model: string; preserve_thinking: boolean; gitv_status: boolean; simulated_streaming_speed: number }>('/api/settings'),

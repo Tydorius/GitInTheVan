@@ -9,7 +9,7 @@
   let showForm = false
   let editingId: string | null = null
 
-  let form = { name: '', base_url: '', api_key: '', api_base_path: '', provider: '', bypass_method: 'none', enabled: true }
+  let form = { name: '', base_url: '', api_key: '', api_base_path: '', provider: '', default_model: '', bypass_method: 'none', enabled: true }
   let showApiKey = false
   let visibleKeys: Record<string, boolean> = {}
   let copiedKeyId: string | null = null
@@ -60,13 +60,13 @@
   }
 
   function resetForm() {
-    form = { name: '', base_url: '', api_key: '', api_base_path: '', bypass_method: 'none', enabled: true }
+    form = { name: '', base_url: '', api_key: '', api_base_path: '', provider: '', default_model: '', bypass_method: 'none', enabled: true }
     editingId = null
   }
 
   function startEdit(ep: any) {
     editingId = ep.id
-    form = { name: ep.name, base_url: ep.base_url, api_key: ep.api_key, api_base_path: ep.api_base_path || '', provider: ep.provider || '', bypass_method: ep.bypass_method || 'none', enabled: ep.enabled }
+    form = { name: ep.name, base_url: ep.base_url, api_key: ep.api_key, api_base_path: ep.api_base_path || '', provider: ep.provider || '', default_model: ep.default_model || '', bypass_method: ep.bypass_method || 'none', enabled: ep.enabled }
     showForm = true
   }
 
@@ -284,6 +284,13 @@
               Raw HTTP passthrough. Use API base path for path rewriting if needed.
             </p>
           {/if}
+        </div>
+        <div class="form-group">
+          <label for="ep-model">Default Model <span style="color: var(--text-dim);">(used for diagnostics and as fallback)</span></label>
+          <input id="ep-model" autocomplete="off" spellcheck="false" bind:value={form.default_model} placeholder="e.g. gemini-2.0-flash" />
+          <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+            Used when the client doesn't specify a model and for connectivity tests.
+          </p>
         </div>
         <div class="form-group">
           <label for="ep-enabled">

@@ -100,7 +100,7 @@ async def resolve_routing(bearer_token: str, db: AsyncSession) -> RoutingResult 
             )
         )
         endpoint = ep_result.scalar_one_or_none()
-        model_override = user_settings.default_model or None
+        model_override = (endpoint.default_model if endpoint else None) or None
 
     if endpoint is None:
         endpoint = await _resolve_default_endpoint(db, user.id)

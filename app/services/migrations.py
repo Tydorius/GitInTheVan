@@ -485,6 +485,12 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
         ALTER TABLE endpoints ADD COLUMN provider VARCHAR(32) DEFAULT '' NOT NULL;
         """,
     ),
+    (
+        "031_add_endpoint_default_model",
+        """
+        ALTER TABLE endpoints ADD COLUMN default_model VARCHAR(128) DEFAULT '' NOT NULL;
+        """,
+    ),
 ]
 
 
