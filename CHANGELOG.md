@@ -17,6 +17,8 @@ All notable changes to GitInTheVan are documented in this file.
   - Windows Firewall rule auto-created via `netsh` (or manual command printed if not admin)
   - macOS/Linux firewall detection with `sudo` commands printed as warnings
   - App-level firewall check on every server boot via `app/services/firewall_check.py`
+  - PowerShell detection: resolves full path to `powershell.exe` when not on PATH (fixes Deno/Node download failure on systems with modified PATH)
+  - Deno is now a soft requirement: missing Deno warns but does not abort installation (cantrips are skipped, proxy/lorebooks/verification/maps all work without Deno)
 - **Docker Distribution**: Multi-stage Dockerfile with three docker-compose configurations for production deployment:
   - `docker-compose.sqlite.yml` — Single-instance with SQLite (default, zero-config)
   - `docker-compose.mariadb.yml` — App + MariaDB container with persistent volume

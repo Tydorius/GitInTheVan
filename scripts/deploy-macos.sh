@@ -317,7 +317,7 @@ fi
 if [ ! -f "$DENO_BIN" ] && ! command -v deno &> /dev/null; then
     echo "WARNING: Deno not found at $DENO_BIN or in PATH"
     echo "Cantrips will not work without Deno."
-    VERIFY_OK=0
+    echo "Install Deno manually from https://deno.land or set GITV_DENO_PATH."
 fi
 if [ "$VERIFY_OK" = "0" ]; then
     echo ""
