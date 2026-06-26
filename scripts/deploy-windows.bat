@@ -643,5 +643,17 @@ echo Installer log saved to: %LOG_FILE%
 echo.
 
 cd /d "%GITV_ROOT%"
+REM Check if port 8000 is already in use (another instance running)
+"!GITV_ROOT!\.venv\Scripts\python" -c "import socket; s=socket.socket(); s.settimeout(1); r=s.connect_ex(('127.0.0.1',8000)); s.close(); exit(0 if r==0 else 1)" >nul 2>&1
+if not errorlevel 1 (
+    echo ============================================
+    echo WARNING: Port 8000 is already in use.
+    echo A GitInTheVan server may already be running.
+    echo Close the other instance first, then re-run.
+    echo ============================================
+    echo.
+    pause
+    exit /b 0
+)
 "%GITV_ROOT%\.venv\Scripts\python" -m app.main
 pause

@@ -5,21 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GitInTheVan User Guide</title>
 <style>
-
-body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px 40px; line-height: 1.6; color: #e0e0e6; background: #1a1d27; }
-h1 { color: #8b9ad0; border-bottom: 2px solid #2a2e3e; padding-bottom: 10px; }
-h2 { color: #8b9ad0; margin-top: 40px; border-bottom: 1px solid #2a2e3e; padding-bottom: 6px; }
-h3 { color: #a0aec0; }
-a { color: #6b8aff; }
-code { background: #15171f; padding: 2px 6px; border-radius: 4px; font-size: 13px; color: #c8c9d3; }
-pre { background: #15171f; padding: 12px; border-radius: 8px; overflow-x: auto; }
-pre code { background: none; padding: 0; }
-table { border-collapse: collapse; width: 100%; margin: 12px 0; }
-th, td { border: 1px solid #2a2e3e; padding: 8px 12px; text-align: left; }
-th { background: #15171f; }
-blockquote { border-left: 3px solid #8b9ad0; margin: 12px 0; padding: 8px 16px; background: #15171f; border-radius: 0 8px 8px 0; }
-img { max-width: 100%; border-radius: 8px; margin: 12px 0; }
-
+body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px 40px; line-height: 1.6; color: #e0e0e6; background: #1a1d27; } h1 { color: #8b9ad0; border-bottom: 2px solid #2a2e3e; padding-bottom: 10px; } h2 { color: #8b9ad0; margin-top: 40px; border-bottom: 1px solid #2a2e3e; padding-bottom: 6px; } h3 { color: #a0aec0; } a { color: #6b8aff; } code { background: #15171f; padding: 2px 6px; border-radius: 4px; font-size: 13px; color: #c8c9d3; } pre { background: #15171f; padding: 12px; border-radius: 8px; overflow-x: auto; } pre code { background: none; padding: 0; } table { border-collapse: collapse; width: 100%; margin: 12px 0; } th, td { border: 1px solid #2a2e3e; padding: 8px 12px; text-align: left; } th { background: #15171f; } blockquote { border-left: 3px solid #8b9ad0; margin: 12px 0; padding: 8px 16px; background: #15171f; border-radius: 0 8px 8px 0; } img { max-width: 100%; border-radius: 8px; margin: 12px 0; }
 </style>
 </head>
 <body>
@@ -88,7 +74,7 @@ img { max-width: 100%; border-radius: 8px; margin: 12px 0; }
 </ol>
 <blockquote>
 <p><strong>Why this is necessary</strong>: Browsers silently block background API requests (like JanitorAI's chat generation calls) to servers with untrusted certificates. Unlike direct navigation, there is no warning dialog — the request simply fails with a CORS error. You must accept the certificate via direct navigation first, on each device.</p>
-<p><strong>"Unable to connect" instead of a cert warning?</strong> This means the server is not running or not reachable on the network — not a certificate problem. Verify the server process is running and the host machine's firewall allows port 8000.</p>
+<p><strong>"Unable to connect" instead of a cert warning?</strong> This means the server is not running or not reachable on the network — not a certificate problem. Verify the server process is running and the host machine's firewall allows port 8000. On macOS 15+, also check <a href="#macos-15-sequoia-local-network-permissions">Local Network permissions</a> below.</p>
 </blockquote>
 <h4 id="platform-specific-notes">Platform-Specific Notes</h4>
 <p><strong>Firefox (all platforms):</strong>
@@ -97,8 +83,20 @@ Navigate to the URL, click <strong>Advanced</strong> → <strong>Accept the Risk
 Click the warning page and type <code>thisisunsafe</code> (no spaces) to bypass. For localhost only, you can also enable <code>chrome://flags/#allow-insecure-localhost</code>.</p>
 <p><strong>Firefox on Android:</strong>
 Works via the standard warning page → <strong>Accept the Risk</strong>.</p>
-<p><strong>Safari (macOS):</strong>
-Safari does not offer a self-signed cert bypass. Import the certificate into Keychain Access:
+<h4 id="macos-15-sequoia-local-network-permissions">macOS 15 (Sequoia) Local Network Permissions</h4>
+<p>macOS 15 introduced a privacy feature requiring apps to request permission before connecting to local network devices. Non-Safari browsers (Firefox, Chrome, Edge) are blocked at the OS level — they never reach the server and cannot display the certificate warning. Safari works because it is granted local network access by default as a native Apple app.</p>
+<p><strong>Symptoms</strong>: "Unable to connect" or "No Information Available" in Firefox, but Safari connects fine.</p>
+<p><strong>Fix — grant Local Network access to your browser:</strong></p>
+<ol>
+<li>Open <strong>System Settings</strong> (Apple menu → System Settings)</li>
+<li>Go to <strong>Privacy &amp; Security</strong> → <strong>Local Network</strong></li>
+<li>Find your browser (Firefox, Chrome, etc.) in the list</li>
+<li>Toggle the switch to <strong>ON</strong></li>
+<li>Quit and reopen the browser completely (Cmd+Q, then relaunch)</li>
+</ol>
+<p>After this, navigate to <code>https://YOUR-LAN-IP:8000</code> — the browser will reach the server and display the self-signed certificate warning with the "Accept the Risk" option.</p>
+<h4 id="safari-macos-keychain-import">Safari (macOS): Keychain Import</h4>
+<p>Safari does not offer a self-signed cert bypass. Import the certificate into Keychain Access:
 1. Copy <code>data/ssl/cert.pem</code> from the server machine to the Mac
 2. Double-click the file to open it in <strong>Keychain Access</strong>
 3. Select the <strong>login</strong> keychain and click <strong>Add</strong>
