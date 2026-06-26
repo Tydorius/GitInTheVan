@@ -1,235 +1,311 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GitInTheVan User Guide</title>
-    <style>
-        :root {
-            --bg: #0f1117;
-            --surface: #1a1d27;
-            --border: #2e3344;
-            --text: #e4e6ef;
-            --text-dim: #8b90a5;
-            --accent: #7c5cfc;
-        }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: system-ui, -apple-system, sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            line-height: 1.7;
-            padding: 0;
-        }
-        .container { max-width: 1000px; margin: 0 auto; padding: 40px 24px; }
-        h1 { font-size: 32px; margin-bottom: 8px; color: var(--accent); }
-        h2 { font-size: 24px; margin-top: 48px; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
-        h3 { font-size: 18px; margin-top: 24px; margin-bottom: 12px; color: var(--accent); }
-        h4 { font-size: 15px; margin-top: 18px; margin-bottom: 8px; color: var(--text); }
-        p { margin-bottom: 12px; color: var(--text); }
-        ul, ol { margin-bottom: 16px; padding-left: 24px; }
-        li { margin-bottom: 6px; }
-        code { background: var(--surface); padding: 2px 8px; border-radius: 4px; font-family: monospace; font-size: 13px; color: var(--accent); }
-        pre { background: var(--surface); padding: 16px; border-radius: 8px; overflow-x: auto; margin-bottom: 16px; border: 1px solid var(--border); }
-        pre code { background: none; padding: 0; }
-        img { max-width: 100%; border-radius: 8px; border: 1px solid var(--border); margin: 16px 0; }
-        .toc { background: var(--surface); padding: 24px; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 32px; }
-        .toc ol { margin: 0; }
-        .toc a { color: var(--accent); text-decoration: none; }
-        .toc a:hover { text-decoration: underline; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-        th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
-        th { color: var(--text-dim); font-size: 12px; text-transform: uppercase; }
-        .note { background: rgba(124, 92, 252, 0.1); border: 1px solid var(--accent); padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; }
-        .note::before { content: "Note: "; font-weight: bold; color: var(--accent); }
-        a { color: var(--accent); }
-        .screenshot-caption { color: var(--text-dim); font-size: 13px; text-align: center; margin-bottom: 24px; }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GitInTheVan User Guide</title>
+<style>
+
+body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px 40px; line-height: 1.6; color: #e0e0e6; background: #1a1d27; }
+h1 { color: #8b9ad0; border-bottom: 2px solid #2a2e3e; padding-bottom: 10px; }
+h2 { color: #8b9ad0; margin-top: 40px; border-bottom: 1px solid #2a2e3e; padding-bottom: 6px; }
+h3 { color: #a0aec0; }
+a { color: #6b8aff; }
+code { background: #15171f; padding: 2px 6px; border-radius: 4px; font-size: 13px; color: #c8c9d3; }
+pre { background: #15171f; padding: 12px; border-radius: 8px; overflow-x: auto; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+th, td { border: 1px solid #2a2e3e; padding: 8px 12px; text-align: left; }
+th { background: #15171f; }
+blockquote { border-left: 3px solid #8b9ad0; margin: 12px 0; padding: 8px 16px; background: #15171f; border-radius: 0 8px 8px 0; }
+img { max-width: 100%; border-radius: 8px; margin: 12px 0; }
+
+</style>
 </head>
 <body>
-<div class="container">
-
-<h1>GitInTheVan User Guide</h1>
+<h1 id="gitinthevan-user-guide">GitInTheVan User Guide</h1>
 <p>This guide walks through every part of the GitInTheVan management interface.</p>
-
 <p>GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:</p>
 <table>
-    <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
-    <tbody>
-        <tr><td><strong>Driver</strong></td><td>The primary writing/roleplay LLM</td></tr>
-        <tr><td><strong>Navigator</strong></td><td>The verification LLM that checks Driver responses</td></tr>
-        <tr><td><strong>Summarizer</strong></td><td>The LLM that compresses long conversation history</td></tr>
-    </tbody>
+<thead>
+<tr>
+<th>Term</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Driver</strong></td>
+<td>The primary writing/roleplay LLM</td>
+</tr>
+<tr>
+<td><strong>Navigator</strong></td>
+<td>The verification LLM that checks Driver responses</td>
+</tr>
+<tr>
+<td><strong>Summarizer</strong></td>
+<td>The LLM that compresses long conversation history</td>
+</tr>
+</tbody>
 </table>
-
-<div class="toc">
+<hr />
+<h2 id="table-of-contents">Table of Contents</h2>
 <ol>
-    <li><a href="#login">Login and Admin Setup</a></li>
-    <li><a href="#dashboard">Dashboard</a></li>
-    <li><a href="#endpoints">Endpoints</a></li>
-    <li><a href="#cantrips">Cantrips</a></li>
-    <li><a href="#lorebooks">Lorebooks</a></li>
-    <li><a href="#verification">Verification</a></li>
-    <li><a href="#memories">Memories</a></li>
-    <li><a href="#command-tags">Command Tags</a></li>
-    <li><a href="#maps">Maps</a></li>
-    <li><a href="#content-packs">Content Packs</a></li>
-    <li><a href="#settings">Settings</a></li>
-    <li><a href="#admin">Admin</a></li>
+<li><a href="#1-login-and-admin-setup">Login and Admin Setup</a></li>
+<li><a href="#2-https-and-lan-access">HTTPS and LAN Access</a></li>
+<li><a href="#3-dashboard">Dashboard</a></li>
+<li><a href="#4-endpoints">Endpoints</a></li>
+<li><a href="#5-cantrips">Cantrips</a></li>
+<li><a href="#6-lorebooks">Lorebooks</a></li>
+<li><a href="#7-verification">Verification</a></li>
+<li><a href="#8-memories">Memories</a></li>
+<li><a href="#9-command-tags">Command Tags</a></li>
+<li><a href="#10-maps">Maps</a></li>
+<li><a href="#11-content-packs">Content Packs</a></li>
+<li><a href="#12-settings">Settings</a></li>
+<li><a href="#13-admin">Admin</a></li>
 </ol>
-</div>
-
-<h2 id="login">1. Login and Admin Setup</h2>
-<img src="media/gitv-login.png" alt="Login Screen">
-
+<hr />
+<h2 id="1-login-and-admin-setup">1. Login and Admin Setup</h2>
+<p><img alt="Login Screen" src="media/gitv-login.png" /></p>
 <p>On first launch, the login page appears. If no admin account exists yet, click <strong>"First run? Setup admin"</strong> at the bottom to create the initial administrator account.</p>
 <ul>
-    <li><strong>Username</strong>: Choose any username (e.g., <code>admin</code>)</li>
-    <li><strong>Password</strong>: Choose a secure password</li>
+<li><strong>Username</strong>: Choose any username (e.g., <code>admin</code>)</li>
+<li><strong>Password</strong>: Choose a secure password</li>
 </ul>
 <p>After setup, log in with your new credentials. Your <strong>API key</strong> (prefixed with <code>gitv_</code>) is managed from the <strong>Endpoints</strong> page after logging in. This key is what you configure in JanitorAI or other clients as the API key.</p>
 <p>On subsequent visits, use the standard login form with your username and password.</p>
-
-<h2 id="dashboard">2. Dashboard</h2>
-<img src="media/gitv-dashboard.png" alt="Dashboard">
+<hr />
+<h2 id="2-https-and-lan-access">2. HTTPS and LAN Access</h2>
+<p>GitInTheVan uses a self-signed SSL certificate to enable HTTPS, which is required when accessing the proxy from other devices on your network. Browsers block HTTP requests from HTTPS sites (like JanitorAI) — a restriction called <em>mixed content blocking</em>. HTTPS bypasses this restriction.</p>
+<h3 id="trusting-the-certificate">Trusting the Certificate</h3>
+<p>On <strong>every device and browser</strong> that will connect to GitInTheVan:</p>
+<ol>
+<li>Open your GitInTheVan URL directly in the browser address bar (e.g. <code>https://10.0.0.187:8000</code>)</li>
+<li>You'll see a security warning about the self-signed certificate</li>
+<li>Click <strong>Advanced</strong> → <strong>Accept the Risk and Continue</strong> (Firefox) or <strong>Proceed to site</strong> (Chrome)</li>
+<li>The GitInTheVan login page will load — the certificate is now trusted</li>
+</ol>
+<blockquote>
+<p><strong>Why this is necessary</strong>: Browsers silently block background API requests (like JanitorAI's chat generation calls) to servers with untrusted certificates. Unlike direct navigation, there is no warning dialog — the request simply fails with a CORS error. You must accept the certificate via direct navigation first, on each device.</p>
+<p><strong>"Unable to connect" instead of a cert warning?</strong> This means the server is not running or not reachable on the network — not a certificate problem. Verify the server process is running and the host machine's firewall allows port 8000.</p>
+</blockquote>
+<h4 id="platform-specific-notes">Platform-Specific Notes</h4>
+<p><strong>Firefox (all platforms):</strong>
+Navigate to the URL, click <strong>Advanced</strong> → <strong>Accept the Risk and Continue</strong>. If no warning page appears, add a manual exception: go to <code>about:preferences#privacy</code> → scroll to <strong>Certificates</strong> → <strong>View Certificates</strong> → <strong>Servers</strong> tab → <strong>Add Exception</strong> → enter the URL → <strong>Get Certificate</strong> → <strong>Confirm Security Exception</strong>.</p>
+<p><strong>Chrome / Edge (desktop):</strong>
+Click the warning page and type <code>thisisunsafe</code> (no spaces) to bypass. For localhost only, you can also enable <code>chrome://flags/#allow-insecure-localhost</code>.</p>
+<p><strong>Firefox on Android:</strong>
+Works via the standard warning page → <strong>Accept the Risk</strong>.</p>
+<p><strong>Safari (macOS):</strong>
+Safari does not offer a self-signed cert bypass. Import the certificate into Keychain Access:
+1. Copy <code>data/ssl/cert.pem</code> from the server machine to the Mac
+2. Double-click the file to open it in <strong>Keychain Access</strong>
+3. Select the <strong>login</strong> keychain and click <strong>Add</strong>
+4. Find "GitInTheVan", right-click → <strong>Get Info</strong>
+5. Expand <strong>Trust</strong> → set to <strong>Always Trust</strong>
+6. Enter your macOS password to confirm
+7. Restart Safari</p>
+<p><strong>Safari / Chrome (iOS):</strong>
+iOS requires installing a certificate profile:
+1. Download <code>cert.pem</code> onto the iOS device (e.g. via AirDrop, email, or a web link)
+2. Open <strong>Settings</strong> → <strong>Profile Downloaded</strong> → <strong>Install</strong>
+3. Go to <strong>Settings</strong> → <strong>General</strong> → <strong>About</strong> → <strong>Certificate Trust Settings</strong>
+4. Enable trust for the GitInTheVan certificate</p>
+<h3 id="configuring-janitorai-for-lan-access">Configuring JanitorAI for LAN Access</h3>
+<ol>
+<li>Complete the certificate trust steps above on the device running JanitorAI</li>
+<li>In JanitorAI settings, go to API configuration</li>
+<li>Set API to "OpenAI" mode</li>
+<li>Set the Reverse Proxy URL to <code>https://YOUR-LAN-IP:8000/v1/chat/completions</code></li>
+<li>Set the API key to your <code>gitv_</code> key</li>
+</ol>
+<h3 id="managing-certificates">Managing Certificates</h3>
+<p>Go to <strong>Admin</strong> → <strong>Network</strong> tab to:
+- View certificate status and validity period
+- Regenerate the certificate with additional IP addresses
+- Check whether HTTPS is active</p>
+<p>The deploy scripts automatically detect your LAN IP and include it in the certificate. If your IP changes, regenerate the certificate from the Admin panel and restart the server.</p>
+<hr />
+<h2 id="3-dashboard">3. Dashboard</h2>
+<p><img alt="Dashboard" src="media/gitv-dashboard.png" /></p>
 <p>The dashboard provides a quick overview of your GitInTheVan instance:</p>
 <ul>
-    <li><strong>Stat cards</strong>: Count of configured Endpoints, Cantrips, Lorebooks, and Verification Rules</li>
-    <li><strong>System Status</strong>: Proxy health check status</li>
-    <li><strong>Quick Start</strong>: Step-by-step links to configure and run your proxy</li>
+<li><strong>Stat cards</strong>: Count of configured Endpoints, Cantrips, Lorebooks, and Verification Rules</li>
+<li><strong>System Status</strong>: Proxy health check status</li>
+<li><strong>Quick Start</strong>: Step-by-step links to configure and run your proxy</li>
 </ul>
 <p>The sidebar on the left navigates to all management pages. The logo is at the top and the logout button is at the bottom. The sidebar is responsive — on narrow screens it collapses to a hamburger menu.</p>
-<img src="media/gitv-dashboard-diagnostic-result-example.png" alt="Dashboard Diagnostic Result">
+<p><img alt="Dashboard Diagnostic Result" src="media/gitv-dashboard-diagnostic-result-example.png" /></p>
 <p>The <strong>Diagnostics</strong> tool runs an automated check of your endpoints and configuration. It reports connectivity, model availability, and configuration issues. Run it whenever a connection is not working as expected.</p>
-
-<h2 id="endpoints">3. Endpoints</h2>
-<img src="media/gitv-endpoints.png" alt="Endpoints List">
+<hr />
+<h2 id="4-endpoints">4. Endpoints</h2>
+<p><img alt="Endpoints List" src="media/gitv-endpoints.png" /></p>
 <p>The Endpoints page manages your LLM backend connections. Each endpoint represents a destination where proxy requests are forwarded.</p>
-
-<h3>Endpoint List</h3>
+<h3 id="endpoint-list">Endpoint List</h3>
 <p>Each endpoint card shows the <strong>name</strong>, <strong>enabled/disabled status</strong>, <strong>base URL</strong>, <strong>API base path</strong>, <strong>content bypass method</strong>, and a masked <strong>provider API key</strong>. <strong>Edit</strong> and <strong>Delete</strong> buttons are on each card.</p>
-
-<h3>Adding an Endpoint</h3>
-<img src="media/gitv-endpoints-edit-endpoint-example.png" alt="Edit Endpoint">
+<h3 id="adding-an-endpoint">Adding an Endpoint</h3>
+<p><img alt="Edit Endpoint" src="media/gitv-endpoints-edit-endpoint-example.png" /></p>
 <p>Click <strong>"+ Add Endpoint"</strong> to open the endpoint form:</p>
 <ul>
-    <li><strong>Name</strong>: A friendly label (e.g., "OpenWebUI", "OpenRouter")</li>
-    <li><strong>Base URL</strong>: The root URL of your LLM provider. You can paste the full URL (e.g., <code>https://your-provider.com/api/chat/completions</code>) and the system auto-detects the base URL and API path</li>
-    <li><strong>API Key</strong>: Your provider's API key. Click the eye icon to toggle visibility</li>
-    <li><strong>API Base Path</strong>: Most providers use <code>/v1</code> (leave blank). OpenWebUI and some others use <code>/api</code>. Auto-filled if you pasted a full URL above</li>
-    <li><strong>Content Bypass</strong>: Per-endpoint content bypass encoding (None, Space Separation, Dot Separation, Character Replacement). See <a href="#content-bypass">Content Bypass</a> below</li>
-    <li><strong>Enabled</strong>: Toggle whether this endpoint is active</li>
+<li><strong>Name</strong>: A friendly label (e.g., "OpenWebUI", "OpenRouter")</li>
+<li><strong>Base URL</strong>: The root URL of your LLM provider. You can paste the full URL (e.g., <code>https://your-provider.com/api/chat/completions</code>) and the system auto-detects the base URL and API path</li>
+<li><strong>API Key</strong>: Your provider's API key. Click the eye icon to toggle visibility</li>
+<li><strong>API Base Path</strong>: Most providers use <code>/v1</code> (leave blank). OpenWebUI and some others use <code>/api</code>. Auto-filled if you pasted a full URL above</li>
+<li><strong>Content Bypass</strong>: Per-endpoint content bypass encoding (None, Space Separation, Dot Separation, Character Replacement). See <a href="#content-bypass-per-endpoint">Content Bypass</a> below</li>
+<li><strong>Enabled</strong>: Toggle whether this endpoint is active</li>
 </ul>
-
-<h3>GitInTheVan API Keys</h3>
+<h3 id="gitinthevan-api-keys">GitInTheVan API Keys</h3>
 <p>Each endpoint card displays its associated <code>gitv_</code> API keys. These are the keys clients (JanitorAI, SillyTavern, etc.) use to connect to GitInTheVan:</p>
 <ul>
-    <li><strong>+ Add Key</strong>: Creates a new API key mapped to this endpoint. The key is shown once — save it immediately</li>
-    <li><strong>Enable/Disable</strong>: Toggle a key without deleting it</li>
-    <li><strong>Delete</strong>: Permanently revokes the key (it stops working immediately)</li>
+<li><strong>+ Add Key</strong>: Creates a new API key mapped to this endpoint. The key is shown once — save it immediately</li>
+<li><strong>Enable/Disable</strong>: Toggle a key without deleting it</li>
+<li><strong>Delete</strong>: Permanently revokes the key (it stops working immediately)</li>
 </ul>
 <p>Default keys (not mapped to a specific endpoint) route to your configured default endpoint. These are listed in a separate card below the endpoint cards.</p>
-
-<h3 id="content-bypass">Content Bypass (Per-Endpoint)</h3>
-<img src="media/gitv-endpoints-edit-endpoint-example.png" alt="Endpoint Content Bypass">
+<h3 id="content-bypass-per-endpoint">Content Bypass (Per-Endpoint)</h3>
+<p><img alt="Endpoint Content Bypass" src="media/gitv-endpoints-edit-endpoint-example.png" /></p>
 <p>Content bypass encoding is configured per endpoint, so different providers can use different strategies. Available methods:</p>
 <table>
-    <thead><tr><th>Method</th><th>Behavior</th></tr></thead>
-    <tbody>
-        <tr><td><strong>None</strong></td><td>Disabled (default)</td></tr>
-        <tr><td><strong>Space Separation</strong></td><td>Inserts zero-width spaces between characters in sensitive words</td></tr>
-        <tr><td><strong>Dot Separation</strong></td><td>Inserts periods between characters (more aggressive)</td></tr>
-        <tr><td><strong>Character Replacement</strong></td><td>Replaces Latin characters with visually similar homoglyphs (most aggressive)</td></tr>
-    </tbody>
+<thead>
+<tr>
+<th>Method</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>None</strong></td>
+<td>Disabled (default)</td>
+</tr>
+<tr>
+<td><strong>Space Separation</strong></td>
+<td>Inserts zero-width spaces between characters in sensitive words</td>
+</tr>
+<tr>
+<td><strong>Dot Separation</strong></td>
+<td>Inserts periods between characters (more aggressive)</td>
+</tr>
+<tr>
+<td><strong>Character Replacement</strong></td>
+<td>Replaces Latin characters with visually similar homoglyphs (most aggressive)</td>
+</tr>
+</tbody>
 </table>
-<div class="note">Content bypass may violate your provider's Terms of Service. Use at your own risk.</div>
-
-<h3>API Base Path</h3>
+<p><strong>WARNING</strong>: Content bypass may violate your provider's Terms of Service. Use at your own risk.</p>
+<h3 id="api-base-path">API Base Path</h3>
+<p>The API base path determines how URLs are constructed when forwarding requests:</p>
 <table>
-    <thead><tr><th>Provider Type</th><th>Base Path</th><th>Example</th></tr></thead>
-    <tbody>
-        <tr><td>Standard OpenAI-compatible</td><td><em>(blank, defaults to /v1)</em></td><td><code>https://api.openai.com/v1/chat/completions</code></td></tr>
-        <tr><td>OpenWebUI</td><td><code>/api</code></td><td><code>https://your-provider.com/api/chat/completions</code></td></tr>
-    </tbody>
+<thead>
+<tr>
+<th>Provider Type</th>
+<th>Base Path</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Standard OpenAI-compatible</td>
+<td><em>(blank, defaults to /v1)</em></td>
+<td><code>https://api.openai.com/v1/chat/completions</code></td>
+</tr>
+<tr>
+<td>OpenWebUI</td>
+<td><code>/api</code></td>
+<td><code>https://your-provider.com/api/chat/completions</code></td>
+</tr>
+</tbody>
 </table>
-
-<h2 id="cantrips">4. Cantrips</h2>
-<img src="media/gitv-cantrips.png" alt="Cantrips List">
+<hr />
+<h2 id="5-cantrips">5. Cantrips</h2>
+<p><img alt="Cantrips List" src="media/gitv-cantrips.png" /></p>
 <p>Cantrips are sandboxed JavaScript snippets that modify request context at specific points in the pipeline. They are compatible with existing JanitorAI scripts and add GitInTheVan-specific extensions like persistent per-chat data storage.</p>
-
-<h3>Pipeline Positions</h3>
+<h3 id="pipeline-positions">Pipeline Positions</h3>
 <p>Cantrips can run at multiple positions in the request pipeline. Each cantrip has four independent checkboxes (not radio buttons — a cantrip can run at multiple positions):</p>
 <table>
-    <thead><tr><th>Position</th><th>When It Runs</th><th>Use Case</th></tr></thead>
-    <tbody>
-        <tr><td><strong>Pre-Driver</strong></td><td>Before the writing LLM call</td><td>Inject lore, modify persona/scenario, roll dice</td></tr>
-        <tr><td><strong>Driver-Callable</strong></td><td>Available for the LLM to invoke during generation</td><td>LLM-initiated dice rolls, stat lookups (notification-based, turn-tracked)</td></tr>
-        <tr><td><strong>Pre-Navigator</strong></td><td>After Driver responds, before verification</td><td>Regex/keyword checks, content cleanup, response modification via <code>context.response.content</code></td></tr>
-        <tr><td><strong>Post-Navigator</strong></td><td>After verification completes, before returning to client</td><td>Final cleanup, format correction, markdown repair</td></tr>
-    </tbody>
+<thead>
+<tr>
+<th>Position</th>
+<th>When It Runs</th>
+<th>Use Case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Pre-Driver</strong></td>
+<td>Before the writing LLM call</td>
+<td>Inject lore, modify persona/scenario, roll dice</td>
+</tr>
+<tr>
+<td><strong>Driver-Callable</strong></td>
+<td>Available for the LLM to invoke during generation</td>
+<td>LLM-initiated dice rolls, stat lookups (notification-based, turn-tracked)</td>
+</tr>
+<tr>
+<td><strong>Pre-Navigator</strong></td>
+<td>After Driver responds, before verification</td>
+<td>Regex/keyword checks, content cleanup, response modification via <code>context.response.content</code></td>
+</tr>
+<tr>
+<td><strong>Post-Navigator</strong></td>
+<td>After verification completes, before returning to client</td>
+<td>Final cleanup, format correction, markdown repair</td>
+</tr>
+</tbody>
 </table>
 <p>Pre-Driver is enabled by default. The other positions are opt-in per cantrip.</p>
-
-<h3>Driver-Callable Tools</h3>
+<h3 id="driver-callable-tools">Driver-Callable Tools</h3>
 <p>Driver-Callable cantrips are invoked by the writing LLM during generation. When any active cantrip has Driver-Callable checked and turns are greater than 0, a <code>[TOOL ACCESS]</code> block is injected listing available tools. The LLM calls them with <code>&lt;call:tool_name arg="value"&gt;</code> tags, the cantrip executes, and the result returns as a <code>[TOOL RESULT]</code> message.</p>
 <p>Configure the maximum tool-call rounds per request in <strong>Settings &gt; Driver-Callable Tools</strong> (default 1). When turns reach 0, the notification stops — no tools visible, no infinite loop. Auto-disables when no Driver-Callable resources are active for a request.</p>
-
-<h3>LLM Instructions</h3>
+<h3 id="llm-instructions">LLM Instructions</h3>
 <p>Each cantrip has an <strong>LLM Instructions</strong> field. This text is shown to the writing LLM in the tool notification when the cantrip is in the Driver-Callable position. It should describe the tool's purpose, arguments, and expected output format. Falls back to Description if empty.</p>
 <p>Example:</p>
-<pre><code>Call this tool to roll dice. Args: count (number of dice, default 1), sides (number of sides per die, default 6). Example: &lt;call:dice_roll count="2" sides="6"&gt;</code></pre>
-
-<h3>Cantrip List</h3>
-<p>Each cantrip card shows:</p>
-<ul>
-    <li><strong>Name</strong> and <strong>Public</strong> badge (if shared)</li>
-    <li><strong>ON/OFF toggle</strong>: Enable or disable without editing</li>
-    <li><strong>Test</strong>: Open the cantrip tester</li>
-    <li><strong>Edit</strong> / <strong>Delete</strong></li>
-</ul>
+<pre><code>Call this tool to roll dice. Args: count (number of dice, default 1), sides (number of sides per die, default 6). Example: &lt;call:dice_roll count=&quot;2&quot; sides=&quot;6&quot;&gt;
+</code></pre>
+<h3 id="cantrip-list">Cantrip List</h3>
+<p>Each cantrip card shows:
+- <strong>Name</strong> and <strong>Public</strong> badge (if shared)
+- <strong>ON/OFF toggle</strong>: Enable or disable without editing
+- <strong>Test</strong>: Open the cantrip tester
+- <strong>Edit</strong> / <strong>Delete</strong></p>
 <p>The card footer displays the active pipeline positions, execution order, and timeout.</p>
-
-<h3>Cantrip Tester</h3>
-<img src="media/gitv-cantrips-test-example.png" alt="Cantrip Test Panel">
+<h3 id="cantrip-tester">Cantrip Tester</h3>
+<p><img alt="Cantrip Test Panel" src="media/gitv-cantrips-test-example.png" /></p>
 <p>The test panel lets you run a cantrip against sample context without forwarding anything to an LLM:</p>
 <ol>
-    <li><strong>Select a cantrip</strong> from the dropdown</li>
-    <li><strong>Enter test messages</strong> in JSON format (e.g., <code>[{"role": "user", "content": "Hello"}]</code>)</li>
-    <li>Optionally set a <strong>character name</strong> and <strong>chat data</strong> (JSON key-value pairs)</li>
-    <li>Click <strong>Run Test</strong></li>
+<li><strong>Select a cantrip</strong> from the dropdown</li>
+<li><strong>Enter test messages</strong> in JSON format (e.g., <code>[{"role": "user", "content": "Hello"}]</code>)</li>
+<li>Optionally set a <strong>character name</strong> and <strong>chat data</strong> (JSON key-value pairs)</li>
+<li>Click <strong>Run Test</strong></li>
 </ol>
-<p>The results show:</p>
+<p>The results show:
+- <strong>Scenario Output</strong>: Text injected into the scenario context
+- <strong>Personality Output</strong>: Text injected into the personality context
+- <strong>Debug Logs</strong>: Output from <code>console.log()</code> calls in the cantrip
+- <strong>Chat Data Result</strong>: The final state of <code>context.chat_data</code> after execution</p>
+<h3 id="addingediting-a-cantrip">Adding/Editing a Cantrip</h3>
 <ul>
-    <li><strong>Scenario Output</strong>: Text injected into the scenario context</li>
-    <li><strong>Personality Output</strong>: Text injected into the personality context</li>
-    <li><strong>Debug Logs</strong>: Output from <code>console.log()</code> calls in the cantrip</li>
-    <li><strong>Chat Data Result</strong>: The final state of <code>context.chat_data</code> after execution</li>
+<li><strong>Name</strong>: A label for the cantrip</li>
+<li><strong>Description</strong>: Optional notes for the user</li>
+<li><strong>LLM Instructions</strong>: Text shown to the writing LLM in tool notifications (for Driver-Callable cantrips). Describe the tool's purpose, arguments, and call syntax</li>
+<li><strong>Pipeline Positions</strong>: Checkboxes for Pre-Driver, Driver-Callable, Pre-Navigator, Post-Navigator</li>
+<li><strong>JavaScript Code</strong>: The cantrip code. Uses the JanitorAI <code>context</code> object API</li>
+<li><strong>Execution Order</strong>: Lower numbers run first (when multiple cantrips are active)</li>
+<li><strong>Timeout</strong>: Maximum execution time in milliseconds</li>
+<li><strong>Budget Weight</strong>: Proportional weight for context budget allocation (default 1.0). Higher weights receive a larger share of the injection budget</li>
+<li><strong>Active</strong>: Whether the cantrip is enabled</li>
+<li><strong>Public</strong>: Whether other users can see and use this cantrip</li>
 </ul>
-
-<h3>Adding/Editing a Cantrip</h3>
-<ul>
-    <li><strong>Name</strong>: A label for the cantrip</li>
-    <li><strong>Description</strong>: Optional notes for the user</li>
-    <li><strong>LLM Instructions</strong>: Text shown to the writing LLM in tool notifications (for Driver-Callable cantrips). Describe the tool's purpose, arguments, and call syntax</li>
-    <li><strong>Pipeline Positions</strong>: Checkboxes for Pre-Driver, Driver-Callable, Pre-Navigator, Post-Navigator</li>
-    <li><strong>JavaScript Code</strong>: The cantrip code. Uses the JanitorAI <code>context</code> object API</li>
-    <li><strong>Execution Order</strong>: Lower numbers run first (when multiple cantrips are active)</li>
-    <li><strong>Timeout</strong>: Maximum execution time in milliseconds</li>
-    <li><strong>Budget Weight</strong>: Proportional weight for context budget allocation (default 1.0). Higher weights receive a larger share of the injection budget</li>
-    <li><strong>Active</strong>: Whether the cantrip is enabled</li>
-    <li><strong>Public</strong>: Whether other users can see and use this cantrip</li>
-</ul>
-
-<h3>Cantrip Context API</h3>
+<h3 id="cantrip-context-api">Cantrip Context API</h3>
 <p>Cantrips have access to the JanitorAI context object:</p>
-<pre><code>const lastMessage = context.chat.last_message;
+<pre><code class="language-javascript">const lastMessage = context.chat.last_message;
 const messageCount = context.chat.message_count;
 
-context.character.scenario += " Additional world context.";
-context.character.personality += ", additional trait";</code></pre>
-
+context.character.scenario += &quot; Additional world context.&quot;;
+context.character.personality += &quot;, additional trait&quot;;
+</code></pre>
 <p>GitInTheVan extensions — persistent storage, memory, budget, response modification, and tool calls:</p>
-<pre><code>// Per-chat persistent state (survives across cycles)
+<pre><code class="language-javascript">// Per-chat persistent state (survives across cycles)
 const day = context.chat_data.get('day') || 1;
 context.chat_data.set('day', day + 1);
 
@@ -240,39 +316,38 @@ context.memory.set('weather', 'stormy');
 // Context budget (when budgeting is enabled in Settings)
 const budget = context.budget;  // {total, remaining, weight, share, detail_level}
 
-console.log('Debug output visible in cantrip tester');</code></pre>
-
+console.log('Debug output visible in cantrip tester');
+</code></pre>
 <p>Pre-Navigator and Post-Navigator cantrips can modify the Driver's response:</p>
-<pre><code>if (context.response) {
-    context.response.content = context.response.content.replace("badword", "***");
-}</code></pre>
-
+<pre><code class="language-javascript">if (context.response) {
+    context.response.content = context.response.content.replace(&quot;badword&quot;, &quot;***&quot;);
+}
+</code></pre>
 <p>Driver-Callable cantrips read tool call arguments and produce results:</p>
-<pre><code>if (context.tool_call) {
+<pre><code class="language-javascript">if (context.tool_call) {
     const sides = parseInt(context.tool_call.args.sides) || 6;
     const count = parseInt(context.tool_call.args.count) || 1;
     let results = [];
     for (let i = 0; i &lt; count; i++) {
         results.push(Math.floor(Math.random() * sides) + 1);
     }
-    context.tool_result = `${count}d${sides} = [${results.join(", ")}] = ${results.reduce((a, b) =&gt; a + b, 0)}`;
-}</code></pre>
-
+    context.tool_result = `${count}d${sides} = [${results.join(&quot;, &quot;)}] = ${results.reduce((a, b) =&gt; a + b, 0)}`;
+}
+</code></pre>
 <h3 id="cantrip-snippets">Cantrip Snippets</h3>
 <p>Copy-paste examples for common patterns.</p>
-
-<h4>Day counter (persistent state via <code>chat_data</code>)</h4>
-<pre><code>let day = context.chat_data.get('day') || 1;
+<p><strong>Day counter (persistent state via <code>chat_data</code>):</strong></p>
+<pre><code class="language-javascript">let day = context.chat_data.get('day') || 1;
 context.character.scenario += `\n\nCurrent day: ${day}.`;
-context.chat_data.set('day', day + 1);</code></pre>
-
-<h4>Status tracker (persistent memory via <code>memory</code>)</h4>
-<pre><code>const mood = context.memory.get('mood') || 'neutral';
+context.chat_data.set('day', day + 1);
+</code></pre>
+<p><strong>Status tracker (persistent memory via <code>memory</code>):</strong></p>
+<pre><code class="language-javascript">const mood = context.memory.get('mood') || 'neutral';
 context.character.scenario += `\nThe character's current mood is ${mood}.`;
-// The LLM can update mood via &lt;memstore key="mood"&gt;happy&lt;/memstore&gt; in its response</code></pre>
-
-<h4>Budget-aware scaling</h4>
-<pre><code>const budget = context.budget;
+// The LLM can update mood via &lt;memstore key=&quot;mood&quot;&gt;happy&lt;/memstore&gt; in its response
+</code></pre>
+<p><strong>Budget-aware scaling:</strong></p>
+<pre><code class="language-javascript">const budget = context.budget;
 if (!budget) {
     context.character.scenario += ' Full detailed lore description here...';
 } else if (budget.detail_level === 'bullets') {
@@ -281,517 +356,558 @@ if (!budget) {
     context.character.scenario += ' Condensed summary of the lore.';
 } else {
     context.character.scenario += ' Full detailed lore description here...';
-}</code></pre>
-
-<h4>Response modification (Pre-Navigator)</h4>
-<pre><code>if (context.response) {
+}
+</code></pre>
+<p><strong>Response modification (Pre-Navigator):</strong></p>
+<pre><code class="language-javascript">if (context.response) {
     // Collapse repeated whitespace
     context.response.content = context.response.content.replace(/\n{3,}/g, '\n\n');
     // Replace an unwanted phrase
-    context.response.content = context.response.content.replaceAll("As an AI", "");
-}</code></pre>
-
-<h4>Dice roller (Driver-Callable)</h4>
-<pre><code>if (context.tool_call) {
+    context.response.content = context.response.content.replaceAll(&quot;As an AI&quot;, &quot;&quot;);
+}
+</code></pre>
+<p><strong>Dice roller (Driver-Callable):</strong></p>
+<pre><code class="language-javascript">if (context.tool_call) {
     const sides = parseInt(context.tool_call.args.sides) || 6;
     const count = parseInt(context.tool_call.args.count) || 1;
     const rolls = Array.from({length: count}, () =&gt;
         Math.floor(Math.random() * sides) + 1);
     context.tool_result = `Rolled ${count}d${sides}: [${rolls.join(', ')}] = ${rolls.reduce((a, b) =&gt; a + b, 0)}`;
-}</code></pre>
-
-<h4>Multi-position cantrip</h4>
-<p>A single cantrip can run at several positions by checking multiple boxes. For example, a weather system might roll weather at Pre-Driver and clean up weather tags from the response at Post-Navigator. Guard each branch by position so the code stays correct regardless of which position triggered it:</p>
-<pre><code>if (context.response) {
+}
+</code></pre>
+<p><strong>Multi-position cantrip:</strong> A single cantrip can run at several positions by checking multiple boxes. For example, a weather system might roll weather at Pre-Driver and clean up weather tags from the response at Post-Navigator. Guard each branch by position so the code stays correct regardless of which position triggered it:</p>
+<pre><code class="language-javascript">if (context.response) {
     // Pre-Navigator or Post-Navigator branch
     context.response.content = context.response.content.replace(/&lt;weather:.*?&gt;/g, '');
 } else {
     // Pre-Driver branch
     const weather = ['sunny', 'rainy', 'stormy'][Math.floor(Math.random() * 3)];
     context.character.scenario += `\nThe weather is ${weather}.`;
-}</code></pre>
-
-<h2 id="lorebooks">5. Lorebooks</h2>
-<img src="media/gitv-lorebooks.png" alt="Lorebooks List">
+}
+</code></pre>
+<hr />
+<h2 id="6-lorebooks">6. Lorebooks</h2>
+<p><img alt="Lorebooks List" src="media/gitv-lorebooks.png" /></p>
 <p>Lorebooks are JSON worldbook entries that inject context into requests based on keyword matching.</p>
-
-<h3>Lorebook List</h3>
-<p>The table shows each lorebook with:</p>
-<ul>
-    <li><strong>Name</strong>: Click to manage entries</li>
-    <li><strong>Entries</strong>: Count of keyword entries</li>
-    <li><strong>Active</strong>: ON/OFF toggle to enable/disable injection without deleting</li>
-    <li><strong>Visibility</strong>: Public or Private</li>
-    <li><strong>Actions</strong>: Manage, Export (download JSON), Delete</li>
-</ul>
-
-<h3>Importing Lorebooks</h3>
-<img src="media/gitv-lorebooks-import-lorebook-example.png" alt="Import Lorebook">
+<h3 id="lorebook-list">Lorebook List</h3>
+<p>The table shows each lorebook with:
+- <strong>Name</strong>: Click to manage entries
+- <strong>Entries</strong>: Count of keyword entries
+- <strong>Active</strong>: ON/OFF toggle to enable/disable injection without deleting
+- <strong>Visibility</strong>: Public or Private
+- <strong>Actions</strong>: Manage, Export (download JSON), Delete</p>
+<h3 id="importing-lorebooks">Importing Lorebooks</h3>
+<p><img alt="Import Lorebook" src="media/gitv-lorebooks-import-lorebook-example.png" /></p>
 <p>Click <strong>"Import JSON"</strong> to import a lorebook from an external source:</p>
 <ul>
-    <li><strong>Load from File</strong>: Click to open a file browser and select a <code>.json</code> file</li>
-    <li><strong>Or paste JSON</strong>: Manually paste lorebook JSON into the text area</li>
-    <li><strong>Lorebook Name</strong>: Optional, defaults to the name in the JSON</li>
+<li><strong>Load from File</strong>: Click to open a file browser and select a <code>.json</code> file</li>
+<li><strong>Or paste JSON</strong>: Manually paste lorebook JSON into the text area</li>
+<li><strong>Lorebook Name</strong>: Optional, defaults to the name in the JSON</li>
 </ul>
-<p>Supported formats include:</p>
-<ul>
-    <li>GitInTheVan native format</li>
-    <li>SillyTavern world info format</li>
-    <li>Chub lorebook format</li>
-    <li>JanitorAI lorebook exports</li>
-</ul>
+<p>Supported formats include:
+- GitInTheVan native format
+- SillyTavern world info format
+- Chub lorebook format
+- JanitorAI lorebook exports</p>
 <p>The import handles both array and dictionary-keyed entry formats, and maps common alternative field names automatically.</p>
-
-<h3>Managing Entries</h3>
-<img src="media/gitv-lorebooks-manage-lorebook-example.png" alt="Manage Lorebook">
+<h3 id="managing-entries">Managing Entries</h3>
+<p><img alt="Manage Lorebook" src="media/gitv-lorebooks-manage-lorebook-example.png" /></p>
 <p>Click <strong>Manage</strong> on a lorebook to view and edit its entries:</p>
-<p>Each entry has:</p>
-<ul>
-    <li><strong>Entry Name</strong>: A label for the entry</li>
-    <li><strong>Keywords</strong>: Comma-separated trigger words (e.g., <code>castle, throne, keep</code>)</li>
-    <li><strong>Secondary Keywords</strong>: Additional keywords for selective matching</li>
-    <li><strong>Content</strong>: The text to inject when keywords match</li>
-    <li><strong>Position</strong>: Where in the message array to inject (<code>before_last_message</code> or <code>system_start</code>)</li>
-    <li><strong>Insertion Order</strong>: Sort order when multiple entries match (lower = first)</li>
-    <li><strong>Always Include (Constant)</strong>: Entry always fires regardless of keywords</li>
-    <li><strong>Selective</strong>: Requires both a primary AND secondary keyword to match</li>
-    <li><strong>Disabled</strong>: Temporarily disable this entry without deleting it</li>
-</ul>
-
-<h3>Lorebook Pipeline Positions</h3>
+<p>Each entry has:
+- <strong>Entry Name</strong>: A label for the entry
+- <strong>Keywords</strong>: Comma-separated trigger words (e.g., <code>castle, throne, keep</code>)
+- <strong>Secondary Keywords</strong>: Additional keywords for selective matching
+- <strong>Content</strong>: The text to inject when keywords match
+- <strong>Position</strong>: Where in the message array to inject (<code>before_last_message</code> or <code>system_start</code>)
+- <strong>Insertion Order</strong>: Sort order when multiple entries match (lower = first)
+- <strong>Always Include (Constant)</strong>: Entry always fires regardless of keywords
+- <strong>Selective</strong>: Requires both a primary AND secondary keyword to match
+- <strong>Disabled</strong>: Temporarily disable this entry without deleting it</p>
+<h3 id="lorebook-pipeline-positions">Lorebook Pipeline Positions</h3>
 <p>Lorebooks support the same four pipeline positions as cantrips (Pre-Driver, Driver-Callable, Pre-Navigator, Post-Navigator). Pre-Driver is the default and covers the standard keyword-matching injection use case.</p>
-
-<h2 id="verification">6. Verification</h2>
+<hr />
+<h2 id="7-verification">7. Verification</h2>
 <p>Verification uses a separate LLM (the <strong>Navigator</strong>) to check the writing LLM's (the <strong>Driver's</strong>) responses against configurable rules. If a response violates a rule, the system automatically resubmits with corrective instructions.</p>
 <p>The Verification page has five tabs: <strong>Rules</strong>, <strong>Settings</strong>, <strong>Logs</strong>, <strong>Forbidden Words</strong>, and <strong>Test</strong>.</p>
-
-<h3 id="verification-rules">Rules Tab</h3>
-<img src="media/gitv-verification-rules.png" alt="Verification Rules">
-<p>Each rule contains:</p>
-<ul>
-    <li><strong>Name</strong>: A label for the rule</li>
-    <li><strong>Description</strong>: Optional notes</li>
-    <li><strong>Verification Prompt</strong>: Instructions for the Navigator (e.g., "The response must contain the string MARKER:")</li>
-    <li><strong>Max Retries</strong>: How many times to resubmit before giving up (default 2)</li>
-    <li><strong>Execution Order</strong>: Sort order when multiple rules are active</li>
-    <li><strong>Resubmission Strategy</strong>: How to handle violations:
-        <ul>
-            <li><strong>Add Instructions</strong>: Appends a corrective system message to the request</li>
-            <li><strong>Rewrite</strong>: Sends the bad response back with rewrite instructions</li>
-        </ul>
-    </li>
-    <li><strong>Verification Endpoint Override</strong>: Use a specific endpoint for this rule (leave as "Use global setting" for the default)</li>
-    <li><strong>Verification Model Override</strong>: Use a specific model for this rule (leave blank for the global setting)</li>
-</ul>
+<h3 id="rules-tab">Rules Tab</h3>
+<p><img alt="Verification Rules" src="media/gitv-verification-rules.png" /></p>
+<p>Each rule contains:
+- <strong>Name</strong>: A label for the rule
+- <strong>Description</strong>: Optional notes
+- <strong>Verification Prompt</strong>: Instructions for the Navigator (e.g., "The response must contain the string MARKER:")
+- <strong>Max Retries</strong>: How many times to resubmit before giving up (default 2)
+- <strong>Execution Order</strong>: Sort order when multiple rules are active
+- <strong>Resubmission Strategy</strong>: How to handle violations:
+  - <strong>Add Instructions</strong>: Appends a corrective system message to the request
+  - <strong>Rewrite</strong>: Sends the bad response back with rewrite instructions
+- <strong>Verification Endpoint Override</strong>: Use a specific endpoint for this rule (leave as "Use global setting" for the default)
+- <strong>Verification Model Override</strong>: Use a specific model for this rule (leave blank for the global setting)</p>
 <p>Each rule card has an <strong>ON/OFF toggle</strong> to enable/disable without editing. Rules are taggable and activate via <code>&lt;#verify-tag#&gt;</code> in persona or message text.</p>
-<img src="media/gitv-verification-rules-edit-rule-example.png" alt="Edit Verification Rule">
-
-<h3 id="verification-settings">Settings Tab</h3>
-<img src="media/gitv-verification-settings.png" alt="Verification Settings">
-<p>Configure the Navigator:</p>
-<ul>
-    <li><strong>Verification Enabled</strong>: Master toggle for response verification</li>
-    <li><strong>Verification Endpoint</strong>: Which endpoint to use for Navigator checks (can be the same or different from your Driver endpoint)</li>
-    <li><strong>Verification Model</strong>: Which model to use for checking (a fast, instruction-following model is recommended)</li>
-</ul>
-<div class="note">When verification is enabled, streaming requests are automatically converted to non-streaming to allow the full response to be checked before returning to the client.</div>
-
-<h3 id="verification-logs">Logs Tab</h3>
-<img src="media/gitv-verification-logs.png" alt="Verification Logs">
-<p>The logs tab shows the history of verification checks:</p>
-<ul>
-    <li><strong>Rule</strong>: Which rule was evaluated</li>
-    <li><strong>Result</strong>: Approved or Rejected</li>
-    <li><strong>Severity</strong>: How serious the violation was (none, low, medium, high)</li>
-    <li><strong>Retries</strong>: How many resubmission attempts were made</li>
-    <li><strong>Reason</strong>: Why the response was rejected (if applicable)</li>
-    <li><strong>Time</strong>: When the check occurred</li>
-</ul>
+<p><img alt="Edit Verification Rule" src="media/gitv-verification-rules-edit-rule-example.png" /></p>
+<h3 id="settings-tab">Settings Tab</h3>
+<p><img alt="Verification Settings" src="media/gitv-verification-settings.png" /></p>
+<p>Configure the Navigator:
+- <strong>Verification Enabled</strong>: Master toggle for response verification
+- <strong>Verification Endpoint</strong>: Which endpoint to use for Navigator checks (can be the same or different from your Driver endpoint)
+- <strong>Verification Model</strong>: Which model to use for checking (a fast, instruction-following model is recommended)</p>
+<p><strong>Note:</strong> When verification is enabled, streaming requests are automatically converted to non-streaming to allow the full response to be checked before returning to the client.</p>
+<h3 id="logs-tab">Logs Tab</h3>
+<p><img alt="Verification Logs" src="media/gitv-verification-logs.png" /></p>
+<p>The logs tab shows the history of verification checks:
+- <strong>Rule</strong>: Which rule was evaluated
+- <strong>Result</strong>: Approved or Rejected
+- <strong>Severity</strong>: How serious the violation was (none, low, medium, high)
+- <strong>Retries</strong>: How many resubmission attempts were made
+- <strong>Reason</strong>: Why the response was rejected (if applicable)
+- <strong>Time</strong>: When the check occurred</p>
 <p>Use the <strong>Refresh</strong> button to update the list, or toggle <strong>Auto</strong> for automatic refresh every 15 seconds.</p>
-
-<h3 id="forbidden-words">Forbidden Words Tab</h3>
-<img src="media/gitv-verification-forbidden-words.png" alt="Forbidden Words">
+<h3 id="forbidden-words-tab">Forbidden Words Tab</h3>
+<p><img alt="Forbidden Words" src="media/gitv-verification-forbidden-words.png" /></p>
 <p>The Forbidden Words tab provides a fast, string-matching check that runs before the Navigator. This is more efficient than using an LLM for simple word/phrase filters.</p>
 <p><strong>How it works:</strong></p>
 <ol>
-    <li>After the Driver responds, the response is scanned against your list of forbidden phrases</li>
-    <li>Any matches are collected into a violation summary</li>
-    <li>If matches are found and the Navigator is enabled, the summary is prepended to the verification prompt as a <code>[FORBIDDEN CONTENT DETECTED]</code> block</li>
-    <li>If matches are found and the Navigator is not enabled, the matches are logged but the response is still returned</li>
-    <li>If the Navigator has no rules but forbidden words exist, the forbidden check alone triggers the verification loop</li>
+<li>After the Driver responds, the response is scanned against your list of forbidden phrases</li>
+<li>Any matches are collected into a violation summary</li>
+<li>If matches are found and the Navigator is enabled, the summary is prepended to the verification prompt as a <code>[FORBIDDEN CONTENT DETECTED]</code> block</li>
+<li>If matches are found and the Navigator is not enabled, the matches are logged but the response is still returned</li>
+<li>If the Navigator has no rules but forbidden words exist, the forbidden check alone triggers the verification loop</li>
 </ol>
-<p><strong>Settings:</strong></p>
-<ul>
-    <li><strong>Enable Forbidden Words Check</strong>: Master toggle</li>
-    <li><strong>Case Sensitive</strong>: Whether to match case-sensitively (default: off, matching is case-insensitive)</li>
-</ul>
+<p><strong>Settings:</strong>
+- <strong>Enable Forbidden Words Check</strong>: Master toggle
+- <strong>Case Sensitive</strong>: Whether to match case-sensitively (default: off, matching is case-insensitive)</p>
 <p>Add forbidden words or phrases via the input field. Each phrase is checked literally against the response text. Use the <strong>Test Scanner</strong> to paste any text and see which forbidden phrases would match, with positions and occurrence counts.</p>
-
-<h3 id="verification-test">Test Tab</h3>
-<img src="media/gitv-verification-test.png" alt="Verification Test">
+<h3 id="test-tab">Test Tab</h3>
+<p><img alt="Verification Test" src="media/gitv-verification-test.png" /></p>
 <p>The test panel lets you check sample responses against a verification rule without sending traffic through the proxy:</p>
 <ol>
-    <li>Enter or paste <strong>response content</strong> to evaluate</li>
-    <li>Select a saved <strong>rule</strong> from the dropdown to auto-load its prompt, or enter a <strong>custom verification prompt</strong></li>
-    <li>Select an <strong>endpoint</strong> and <strong>model</strong> for the check</li>
-    <li>Click <strong>Run Verification Check</strong></li>
+<li>Enter or paste <strong>response content</strong> to evaluate</li>
+<li>Select a saved <strong>rule</strong> from the dropdown to auto-load its prompt, or enter a <strong>custom verification prompt</strong></li>
+<li>Select an <strong>endpoint</strong> and <strong>model</strong> for the check</li>
+<li>Click <strong>Run Verification Check</strong></li>
 </ol>
 <p>The result shows whether the response was approved or rejected, along with the reason and severity.</p>
-
-<h2 id="memories">7. Memories</h2>
-<img src="media/gitv-memories.png" alt="Memories Page">
+<hr />
+<h2 id="8-memories">8. Memories</h2>
+<p><img alt="Memories Page" src="media/gitv-memories.png" /></p>
 <p>The Memories page shows persistent data and summarization overrides.</p>
-
-<h3>Persistent Memory (Flags)</h3>
+<h3 id="persistent-memory-flags">Persistent Memory (Flags)</h3>
 <p>Persistent memories are discrete key/value facts the LLM chooses to remember across turns:</p>
 <ol>
-    <li>The LLM includes <code>&lt;memstore&gt;</code> tags in its response:
-        <pre><code>&lt;memstore key="location"&gt;Dragon's Breath Tavern&lt;/memstore&gt;</code></pre>
-    </li>
-    <li>GitInTheVan extracts these tags, stores them per-conversation, and strips them from the response</li>
-    <li>On the next request, stored memories are injected as a <code>[PERSISTENT MEMORY]</code> system block</li>
+<li>The LLM includes <code>&lt;memstore&gt;</code> tags in its response:
+   <code>&lt;memstore key="location"&gt;Dragon's Breath Tavern&lt;/memstore&gt;</code></li>
+<li>GitInTheVan extracts these tags, stores them per-conversation, and strips them from the response</li>
+<li>On the next request, stored memories are injected as a <code>[PERSISTENT MEMORY]</code> system block</li>
 </ol>
 <p>The memories table shows each memory's key, value, conversation, and last-updated time. Memories can be edited or deleted manually.</p>
-
-<h3>Conversation Summaries</h3>
-<p>When summarization is enabled (see <a href="#settings">Settings</a>), long conversations are automatically compressed. The summaries section shows:</p>
+<h3 id="conversation-summaries">Conversation Summaries</h3>
+<p>When summarization is enabled (see <a href="#11-settings">Settings</a>), long conversations are automatically compressed. The summaries section shows:</p>
 <ul>
-    <li><strong>Chat</strong>: Internal conversation identifier</li>
-    <li><strong>Messages</strong>: How many messages were compressed into the summary</li>
-    <li><strong>Tokens</strong>: Estimated token count at time of summarization</li>
-    <li><strong>Updated</strong>: When the summary was last generated</li>
+<li><strong>Chat</strong>: Internal conversation identifier</li>
+<li><strong>Messages</strong>: How many messages were compressed into the summary</li>
+<li><strong>Tokens</strong>: Estimated token count at time of summarization</li>
+<li><strong>Updated</strong>: When the summary was last generated</li>
 </ul>
 <p>Click <strong>View</strong> to expand and read the full summary text. Click <strong>Delete</strong> to remove a summary (the conversation will be re-summarized next time it exceeds the threshold).</p>
-
-<h3>Memory Rules</h3>
-<img src="media/gitv-memories-add-rule.png" alt="Add Memory Rule">
+<h3 id="memory-rules">Memory Rules</h3>
+<p><img alt="Add Memory Rule" src="media/gitv-memories-add-rule.png" /></p>
 <p>Memory Rules override summarization behavior for specific conversations. Rules are taggable — they activate via <code>&lt;#memory-rule-tag#&gt;</code> in persona or message text. A rule with no tag acts as the default fallback.</p>
-<p>Each rule can override:</p>
-<ul>
-    <li><strong>Summarization Enabled</strong>: Turn summarization on or off for matching conversations</li>
-    <li><strong>Token Threshold</strong>: Override the global threshold (0 = use global)</li>
-    <li><strong>Keep Recent</strong>: Override the global keep-recent count (0 = use global)</li>
-    <li><strong>Custom Prompt</strong>: Override the summarization prompt (empty = use global)</li>
-</ul>
+<p>Each rule can override:
+- <strong>Summarization Enabled</strong>: Turn summarization on or off for matching conversations
+- <strong>Token Threshold</strong>: Override the global threshold (0 = use global)
+- <strong>Keep Recent</strong>: Override the global keep-recent count (0 = use global)
+- <strong>Custom Prompt</strong>: Override the summarization prompt (empty = use global)</p>
 <p>Rules are evaluated in execution order. The first matching tagged rule wins. If no tagged rules match, the default (untagged) rule applies. If no rules exist, global settings are used.</p>
-<p>To create a memory rule:</p>
-<ol>
-    <li>Click <strong>+ Add Rule</strong> in the Memory Rules section</li>
-    <li>Enter a <strong>Name</strong> and optional <strong>Tag</strong></li>
-    <li>Configure which settings to override (set to 0 or empty to inherit global)</li>
-    <li>Click <strong>Create</strong></li>
-</ol>
+<p>To create a memory rule:
+1. Click <strong>+ Add Rule</strong> in the Memory Rules section
+2. Enter a <strong>Name</strong> and optional <strong>Tag</strong>
+3. Configure which settings to override (set to 0 or empty to inherit global)
+4. Click <strong>Create</strong></p>
 <p>Use <strong>Edit</strong> to modify a rule and the <strong>ON/OFF</strong> toggle to enable/disable without deleting.</p>
-
-<h2 id="command-tags">8. Command Tags</h2>
+<hr />
+<h2 id="9-command-tags">9. Command Tags</h2>
 <p>Command tags are inline directives placed in the user's message text that override pipeline behavior. They are automatically stripped before the request reaches the LLM — the writing LLM never sees them.</p>
-
-<h3>Syntax</h3>
+<h3 id="syntax">Syntax</h3>
 <pre><code>&lt;COMMAND:setting&gt;          One-off override (this request only)
 &lt;COMMAND:setting:persist&gt;  Persistent override (saved to conversation memory)
-&lt;COMMAND:reset&gt;            Clears persistent override for this command</code></pre>
+&lt;COMMAND:reset&gt;            Clears persistent override for this command
+</code></pre>
 <p>Tags are case-insensitive: <code>&lt;verify:off&gt;</code> works the same as <code>&lt;VERIFY:OFF&gt;</code>.</p>
-
-<h3>Available Commands</h3>
+<h3 id="available-commands">Available Commands</h3>
 <table>
-    <thead><tr><th>Command</th><th>Controls</th><th>What <code>off</code> Does</th><th>What <code>on</code> Does</th></tr></thead>
-    <tbody>
-        <tr><td><code>VERIFY</code></td><td>Verification (Navigator)</td><td>Skip verification for this message</td><td>Force verification even if GUI setting is off</td></tr>
-        <tr><td><code>SUMMARY</code></td><td>Conversation summarization</td><td>Skip compression for this message</td><td>Force summarization check</td></tr>
-        <tr><td><code>FORBIDDEN</code></td><td>Forbidden words scanner</td><td>Skip forbidden word scan</td><td>Force scan even if GUI setting is off</td></tr>
-        <tr><td><code>MEMORY</code></td><td>Memory injection + extraction</td><td>Skip memory injection and <code>&lt;memstore&gt;</code> extraction</td><td>Force memory processing</td></tr>
-        <tr><td><code>DRIVER</code></td><td>Driver-callable tools</td><td>Disable tool access for this message</td><td>Force tool access if tools are available</td></tr>
-    </tbody>
+<thead>
+<tr>
+<th>Command</th>
+<th>Controls</th>
+<th>What <code>off</code> Does</th>
+<th>What <code>on</code> Does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>VERIFY</code></td>
+<td>Verification (Navigator)</td>
+<td>Skip verification for this message</td>
+<td>Force verification even if GUI setting is off</td>
+</tr>
+<tr>
+<td><code>SUMMARY</code></td>
+<td>Conversation summarization</td>
+<td>Skip compression for this message</td>
+<td>Force summarization check</td>
+</tr>
+<tr>
+<td><code>FORBIDDEN</code></td>
+<td>Forbidden words scanner</td>
+<td>Skip forbidden word scan</td>
+<td>Force scan even if GUI setting is off</td>
+</tr>
+<tr>
+<td><code>MEMORY</code></td>
+<td>Memory injection + extraction</td>
+<td>Skip memory injection and <code>&lt;memstore&gt;</code> extraction</td>
+<td>Force memory processing</td>
+</tr>
+<tr>
+<td><code>DRIVER</code></td>
+<td>Driver-callable tools</td>
+<td>Disable tool access for this message</td>
+<td>Force tool access if tools are available</td>
+</tr>
+</tbody>
 </table>
-
-<h3>Precedence</h3>
+<h3 id="precedence">Precedence</h3>
 <p>Three tiers, highest to lowest:</p>
 <ol>
-    <li><strong>One-off</strong> (no <code>:persist</code>) — applies to the current request only, then reverts</li>
-    <li><strong>Persistent</strong> (<code>:persist</code>) — saved to conversation memory, applies to all subsequent messages until reset</li>
-    <li><strong>GUI setting</strong> — the default configured in the web UI (used when no override exists)</li>
+<li><strong>One-off</strong> (no <code>:persist</code>) — applies to the current request only, then reverts</li>
+<li><strong>Persistent</strong> (<code>:persist</code>) — saved to conversation memory, applies to all subsequent messages until reset</li>
+<li><strong>GUI setting</strong> — the default configured in the web UI (used when no override exists)</li>
 </ol>
 <p>A one-off always overrides a persistent override for that single request. The persistent override resumes on the next message.</p>
-
-<h3>Example Session</h3>
-<pre><code>Message 1: "Fight the dragon &lt;VERIFY:off:persist&gt;"   -&gt; Verification off, saved to chat memory
-Message 2: "Continue"                                -&gt; Verification still off (persistent)
-Message 3: "Keep going &lt;VERIFY:on&gt;"                  -&gt; Verification on for THIS message only
-Message 4: "More"                                    -&gt; Verification off again (persistent resumes)
-Message 5: "Done &lt;VERIFY:reset&gt;"                     -&gt; Persistent cleared, GUI setting resumes</code></pre>
+<h3 id="example-session">Example Session</h3>
+<pre><code>Message 1: &quot;Fight the dragon &lt;VERIFY:off:persist&gt;&quot;   -&gt; Verification off, saved to chat memory
+Message 2: &quot;Continue&quot;                                -&gt; Verification still off (persistent)
+Message 3: &quot;Keep going &lt;VERIFY:on&gt;&quot;                  -&gt; Verification on for THIS message only
+Message 4: &quot;More&quot;                                    -&gt; Verification off again (persistent resumes)
+Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persistent cleared, GUI setting resumes
+</code></pre>
 <p>Persistent overrides are scoped per-conversation. Different chats have independent override state. Overrides appear as memory entries with the <code>__cmd_persist_</code> prefix on the Memories page.</p>
-
-<h2 id="maps">9. Maps</h2>
-<img src="media/gitv-maps.png" alt="Maps List">
+<hr />
+<h2 id="10-maps">10. Maps</h2>
+<p><img alt="Maps List" src="media/gitv-maps.png" /></p>
 <p>Maps are workflow presets that chain multiple LLM stages into a single request. Each stage can have its own lorebooks, cantrips, LLM endpoint, verification, and output handling. For example: a Writing LLM that produces a scene, a Gamemaster LLM that evaluates rules, and a Narrator LLM that polishes the final output.</p>
 <p>When no map is active, the standard single-stage pipeline runs.</p>
-
-<h3>Map List</h3>
-<p>The table shows each map with:</p>
-<ul>
-    <li><strong>Name</strong> and description</li>
-    <li><strong>Stages</strong>: Number of LLM stages in the chain</li>
-    <li><strong>Tag</strong>: Activation tag (click to copy the <code>&lt;#map-tag#&gt;</code> string)</li>
-    <li><strong>Active</strong>: ON/OFF toggle</li>
-    <li><strong>Actions</strong>: Edit, Export, Delete</li>
-</ul>
-
-<h3>Map Activation</h3>
+<h3 id="map-list">Map List</h3>
+<p>The table shows each map with:
+- <strong>Name</strong> and description
+- <strong>Stages</strong>: Number of LLM stages in the chain
+- <strong>Tag</strong>: Activation tag (click to copy the <code>&lt;#map-tag#&gt;</code> string)
+- <strong>Active</strong>: ON/OFF toggle
+- <strong>Actions</strong>: Edit, Export, Delete</p>
+<h3 id="map-activation">Map Activation</h3>
 <p>Maps activate via <code>&lt;#map-tag#&gt;</code> tags in persona or message text, the same tag system used by lorebooks, cantrips, and verification rules. One map per request (first match wins). When no map tag is present, the standard pipeline runs.</p>
-
-<h3>Map Editor</h3>
+<h3 id="map-editor">Map Editor</h3>
 <p>The editor is a vertical series of cards. The first card configures the map itself:</p>
 <ul>
-    <li><strong>Name</strong>: A label for the map</li>
-    <li><strong>Description</strong>: Optional summary</li>
-    <li><strong>Tag</strong>: Activation tag for <code>&lt;#map-tag#&gt;</code> matching</li>
-    <li><strong>Version</strong> and <strong>Author</strong>: Metadata for sharing</li>
-    <li><strong>Public</strong>: Whether other users can see and use this map</li>
-    <li><strong>Global LLM Instructions</strong>: Text shown to every LLM stage in the chain</li>
+<li><strong>Name</strong>: A label for the map</li>
+<li><strong>Description</strong>: Optional summary</li>
+<li><strong>Tag</strong>: Activation tag for <code>&lt;#map-tag#&gt;</code> matching</li>
+<li><strong>Version</strong> and <strong>Author</strong>: Metadata for sharing</li>
+<li><strong>Public</strong>: Whether other users can see and use this map</li>
+<li><strong>Global LLM Instructions</strong>: Text shown to every LLM stage in the chain</li>
 </ul>
-<img src="media/gitv-maps-edit-1.png" alt="Map Editor - Settings">
+<p><img alt="Map Editor - Settings" src="media/gitv-maps-edit-1.png" /></p>
 <p>Each subsequent card is a <strong>stage</strong>:</p>
-<img src="media/gitv-maps-edit-2.png" alt="Map Editor - Stage">
+<p><img alt="Map Editor - Stage" src="media/gitv-maps-edit-2.png" /></p>
 <ul>
-    <li><strong>Stage Name</strong>: A label for the stage</li>
-    <li><strong>System Instructions</strong>: Instructions specific to this stage's LLM (prepended to its call)</li>
-    <li><strong>Endpoint</strong>: Which endpoint to use for this stage (blank = your default endpoint)</li>
-    <li><strong>Model Override</strong>: Force a specific model for this stage (blank = endpoint default)</li>
-    <li><strong>Driver-Callable Turns</strong>: Maximum tool-call rounds for this stage (0 = disabled)</li>
-    <li><strong>Output Mode</strong>: How this stage's output feeds the next stage</li>
-    <li><strong>Attached Lorebooks</strong>: Lorebooks injected before this stage's LLM call</li>
-    <li><strong>Attached Cantrips</strong>: Cantrips run before this stage's LLM call (with a <strong>Sticky</strong> option)</li>
+<li><strong>Stage Name</strong>: A label for the stage</li>
+<li><strong>System Instructions</strong>: Instructions specific to this stage's LLM (prepended to its call)</li>
+<li><strong>Endpoint</strong>: Which endpoint to use for this stage (blank = your default endpoint)</li>
+<li><strong>Model Override</strong>: Force a specific model for this stage (blank = endpoint default)</li>
+<li><strong>Driver-Callable Turns</strong>: Maximum tool-call rounds for this stage (0 = disabled)</li>
+<li><strong>Output Mode</strong>: How this stage's output feeds the next stage</li>
+<li><strong>Attached Lorebooks</strong>: Lorebooks injected before this stage's LLM call</li>
+<li><strong>Attached Cantrips</strong>: Cantrips run before this stage's LLM call (with a <strong>Sticky</strong> option)</li>
 </ul>
-<img src="media/gitv-maps-edit-3.png" alt="Map Editor - Verification">
+<p><img alt="Map Editor - Verification" src="media/gitv-maps-edit-3.png" /></p>
 <p>Each stage can optionally enable <strong>Verification</strong> with its own Navigator instructions, endpoint, model, and max retries. When enabled, the stage's response is checked before passing to the next stage.</p>
 <p><strong>"+ Add Stage"</strong> adds stages to the chain (up to the maximum). Use <strong>Remove Stage</strong> to delete a stage.</p>
-
-<h3>Output Modes</h3>
+<h3 id="output-modes">Output Modes</h3>
 <p>Each stage's output is handled before the next stage runs:</p>
 <table>
-    <thead><tr><th>Mode</th><th>Behavior</th></tr></thead>
-    <tbody>
-        <tr><td><strong>Persist</strong> (default)</td><td>Stage output is added to the conversation as an assistant message before the next stage runs</td></tr>
-        <tr><td><strong>Sanitize</strong></td><td>Stage output is converted to a system context block (e.g., <code>[STAGE N OUTPUT]</code>) and stripped from message history</td></tr>
-        <tr><td><strong>Discard</strong></td><td>Stage output is dropped entirely (only used for verification within its own stage)</td></tr>
-    </tbody>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Persist</strong> (default)</td>
+<td>Stage output is added to the conversation as an assistant message before the next stage runs</td>
+</tr>
+<tr>
+<td><strong>Sanitize</strong></td>
+<td>Stage output is converted to a system context block (e.g., <code>[STAGE N OUTPUT]</code>) and stripped from message history</td>
+</tr>
+<tr>
+<td><strong>Discard</strong></td>
+<td>Stage output is dropped entirely (only used for verification within its own stage)</td>
+</tr>
+</tbody>
 </table>
-
-<h3>Sticky vs Stage-Only Resources</h3>
-<p>Cantrip and lorebook attachments have a <strong>Sticky</strong> option:</p>
-<ul>
-    <li><strong>Sticky</strong>: The injection persists through all subsequent stages</li>
-    <li><strong>Stage-only</strong> (default): The injection is stripped after this stage completes</li>
-</ul>
+<h3 id="sticky-vs-stage-only-resources">Sticky vs Stage-Only Resources</h3>
+<p>Cantrip and lorebook attachments have a <strong>Sticky</strong> option:
+- <strong>Sticky</strong>: The injection persists through all subsequent stages
+- <strong>Stage-only</strong> (default): The injection is stripped after this stage completes</p>
 <p>This lets a shared world-setting lorebook remain active across the whole chain while a stage-specific cantrip runs only once.</p>
-
-<h3>Import and Export</h3>
+<h3 id="import-and-export">Import and Export</h3>
 <p>Maps export as a single JSON file containing all stages, resource contents, and configuration. Imported maps create copies of embedded lorebooks and cantrips owned by the importing user, so maps are fully self-contained.</p>
-<img src="media/gitv-maps-edit-4.png" alt="Map Import">
+<p><img alt="Map Import" src="media/gitv-maps-edit-4.png" /></p>
 <p>When importing, choose a <strong>Resource Handling</strong> mode:</p>
 <table>
-    <thead><tr><th>Mode</th><th>Behavior</th></tr></thead>
-    <tbody>
-        <tr><td><strong>Keep Both</strong></td><td>Always create new copies of resources</td></tr>
-        <tr><td><strong>Reuse Existing</strong></td><td>Link to same-named resources you already have</td></tr>
-        <tr><td><strong>Overwrite</strong></td><td>Update same-named resources with the imported versions</td></tr>
-    </tbody>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Keep Both</strong></td>
+<td>Always create new copies of resources</td>
+</tr>
+<tr>
+<td><strong>Reuse Existing</strong></td>
+<td>Link to same-named resources you already have</td>
+</tr>
+<tr>
+<td><strong>Overwrite</strong></td>
+<td>Update same-named resources with the imported versions</td>
+</tr>
+</tbody>
 </table>
-
-<h3>Content Pack Integration</h3>
+<h3 id="content-pack-integration">Content Pack Integration</h3>
 <p>Maps integrate with the content pack system. A <code>maps/</code> folder in a git repository is auto-discovered, and map files can be installed or forked like other resources. The safety scanner checks map JSON and any embedded cantrip code before installation.</p>
-
-<h3>Example Map</h3>
-<p>A complete example map — the Gambling Hall (a 3-stage casino game with driver-callable card dealing, money tracking, and personality assignment) — is included in <code>docs/examples/map/</code>. It contains individual cantrip/lorebook components with build instructions, plus a pre-exported <code>map_gambling_hall.json</code> you can import directly. See the <a href="examples/map/README.html">example map guide</a> for setup instructions.</p>
-
-<h2 id="content-packs">10. Content Packs</h2>
-<img src="media/gitv-content-packs.png" alt="Content Packs">
+<h3 id="example-map">Example Map</h3>
+<p>A complete example map — the Gambling Hall (a 3-stage casino game with driver-callable card dealing, money tracking, and personality assignment) — is included in <code>docs/examples/map/</code>. It contains individual cantrip/lorebook components with build instructions, plus a pre-exported <code>map_gambling_hall.json</code> you can import directly. See the <a href="examples/map/README.md">example map guide</a> for setup instructions.</p>
+<hr />
+<h2 id="11-content-packs">11. Content Packs</h2>
+<p><img alt="Content Packs" src="media/gitv-content-packs.png" /></p>
 <p>The Content Packs page lets you browse and install resources from any git repository. GitInTheVan works with any standard git endpoint (GitHub, Gitea, GitLab, local repos, etc.).</p>
-<div class="note">Content from external repositories is not verified by GitInTheVan. Download and install at your own risk.</div>
-
-<h3>Linking a Repository</h3>
-<img src="media/gitv-content-packs-link-repository.png" alt="Link Repository">
+<p><strong>WARNING</strong>: Content from external repositories is not verified by GitInTheVan. Download and install at your own risk.</p>
+<h3 id="linking-a-repository">Linking a Repository</h3>
+<p><img alt="Link Repository" src="media/gitv-content-packs-link-repository.png" /></p>
 <ol>
-    <li>Click <strong>"+ Link Repository"</strong></li>
-    <li>Enter a <strong>Name</strong> for the repo</li>
-    <li>Enter the <strong>Git URL</strong> (HTTPS only)</li>
-    <li>Optionally set the <strong>Branch</strong> (defaults to main)</li>
-    <li>Optionally enter a <strong>Token</strong> for private repos</li>
-    <li>Click <strong>Link</strong></li>
+<li>Click <strong>"+ Link Repository"</strong></li>
+<li>Enter a <strong>Name</strong> for the repo</li>
+<li>Enter the <strong>Git URL</strong> (HTTPS only)</li>
+<li>Optionally set the <strong>Branch</strong> (defaults to main)</li>
+<li>Optionally enter a <strong>Token</strong> for private repos</li>
+<li>Click <strong>Link</strong></li>
 </ol>
 <p>GitInTheVan clones the repo and reads <code>descriptions.json</code> (the manifest). If no manifest exists, it auto-discovers files from the <code>cantrips/</code>, <code>lorebooks/</code>, <code>rules/</code>, and <code>maps/</code> folders.</p>
-
-<h3>Browsing Files</h3>
-<img src="media/gitv-content-packs-browse.png" alt="Browse Files">
+<h3 id="browsing-files">Browsing Files</h3>
+<p><img alt="Browse Files" src="media/gitv-content-packs-browse.png" /></p>
 <p>After linking or syncing, the browser shows all available files with:</p>
 <ul>
-    <li><strong>Filter by Type</strong>: All, Cantrips, Lorebooks, Rules, Maps</li>
-    <li><strong>Filter by Author</strong>: Filter to specific creators</li>
-    <li><strong>Sort by</strong>: Name, Recently Updated, or Type</li>
+<li><strong>Filter by Type</strong>: All, Cantrips, Lorebooks, Rules, Maps</li>
+<li><strong>Filter by Author</strong>: Filter to specific creators</li>
+<li><strong>Sort by</strong>: Name, Recently Updated, or Type</li>
 </ul>
 <p>Each file shows its name, type, author, version, and description.</p>
-
-<h3>Install vs Fork</h3>
+<h3 id="install-vs-fork">Install vs Fork</h3>
 <ul>
-    <li><strong>Install</strong>: Creates a linked copy in your account. Tracks the repo for update notifications. You can update to the latest version or pin to a specific commit.</li>
-    <li><strong>Fork</strong>: Creates an independent copy. No link to the repo. You own and edit it freely.</li>
+<li><strong>Install</strong>: Creates a linked copy in your account. Tracks the repo for update notifications. You can update to the latest version or pin to a specific commit.</li>
+<li><strong>Fork</strong>: Creates an independent copy. No link to the repo. You own and edit it freely.</li>
 </ul>
 <p>Both options install the resource in a <strong>disabled</strong> state. You must manually enable it after reviewing.</p>
-
-<h3>Safety Scanner</h3>
+<h3 id="safety-scanner">Safety Scanner</h3>
 <p>Before installation, every file is scanned for potential risks:</p>
 <table>
-    <thead><tr><th>Severity</th><th>What It Detects</th><th>Behavior</th></tr></thead>
-    <tbody>
-        <tr><td>Critical</td><td>Network access (fetch, WebSocket), filesystem access, process execution, dynamic imports</td><td>Blocks installation</td></tr>
-        <tr><td>Warning</td><td>eval(), external URLs, infinite loops, oversized content</td><td>Allows install with alert</td></tr>
-        <tr><td>Clean</td><td>No issues found</td><td>Installs normally</td></tr>
-    </tbody>
+<thead>
+<tr>
+<th>Severity</th>
+<th>What It Detects</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Critical</td>
+<td>Network access (fetch, WebSocket), filesystem access, process execution, dynamic imports</td>
+<td>Blocks installation</td>
+</tr>
+<tr>
+<td>Warning</td>
+<td>eval(), external URLs, infinite loops, oversized content</td>
+<td>Allows install with alert</td>
+</tr>
+<tr>
+<td>Clean</td>
+<td>No issues found</td>
+<td>Installs normally</td>
+</tr>
+</tbody>
 </table>
 <p>All installed items start disabled regardless of scan result.</p>
-
-<h3>Managing Installed Items</h3>
+<h3 id="managing-installed-items">Managing Installed Items</h3>
 <p>The installed items panel shows everything you've installed from repos:</p>
 <ul>
-    <li><strong>Enable/Disable</strong>: Toggle the resource on/off</li>
-    <li><strong>Uninstall</strong>: Removes the resource from your account entirely</li>
-    <li><strong>Scan badge</strong>: Shows the scan result (Clean, Warning, Critical)</li>
+<li><strong>Enable/Disable</strong>: Toggle the resource on/off</li>
+<li><strong>Uninstall</strong>: Removes the resource from your account entirely</li>
+<li><strong>Scan badge</strong>: Shows the scan result (Clean, Warning, Critical)</li>
 </ul>
-
-<h3>Syncing Repos</h3>
+<h3 id="syncing-repos">Syncing Repos</h3>
 <p>Click <strong>Sync</strong> on a repo to re-fetch the latest <code>descriptions.json</code> and file list. This checks for new files and updates.</p>
-
-<h2 id="settings">11. Settings</h2>
-<img src="media/gitv-settings.png" alt="Settings Page">
+<hr />
+<h2 id="12-settings">12. Settings</h2>
+<p><img alt="Settings Page" src="media/gitv-settings.png" /></p>
 <p>The Settings page configures your default proxy behavior, streaming UX, summarization, and pipeline features.</p>
-
-<h3>Proxy Configuration</h3>
+<h3 id="proxy-configuration">Proxy Configuration</h3>
 <ul>
-    <li><strong>Default Endpoint</strong>: Which endpoint to use when no specific routing applies</li>
-    <li><strong>Default Model Override</strong>: Force a specific model regardless of what the client sends (leave blank to use the client's model selection)</li>
+<li><strong>Default Endpoint</strong>: Which endpoint to use when no specific routing applies</li>
+<li><strong>Default Model Override</strong>: Force a specific model regardless of what the client sends (leave blank to use the client's model selection)</li>
 </ul>
-
-<h3>Streaming and Status</h3>
+<h3 id="streaming-and-status">Streaming and Status</h3>
 <p>These settings affect how responses are delivered when verification is enabled. Since verification requires buffering the full response, these options control the streaming experience:</p>
 <ul>
-    <li><strong>GITV Status Block</strong>: Includes a <code>&lt;think&gt;&lt;gitv&gt;</code> status block before the response showing pipeline activity</li>
-    <li><strong>Preserve Thinking</strong>: Include the LLM's reasoning/thought process in the final response</li>
-    <li><strong>Simulated Streaming Speed</strong>: When verification buffers the response, simulate streaming output at this speed (tokens/min, 0 = instant)</li>
+<li><strong>GITV Status Block</strong>: Includes a <code>&lt;think&gt;&lt;gitv&gt;</code> status block before the response showing pipeline activity</li>
+<li><strong>Preserve Thinking</strong>: Include the LLM's reasoning/thought process in the final response</li>
+<li><strong>Simulated Streaming Speed</strong>: When verification buffers the response, simulate streaming output at this speed (tokens/min, 0 = instant)</li>
 </ul>
-
-<h3>Conversation Summarization</h3>
-<img src="media/gitv-settings-2.png" alt="Summarization Settings">
+<h3 id="conversation-summarization">Conversation Summarization</h3>
+<p><img alt="Summarization Settings" src="media/gitv-settings-2.png" /></p>
 <p>Automatically compresses long conversations to reduce token usage while preserving narrative context:</p>
 <ul>
-    <li><strong>Enable Summarization</strong>: Master toggle</li>
-    <li><strong>Summarization Endpoint</strong>: Which LLM endpoint to use (can be a cheaper/faster model)</li>
-    <li><strong>Model Override</strong>: Override the model name for summarization calls</li>
-    <li><strong>Token Threshold</strong>: When estimated tokens exceed this, summarization triggers (default 8000)</li>
-    <li><strong>Keep Recent Messages</strong>: Number of recent messages always sent verbatim (minimum 3)</li>
-    <li><strong>Summarization Prompt</strong>: System prompt for the summarization LLM</li>
+<li><strong>Enable Summarization</strong>: Master toggle</li>
+<li><strong>Summarization Endpoint</strong>: Which LLM endpoint to use (can be a cheaper/faster model)</li>
+<li><strong>Model Override</strong>: Override the model name for summarization calls</li>
+<li><strong>Token Threshold</strong>: When estimated tokens exceed this, summarization triggers (default 8000)</li>
+<li><strong>Keep Recent Messages</strong>: Number of recent messages always sent verbatim (minimum 3)</li>
+<li><strong>Summarization Prompt</strong>: System prompt for the summarization LLM</li>
 </ul>
 <p>When summarization triggers, older dialogue is removed from the request and replaced with a single <code>[CONVERSATION SUMMARY]</code> system block. The most recent messages are always forwarded verbatim. Summaries are cached per conversation — rerolls and forks reuse the cached summary without re-calling the LLM.</p>
-
-<h3>Driver-Callable Tools</h3>
+<h3 id="driver-callable-tools_1">Driver-Callable Tools</h3>
 <p>Controls whether the writing LLM (Driver) can invoke cantrips as tools during generation:</p>
 <ul>
-    <li><strong>Driver-Callable Turns</strong>: Maximum number of tool-call rounds per request (0 = disabled). Default 1. Auto-disables when no active resources have the Driver-Callable position checked.</li>
+<li><strong>Driver-Callable Turns</strong>: Maximum number of tool-call rounds per request (0 = disabled). Default 1. Auto-disables when no active resources have the Driver-Callable position checked.</li>
 </ul>
 <p>When enabled, a <code>[TOOL ACCESS]</code> block listing available tools is injected into the system prompt. The LLM calls tools with <code>&lt;call:tool_name arg="value"&gt;</code> tags. Each call decrements the turn counter. When turns reach 0, the notification stops — preventing infinite loops.</p>
-
-<h3>Prefill Normalization</h3>
+<h3 id="prefill-normalization">Prefill Normalization</h3>
 <p>When enabled and a trailing assistant message is detected (the "prefill" pattern), GitInTheVan converts it to a system instruction for OpenAI-compatible providers that don't support native prefill. Anthropic and Google endpoints pass through as-is since they support prefill natively.</p>
 <p>Provider is auto-detected from the endpoint URL and model name.</p>
-
-<h3>Context Budgeting</h3>
-<img src="media/gitv-settings-3.png" alt="Context Budgeting">
+<h3 id="context-budgeting">Context Budgeting</h3>
+<p><img alt="Context Budgeting" src="media/gitv-settings-3.png" /></p>
 <p>Allocates a percentage of the model's context window for injected content (cantrips, lorebooks, memory). Cantrips can access their allocation via <code>context.budget</code> to dynamically scale their output.</p>
 <ul>
-    <li><strong>Injection Budget (%)</strong>: Percentage of the context window reserved for injections (default 10). Set to 0 to disable budgeting entirely.</li>
-    <li><strong>Context Window Override</strong>: Manually set the model's context window size in tokens. Set to 0 to auto-detect from the model name (e.g., GPT-4o = 128K, Claude 3.5 = 200K, Gemini 2 = 1M).</li>
-    <li><strong>Debug Mode</strong>: Capture pipeline stages for the last 20 exchanges. View them on the Debug tab in the Admin page.</li>
+<li><strong>Injection Budget (%)</strong>: Percentage of the context window reserved for injections (default 10). Set to 0 to disable budgeting entirely.</li>
+<li><strong>Context Window Override</strong>: Manually set the model's context window size in tokens. Set to 0 to auto-detect from the model name (e.g., GPT-4o = 128K, Claude 3.5 = 200K, Gemini 2 = 1M).</li>
+<li><strong>Debug Mode</strong>: Capture pipeline stages for the last 20 exchanges. View them on the Debug tab in the Admin page.</li>
 </ul>
 <p>When enabled, each active cantrip and lorebook receives a proportional share of the budget based on their <strong>Budget Weight</strong> field (found on each cantrip/lorebook edit form). Cantrips can read <code>context.budget.detail_level</code> to choose between full, summary, or bullet-point output.</p>
-
-<h3>Security Settings</h3>
+<h3 id="security-settings">Security Settings</h3>
 <p>The following security features are configured via environment variables (<code>.env</code> file):</p>
 <table>
-    <thead><tr><th>Setting</th><th>Default</th><th>Description</th></tr></thead>
-    <tbody>
-        <tr><td><code>GITV_CORS_ORIGINS</code></td><td><code>*</code></td><td>Allowed CORS origins (comma-separated)</td></tr>
-        <tr><td><code>GITV_RATE_LIMIT_ENABLED</code></td><td><code>true</code></td><td>Enable rate limiting</td></tr>
-        <tr><td><code>GITV_RATE_LIMIT_PROXY_PER_MIN</code></td><td><code>60</code></td><td>Max proxy requests per minute per client</td></tr>
-        <tr><td><code>GITV_RATE_LIMIT_API_PER_MIN</code></td><td><code>120</code></td><td>Max management API requests per minute</td></tr>
-        <tr><td><code>GITV_MAX_REQUEST_BODY_SIZE</code></td><td><code>10485760</code></td><td>Max request body size (10MB)</td></tr>
-        <tr><td><code>GITV_JWT_EXPIRATION_HOURS</code></td><td><code>24</code></td><td>JWT token lifetime</td></tr>
-        <tr><td><code>GITV_MIN_PASSWORD_LENGTH</code></td><td><code>8</code></td><td>Minimum password length (requires letter + number)</td></tr>
-    </tbody>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GITV_CORS_ORIGINS</code></td>
+<td><code>*</code></td>
+<td>Allowed CORS origins (comma-separated)</td>
+</tr>
+<tr>
+<td><code>GITV_RATE_LIMIT_ENABLED</code></td>
+<td><code>true</code></td>
+<td>Enable rate limiting</td>
+</tr>
+<tr>
+<td><code>GITV_RATE_LIMIT_PROXY_PER_MIN</code></td>
+<td><code>60</code></td>
+<td>Max proxy requests per minute per client</td>
+</tr>
+<tr>
+<td><code>GITV_RATE_LIMIT_API_PER_MIN</code></td>
+<td><code>120</code></td>
+<td>Max management API requests per minute</td>
+</tr>
+<tr>
+<td><code>GITV_MAX_REQUEST_BODY_SIZE</code></td>
+<td><code>10485760</code></td>
+<td>Max request body size (10MB)</td>
+</tr>
+<tr>
+<td><code>GITV_JWT_EXPIRATION_HOURS</code></td>
+<td><code>24</code></td>
+<td>JWT token lifetime</td>
+</tr>
+<tr>
+<td><code>GITV_MIN_PASSWORD_LENGTH</code></td>
+<td><code>8</code></td>
+<td>Minimum password length (requires letter + number)</td>
+</tr>
+</tbody>
 </table>
 <p>Admin actions (user creation, deletion, password resets) are recorded in the audit log, viewable via the <strong>Admin</strong> page. Global caps for driver-callable turns and verification retries are also configured in the Admin page.</p>
-
-<h2 id="admin">12. Admin</h2>
+<hr />
+<h2 id="13-admin">13. Admin</h2>
 <p><em>Admin only. The Admin link in the sidebar is only visible to admin accounts.</em></p>
-<img src="media/gitv-admin-global-caps.png" alt="Admin">
+<p><img alt="Admin" src="media/gitv-admin-global-caps.png" /></p>
 <p>The Admin page provides system-wide management with five tabs: <strong>Global Caps</strong>, <strong>Users</strong>, <strong>Debug</strong>, <strong>Audit Logs</strong>, and <strong>Server Logs</strong>.</p>
-
-<h3>Global Caps Tab</h3>
+<h3 id="global-caps-tab">Global Caps Tab</h3>
 <p>Prevents users from causing internal denial-of-service by setting absurdly high turn or retry counts. The effective limit is the lower of the user's setting and the global cap — user preferences are not overwritten.</p>
 <ul>
-    <li><strong>Max Driver-Callable Turns</strong>: Global cap for driver-callable tool turns per request (default 2)</li>
-    <li><strong>Max Verification Retries</strong>: Global cap for verification resubmission retries (default 3)</li>
-    <li><strong>Rate Limit: Proxy</strong>: Max proxy requests per minute (default 60)</li>
-    <li><strong>Rate Limit: Management API</strong>: Max management API requests per minute (default 120)</li>
+<li><strong>Max Driver-Callable Turns</strong>: Global cap for driver-callable tool turns per request (default 2)</li>
+<li><strong>Max Verification Retries</strong>: Global cap for verification resubmission retries (default 3)</li>
+<li><strong>Rate Limit: Proxy</strong>: Max proxy requests per minute (default 60)</li>
+<li><strong>Rate Limit: Management API</strong>: Max management API requests per minute (default 120)</li>
 </ul>
-
-<h3>Runtime Log Level</h3>
+<h3 id="runtime-log-level">Runtime Log Level</h3>
 <p>The Global Caps tab also includes a Runtime Log Level override. Temporarily change the server log level without restarting — changes take effect immediately.</p>
 <ul>
-    <li>Select a level from the dropdown (DEBUG through CRITICAL)</li>
-    <li>Click <strong>Apply</strong> to change the level at runtime</li>
-    <li>Leave blank to use the startup default (from <code>GITV_LOG_LEVEL</code>)</li>
-    <li>Click <strong>Reset to Default</strong> to clear the override</li>
+<li>Select a level from the dropdown (DEBUG through CRITICAL)</li>
+<li>Click <strong>Apply</strong> to change the level at runtime</li>
+<li>Leave blank to use the startup default (from <code>GITV_LOG_LEVEL</code>)</li>
+<li>Click <strong>Reset to Default</strong> to clear the override</li>
 </ul>
-
-<h3 id="users">Users Tab</h3>
-<img src="media/gitv-admin-users.png" alt="Users">
-<p>Full user management. Each user row shows:</p>
-<ul>
-    <li><strong>Username</strong></li>
-    <li><strong>Role</strong>: Admin or User</li>
-    <li><strong>Status</strong>: Active or Disabled</li>
-    <li><strong>Created</strong>: Account creation timestamp</li>
-</ul>
+<h3 id="users-tab">Users Tab</h3>
+<p><img alt="Users" src="media/gitv-admin-users.png" /></p>
+<p>Full user management. Each user row shows:
+- <strong>Username</strong>
+- <strong>Role</strong>: Admin or User
+- <strong>Status</strong>: Active or Disabled
+- <strong>Created</strong>: Account creation timestamp</p>
 <p><strong>Actions (non-admin users only):</strong></p>
 <ul>
-    <li><strong>Edit</strong>: Rename the user</li>
-    <li><strong>Password</strong>: Reset the user's password</li>
-    <li><strong>New Key</strong>: Regenerate the user's API key (the old key stops working immediately; the new key is shown once)</li>
-    <li><strong>Disable/Enable</strong>: Block or unblock the user. Disabled users cannot log in and their proxy requests are rejected</li>
-    <li><strong>Delete</strong>: Permanently delete the user and <strong>all</strong> their data (endpoints, cantrips, lorebooks, memories, summaries, forbidden words, verification rules/logs, settings, chat data)</li>
+<li><strong>Edit</strong>: Rename the user</li>
+<li><strong>Password</strong>: Reset the user's password</li>
+<li><strong>New Key</strong>: Regenerate the user's API key (the old key stops working immediately; the new key is shown once)</li>
+<li><strong>Disable/Enable</strong>: Block or unblock the user. Disabled users cannot log in and their proxy requests are rejected</li>
+<li><strong>Delete</strong>: Permanently delete the user and <strong>all</strong> their data (endpoints, cantrips, lorebooks, memories, summaries, forbidden words, verification rules/logs, settings, chat data)</li>
 </ul>
 <p>Admin users cannot be disabled or deleted.</p>
 <p>Click <strong>"+ Add User"</strong> and enter a username and password. After creation, the user's API key is shown once — save it immediately.</p>
-
-<h3 id="debug">Debug Tab</h3>
-<img src="media/gitv-admin-debug.png" alt="Debug">
+<h3 id="debug-tab">Debug Tab</h3>
+<p><img alt="Debug" src="media/gitv-admin-debug.png" /></p>
 <p>The Debug tab provides full pipeline visibility for troubleshooting. When Debug Mode is enabled in Settings, GitInTheVan captures the last 20 exchanges with every pipeline stage preserved.</p>
 <p>The left panel shows recent captured exchanges, newest first. Each entry shows the model, timestamp, stage count, and a verified badge.</p>
 <p>Select an exchange to see three views:</p>
 <ul>
-    <li><strong>Original</strong>: The messages as received from the client, before any pipeline processing. Tags detected in the request are shown.</li>
-    <li><strong>Modified</strong>: The messages as sent to the Driver, after lorebooks, cantrips, memory injection, budget calculation, and summarization. Budget allocation data is shown if budgeting is enabled.</li>
-    <li><strong>Response</strong>: The Driver's response content and verification results (if verification ran). Shows approval status, retry count, and any violations detected.</li>
+<li><strong>Original</strong>: The messages as received from the client, before any pipeline processing. Tags detected in the request are shown.</li>
+<li><strong>Modified</strong>: The messages as sent to the Driver, after lorebooks, cantrips, memory injection, budget calculation, and summarization. Budget allocation data is shown if budgeting is enabled.</li>
+<li><strong>Response</strong>: The Driver's response content and verification results (if verification ran). Shows approval status, retry count, and any violations detected.</li>
 </ul>
 <p>Use <strong>Clear All</strong> to wipe captured exchanges. Captures are automatically pruned to the most recent 20 per user.</p>
-
-<h3 id="audit-logs">Audit Logs Tab</h3>
-<img src="media/gitv-admin-audit-logs.png" alt="Audit Logs">
+<h3 id="audit-logs-tab">Audit Logs Tab</h3>
+<p><img alt="Audit Logs" src="media/gitv-admin-audit-logs.png" /></p>
 <p>Read-only view of admin actions. Each entry shows the action type, target, details, and timestamp. Logs are auto-pruned to 1000 entries. Use <strong>Refresh</strong> or toggle <strong>Auto</strong> for automatic refresh every 15 seconds.</p>
-
-<h3 id="server-logs">Server Logs Tab</h3>
-<img src="media/gitv-admin-server-logs.png" alt="Server Logs">
+<h3 id="server-logs-tab">Server Logs Tab</h3>
+<p><img alt="Server Logs" src="media/gitv-admin-server-logs.png" /></p>
 <p>Read-only view of recent server log output (last 200 lines). Logs are read from the file configured by <code>GITV_LOG_FILE</code> (auto-creates <code>data/logs/gitinthevan.log</code> if unset). Use <strong>Refresh</strong> or toggle <strong>Auto</strong> for automatic refresh every 15 seconds.</p>
-
-</div>
 </body>
 </html>

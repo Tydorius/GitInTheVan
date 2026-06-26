@@ -185,11 +185,14 @@ The script will:
 2. Download Deno automatically (for cantrip sandbox)
 3. Build the web UI frontend (requires Node.js 24+)
 4. Create a `.env` configuration file from the template
-5. Start the server
+5. Generate a self-signed SSL certificate for HTTPS (LAN access)
+6. Start the server
 
 If Python 3.12+ is not installed, the script offers to install it automatically (Windows: winget, macOS: Homebrew, Linux: apt/dnf/pacman).
 
-Once running, open `http://localhost:8000` in your browser.
+Once running, open `https://localhost:8000` in your browser. See [HTTPS and LAN Access](#https-and-lan-access) below for certificate trust instructions.
+
+> **For localhost-only use**: If you only need access from the same machine, you can remove the SSL settings from `.env` to run in HTTP mode. The server will be available at `http://localhost:8000`.
 
 ### Manual Setup
 
@@ -242,12 +245,63 @@ Open `http://localhost:8000` in your browser to access the management UI.
 
 ### First Run
 
-1. Navigate to `http://localhost:8000`
-2. Click "First run? Setup admin" to create your admin account
-3. Save your `gitv_` API key — this is used for proxy requests
-4. Go to **Endpoints** and add your LLM endpoint
-5. Go to **Settings** and set your default endpoint
-6. Point your client (JanitorAI, etc.) at `http://localhost:8000/v1/chat/completions` using your `gitv_` API key
+1. Navigate to `https://localhost:8000` (or `http://localhost:8000` if HTTPS is disabled)
+2. Accept the self-signed certificate warning if prompted (see [HTTPS and LAN Access](#https-and-lan-access))
+3. Click "First run? Setup admin" to create your admin account
+4. Save your `gitv_` API key — this is used for proxy requests
+5. Go to **Endpoints** and add your LLM endpoint
+6. Go to **Settings** and set your default endpoint
+7. Point your client (JanitorAI, etc.) at your proxy URL using your `gitv_` API key
+
+### HTTPS and LAN Access
+
+The deploy scripts automatically generate a self-signed SSL certificate so that GitInTheVan can be accessed from other devices on your local network. This is required because browsers block HTTP requests from HTTPS sites (like JanitorAI) — a restriction called *mixed content blocking*.
+
+**Trusting the certificate on each device:**
+
+On every device/browser that will connect to GitInTheVan:
+
+1. Open your GitInTheVan URL directly in the browser address bar (e.g. `https://10.0.0.187:8000`)
+2. You'll see a security warning about the self-signed certificate
+3. Click **Advanced** → **Accept the Risk and Continue** (Firefox) or **Proceed to site (unsafe)** (Chrome)
+4. The GitInTheVan login page will load — the certificate is now trusted for future requests
+
+> **Why this is necessary**: Browsers silently block background requests (like JanitorAI's API calls) to servers with untrusted certificates. Unlike direct navigation, there is no warning dialog — the request simply fails. You must accept the certificate via direct navigation first.
+
+> **"Unable to connect" instead of a cert warning?** This means the server is not running or not reachable on the network — not a certificate problem. Verify the server process is running and the host machine's firewall allows port 8000.
+
+**Platform-specific notes:**
+
+- **Firefox (all platforms)**: Navigate to the URL, click **Advanced** → **Accept the Risk and Continue**. If no warning page appears, go to `about:preferences#privacy` → scroll to **Certificates** → **View Certificates** → **Servers** tab → **Add Exception**, enter the URL, and confirm.
+- **Chrome/Edge (desktop)**: Click anywhere on the warning page and type `thisisunsafe` (no spaces) to bypass. Alternatively, go to `chrome://flags/#allow-insecure-localhost` and enable it (localhost only).
+- **Safari (macOS/iOS)**: Safari does not offer a self-signed cert bypass for non-localhost addresses. You must import the certificate into **Keychain Access** (macOS) or install a profile (iOS). See below.
+- **Firefox on Android**: Works via the standard warning page → **Accept the Risk**.
+
+**Importing the certificate into macOS Keychain (Safari/Chrome):**
+
+If a browser on macOS doesn't offer a cert bypass, add the certificate to the system trust store:
+
+1. On the server machine, copy `data/ssl/cert.pem` to the macOS device
+2. Double-click the file to open it in **Keychain Access**
+3. Select the **login** keychain and click **Add**
+4. Find the "GitInTheVan" certificate, right-click → **Get Info**
+5. Expand **Trust** → set "When using this certificate" to **Always Trust**
+6. Close and enter your macOS password to confirm
+7. Restart the browser
+
+**Using with JanitorAI from another device:**
+
+1. Complete the certificate trust steps above
+2. In JanitorAI settings, set the Reverse Proxy URL to `https://YOUR-LAN-IP:8000/v1/chat/completions`
+3. Use your `gitv_` API key
+
+**Disabling HTTPS:**
+
+If you only need localhost access, remove or comment out `GITV_SSL_CERTFILE` and `GITV_SSL_KEYFILE` in your `.env` file and restart the server.
+
+**Managing certificates via Admin panel:**
+
+Go to **Admin** → **Network** tab to view certificate status, regenerate with additional IP addresses, or check if HTTPS is active.
 
 ## Configuration
 
@@ -278,6 +332,8 @@ Open `http://localhost:8000` in your browser to access the management UI.
 | `GITV_LOG_FILE` | *(auto)* | Path to log file. If empty, auto-creates `data/logs/gitinthevan.log` |
 | `GITV_LOG_MAX_SIZE_MB` | `1` | Max log file size in MB before rotation |
 | `GITV_LOG_RETENTION_DAYS` | `30` | Days to retain rotated log files |
+| `GITV_SSL_CERTFILE` | *(empty)* | Path to SSL certificate file. Set to enable HTTPS. |
+| `GITV_SSL_KEYFILE` | *(empty)* | Path to SSL private key file. Set to enable HTTPS. |
 
 ### Endpoints
 
@@ -288,19 +344,21 @@ Endpoints support a custom **API Base Path** field. Most OpenAI-compatible APIs 
 Point any OpenAI-compatible client at:
 
 ```
-URL:  http://localhost:8000/v1/chat/completions
+URL:  https://localhost:8000/v1/chat/completions  (same machine, HTTPS enabled)
+URL:  https://YOUR-LAN-IP:8000/v1/chat/completions  (other devices on LAN)
 Key:  gitv_<your-api-key>
 ```
 
-For JanitorAI: set the Reverse Proxy URL to the above and use your `gitv_` key as the API key.
+For JanitorAI: set the Reverse Proxy URL to the above and use your `gitv_` key as the API key. See [HTTPS and LAN Access](#https-and-lan-access) if connecting from another device.
 
 ## Using with JanitorAI
 
-1. In JanitorAI settings, go to API configuration
-2. Set API to "OpenAI" mode
-3. Set the Reverse Proxy URL to `http://localhost:8000/v1/chat/completions`
-4. Set the API key to your `gitv_` key
-5. Select your model
+1. Complete [HTTPS certificate trust](#https-and-lan-access) if connecting from another device
+2. In JanitorAI settings, go to API configuration
+3. Set API to "OpenAI" mode
+4. Set the Reverse Proxy URL to your GitInTheVan address (e.g. `https://10.0.0.187:8000/v1/chat/completions`)
+5. Set the API key to your `gitv_` key
+6. Select your model
 
 All requests will flow through GitInTheVan, applying any configured lorebooks, cantrips, and verification rules.
 

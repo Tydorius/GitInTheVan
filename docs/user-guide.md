@@ -15,17 +15,18 @@ GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:
 ## Table of Contents
 
 1. [Login and Admin Setup](#1-login-and-admin-setup)
-2. [Dashboard](#2-dashboard)
-3. [Endpoints](#3-endpoints)
-4. [Cantrips](#4-cantrips)
-5. [Lorebooks](#5-lorebooks)
-6. [Verification](#6-verification)
-7. [Memories](#7-memories)
-8. [Command Tags](#8-command-tags)
-9. [Maps](#9-maps)
-10. [Content Packs](#10-content-packs)
-11. [Settings](#11-settings)
-12. [Admin](#12-admin)
+2. [HTTPS and LAN Access](#2-https-and-lan-access)
+3. [Dashboard](#3-dashboard)
+4. [Endpoints](#4-endpoints)
+5. [Cantrips](#5-cantrips)
+6. [Lorebooks](#6-lorebooks)
+7. [Verification](#7-verification)
+8. [Memories](#8-memories)
+9. [Command Tags](#9-command-tags)
+10. [Maps](#10-maps)
+11. [Content Packs](#11-content-packs)
+12. [Settings](#12-settings)
+13. [Admin](#13-admin)
 
 ---
 
@@ -44,7 +45,71 @@ On subsequent visits, use the standard login form with your username and passwor
 
 ---
 
-## 2. Dashboard
+## 2. HTTPS and LAN Access
+
+GitInTheVan uses a self-signed SSL certificate to enable HTTPS, which is required when accessing the proxy from other devices on your network. Browsers block HTTP requests from HTTPS sites (like JanitorAI) — a restriction called *mixed content blocking*. HTTPS bypasses this restriction.
+
+### Trusting the Certificate
+
+On **every device and browser** that will connect to GitInTheVan:
+
+1. Open your GitInTheVan URL directly in the browser address bar (e.g. `https://10.0.0.187:8000`)
+2. You'll see a security warning about the self-signed certificate
+3. Click **Advanced** → **Accept the Risk and Continue** (Firefox) or **Proceed to site** (Chrome)
+4. The GitInTheVan login page will load — the certificate is now trusted
+
+> **Why this is necessary**: Browsers silently block background API requests (like JanitorAI's chat generation calls) to servers with untrusted certificates. Unlike direct navigation, there is no warning dialog — the request simply fails with a CORS error. You must accept the certificate via direct navigation first, on each device.
+
+> **"Unable to connect" instead of a cert warning?** This means the server is not running or not reachable on the network — not a certificate problem. Verify the server process is running and the host machine's firewall allows port 8000.
+
+#### Platform-Specific Notes
+
+**Firefox (all platforms):**
+Navigate to the URL, click **Advanced** → **Accept the Risk and Continue**. If no warning page appears, add a manual exception: go to `about:preferences#privacy` → scroll to **Certificates** → **View Certificates** → **Servers** tab → **Add Exception** → enter the URL → **Get Certificate** → **Confirm Security Exception**.
+
+**Chrome / Edge (desktop):**
+Click the warning page and type `thisisunsafe` (no spaces) to bypass. For localhost only, you can also enable `chrome://flags/#allow-insecure-localhost`.
+
+**Firefox on Android:**
+Works via the standard warning page → **Accept the Risk**.
+
+**Safari (macOS):**
+Safari does not offer a self-signed cert bypass. Import the certificate into Keychain Access:
+1. Copy `data/ssl/cert.pem` from the server machine to the Mac
+2. Double-click the file to open it in **Keychain Access**
+3. Select the **login** keychain and click **Add**
+4. Find "GitInTheVan", right-click → **Get Info**
+5. Expand **Trust** → set to **Always Trust**
+6. Enter your macOS password to confirm
+7. Restart Safari
+
+**Safari / Chrome (iOS):**
+iOS requires installing a certificate profile:
+1. Download `cert.pem` onto the iOS device (e.g. via AirDrop, email, or a web link)
+2. Open **Settings** → **Profile Downloaded** → **Install**
+3. Go to **Settings** → **General** → **About** → **Certificate Trust Settings**
+4. Enable trust for the GitInTheVan certificate
+
+### Configuring JanitorAI for LAN Access
+
+1. Complete the certificate trust steps above on the device running JanitorAI
+2. In JanitorAI settings, go to API configuration
+3. Set API to "OpenAI" mode
+4. Set the Reverse Proxy URL to `https://YOUR-LAN-IP:8000/v1/chat/completions`
+5. Set the API key to your `gitv_` key
+
+### Managing Certificates
+
+Go to **Admin** → **Network** tab to:
+- View certificate status and validity period
+- Regenerate the certificate with additional IP addresses
+- Check whether HTTPS is active
+
+The deploy scripts automatically detect your LAN IP and include it in the certificate. If your IP changes, regenerate the certificate from the Admin panel and restart the server.
+
+---
+
+## 3. Dashboard
 
 ![Dashboard](media/gitv-dashboard.png)
 
@@ -62,7 +127,7 @@ The **Diagnostics** tool runs an automated check of your endpoints and configura
 
 ---
 
-## 3. Endpoints
+## 4. Endpoints
 
 ![Endpoints List](media/gitv-endpoints.png)
 
@@ -121,7 +186,7 @@ The API base path determines how URLs are constructed when forwarding requests:
 
 ---
 
-## 4. Cantrips
+## 5. Cantrips
 
 ![Cantrips List](media/gitv-cantrips.png)
 
@@ -319,7 +384,7 @@ if (context.response) {
 
 ---
 
-## 5. Lorebooks
+## 6. Lorebooks
 
 ![Lorebooks List](media/gitv-lorebooks.png)
 
@@ -375,7 +440,7 @@ Lorebooks support the same four pipeline positions as cantrips (Pre-Driver, Driv
 
 ---
 
-## 6. Verification
+## 7. Verification
 
 Verification uses a separate LLM (the **Navigator**) to check the writing LLM's (the **Driver's**) responses against configurable rules. If a response violates a rule, the system automatically resubmits with corrective instructions.
 
@@ -461,7 +526,7 @@ The result shows whether the response was approved or rejected, along with the r
 
 ---
 
-## 7. Memories
+## 8. Memories
 
 ![Memories Page](media/gitv-memories.png)
 
@@ -515,7 +580,7 @@ Use **Edit** to modify a rule and the **ON/OFF** toggle to enable/disable withou
 
 ---
 
-## 8. Command Tags
+## 9. Command Tags
 
 Command tags are inline directives placed in the user's message text that override pipeline behavior. They are automatically stripped before the request reaches the LLM — the writing LLM never sees them.
 
@@ -563,7 +628,7 @@ Persistent overrides are scoped per-conversation. Different chats have independe
 
 ---
 
-## 9. Maps
+## 10. Maps
 
 ![Maps List](media/gitv-maps.png)
 
@@ -658,7 +723,7 @@ A complete example map — the Gambling Hall (a 3-stage casino game with driver-
 
 ---
 
-## 10. Content Packs
+## 11. Content Packs
 
 ![Content Packs](media/gitv-content-packs.png)
 
@@ -724,7 +789,7 @@ Click **Sync** on a repo to re-fetch the latest `descriptions.json` and file lis
 
 ---
 
-## 11. Settings
+## 12. Settings
 
 ![Settings Page](media/gitv-settings.png)
 
@@ -802,7 +867,7 @@ Admin actions (user creation, deletion, password resets) are recorded in the aud
 
 ---
 
-## 12. Admin
+## 13. Admin
 
 *Admin only. The Admin link in the sidebar is only visible to admin accounts.*
 
