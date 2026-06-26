@@ -152,80 +152,117 @@ echo
 # ============================================================
 echo "[4/6] Checking Node.js and building frontend..."
 NODE_CMD=""
+NODE_LOCAL_DIR="$GITV_ROOT/.node"
 
-# Check PATH first
-if command -v node &> /dev/null; then
-    NODE_CMD="$(command -v node)"
-    echo "Found Node.js in PATH: $NODE_CMD"
-else
-    echo "Node.js not found in PATH. Searching common locations..."
+# Check for previously downloaded local Node first
+if [ -x "$NODE_LOCAL_DIR/bin/node" ]; then
+    NODE_CMD="$NODE_LOCAL_DIR/bin/node"
+    echo "Found local Node.js at $NODE_CMD"
+fi
 
-    # Check Homebrew
-    for BREW_NODE in /opt/homebrew/bin/node /usr/local/bin/node; do
-        if [ -x "$BREW_NODE" ]; then
-            NODE_CMD="$BREW_NODE"
-            echo "Found Node.js at $NODE_CMD"
-            break
+# Check system Node if local not found
+if [ -z "$NODE_CMD" ]; then
+    if command -v node &> /dev/null; then
+        NODE_CMD="$(command -v node)"
+        echo "Found Node.js in PATH: $NODE_CMD"
+    else
+        echo "Node.js not found in PATH. Searching common locations..."
+        for SYS_NODE in /opt/homebrew/bin/node /usr/local/bin/node /opt/local/bin/node; do
+            if [ -x "$SYS_NODE" ]; then
+                NODE_CMD="$SYS_NODE"
+                echo "Found Node.js at $NODE_CMD"
+                break
+            fi
+        done
+        if [ -z "$NODE_CMD" ] && [ -d "$HOME/.nvm/versions/node" ]; then
+            NVM_NODE=$(ls -1d "$HOME/.nvm/versions/node/"v* 2>/dev/null | sort -V | tail -1)
+            if [ -n "$NVM_NODE" ] && [ -x "$NVM_NODE/bin/node" ]; then
+                NODE_CMD="$NVM_NODE/bin/node"
+                echo "Found Node.js via nvm at $NODE_CMD"
+            fi
         fi
-    done
-
-    # Check nvm
-    if [ -z "$NODE_CMD" ] && [ -d "$HOME/.nvm/versions/node" ]; then
-        NVM_NODE=$(ls -1d "$HOME/.nvm/versions/node/"v* 2>/dev/null | sort -V | tail -1)
-        if [ -n "$NVM_NODE" ] && [ -x "$NVM_NODE/bin/node" ]; then
-            NODE_CMD="$NVM_NODE/bin/node"
-            echo "Found Node.js via nvm at $NODE_CMD"
+        if [ -z "$NODE_CMD" ] && [ -d "$HOME/Library/Application Support/fnm/node-versions" ]; then
+            FNM_NODE=$(ls -1d "$HOME/Library/Application Support/fnm/node-versions/"v*/*/bin/node 2>/dev/null | sort -V | tail -1)
+            if [ -n "$FNM_NODE" ] && [ -x "$FNM_NODE" ]; then
+                NODE_CMD="$FNM_NODE"
+                echo "Found Node.js via fnm at $NODE_CMD"
+            fi
         fi
-    fi
-
-    # Check fnm
-    if [ -z "$NODE_CMD" ] && [ -d "$HOME/Library/Application Support/fnm/node-versions" ]; then
-        FNM_NODE=$(ls -1d "$HOME/Library/Application Support/fnm/node-versions/"v*/*/bin/node 2>/dev/null | sort -V | tail -1)
-        if [ -n "$FNM_NODE" ] && [ -x "$FNM_NODE" ]; then
-            NODE_CMD="$FNM_NODE"
-            echo "Found Node.js via fnm at $NODE_CMD"
-        fi
-    fi
-
-    # Check MacPorts
-    if [ -z "$NODE_CMD" ] && [ -x "/opt/local/bin/node" ]; then
-        NODE_CMD="/opt/local/bin/node"
-        echo "Found Node.js via MacPorts at $NODE_CMD"
     fi
 fi
 
-# Handle Node not found
+# If still no Node, offer local download
 if [ -z "$NODE_CMD" ]; then
-    echo "DEBUG: Node.js not found in any location."
-    if [ ! -f "$GITV_ROOT/static/index.html" ]; then
+    echo "Node.js not found on system."
+    if [ -f "$GITV_ROOT/static/index.html" ]; then
+        echo "WARNING: Using existing frontend build."
+        echo "To update the UI, install Node.js 24+ or re-run to download a local copy."
+        NODE_CMD=""
+    else
         echo ""
-        echo "============================================"
-        echo "ERROR: Cannot start without a frontend build."
-        echo "============================================"
-        echo "Node.js is required to build the web UI."
+        echo "Node.js 24+ is required to build the web UI."
         echo ""
         echo "Options:"
-        echo "  1. Install Node.js 24+ from https://nodejs.org"
+        echo "  1. Download portable Node.js to .node/ folder (no admin/sudo required)"
         if command -v brew &> /dev/null; then
             echo "  2. Install via Homebrew: brew install node"
         fi
-        echo "  3. Re-run this script after installing Node.js."
+        echo "  3. Skip (use existing frontend if available)"
         echo ""
-        exit 1
-    else
-        echo "WARNING: Node.js not found. Using existing frontend build."
-        echo "To update the UI after upgrades, install Node.js 24+ from https://nodejs.org"
+        read -p "Choose option [1/2/3]: " NODE_CHOICE
+
+        if [ "$NODE_CHOICE" = "1" ]; then
+            echo "Downloading portable Node.js..."
+            ARCH=$(uname -m)
+            if [ "$ARCH" = "arm64" ]; then
+                NODE_TARBALL="node-v24.17.0-darwin-arm64.tar.gz"
+            else
+                NODE_TARBALL="node-v24.17.0-darwin-x64.tar.gz"
+            fi
+            mkdir -p "$NODE_LOCAL_DIR"
+            curl -fsSL "https://nodejs.org/dist/v24.17.0/$NODE_TARBALL" -o "/tmp/gitv-node.tar.gz"
+            if [ $? -ne 0 ]; then
+                echo "ERROR: Failed to download Node.js."
+                rm -f "/tmp/gitv-node.tar.gz"
+            else
+                tar -xzf "/tmp/gitv-node.tar.gz" -C "$NODE_LOCAL_DIR" --strip-components=1
+                rm -f "/tmp/gitv-node.tar.gz"
+                if [ -x "$NODE_LOCAL_DIR/bin/node" ]; then
+                    NODE_CMD="$NODE_LOCAL_DIR/bin/node"
+                    echo "Portable Node.js installed to $NODE_CMD"
+                else
+                    echo "ERROR: Portable Node extraction failed."
+                    ls -la "$NODE_LOCAL_DIR/bin/" 2>/dev/null
+                fi
+            fi
+        elif [ "$NODE_CHOICE" = "2" ] && command -v brew &> /dev/null; then
+            echo "Installing Node.js via Homebrew..."
+            brew install node
+            hash -r 2>/dev/null
+            if command -v node &> /dev/null; then
+                NODE_CMD="$(command -v node)"
+            fi
+        fi
+        if [ -z "$NODE_CMD" ] && [ ! -f "$GITV_ROOT/static/index.html" ]; then
+            echo ""
+            echo "============================================"
+            echo "ERROR: Cannot start without a frontend build."
+            echo "============================================"
+            exit 1
+        fi
     fi
-else
+fi
+
+# Verify Node version and build
+if [ -n "$NODE_CMD" ]; then
     echo "DEBUG: NODE_CMD=$NODE_CMD"
     echo "Node.js version: $($NODE_CMD --version)"
 
-    # Verify Node version (18+ required)
     NODE_MAJOR=$($NODE_CMD -e "process.stdout.write(process.versions.node.split('.')[0])" 2>/dev/null || echo "0")
     if [ "$NODE_MAJOR" -lt 18 ] 2>/dev/null; then
         echo "WARNING: Node.js version is too old (18+ required, 24+ recommended)."
         if [ -f "$GITV_ROOT/static/index.html" ]; then
-            echo "Using existing frontend build. Upgrade Node.js to update the UI."
+            echo "Using existing frontend build."
         else
             echo "ERROR: Cannot build frontend with this Node.js version."
             echo "Please install Node.js 24+ from https://nodejs.org"
@@ -236,13 +273,13 @@ else
         cd "$GITV_ROOT/frontend"
         if [ ! -d "node_modules" ]; then
             echo "Installing frontend dependencies..."
-            npm install -q
+            "$NODE_CMD" "$(dirname "$NODE_CMD")/../lib/node_modules/npm/bin/npm-cli.js" install -q 2>/dev/null || npm install -q
         else
             echo "Updating frontend dependencies..."
-            npm install -q
+            "$NODE_CMD" "$(dirname "$NODE_CMD")/../lib/node_modules/npm/bin/npm-cli.js" install -q 2>/dev/null || npm install -q
         fi
         echo "Building frontend..."
-        npm run build
+        "$NODE_CMD" "$(dirname "$NODE_CMD")/../lib/node_modules/npm/bin/npm-cli.js" run build 2>/dev/null || npm run build
         cd "$GITV_ROOT"
         echo "Frontend built successfully."
     fi
