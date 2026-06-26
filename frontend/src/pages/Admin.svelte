@@ -430,13 +430,15 @@
     </button>
 
     {#if sslStatus?.cert_exists}
-      <div style="margin-top: 16px; padding: 12px; background: var(--bg-elevated); border-radius: 8px; font-size: 12px;">
-        <p style="margin: 0 0 8px;"><strong>Next steps:</strong></p>
-        <ol style="margin: 0; padding-left: 20px; line-height: 1.8;">
-          <li>Restart the GitInTheVan server</li>
-          <li>On each device, open <code>https://YOUR-IP:{location.port}</code> in a browser</li>
-          <li>Accept the security warning (self-signed cert)</li>
-          <li>In JanitorAI, set the reverse proxy URL to <code>https://YOUR-IP:{location.port}/v1/chat/completions</code></li>
+      <div style="margin-top: 16px; padding: 16px; background: var(--bg-elevated); border-radius: 8px; font-size: 13px; border-left: 3px solid var(--accent);">
+        <p style="margin: 0 0 10px;"><strong>Setup steps (do this on EVERY device):</strong></p>
+        <ol style="margin: 0; padding-left: 20px; line-height: 2;">
+          <li><strong>Restart</strong> the GitInTheVan server</li>
+          <li>Open <code>https://YOUR-IP:{location.port}</code> directly in the browser address bar</li>
+          <li>Click <strong>Advanced</strong> &rarr; <strong>Accept the Risk</strong> (or "Proceed to site")<br>
+            <span style="color: var(--text-dim); font-size: 11px;">This step is mandatory. Browsers silently block requests to untrusted certs without showing a warning for background requests (like JanitorAI's API calls).</span></li>
+          <li>In JanitorAI, set the reverse proxy URL to:<br>
+            <code>https://YOUR-IP:{location.port}/v1/chat/completions</code></li>
         </ol>
       </div>
     {/if}

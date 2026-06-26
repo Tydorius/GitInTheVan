@@ -503,6 +503,8 @@ if not exist "%GITV_ROOT%\.env" (
     echo Creating .env from template... >> "%LOG_FILE%"
     copy "%GITV_ROOT%\.env.example" "%GITV_ROOT%\.env" >nul
 )
+echo Syncing .env with defaults... >> "%LOG_FILE%"
+"!GITV_ROOT!\.venv\Scripts\python" -m app.services.env_sync >> "%LOG_FILE%" 2>&1
 if not exist "%GITV_ROOT%\data" mkdir "%GITV_ROOT%\data"
 echo.
 
@@ -559,6 +561,13 @@ if errorlevel 1 (
 
 REM ============================================================
 REM ============================================================
+REM Detect LAN IP (for SSL cert and startup banner)
+REM ============================================================
+set "LAN_IP="
+for /f "delims=" %%i in ('"!GITV_ROOT!\.venv\Scripts\python" -c "import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(('8.8.8.8',80)); print(s.getsockname()[0]); s.close()" 2^>nul') do set "LAN_IP=%%i"
+echo DEBUG: LAN_IP=[!LAN_IP!] >> "%LOG_FILE%"
+
+REM ============================================================
 REM HTTPS setup for LAN access (auto-generates cert if missing)
 REM ============================================================
 echo.
@@ -569,9 +578,12 @@ if exist "%GITV_ROOT%\data\ssl\cert.pem" (
 ) else (
     echo Generating self-signed certificate...
     echo Generating SSL certificate... >> "%LOG_FILE%"
-    for /f "delims=" %%i in ('"!GITV_ROOT!\.venv\Scripts\python" -c "import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(('8.8.8.8',80)); print(s.getsockname()[0]); s.close()" 2^>nul') do set LAN_IP=%%i
-    echo Detected LAN IP: !LAN_IP! >> "%LOG_FILE%"
-    "!GITV_ROOT!\.venv\Scripts\python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert(extra_ips=['!LAN_IP!'])" >> "%LOG_FILE%" 2>&1
+    if "!LAN_IP!"=="" (
+        "!GITV_ROOT!\.venv\Scripts\python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert()" >> "%LOG_FILE%" 2>&1
+    ) else (
+        echo Detected LAN IP: !LAN_IP! >> "%LOG_FILE%"
+        "!GITV_ROOT!\.venv\Scripts\python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert(extra_ips=['!LAN_IP!'])" >> "%LOG_FILE%" 2>&1
+    )
     if errorlevel 1 (
         echo WARNING: Certificate generation failed. >> "%LOG_FILE%"
     ) else (
@@ -590,12 +602,37 @@ REM ============================================================
 echo [6/6] Starting GitInTheVan...
 echo [INSTALL COMPLETE - Server starting] >> "%LOG_FILE%"
 echo.
-echo ============================================
-echo   GitInTheVan is starting...
-echo   Web UI: http://localhost:8000
-echo   (or http://127.0.0.1:8000)
-echo   Press Ctrl+C to stop.
-echo ============================================
+
+if exist "%GITV_ROOT%\data\ssl\cert.pem" (
+    echo ============================================
+    echo   GitInTheVan is starting with HTTPS...
+    echo   Web UI: https://localhost:8000
+    if not "!LAN_IP!"=="" echo   LAN:    https://!LAN_IP!:8000
+    echo   Press Ctrl+C to stop.
+    echo ============================================
+    echo.
+    if not "!LAN_IP!"=="" (
+        echo IMPORTANT: On each device/browser that will use this proxy:
+        echo   1. Open https://!LAN_IP!:8000 in the browser
+        echo   2. Click "Advanced" then "Accept the Risk" (self-signed cert)
+        echo   3. In JanitorAI, use https://!LAN_IP!:8000/v1/chat/completions
+        echo   as the reverse proxy URL.
+    ) else (
+        echo IMPORTANT: On each device/browser that will use this proxy:
+        echo   1. Open https://YOUR-LAN-IP:8000 in the browser
+        echo   2. Click "Advanced" then "Accept the Risk" (self-signed cert)
+        echo   3. In JanitorAI, use https://YOUR-LAN-IP:8000/v1/chat/completions
+        echo   as the reverse proxy URL.
+    )
+    echo.
+) else (
+    echo ============================================
+    echo   GitInTheVan is starting...
+    echo   Web UI: http://localhost:8000
+    echo   (or http://127.0.0.1:8000)
+    echo   Press Ctrl+C to stop.
+    echo ============================================
+)
 echo.
 echo Installer log saved to: %LOG_FILE%
 echo.
