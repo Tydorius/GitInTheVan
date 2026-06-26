@@ -6,6 +6,17 @@ All notable changes to GitInTheVan are documented in this file.
 
 ### Added
 
+- **Deploy Script Hardening**: Comprehensive improvements to Windows, macOS, and Linux deploy scripts:
+  - All output logged to `scripts/installer.log` for debugging when windows close on failure
+  - Node.js now downloads portable copy to `.node/` folder (no admin/sudo required) when not found on system
+  - Node.js version check fixed (was rejecting valid v24 due to cmd.exe redirect operator bug)
+  - All file paths converted to absolute (`GITV_ROOT`) to prevent PowerShell working directory issues
+  - Python detection: fixed empty `PYTHON_CMD` bug when system Python was already 3.12+
+  - Missing frontend is now a hard failure (prevents confusing "no endpoint configured" proxy error)
+  - Deno download/extract verified with post-check; directory listed on failure
+  - Windows Firewall rule auto-created via `netsh` (or manual command printed if not admin)
+  - macOS/Linux firewall detection with `sudo` commands printed as warnings
+  - App-level firewall check on every server boot via `app/services/firewall_check.py`
 - **Docker Distribution**: Multi-stage Dockerfile with three docker-compose configurations for production deployment:
   - `docker-compose.sqlite.yml` — Single-instance with SQLite (default, zero-config)
   - `docker-compose.mariadb.yml` — App + MariaDB container with persistent volume
