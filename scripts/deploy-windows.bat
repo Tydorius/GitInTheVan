@@ -26,6 +26,21 @@ echo Changed to: %GITV_ROOT%
 echo.
 
 REM ============================================================
+REM Detect PowerShell (may not be on PATH on some systems)
+REM ============================================================
+set "PS_CMD="
+where powershell >nul 2>&1
+if not errorlevel 1 (
+    set "PS_CMD=powershell"
+) else if exist "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" (
+    set "PS_CMD=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+    echo DEBUG: PowerShell not on PATH, using system location >> "%LOG_FILE%"
+) else (
+    echo WARNING: PowerShell not found. File downloads may fail. >> "%LOG_FILE%"
+)
+echo DEBUG: PS_CMD=[!PS_CMD!] >> "%LOG_FILE%"
+
+REM ============================================================
 REM Check Python version (3.12+ required)
 REM ============================================================
 echo [1/6] Checking Python...
@@ -223,11 +238,11 @@ if exist "%DENO_EXE%" (
         echo Deno not found. Downloading... >> "%LOG_FILE%"
         if not exist "%DENO_DIR%" mkdir "%DENO_DIR%"
         set "DENO_ZIP=%DENO_DIR%\deno.zip"
-        powershell -Command "Invoke-WebRequest -Uri 'https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip' -OutFile '!DENO_ZIP!'" >> "%LOG_FILE%" 2>&1
+        "!PS_CMD!" -Command "Invoke-WebRequest -Uri 'https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip' -OutFile '!DENO_ZIP!'" >> "%LOG_FILE%" 2>&1
         if errorlevel 1 (
             echo WARNING: Could not download Deno. >> "%LOG_FILE%"
         ) else (
-            powershell -Command "Expand-Archive -Path '!DENO_ZIP!' -DestinationPath '%DENO_DIR%' -Force" >> "%LOG_FILE%" 2>&1
+            "!PS_CMD!" -Command "Expand-Archive -Path '!DENO_ZIP!' -DestinationPath '%DENO_DIR%' -Force" >> "%LOG_FILE%" 2>&1
             del "!DENO_ZIP!"
             if exist "%DENO_EXE%" (
                 echo Deno installed to %DENO_EXE% >> "%LOG_FILE%"
@@ -334,7 +349,7 @@ echo Downloading portable Node.js...
 echo Downloading portable Node.js... >> "%LOG_FILE%"
 if not exist "%NODE_LOCAL_DIR%" mkdir "%NODE_LOCAL_DIR%"
 set "NODE_ZIP=%NODE_LOCAL_DIR%\node.zip"
-powershell -Command "$ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -Uri 'https://nodejs.org/dist/v24.17.0/node-v24.17.0-win-x64.zip' -OutFile '%NODE_ZIP%'" >> "%LOG_FILE%" 2>&1
+"!PS_CMD!" -Command "$ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -Uri 'https://nodejs.org/dist/v24.17.0/node-v24.17.0-win-x64.zip' -OutFile '%NODE_ZIP%'" >> "%LOG_FILE%" 2>&1
 if errorlevel 1 (
     echo ERROR: Failed to download Node.js. >> "%LOG_FILE%"
     echo ERROR: Failed to download Node.js.
@@ -342,7 +357,7 @@ if errorlevel 1 (
     goto :node_check_existing
 )
 echo Extracting...
-powershell -Command "$ProgressPreference = 'SilentlyContinue'; Expand-Archive -Path '%NODE_ZIP%' -DestinationPath '%NODE_LOCAL_DIR%' -Force" >> "%LOG_FILE%" 2>&1
+"!PS_CMD!" -Command "$ProgressPreference = 'SilentlyContinue'; Expand-Archive -Path '%NODE_ZIP%' -DestinationPath '%NODE_LOCAL_DIR%' -Force" >> "%LOG_FILE%" 2>&1
 del "%NODE_ZIP%"
 REM The zip extracts to a subfolder like node-v24.17.0-win-x64\
 REM Move the contents up one level
@@ -508,8 +523,9 @@ if not exist "%GITV_ROOT%\static\index.html" (
 if not exist "%DENO_EXE%" (
     where deno >nul 2>&1
     if errorlevel 1 (
-        echo WARNING: Deno not found >> "%LOG_FILE%"
-        set VERIFY_OK=0
+        echo WARNING: Deno not found. Cantrips will not work. >> "%LOG_FILE%"
+        echo WARNING: Deno not found. Cantrips will not work.
+        echo   Install Deno manually from https://deno.land or set GITV_DENO_PATH
     )
 )
 if "!VERIFY_OK!"=="0" (
