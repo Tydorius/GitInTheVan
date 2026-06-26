@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     log_file: str = ""
     log_max_size_mb: int = 1
     log_retention_days: int = 30
+    ssl_certfile: str = ""
+    ssl_keyfile: str = ""
 
     @field_validator("default_endpoint_url")
     @classmethod
@@ -45,6 +47,10 @@ class Settings(BaseSettings):
         if self.cors_origins == "*":
             return ["*"]
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def ssl_enabled(self) -> bool:
+        return bool(self.ssl_certfile and self.ssl_keyfile)
 
     model_config = {"env_prefix": "GITV_"}
 
