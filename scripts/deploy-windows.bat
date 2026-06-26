@@ -12,7 +12,8 @@ echo Script location: %~dp0
 echo.
 
 cd /d "%~dp0\.."
-echo Changed to: %CD%
+set "GITV_ROOT=%CD%"
+echo Changed to: %GITV_ROOT%
 echo.
 
 REM Check Python version (3.12+ required)
@@ -151,10 +152,10 @@ echo.
 
 REM Check for existing venv or create it
 echo [2/6] Setting up Python environment...
-if not exist ".venv\Scripts\python.exe" (
+if not exist "%GITV_ROOT%\.venv\Scripts\python.exe" (
     echo Creating virtual environment...
-    echo DEBUG: Running command: "!PYTHON_CMD!" -m venv .venv
-    "!PYTHON_CMD!" -m venv .venv
+    echo DEBUG: Running command: "!PYTHON_CMD!" -m venv "%GITV_ROOT%\.venv"
+    "!PYTHON_CMD!" -m venv "%GITV_ROOT%\.venv"
     if errorlevel 1 (
         echo ERROR: Failed to create virtual environment.
         echo DEBUG: PYTHON_CMD was [!PYTHON_CMD!]
@@ -166,9 +167,9 @@ if not exist ".venv\Scripts\python.exe" (
     echo DEBUG: .venv already exists, skipping creation
 )
 echo Upgrading pip...
-".venv\Scripts\python" -m pip install --upgrade pip -q
+"%GITV_ROOT%\.venv\Scripts\python" -m pip install --upgrade pip -q
 echo Installing dependencies...
-".venv\Scripts\pip" install -e ".[dev]" -q
+"%GITV_ROOT%\.venv\Scripts\pip" install -e "%GITV_ROOT%.[dev]" -q
 if errorlevel 1 (
     echo ERROR: Failed to install Python dependencies.
     echo This usually means pip is outdated or Python version is incompatible.
@@ -180,24 +181,40 @@ echo.
 
 REM Check Deno
 echo [3/6] Checking Deno runtime...
-if exist ".deno\deno.exe" (
-    echo Deno found at .deno\deno.exe
+set "DENO_DIR=%GITV_ROOT%\.deno"
+set "DENO_EXE=%DENO_DIR%\deno.exe"
+
+if exist "%DENO_EXE%" (
+    echo Deno found at %DENO_EXE%
 ) else (
     where deno >nul 2>&1
     if not errorlevel 1 (
         echo Deno found in PATH
     ) else (
         echo Deno not found. Downloading...
-        if not exist ".deno" mkdir ".deno"
-        powershell -Command "Invoke-WebRequest -Uri 'https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip' -OutFile '.deno\deno.zip'"
+        if not exist "%DENO_DIR%" mkdir "%DENO_DIR%"
+        set "DENO_ZIP=%DENO_DIR%\deno.zip"
+        echo DEBUG: Deno dir: %DENO_DIR%
+        echo DEBUG: Download target: !DENO_ZIP!
+        powershell -Command "Invoke-WebRequest -Uri 'https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip' -OutFile '!DENO_ZIP!'"
         if errorlevel 1 (
             echo WARNING: Could not download Deno automatically.
             echo Cantrips will not work. Please install Deno manually from https://deno.land
-            echo Or download and place at .deno\deno.exe
+            echo Or download and place at %DENO_EXE%
         ) else (
-            powershell -Command "Expand-Archive -Path '.deno\deno.zip' -DestinationPath '.deno\' -Force"
-            del ".deno\deno.zip"
-            echo Deno installed to .deno\deno.exe
+            echo DEBUG: Extracting !DENO_ZIP! to %DENO_DIR%
+            powershell -Command "Expand-Archive -Path '!DENO_ZIP!' -DestinationPath '%DENO_DIR%' -Force"
+            del "!DENO_ZIP!"
+            if exist "%DENO_EXE%" (
+                echo Deno installed to %DENO_EXE%
+            ) else (
+                echo WARNING: Deno download succeeded but deno.exe not found at expected location.
+                echo DEBUG: Contents of %DENO_DIR%:
+                dir "%DENO_DIR%" /b
+                echo.
+                echo Cantrips will not work. Please install Deno manually from https://deno.land
+                echo Or download and place at %DENO_EXE%
+            )
         )
     )
 )
@@ -207,7 +224,7 @@ REM Check Node and build frontend
 echo [4/6] Building frontend...
 where node >nul 2>&1
 if errorlevel 1 (
-    if exist "static\index.html" (
+    if exist "%GITV_ROOT%\static\index.html" (
         echo WARNING: Node.js not found. Using existing frontend build.
         echo To update the UI after upgrades, install Node.js 24+ from https://nodejs.org
     ) else (
@@ -216,7 +233,7 @@ if errorlevel 1 (
         echo   cd frontend ^&^& npm install ^&^& npm run build
     )
 ) else (
-    cd frontend
+    cd /d "%GITV_ROOT%\frontend"
     if not exist "node_modules" (
         echo Installing frontend dependencies...
         call npm install -q
@@ -226,22 +243,44 @@ if errorlevel 1 (
     )
     echo Building frontend...
     call npm run build
-    cd ..
+    cd /d "%GITV_ROOT%"
     echo Frontend built.
 )
 echo.
 
 REM Create .env if missing
 echo [5/6] Checking configuration...
-if not exist ".env" (
+if not exist "%GITV_ROOT%\.env" (
     echo Creating .env from template...
-    copy ".env.example" ".env" >nul
+    copy "%GITV_ROOT%\.env.example" "%GITV_ROOT%\.env" >nul
     echo Created .env - edit it to configure your endpoint and secret key.
 )
 echo.
 
 REM Create data directory
-if not exist "data" mkdir "data"
+if not exist "%GITV_ROOT%\data" mkdir "%GITV_ROOT%\data"
+
+REM Verify installation
+echo Verifying installation...
+set VERIFY_OK=1
+if not exist "%GITV_ROOT%\.venv\Scripts\python.exe" (
+    echo ERROR: Python venv not found at %GITV_ROOT%\.venv\Scripts\python.exe
+    set VERIFY_OK=0
+)
+if not exist "%GITV_ROOT%\static\index.html" (
+    echo WARNING: Frontend build not found at %GITV_ROOT%\static\index.html
+    echo The web UI will not load until you build the frontend.
+    set VERIFY_OK=0
+)
+if not exist "%DENO_EXE%" (
+    where deno >nul 2>&1
+    if errorlevel 1 (
+        echo WARNING: Deno not found at %DENO_EXE% or in PATH
+        echo Cantrips will not work without Deno.
+        set VERIFY_OK=0
+    )
+)
+if "!VERIFY_OK!"=="1" echo All components verified.
 
 REM Start server
 echo [6/6] Starting GitInTheVan...
@@ -253,5 +292,6 @@ echo   Press Ctrl+C to stop.
 echo ============================================
 echo.
 
-".venv\Scripts\uvicorn" app.main:app --host 0.0.0.0 --port 8000
+cd /d "%GITV_ROOT%"
+"%GITV_ROOT%\.venv\Scripts\uvicorn" app.main:app --host 0.0.0.0 --port 8000
 pause

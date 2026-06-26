@@ -6,7 +6,11 @@ echo "  GitInTheVan - macOS Deploy"
 echo "============================================"
 echo
 
-cd "$(dirname "$0")/.."
+GITV_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+echo "Working directory: $GITV_ROOT"
+echo
+
+cd "$GITV_ROOT"
 
 # Check Python version (3.12+ required)
 echo "[1/6] Checking Python..."
@@ -76,18 +80,19 @@ if [ -z "$PYTHON_CMD" ]; then
         fi
     fi
 fi
+echo "DEBUG: PYTHON_CMD=$PYTHON_CMD"
 echo
 
 # Check for existing venv or create it
 echo "[2/6] Setting up Python environment..."
-if [ ! -f ".venv/bin/python" ]; then
+if [ ! -f "$GITV_ROOT/.venv/bin/python" ]; then
     echo "Creating virtual environment..."
-    $PYTHON_CMD -m venv .venv
+    "$PYTHON_CMD" -m venv "$GITV_ROOT/.venv"
 fi
 echo "Upgrading pip..."
-.venv/bin/python -m pip install --upgrade pip -q
+"$GITV_ROOT/.venv/bin/python" -m pip install --upgrade pip -q
 echo "Installing dependencies..."
-.venv/bin/pip install -e ".[dev]" -q
+"$GITV_ROOT/.venv/bin/pip" install -e "$GITV_ROOT[dev]" -q
 echo "Done."
 echo
 
@@ -99,24 +104,33 @@ if [ "$ARCH" = "arm64" ]; then
 else
     DENO_ARCH="x86_64-apple-darwin"
 fi
+DENO_DIR="$GITV_ROOT/.deno"
+DENO_BIN="$DENO_DIR/deno"
 
-if [ -f ".deno/deno" ]; then
-    echo "Deno found at .deno/deno"
+if [ -f "$DENO_BIN" ]; then
+    echo "Deno found at $DENO_BIN"
 elif command -v deno &> /dev/null; then
     echo "Deno found in PATH"
 else
     echo "Deno not found. Downloading..."
-    mkdir -p .deno
-    curl -fsSL "https://github.com/denoland/deno/releases/latest/download/deno-${DENO_ARCH}.zip" -o .deno/deno.zip
+    mkdir -p "$DENO_DIR"
+    curl -fsSL "https://github.com/denoland/deno/releases/latest/download/deno-${DENO_ARCH}.zip" -o "$DENO_DIR/deno.zip"
     if [ $? -ne 0 ]; then
         echo "WARNING: Could not download Deno automatically."
         echo "Cantrips will not work. Please install Deno manually from https://deno.land"
-        rm -f .deno/deno.zip
+        rm -f "$DENO_DIR/deno.zip"
     else
-        cd .deno && unzip -o deno.zip && cd ..
-        rm -f .deno/deno.zip
-        chmod +x .deno/deno
-        echo "Deno installed to .deno/deno"
+        cd "$DENO_DIR" && unzip -o deno.zip && cd "$GITV_ROOT"
+        rm -f "$DENO_DIR/deno.zip"
+        chmod +x "$DENO_BIN"
+        if [ -f "$DENO_BIN" ]; then
+            echo "Deno installed to $DENO_BIN"
+        else
+            echo "WARNING: Deno download succeeded but binary not found."
+            echo "Contents of $DENO_DIR:"
+            ls -la "$DENO_DIR"
+            echo "Please install Deno manually from https://deno.land"
+        fi
     fi
 fi
 echo
@@ -124,7 +138,7 @@ echo
 # Check Node and build frontend
 echo "[4/6] Building frontend..."
 if ! command -v node &> /dev/null; then
-    if [ -f "static/index.html" ]; then
+    if [ -f "$GITV_ROOT/static/index.html" ]; then
         echo "WARNING: Node.js not found. Using existing frontend build."
         echo "To update the UI after upgrades, install Node.js 24+ from https://nodejs.org"
     else
@@ -133,7 +147,7 @@ if ! command -v node &> /dev/null; then
         echo "  cd frontend && npm install && npm run build"
     fi
 else
-    cd frontend
+    cd "$GITV_ROOT/frontend"
     if [ ! -d "node_modules" ]; then
         echo "Installing frontend dependencies..."
         npm install -q
@@ -143,22 +157,43 @@ else
     fi
     echo "Building frontend..."
     npm run build
-    cd ..
+    cd "$GITV_ROOT"
     echo "Frontend built."
 fi
 echo
 
 # Create .env if missing
 echo "[5/6] Checking configuration..."
-if [ ! -f ".env" ]; then
+if [ ! -f "$GITV_ROOT/.env" ]; then
     echo "Creating .env from template..."
-    cp .env.example .env
+    cp "$GITV_ROOT/.env.example" "$GITV_ROOT/.env"
     echo "Created .env - edit it to configure your endpoint and secret key."
 fi
 echo
 
 # Create data directory
-mkdir -p data
+mkdir -p "$GITV_ROOT/data"
+
+# Verify installation
+echo "Verifying installation..."
+VERIFY_OK=1
+if [ ! -f "$GITV_ROOT/.venv/bin/python" ]; then
+    echo "ERROR: Python venv not found at $GITV_ROOT/.venv/bin/python"
+    VERIFY_OK=0
+fi
+if [ ! -f "$GITV_ROOT/static/index.html" ]; then
+    echo "WARNING: Frontend build not found at $GITV_ROOT/static/index.html"
+    echo "The web UI will not load until you build the frontend."
+    VERIFY_OK=0
+fi
+if [ ! -f "$DENO_BIN" ] && ! command -v deno &> /dev/null; then
+    echo "WARNING: Deno not found at $DENO_BIN or in PATH"
+    echo "Cantrips will not work without Deno."
+    VERIFY_OK=0
+fi
+if [ "$VERIFY_OK" = "1" ]; then
+    echo "All components verified."
+fi
 
 # Start server
 echo "[6/6] Starting GitInTheVan..."
@@ -170,4 +205,5 @@ echo "  Press Ctrl+C to stop."
 echo "============================================"
 echo
 
-.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+cd "$GITV_ROOT"
+"$GITV_ROOT/.venv/bin/uvicorn" app.main:app --host 0.0.0.0 --port 8000
