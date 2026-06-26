@@ -12,7 +12,9 @@ echo
 
 cd "$GITV_ROOT"
 
+# ============================================================
 # Check Python version (3.12+ required)
+# ============================================================
 echo "[1/6] Checking Python..."
 PYTHON_CMD=""
 
@@ -63,40 +65,42 @@ if [ -z "$PYTHON_CMD" ]; then
             INSTALL_CMD="sudo pacman -S --noconfirm python"
         fi
 
-    if [ -n "$PKG_MGR" ]; then
-        read -p "Would you like to install Python 3.12 via $PKG_MGR? [y/n]: " INSTALL_PY
-        if [[ "$INSTALL_PY" =~ ^[Yy]$ ]]; then
-            echo "Installing Python 3.12..."
-            if ! eval "$INSTALL_CMD"; then
-                echo "Installation failed. Python 3.12 may not be available in your distribution's"
-                echo "default repositories. Please install it manually."
-                exit 1
-            fi
-            hash -r 2>/dev/null
-            if command -v python3.12 &> /dev/null; then
-                PYTHON_CMD="python3.12"
-            elif command -v python3 &> /dev/null && python3 -c "import sys; exit(0 if sys.version_info >= (3, 12) else 1)" 2>/dev/null; then
-                PYTHON_CMD="python3"
+        if [ -n "$PKG_MGR" ]; then
+            read -p "Would you like to install Python 3.12 via $PKG_MGR? [y/n]: " INSTALL_PY
+            if [[ "$INSTALL_PY" =~ ^[Yy]$ ]]; then
+                echo "Installing Python 3.12..."
+                if ! eval "$INSTALL_CMD"; then
+                    echo "Installation failed. Python 3.12 may not be available in your distribution's"
+                    echo "default repositories. Please install it manually."
+                    exit 1
+                fi
+                hash -r 2>/dev/null
+                if command -v python3.12 &> /dev/null; then
+                    PYTHON_CMD="python3.12"
+                elif command -v python3 &> /dev/null && python3 -c "import sys; exit(0 if sys.version_info >= (3, 12) else 1)" 2>/dev/null; then
+                    PYTHON_CMD="python3"
+                else
+                    echo "Installation completed but Python 3.12+ not found."
+                    echo "Please open a new terminal and re-run this script."
+                    exit 1
+                fi
             else
-                echo "Installation completed but Python 3.12+ not found."
-                echo "Please open a new terminal and re-run this script."
+                echo "Please install Python 3.12+ via your package manager."
                 exit 1
             fi
         else
-            echo "Please install Python 3.12+ via your package manager."
+            echo "Could not detect a supported package manager (apt/dnf/pacman)."
+            echo "Please install Python 3.12+ manually."
             exit 1
         fi
-    else
-        echo "Could not detect a supported package manager (apt/dnf/pacman)."
-        echo "Please install Python 3.12+ manually."
-        exit 1
     fi
-fi
 fi
 echo "DEBUG: PYTHON_CMD=$PYTHON_CMD"
 echo
 
-# Check for existing venv or create it
+# ============================================================
+# Set up Python environment
+# ============================================================
 echo "[2/6] Setting up Python environment..."
 if [ ! -f "$GITV_ROOT/.venv/bin/python" ]; then
     echo "Creating virtual environment..."
@@ -109,7 +113,9 @@ echo "Installing dependencies..."
 echo "Done."
 echo
 
+# ============================================================
 # Check Deno
+# ============================================================
 echo "[3/6] Checking Deno runtime..."
 ARCH=$(uname -m)
 if [ "$ARCH" = "aarch64" ]; then
@@ -148,34 +154,103 @@ else
 fi
 echo
 
-# Check Node and build frontend
-echo "[4/6] Building frontend..."
-if ! command -v node &> /dev/null; then
-    if [ -f "$GITV_ROOT/static/index.html" ]; then
+# ============================================================
+# Check Node.js and build frontend
+# ============================================================
+echo "[4/6] Checking Node.js and building frontend..."
+NODE_CMD=""
+
+# Check PATH first
+if command -v node &> /dev/null; then
+    NODE_CMD="$(command -v node)"
+    echo "Found Node.js in PATH: $NODE_CMD"
+else
+    echo "Node.js not found in PATH. Searching common locations..."
+
+    # Check common system locations
+    for SYS_NODE in /usr/bin/node /usr/local/bin/node /snap/bin/node; do
+        if [ -x "$SYS_NODE" ]; then
+            NODE_CMD="$SYS_NODE"
+            echo "Found Node.js at $NODE_CMD"
+            break
+        fi
+    done
+
+    # Check nvm
+    if [ -z "$NODE_CMD" ] && [ -d "$HOME/.nvm/versions/node" ]; then
+        NVM_NODE=$(ls -1d "$HOME/.nvm/versions/node/"v* 2>/dev/null | sort -V | tail -1)
+        if [ -n "$NVM_NODE" ] && [ -x "$NVM_NODE/bin/node" ]; then
+            NODE_CMD="$NVM_NODE/bin/node"
+            echo "Found Node.js via nvm at $NODE_CMD"
+        fi
+    fi
+
+    # Check fnm
+    if [ -z "$NODE_CMD" ] && [ -d "$HOME/.local/share/fnm/node-versions" ]; then
+        FNM_NODE=$(ls -1d "$HOME/.local/share/fnm/node-versions/"v*/*/bin/node 2>/dev/null | sort -V | tail -1)
+        if [ -n "$FNM_NODE" ] && [ -x "$FNM_NODE" ]; then
+            NODE_CMD="$FNM_NODE"
+            echo "Found Node.js via fnm at $NODE_CMD"
+        fi
+    fi
+fi
+
+# Handle Node not found
+if [ -z "$NODE_CMD" ]; then
+    echo "DEBUG: Node.js not found in any location."
+    if [ ! -f "$GITV_ROOT/static/index.html" ]; then
+        echo ""
+        echo "============================================"
+        echo "ERROR: Cannot start without a frontend build."
+        echo "============================================"
+        echo "Node.js is required to build the web UI."
+        echo ""
+        echo "Options:"
+        echo "  1. Install Node.js 24+ from https://nodejs.org"
+        echo "  2. Install via your package manager (e.g. apt, dnf, pacman)"
+        echo "  3. Re-run this script after installing Node.js."
+        echo ""
+        exit 1
+    else
         echo "WARNING: Node.js not found. Using existing frontend build."
         echo "To update the UI after upgrades, install Node.js 24+ from https://nodejs.org or your package manager"
-    else
-        echo "WARNING: Node.js not found. Frontend will not be built."
-        echo "Install Node.js 24+ from https://nodejs.org or your package manager and run:"
-        echo "  cd frontend && npm install && npm run build"
     fi
 else
-    cd "$GITV_ROOT/frontend"
-    if [ ! -d "node_modules" ]; then
-        echo "Installing frontend dependencies..."
-        npm install -q
+    echo "DEBUG: NODE_CMD=$NODE_CMD"
+    echo "Node.js version: $($NODE_CMD --version)"
+
+    # Verify Node version (18+ required)
+    NODE_MAJOR=$($NODE_CMD -e "process.stdout.write(process.versions.node.split('.')[0])" 2>/dev/null || echo "0")
+    if [ "$NODE_MAJOR" -lt 18 ] 2>/dev/null; then
+        echo "WARNING: Node.js version is too old (18+ required, 24+ recommended)."
+        if [ -f "$GITV_ROOT/static/index.html" ]; then
+            echo "Using existing frontend build. Upgrade Node.js to update the UI."
+        else
+            echo "ERROR: Cannot build frontend with this Node.js version."
+            echo "Please install Node.js 24+ from https://nodejs.org"
+            exit 1
+        fi
     else
-        echo "Updating frontend dependencies..."
-        npm install -q
+        echo "Building frontend..."
+        cd "$GITV_ROOT/frontend"
+        if [ ! -d "node_modules" ]; then
+            echo "Installing frontend dependencies..."
+            npm install -q
+        else
+            echo "Updating frontend dependencies..."
+            npm install -q
+        fi
+        echo "Building frontend..."
+        npm run build
+        cd "$GITV_ROOT"
+        echo "Frontend built successfully."
     fi
-    echo "Building frontend..."
-    npm run build
-    cd "$GITV_ROOT"
-    echo "Frontend built."
 fi
 echo
 
-# Create .env if missing
+# ============================================================
+# Configuration
+# ============================================================
 echo "[5/6] Checking configuration..."
 if [ ! -f "$GITV_ROOT/.env" ]; then
     echo "Creating .env from template..."
@@ -187,7 +262,9 @@ echo
 # Create data directory
 mkdir -p "$GITV_ROOT/data"
 
+# ============================================================
 # Verify installation
+# ============================================================
 echo "Verifying installation..."
 VERIFY_OK=1
 if [ ! -f "$GITV_ROOT/.venv/bin/python" ]; then
@@ -195,8 +272,8 @@ if [ ! -f "$GITV_ROOT/.venv/bin/python" ]; then
     VERIFY_OK=0
 fi
 if [ ! -f "$GITV_ROOT/static/index.html" ]; then
-    echo "WARNING: Frontend build not found at $GITV_ROOT/static/index.html"
-    echo "The web UI will not load until you build the frontend."
+    echo "ERROR: Frontend build not found at $GITV_ROOT/static/index.html"
+    echo "The web UI will not load. Ensure Node.js 24+ is installed and re-run."
     VERIFY_OK=0
 fi
 if [ ! -f "$DENO_BIN" ] && ! command -v deno &> /dev/null; then
@@ -204,19 +281,25 @@ if [ ! -f "$DENO_BIN" ] && ! command -v deno &> /dev/null; then
     echo "Cantrips will not work without Deno."
     VERIFY_OK=0
 fi
-if [ "$VERIFY_OK" = "1" ]; then
-    echo "All components verified."
+if [ "$VERIFY_OK" = "0" ]; then
+    echo ""
+    echo "ERROR: Installation verification failed. See errors above."
+    exit 1
 fi
+echo "All components verified."
 
+# ============================================================
 # Start server
+# ============================================================
 echo "[6/6] Starting GitInTheVan..."
 echo
 echo "============================================"
 echo "  GitInTheVan is starting..."
 echo "  Web UI: http://localhost:8000"
+echo "  (or http://127.0.0.1:8000)"
 echo "  Press Ctrl+C to stop."
 echo "============================================"
 echo
 
 cd "$GITV_ROOT"
-"$GITV_ROOT/.venv/bin/uvicorn" app.main:app --host 0.0.0.0 --port 8000
+"$GITV_ROOT/.venv/bin/uvicorn" app.main:app --host :: --port 8000
