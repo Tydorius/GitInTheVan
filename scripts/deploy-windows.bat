@@ -247,7 +247,17 @@ echo [4/6] Checking Node.js and building frontend...
 echo [4/6] Checking Node.js and building frontend... >> "%LOG_FILE%"
 set "NODE_CMD="
 set "NPM_CMD="
+set "NODE_LOCAL_DIR=%GITV_ROOT%\.node"
 
+REM Check for previously downloaded local Node first
+if exist "%NODE_LOCAL_DIR%\node.exe" (
+    set "NODE_CMD=%NODE_LOCAL_DIR%\node.exe"
+    set "NPM_CMD=%NODE_LOCAL_DIR%\npm.cmd"
+    echo Found local Node.js at !NODE_CMD! >> "%LOG_FILE%"
+    goto :node_verify
+)
+
+REM Check PATH
 where node >nul 2>&1
 if not errorlevel 1 (
     for /f "delims=" %%n in ('where node') do set "NODE_CMD=%%n"
@@ -256,69 +266,120 @@ if not errorlevel 1 (
         for /f "delims=" %%n in ('where npm') do set "NPM_CMD=%%n"
     )
     echo Found Node.js in PATH: !NODE_CMD! >> "%LOG_FILE%"
-    goto :node_found
+    goto :node_verify
 )
 
-echo Node.js not found in PATH. Searching... >> "%LOG_FILE%"
-
+REM Check common system locations
 if exist "C:\Program Files\nodejs\node.exe" (
     set "NODE_CMD=C:\Program Files\nodejs\node.exe"
     set "NPM_CMD=C:\Program Files\nodejs\npm.cmd"
-    goto :node_found
+    echo Found Node.js in Program Files >> "%LOG_FILE%"
+    goto :node_verify
 )
 if exist "C:\Program Files (x86)\nodejs\node.exe" (
     set "NODE_CMD=C:\Program Files (x86)\nodejs\node.exe"
     set "NPM_CMD=C:\Program Files (x86)\nodejs\npm.cmd"
-    goto :node_found
+    echo Found Node.js in Program Files ^(x86^) >> "%LOG_FILE%"
+    goto :node_verify
 )
 if exist "%LOCALAPPDATA%\Programs\nodejs\node.exe" (
     set "NODE_CMD=%LOCALAPPDATA%\Programs\nodejs\node.exe"
     set "NPM_CMD=%LOCALAPPDATA%\Programs\nodejs\npm.cmd"
-    goto :node_found
+    echo Found Node.js in LOCALAPPDATA >> "%LOG_FILE%"
+    goto :node_verify
 )
 
+REM Check nvm-windows
 for %%v in (24 23 22 21 20) do (
     for /f "delims=" %%p in ('dir /b /ad "%LOCALAPPDATA%\nvm\v%%v*" 2^>nul') do (
         if exist "%LOCALAPPDATA%\nvm\%%p\node.exe" (
             set "NODE_CMD=%LOCALAPPDATA%\nvm\%%p\node.exe"
             set "NPM_CMD=%LOCALAPPDATA%\nvm\%%p\npm.cmd"
             echo Found Node.js via nvm-windows >> "%LOG_FILE%"
-            goto :node_found
+            goto :node_verify
         )
     )
 )
 
+REM Check fnm
 if exist "%LOCALAPPDATA%\fnm_multishells" (
     for /f "delims=" %%p in ('dir /b /ad /s "%LOCALAPPDATA%\fnm_multishells\*\node.exe" 2^>nul') do (
         set "NODE_CMD=%%p"
         echo Found Node.js via fnm >> "%LOG_FILE%"
-        goto :node_found
+        goto :node_verify
     )
 )
 
-echo DEBUG: Node.js not found in any location. >> "%LOG_FILE%"
-
-where winget >nul 2>&1
-if errorlevel 1 (
-    echo ERROR: Node.js not found and winget unavailable. >> "%LOG_FILE%"
-    goto :node_failed
-)
-
+REM No system Node found — offer local portable download
+echo Node.js not found on system. >> "%LOG_FILE%"
 echo.
 echo Node.js 24+ is required to build the web UI.
-set "INSTALL_NODE="
-set /p INSTALL_NODE="Would you like to install Node.js via winget? [y/n]: "
-if /i not "!INSTALL_NODE!"=="y" goto :node_failed
-
+echo You can install it system-wide via winget, or download a portable
+echo copy locally to the GitInTheVan folder ^(no admin required^).
 echo.
+echo   1. Download portable Node.js to .node\ folder ^(recommended^)
+echo   2. Install Node.js system-wide via winget
+echo   3. Skip ^(use existing frontend if available^)
+echo.
+set "NODE_CHOICE="
+set /p NODE_CHOICE="Choose option [1/2/3]: "
+
+if "!NODE_CHOICE!"=="1" goto :node_download_local
+if "!NODE_CHOICE!"=="2" goto :node_install_winget
+goto :node_check_existing
+
+:node_download_local
+echo.
+echo Downloading portable Node.js...
+echo Downloading portable Node.js... >> "%LOG_FILE%"
+if not exist "%NODE_LOCAL_DIR%" mkdir "%NODE_LOCAL_DIR%"
+set "NODE_ZIP=%NODE_LOCAL_DIR%\node.zip"
+powershell -Command "$ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -Uri 'https://nodejs.org/dist/v24.17.0/node-v24.17.0-win-x64.zip' -OutFile '%NODE_ZIP%'" >> "%LOG_FILE%" 2>&1
+if errorlevel 1 (
+    echo ERROR: Failed to download Node.js. >> "%LOG_FILE%"
+    echo ERROR: Failed to download Node.js.
+    del "%NODE_ZIP%" 2>nul
+    goto :node_check_existing
+)
+echo Extracting...
+powershell -Command "$ProgressPreference = 'SilentlyContinue'; Expand-Archive -Path '%NODE_ZIP%' -DestinationPath '%NODE_LOCAL_DIR%' -Force" >> "%LOG_FILE%" 2>&1
+del "%NODE_ZIP%"
+REM The zip extracts to a subfolder like node-v24.17.0-win-x64\
+REM Move the contents up one level
+for /d %%d in ("%NODE_LOCAL_DIR%\node-*") do (
+    move /y "%%d\*" "%NODE_LOCAL_DIR%\" >nul 2>&1
+    move /y "%%d\node_modules" "%NODE_LOCAL_DIR%\" >nul 2>&1
+    for /d %%s in ("%%d\*") do (
+        move /y "%%s" "%NODE_LOCAL_DIR%\" >nul 2>&1
+    )
+    rd "%%d" 2>nul
+)
+if exist "%NODE_LOCAL_DIR%\node.exe" (
+    set "NODE_CMD=%NODE_LOCAL_DIR%\node.exe"
+    set "NPM_CMD=%NODE_LOCAL_DIR%\npm.cmd"
+    echo Portable Node.js installed to !NODE_CMD! >> "%LOG_FILE%"
+    echo Portable Node.js installed.
+    goto :node_verify
+) else (
+    echo ERROR: Portable Node extraction failed. >> "%LOG_FILE%"
+    echo Contents of !NODE_LOCAL_DIR!: >> "%LOG_FILE%"
+    dir "%NODE_LOCAL_DIR%" /b >> "%LOG_FILE%" 2>&1
+    goto :node_check_existing
+)
+
+:node_install_winget
+where winget >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: winget not available. >> "%LOG_FILE%"
+    goto :node_check_existing
+)
 echo Installing Node.js LTS via winget...
 echo Installing Node.js via winget... >> "%LOG_FILE%"
 winget install OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements >> "%LOG_FILE%" 2>&1
 if errorlevel 1 (
     echo ERROR: winget Node.js install failed. >> "%LOG_FILE%"
-    goto :node_failed
+    goto :node_check_existing
 )
-
 where node >nul 2>&1
 if not errorlevel 1 (
     for /f "delims=" %%n in ('where node') do set "NODE_CMD=%%n"
@@ -326,41 +387,54 @@ if not errorlevel 1 (
     if not errorlevel 1 (
         for /f "delims=" %%n in ('where npm') do set "NPM_CMD=%%n"
     )
-    goto :node_found
+    goto :node_verify
 )
 if exist "C:\Program Files\nodejs\node.exe" (
     set "NODE_CMD=C:\Program Files\nodejs\node.exe"
     set "NPM_CMD=C:\Program Files\nodejs\npm.cmd"
-    goto :node_found
+    goto :node_verify
 )
-
 echo Node.js installed but not found on PATH. >> "%LOG_FILE%"
-goto :node_failed
+goto :node_check_existing
 
-:node_failed
-if not exist "%GITV_ROOT%\static\index.html" (
-    echo ============================================
-    echo ERROR: Cannot start without a frontend build.
-    echo Node.js is required.
-    echo ============================================
-    echo ERROR: No Node.js and no existing frontend build. >> "%LOG_FILE%"
-    echo.
-    echo Installer log: %LOG_FILE%
-    pause
-    exit /b 1
-) else (
-    echo WARNING: Node.js not found. Using existing frontend build. >> "%LOG_FILE%"
+:node_check_existing
+if exist "%GITV_ROOT%\static\index.html" (
+    echo WARNING: Using existing frontend build. >> "%LOG_FILE%"
+    echo WARNING: Using existing frontend build.
     goto :frontend_done
 )
+echo.
+echo ============================================
+echo ERROR: Cannot start without a frontend build.
+echo Node.js is required.
+echo ============================================
+echo ERROR: No Node.js and no existing frontend build. >> "%LOG_FILE%"
+echo.
+echo Installer log: %LOG_FILE%
+pause
+exit /b 1
 
-:node_found
+:node_verify
 echo DEBUG: NODE_CMD=[!NODE_CMD!] >> "%LOG_FILE%"
 echo Node.js version: >> "%LOG_FILE%"
 "!NODE_CMD!" --version >> "%LOG_FILE%" 2>&1
 
-"!NODE_CMD!" -e "process.exit(process.versions.node >= 18 ? 0 : 1)" 2>nul
-if errorlevel 1 (
-    echo WARNING: Node.js version too old ^(18+ required^). >> "%LOG_FILE%"
+REM Extract major version number and compare numerically (18+ required)
+set "NODE_VER_RAW="
+for /f "delims=" %%v in ('"!NODE_CMD!" --version 2^>nul') do set "NODE_VER_RAW=%%v"
+echo DEBUG: NODE_VER_RAW=[!NODE_VER_RAW!] >> "%LOG_FILE%"
+
+REM Strip the 'v' prefix: v24.17.0 -> 24.17.0
+set "NODE_VER_CLEAN=!NODE_VER_RAW:~1!"
+for /f "tokens=1 delims=." %%m in ("!NODE_VER_CLEAN!") do set "NODE_MAJOR=%%m"
+echo DEBUG: NODE_MAJOR=[!NODE_MAJOR!] >> "%LOG_FILE%"
+
+REM Numerically compare (if NODE_MAJOR is a number)
+set "NODE_OK=0"
+if !NODE_MAJOR! GEQ 18 set "NODE_OK=1"
+
+if "!NODE_OK!"=="0" (
+    echo WARNING: Node.js version too old ^(found !NODE_VER_RAW!, need v18+^). >> "%LOG_FILE%"
     if exist "%GITV_ROOT%\static\index.html" (
         echo Using existing frontend build. >> "%LOG_FILE%"
         goto :frontend_done
