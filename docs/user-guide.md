@@ -60,7 +60,7 @@ On **every device and browser** that will connect to GitInTheVan:
 
 > **Why this is necessary**: Browsers silently block background API requests (like JanitorAI's chat generation calls) to servers with untrusted certificates. Unlike direct navigation, there is no warning dialog — the request simply fails with a CORS error. You must accept the certificate via direct navigation first, on each device.
 
-> **"Unable to connect" instead of a cert warning?** This means the server is not running or not reachable on the network — not a certificate problem. Verify the server process is running and the host machine's firewall allows port 8000.
+> **"Unable to connect" instead of a cert warning?** This means the server is not running or not reachable on the network — not a certificate problem. Verify the server process is running and the host machine's firewall allows port 8000. On macOS 15+, also check [Local Network permissions](#macos-15-sequoia-local-network-permissions) below.
 
 #### Platform-Specific Notes
 
@@ -73,7 +73,24 @@ Click the warning page and type `thisisunsafe` (no spaces) to bypass. For localh
 **Firefox on Android:**
 Works via the standard warning page → **Accept the Risk**.
 
-**Safari (macOS):**
+#### macOS 15 (Sequoia) Local Network Permissions
+
+macOS 15 introduced a privacy feature requiring apps to request permission before connecting to local network devices. Non-Safari browsers (Firefox, Chrome, Edge) are blocked at the OS level — they never reach the server and cannot display the certificate warning. Safari works because it is granted local network access by default as a native Apple app.
+
+**Symptoms**: "Unable to connect" or "No Information Available" in Firefox, but Safari connects fine.
+
+**Fix — grant Local Network access to your browser:**
+
+1. Open **System Settings** (Apple menu → System Settings)
+2. Go to **Privacy & Security** → **Local Network**
+3. Find your browser (Firefox, Chrome, etc.) in the list
+4. Toggle the switch to **ON**
+5. Quit and reopen the browser completely (Cmd+Q, then relaunch)
+
+After this, navigate to `https://YOUR-LAN-IP:8000` — the browser will reach the server and display the self-signed certificate warning with the "Accept the Risk" option.
+
+#### Safari (macOS): Keychain Import
+
 Safari does not offer a self-signed cert bypass. Import the certificate into Keychain Access:
 1. Copy `data/ssl/cert.pem` from the server machine to the Mac
 2. Double-click the file to open it in **Keychain Access**

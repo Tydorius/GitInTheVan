@@ -436,4 +436,14 @@ fi
 echo
 
 cd "$GITV_ROOT"
+# Check if port 8000 is already in use
+"$GITV_ROOT/.venv/bin/python" -c "import socket; s=socket.socket(); s.settimeout(1); r=s.connect_ex(('127.0.0.1',8000)); s.close(); exit(0 if r==0 else 1)" 2>/dev/null
+if [ $? -eq 0 ]; then
+    echo "============================================"
+    echo "WARNING: Port 8000 is already in use."
+    echo "A GitInTheVan server may already be running."
+    echo "Stop the other instance first, then re-run."
+    echo "============================================"
+    exit 0
+fi
 "$GITV_ROOT/.venv/bin/python" -m app.main

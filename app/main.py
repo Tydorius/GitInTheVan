@@ -41,6 +41,16 @@ async def lifespan(app: FastAPI):
     from app.services.log_manager import setup_file_logging
     setup_file_logging()
     logger.info("GitInTheVan starting up")
+
+    try:
+        import litellm
+        logger.info("LiteLLM %s loaded", litellm._version)
+    except ImportError:
+        logger.warning(
+            "LiteLLM not installed. Provider-based endpoints (Gemini, OpenRouter, etc.) will fail. "
+            "Run: pip install litellm==1.89.4"
+        )
+
     from app.services.firewall_check import check_firewall
     check_firewall(settings.port)
     await init_db()

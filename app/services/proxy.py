@@ -964,7 +964,13 @@ async def _do_forward_litellm(
     body: bytes, provider: str, base_url: str, api_key: str, timeout: httpx.Timeout
 ) -> tuple[dict[str, Any], int]:
     """Forward request via LiteLLM for provider-specific compatibility."""
-    import litellm
+    try:
+        import litellm
+    except ImportError:
+        return (
+            {"error": {"message": "LiteLLM is not installed. Provider-based endpoints require it. Run: pip install litellm==1.89.4", "type": "proxy_error"}},
+            500,
+        )
 
     try:
         body_json = json.loads(body)

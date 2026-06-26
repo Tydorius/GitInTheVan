@@ -149,6 +149,21 @@ async def run_audit(
         detail="Cantrips will not work without Deno. Install it or set GITV_DENO_PATH." if not DENO_PATH else "",
     ))
 
+    try:
+        import litellm
+        results.append(DiagnosticResult(
+            check="LiteLLM",
+            passed=True,
+            message=f"LiteLLM {litellm._version} installed",
+        ))
+    except ImportError:
+        results.append(DiagnosticResult(
+            check="LiteLLM",
+            passed=False,
+            message="LiteLLM not installed",
+            detail="Provider-based endpoints (Gemini, OpenRouter, etc.) require LiteLLM. Run: pip install litellm==1.89.4",
+        ))
+
     target_ep = None
     if endpoint_id:
         for ep in endpoints:
@@ -168,6 +183,18 @@ async def run_audit(
             test_body_bytes = None
 
             if provider:
+                try:
+                    import litellm as _litellm_check  # noqa: F401
+                except ImportError:
+                    results.append(DiagnosticResult(
+                        check="Endpoint Connectivity",
+                        passed=False,
+                        message=f"LiteLLM not installed (provider: {provider})",
+                        detail=f"'{target_ep.name}' uses provider '{provider}' which requires LiteLLM. Run: pip install litellm==1.89.4",
+                    ))
+                    all_passed = all(r.passed for r in results)
+                    return AuditResponse(results=results, all_passed=all_passed)
+
                 test_body = {"model": "test", "messages": [{"role": "user", "content": "test"}], "max_tokens": 1, "stream": False}
                 test_body_bytes = json.dumps(test_body).encode()
                 timeout = httpx.Timeout(15.0, connect=10.0)

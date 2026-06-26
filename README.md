@@ -268,7 +268,7 @@ On every device/browser that will connect to GitInTheVan:
 
 > **Why this is necessary**: Browsers silently block background requests (like JanitorAI's API calls) to servers with untrusted certificates. Unlike direct navigation, there is no warning dialog — the request simply fails. You must accept the certificate via direct navigation first.
 
-> **"Unable to connect" instead of a cert warning?** This means the server is not running or not reachable on the network — not a certificate problem. Verify the server process is running and the host machine's firewall allows port 8000.
+> **"Unable to connect" instead of a cert warning?** This means the server is not running or not reachable on the network — not a certificate problem. Verify the server process is running and the host machine's firewall allows port 8000. On macOS 15+, also check [Local Network permissions](#macos-15-local-network-permissions) below.
 
 **Platform-specific notes:**
 
@@ -276,6 +276,24 @@ On every device/browser that will connect to GitInTheVan:
 - **Chrome/Edge (desktop)**: Click anywhere on the warning page and type `thisisunsafe` (no spaces) to bypass. Alternatively, go to `chrome://flags/#allow-insecure-localhost` and enable it (localhost only).
 - **Safari (macOS/iOS)**: Safari does not offer a self-signed cert bypass for non-localhost addresses. You must import the certificate into **Keychain Access** (macOS) or install a profile (iOS). See below.
 - **Firefox on Android**: Works via the standard warning page → **Accept the Risk**.
+
+#### macOS 15 Local Network Permissions
+
+macOS 15 (Sequoia) introduced a privacy feature that requires apps to request permission before connecting to local network devices. Non-Safari browsers (Firefox, Chrome, Edge) are blocked at the OS level — they never reach the server and cannot display the certificate warning.
+
+**Symptoms**: "Unable to connect" or "No Information Available" in Firefox, but Safari works fine.
+
+**Fix — grant Local Network access to your browser:**
+
+1. Open **System Settings** (Apple menu → System Settings)
+2. Go to **Privacy & Security** → **Local Network**
+3. Find your browser (Firefox, Chrome, etc.) in the list
+4. Toggle the switch to **ON**
+5. Quit and reopen the browser (Cmd+Q, then relaunch)
+
+After this, navigate to `https://YOUR-LAN-IP:8000` — Firefox will now reach the server and display the self-signed certificate warning with the "Accept the Risk" option.
+
+> Safari is typically granted local network access by default as a native Apple app, which is why it works without this step.
 
 **Importing the certificate into macOS Keychain (Safari/Chrome):**
 
