@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     def ssl_enabled(self) -> bool:
         return bool(self.ssl_certfile and self.ssl_keyfile)
 
-    model_config = {"env_prefix": "GITV_"}
+    model_config = {"env_prefix": "GITV_", "env_file": ".env", "env_file_encoding": "utf-8"}
 
 
 settings = Settings()

@@ -295,6 +295,8 @@ if [ ! -f "$GITV_ROOT/.env" ]; then
     cp "$GITV_ROOT/.env.example" "$GITV_ROOT/.env"
     echo "Created .env - edit it to configure your endpoint and secret key."
 fi
+echo "Syncing .env with defaults..."
+"$GITV_ROOT/.venv/bin/python" -m app.services.env_sync >> "$INSTALLER_LOG" 2>&1
 echo
 
 # Create data directory
@@ -346,6 +348,11 @@ else
 fi
 
 # ============================================================
+# Detect LAN IP (for SSL cert and startup banner)
+# ============================================================
+LAN_IP=$(python3 -c "import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(('8.8.8.8',80)); print(s.getsockname()[0]); s.close()" 2>/dev/null || echo "")
+
+# ============================================================
 # HTTPS setup for LAN access (auto-generates cert if missing)
 # ============================================================
 echo
@@ -354,8 +361,11 @@ if [ -f "$GITV_ROOT/data/ssl/cert.pem" ]; then
     echo "SSL certificate already exists, skipping generation."
 else
     echo "Generating self-signed certificate..."
-    LAN_IP=$(python3 -c "import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(('8.8.8.8',80)); print(s.getsockname()[0]); s.close()" 2>/dev/null || echo "")
-    "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert(extra_ips=['${LAN_IP}'])" >> "$INSTALLER_LOG" 2>&1
+    if [ -n "$LAN_IP" ]; then
+        "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert(extra_ips=['${LAN_IP}'])" >> "$INSTALLER_LOG" 2>&1
+    else
+        "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert()" >> "$INSTALLER_LOG" 2>&1
+    fi
     if [ $? -eq 0 ]; then
         if ! grep -q "^GITV_SSL_CERTFILE=" "$GITV_ROOT/.env" 2>/dev/null; then
             echo "GITV_SSL_CERTFILE=data/ssl/cert.pem" >> "$GITV_ROOT/.env"
@@ -372,12 +382,36 @@ fi
 # ============================================================
 echo "[6/6] Starting GitInTheVan..."
 echo
-echo "============================================"
-echo "  GitInTheVan is starting..."
-echo "  Web UI: http://localhost:8000"
-echo "  (or http://127.0.0.1:8000)"
-echo "  Press Ctrl+C to stop."
-echo "============================================"
+
+if [ -f "$GITV_ROOT/data/ssl/cert.pem" ]; then
+    echo "============================================"
+    echo "  GitInTheVan is starting with HTTPS..."
+    echo "  Web UI: https://localhost:8000"
+    if [ -n "$LAN_IP" ]; then echo "  LAN:    https://${LAN_IP}:8000"; fi
+    echo "  Press Ctrl+C to stop."
+    echo "============================================"
+    echo
+    echo "IMPORTANT: On each device/browser that will use this proxy:"
+    if [ -n "$LAN_IP" ]; then
+        echo "  1. Open https://${LAN_IP}:8000 in the browser"
+        echo "  2. Accept the self-signed certificate warning"
+        echo "  3. In JanitorAI, use https://${LAN_IP}:8000/v1/chat/completions"
+        echo "  as the reverse proxy URL."
+    else
+        echo "  1. Open https://YOUR-LAN-IP:8000 in the browser"
+        echo "  2. Accept the self-signed certificate warning"
+        echo "  3. In JanitorAI, use https://YOUR-LAN-IP:8000/v1/chat/completions"
+        echo "  as the reverse proxy URL."
+    fi
+    echo
+else
+    echo "============================================"
+    echo "  GitInTheVan is starting..."
+    echo "  Web UI: http://localhost:8000"
+    echo "  (or http://127.0.0.1:8000)"
+    echo "  Press Ctrl+C to stop."
+    echo "============================================"
+fi
 echo
 
 cd "$GITV_ROOT"

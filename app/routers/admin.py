@@ -200,13 +200,13 @@ async def generate_ssl_cert(
 
 
 def _update_env_ssl(env_path: Path, cert_val: str, key_val: str):
-    """Write SSL cert/key paths into .env file."""
+    """Write SSL cert/key paths into .env file, replacing or appending safely."""
     lines = []
     found_cert = False
     found_key = False
 
     if env_path.exists():
-        for line in env_path.read_text().splitlines():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
             if line.strip().startswith("GITV_SSL_CERTFILE="):
                 lines.append(f"GITV_SSL_CERTFILE={cert_val}")
                 found_cert = True
@@ -216,9 +216,13 @@ def _update_env_ssl(env_path: Path, cert_val: str, key_val: str):
             else:
                 lines.append(line)
 
+    if not found_cert or not found_key:
+        if lines and lines[-1].strip():
+            lines.append("")
+
     if not found_cert:
         lines.append(f"GITV_SSL_CERTFILE={cert_val}")
     if not found_key:
         lines.append(f"GITV_SSL_KEYFILE={key_val}")
 
-    env_path.write_text("\n".join(lines) + "\n")
+    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
