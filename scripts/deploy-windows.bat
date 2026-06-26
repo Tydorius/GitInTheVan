@@ -558,5 +558,5 @@ echo Installer log saved to: %LOG_FILE%
 echo.
 
 cd /d "%GITV_ROOT%"
-"%GITV_ROOT%\.venv\Scripts\uvicorn" app.main:app --host :: --port 8000
+"%GITV_ROOT%\.venv\Scripts\uvicorn" app.main:app --host 0.0.0.0 --port 8000
 pause
