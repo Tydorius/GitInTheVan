@@ -1,16 +1,22 @@
 #!/bin/bash
 set -e
 
-echo "============================================"
-echo "  GitInTheVan - macOS Deploy"
-echo "============================================"
-echo
-
 GITV_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-echo "Working directory: $GITV_ROOT"
+LOG_FILE="$(dirname "$0")/installer.log"
+
+# Redirect all output to both console and log file
+exec > >(tee "$LOG_FILE") 2>&1
+
+echo "============================================"
+echo "  GitInTheVan - macOS Deploy
+echo "  Date: $(date)
+echo "  Installer log: $LOG_FILE
+echo "============================================"
 echo
 
 cd "$GITV_ROOT"
+echo "Working directory: $GITV_ROOT"
+echo
 
 # ============================================================
 # Check Python version (3.12+ required)
