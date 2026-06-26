@@ -350,7 +350,7 @@ fi
 # ============================================================
 # Detect LAN IP (for SSL cert and startup banner)
 # ============================================================
-LAN_IP=$(python3 -c "import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(('8.8.8.8',80)); print(s.getsockname()[0]); s.close()" 2>/dev/null || echo "")
+LAN_IP=$("$GITV_ROOT/.venv/bin/python" -c "import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(('8.8.8.8',80)); print(s.getsockname()[0]); s.close()" 2>/dev/null || echo "")
 
 # ============================================================
 # HTTPS setup for LAN access (auto-generates cert if missing)

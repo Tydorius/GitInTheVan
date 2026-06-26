@@ -560,42 +560,44 @@ if errorlevel 1 (
 )
 
 REM ============================================================
-REM ============================================================
-REM Detect LAN IP (for SSL cert and startup banner)
-REM ============================================================
-set "LAN_IP="
-for /f "delims=" %%i in ('"!GITV_ROOT!\.venv\Scripts\python" -c "import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(('8.8.8.8',80)); print(s.getsockname()[0]); s.close()" 2^>nul') do set "LAN_IP=%%i"
-echo DEBUG: LAN_IP=[!LAN_IP!] >> "%LOG_FILE%"
-
-REM ============================================================
-REM HTTPS setup for LAN access (auto-generates cert if missing)
+REM Detect LAN IP + generate SSL cert (single Python call)
 REM ============================================================
 echo.
 echo Setting up HTTPS for LAN access...
 echo Setting up HTTPS for LAN access... >> "%LOG_FILE%"
+"!GITV_ROOT!\.venv\Scripts\python" -c "import socket, os; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(('8.8.8.8',80)); ip=s.getsockname()[0]; s.close(); open(os.path.join(os.environ.get('GITV_ROOT','.'),'data','ssl','lan_ip.txt'),'w').write(ip)" >nul 2>&1
+set "LAN_IP="
+if exist "%GITV_ROOT%\data\ssl\lan_ip.txt" (
+    set /p LAN_IP=<"%GITV_ROOT%\data\ssl\lan_ip.txt"
+    del "%GITV_ROOT%\data\ssl\lan_ip.txt" >nul 2>&1
+)
+echo DEBUG: LAN_IP=[!LAN_IP!] >> "%LOG_FILE%"
+
 if exist "%GITV_ROOT%\data\ssl\cert.pem" (
     echo SSL certificate already exists, skipping generation. >> "%LOG_FILE%"
-) else (
-    echo Generating self-signed certificate...
-    echo Generating SSL certificate... >> "%LOG_FILE%"
-    if "!LAN_IP!"=="" (
-        "!GITV_ROOT!\.venv\Scripts\python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert()" >> "%LOG_FILE%" 2>&1
-    ) else (
-        echo Detected LAN IP: !LAN_IP! >> "%LOG_FILE%"
-        "!GITV_ROOT!\.venv\Scripts\python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert(extra_ips=['!LAN_IP!'])" >> "%LOG_FILE%" 2>&1
-    )
-    if errorlevel 1 (
-        echo WARNING: Certificate generation failed. >> "%LOG_FILE%"
-    ) else (
-        findstr /b "GITV_SSL_CERTFILE=" "%GITV_ROOT%\.env" >nul 2>&1
-        if errorlevel 1 (
-            echo GITV_SSL_CERTFILE=data/ssl/cert.pem>> "%GITV_ROOT%\.env"
-            echo GITV_SSL_KEYFILE=data/ssl/key.pem>> "%GITV_ROOT%\.env"
-        )
-        echo Certificate generated. HTTPS will be active. >> "%LOG_FILE%"
-    )
+    goto :ssl_done
 )
 
+echo Generating self-signed certificate...
+echo Generating SSL certificate... >> "%LOG_FILE%"
+if "!LAN_IP!"=="" (
+    "!GITV_ROOT!\.venv\Scripts\python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert()" >> "%LOG_FILE%" 2>&1
+) else (
+    echo Detected LAN IP: !LAN_IP! >> "%LOG_FILE%"
+    "!GITV_ROOT!\.venv\Scripts\python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert(extra_ips=['!LAN_IP!'])" >> "%LOG_FILE%" 2>&1
+)
+if errorlevel 1 (
+    echo WARNING: Certificate generation failed. >> "%LOG_FILE%"
+    goto :ssl_done
+)
+findstr /b "GITV_SSL_CERTFILE=" "%GITV_ROOT%\.env" >nul 2>&1
+if errorlevel 1 (
+    echo GITV_SSL_CERTFILE=data/ssl/cert.pem>> "%GITV_ROOT%\.env"
+    echo GITV_SSL_KEYFILE=data/ssl/key.pem>> "%GITV_ROOT%\.env"
+)
+echo Certificate generated. HTTPS will be active. >> "%LOG_FILE%"
+
+:ssl_done
 REM ============================================================
 REM Start server
 REM ============================================================
@@ -603,36 +605,39 @@ echo [6/6] Starting GitInTheVan...
 echo [INSTALL COMPLETE - Server starting] >> "%LOG_FILE%"
 echo.
 
-if exist "%GITV_ROOT%\data\ssl\cert.pem" (
-    echo ============================================
-    echo   GitInTheVan is starting with HTTPS...
-    echo   Web UI: https://localhost:8000
-    if not "!LAN_IP!"=="" echo   LAN:    https://!LAN_IP!:8000
-    echo   Press Ctrl+C to stop.
-    echo ============================================
-    echo.
-    if not "!LAN_IP!"=="" (
-        echo IMPORTANT: On each device/browser that will use this proxy:
-        echo   1. Open https://!LAN_IP!:8000 in the browser
-        echo   2. Click "Advanced" then "Accept the Risk" (self-signed cert)
-        echo   3. In JanitorAI, use https://!LAN_IP!:8000/v1/chat/completions
-        echo   as the reverse proxy URL.
-    ) else (
-        echo IMPORTANT: On each device/browser that will use this proxy:
-        echo   1. Open https://YOUR-LAN-IP:8000 in the browser
-        echo   2. Click "Advanced" then "Accept the Risk" (self-signed cert)
-        echo   3. In JanitorAI, use https://YOUR-LAN-IP:8000/v1/chat/completions
-        echo   as the reverse proxy URL.
-    )
-    echo.
-) else (
-    echo ============================================
-    echo   GitInTheVan is starting...
-    echo   Web UI: http://localhost:8000
-    echo   (or http://127.0.0.1:8000)
-    echo   Press Ctrl+C to stop.
-    echo ============================================
-)
+if not exist "%GITV_ROOT%\data\ssl\cert.pem" goto :start_http
+
+echo ============================================
+echo   GitInTheVan is starting with HTTPS...
+echo   Web UI: https://localhost:8000
+if not "!LAN_IP!"=="" echo   LAN:    https://!LAN_IP!:8000
+echo   Press Ctrl+C to stop.
+echo ============================================
+echo.
+echo IMPORTANT: On each device/browser that will use this proxy:
+if not "!LAN_IP!"=="" goto :show_lan_instructions
+echo   1. Open https://YOUR-LAN-IP:8000 in the browser
+echo   2. Click "Advanced" then "Accept the Risk" ^(self-signed cert^)
+echo   3. In JanitorAI, use https://YOUR-LAN-IP:8000/v1/chat/completions
+echo      as the reverse proxy URL.
+goto :start_server
+
+:show_lan_instructions
+echo   1. Open https://!LAN_IP!:8000 in the browser
+echo   2. Click "Advanced" then "Accept the Risk" ^(self-signed cert^)
+echo   3. In JanitorAI, use https://!LAN_IP!:8000/v1/chat/completions
+echo      as the reverse proxy URL.
+goto :start_server
+
+:start_http
+echo ============================================
+echo   GitInTheVan is starting...
+echo   Web UI: http://localhost:8000
+echo   (or http://127.0.0.1:8000)
+echo   Press Ctrl+C to stop.
+echo ============================================
+
+:start_server
 echo.
 echo Installer log saved to: %LOG_FILE%
 echo.
