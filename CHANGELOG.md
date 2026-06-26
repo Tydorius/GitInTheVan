@@ -6,6 +6,13 @@ All notable changes to GitInTheVan are documented in this file.
 
 ### Added
 
+- **HTTPS / SSL Support for LAN Access**: Self-hosted instances can now serve over HTTPS, required for cross-device access from HTTPS sites like JanitorAI (browsers block mixed HTTP content from HTTPS pages):
+  - Self-signed certificate generation via Admin panel (Network tab) or deploy scripts
+  - Certificates include LAN IP addresses in Subject Alternative Names (SANs) for browser trust
+  - Configurable via `GITV_SSL_CERTFILE` and `GITV_SSL_KEYFILE` environment variables
+  - Admin UI shows cert status, details, and step-by-step setup instructions
+  - Deploy scripts offer HTTPS setup during installation with automatic LAN IP detection
+  - Server startup reads SSL config from `.env` via `python -m app.main` (replaces direct `uvicorn` invocation)
 - **Deploy Script Hardening**: Comprehensive improvements to Windows, macOS, and Linux deploy scripts:
   - All output logged to `scripts/installer.log` for debugging when windows close on failure
   - Node.js now downloads portable copy to `.node/` folder (no admin/sudo required) when not found on system

@@ -38,6 +38,10 @@
   let regeneratingKeyId: string | null = null
   let newApiKey = ''
 
+  let sslStatus: any = null
+  let sslIPs = ''
+  let sslGenerating = false
+
   async function load() {
     loading = true
     try {
@@ -180,6 +184,22 @@
     } catch (e: any) { error = e.message }
   }
 
+  async function loadSSL() {
+    try {
+      sslStatus = await api.getSSLStatus()
+    } catch { sslStatus = null }
+  }
+
+  async function generateCert() {
+    error = ''
+    sslGenerating = true
+    try {
+      const ips = sslIPs.trim() ? sslIPs.trim().split(',').map(s => s.trim()).filter(Boolean) : undefined
+      sslStatus = await api.generateSSLCert(ips)
+    } catch (e: any) { error = e.message }
+    finally { sslGenerating = false }
+  }
+
   onDestroy(() => {
     if (auditInterval) clearInterval(auditInterval)
     if (serverLogInterval) clearInterval(serverLogInterval)
@@ -190,6 +210,7 @@
     loadAudit()
     loadServerLogs()
     loadUsers()
+    loadSSL()
   })
 </script>
 
@@ -201,6 +222,7 @@
     <button onclick={() => tab = 'debug'} class={tab === 'debug' ? 'primary' : ''}>Debug</button>
     <button onclick={() => tab = 'audit'} class={tab === 'audit' ? 'primary' : ''}>Audit Logs</button>
     <button onclick={() => tab = 'logs'} class={tab === 'logs' ? 'primary' : ''}>Server Logs</button>
+    <button onclick={() => tab = 'network'} class={tab === 'network' ? 'primary' : ''}>Network</button>
   </div>
 </div>
 
@@ -365,6 +387,61 @@
       white-space: pre-wrap; word-break: break-all;
     ">{serverLogs.join('\n')}</div>
   </div>
+{:else if tab === 'network'}
+  <div class="card">
+    <h3>HTTPS / LAN Access</h3>
+    <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
+      Browsers block HTTP requests from HTTPS sites (like JanitorAI). Enabling HTTPS allows
+      other devices on your network to use GitInTheVan as a reverse proxy.
+      This uses a self-signed certificate &mdash; you must accept it once in each browser.
+    </p>
+
+    {#if sslStatus?.is_active}
+      <div class="success-msg" style="margin-bottom: 12px;">
+        HTTPS is active. Access from other devices via <code>https://YOUR-IP:{location.port}</code>
+      </div>
+    {:else if sslStatus?.cert_exists}
+      <div style="background: var(--bg-elevated); padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 12px;">
+        Certificate generated but not yet active. Restart the server to enable HTTPS.
+      </div>
+    {:else}
+      <div style="background: var(--bg-elevated); padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 12px;">
+        No certificate configured. The server is running over HTTP.
+      </div>
+    {/if}
+
+    {#if sslStatus?.cert_info}
+      <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 16px;">
+        <div><strong>Subject:</strong> {sslStatus.cert_info.subject}</div>
+        <div><strong>Valid until:</strong> {new Date(sslStatus.cert_info.not_after).toLocaleDateString()}</div>
+      </div>
+    {/if}
+
+    <div class="form-group">
+      <label for="ssl-ips">Include IP addresses in certificate (comma-separated, optional)</label>
+      <input id="ssl-ips" bind:value={sslIPs} placeholder="10.0.0.187, 192.168.1.50" />
+      <p style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">
+        Add your machine's LAN IP(s) so browsers trust the cert for those addresses.
+      </p>
+    </div>
+
+    <button class="primary" onclick={generateCert} disabled={sslGenerating}>
+      {sslGenerating ? 'Generating...' : sslStatus?.cert_exists ? 'Regenerate Certificate' : 'Generate Self-Signed Certificate'}
+    </button>
+
+    {#if sslStatus?.cert_exists}
+      <div style="margin-top: 16px; padding: 12px; background: var(--bg-elevated); border-radius: 8px; font-size: 12px;">
+        <p style="margin: 0 0 8px;"><strong>Next steps:</strong></p>
+        <ol style="margin: 0; padding-left: 20px; line-height: 1.8;">
+          <li>Restart the GitInTheVan server</li>
+          <li>On each device, open <code>https://YOUR-IP:{location.port}</code> in a browser</li>
+          <li>Accept the security warning (self-signed cert)</li>
+          <li>In JanitorAI, set the reverse proxy URL to <code>https://YOUR-IP:{location.port}/v1/chat/completions</code></li>
+        </ol>
+      </div>
+    {/if}
+  </div>
+
 {:else if tab === 'debug'}
   <Debug />
 {/if}

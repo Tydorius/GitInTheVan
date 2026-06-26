@@ -243,6 +243,10 @@ export const api = {
     request<{ logs: any[]; total: number }>(`/api/admin/audit?limit=${limit}&offset=${offset}`),
   getServerLogs: (lines = 200) =>
     request<{ lines: string[]; total: number }>(`/api/admin/logs?lines=${lines}`),
+  getSSLStatus: () =>
+    request<{ cert_configured: boolean; cert_exists: boolean; cert_path: string | null; key_path: string | null; cert_info: any | null; is_active: boolean }>('/api/admin/ssl/status'),
+  generateSSLCert: (extra_ips?: string[], extra_dns?: string[]) =>
+    request<any>('/api/admin/ssl/generate', { method: 'POST', body: JSON.stringify({ extra_ips: extra_ips || null, extra_dns: extra_dns || null }) }),
 
   // Debug
   listDebugExchanges: () =>

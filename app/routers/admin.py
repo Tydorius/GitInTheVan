@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -142,3 +143,82 @@ async def get_server_logs(
     log_lines = read_recent_logs(max(1, min(lines, 1000)))
 
     return ServerLogResponse(lines=log_lines, total=len(log_lines))
+
+
+class SSLStatusResponse(BaseModel):
+    cert_configured: bool
+    cert_exists: bool
+    cert_path: str | None
+    key_path: str | None
+    cert_info: dict | None
+    is_active: bool
+
+
+class SSLGenerateRequest(BaseModel):
+    extra_ips: list[str] | None = None
+    extra_dns: list[str] | None = None
+
+
+@router.get("/ssl/status", response_model=SSLStatusResponse)
+async def get_ssl_status(
+    admin: Annotated[User, Depends(require_admin)],
+):
+    from app.services.ssl_manager import get_ssl_status as _get_status
+    s = _get_status()
+    return SSLStatusResponse(**s)
+
+
+@router.post("/ssl/generate", response_model=SSLStatusResponse)
+async def generate_ssl_cert(
+    req: SSLGenerateRequest,
+    admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    from app.services.audit import create_log
+    from app.services.ssl_manager import (
+        CERT_PATH,
+        KEY_PATH,
+        generate_self_signed_cert,
+        get_ssl_status,
+    )
+
+    generate_self_signed_cert(
+        extra_ips=req.extra_ips,
+        extra_dns=req.extra_dns,
+    )
+
+    env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+    _update_env_ssl(env_path, str(CERT_PATH), str(KEY_PATH))
+
+    await create_log(
+        db, admin.id, "ssl.generate", "ssl", "self-signed",
+        "Generated self-signed SSL certificate",
+    )
+
+    s = get_ssl_status()
+    return SSLStatusResponse(**s)
+
+
+def _update_env_ssl(env_path: Path, cert_val: str, key_val: str):
+    """Write SSL cert/key paths into .env file."""
+    lines = []
+    found_cert = False
+    found_key = False
+
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            if line.strip().startswith("GITV_SSL_CERTFILE="):
+                lines.append(f"GITV_SSL_CERTFILE={cert_val}")
+                found_cert = True
+            elif line.strip().startswith("GITV_SSL_KEYFILE="):
+                lines.append(f"GITV_SSL_KEYFILE={key_val}")
+                found_key = True
+            else:
+                lines.append(line)
+
+    if not found_cert:
+        lines.append(f"GITV_SSL_CERTFILE={cert_val}")
+    if not found_key:
+        lines.append(f"GITV_SSL_KEYFILE={key_val}")
+
+    env_path.write_text("\n".join(lines) + "\n")

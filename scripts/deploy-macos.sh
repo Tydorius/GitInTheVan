@@ -346,6 +346,28 @@ else
 fi
 
 # ============================================================
+# HTTPS setup for LAN access (auto-generates cert if missing)
+# ============================================================
+echo
+echo "Setting up HTTPS for LAN access..."
+if [ -f "$GITV_ROOT/data/ssl/cert.pem" ]; then
+    echo "SSL certificate already exists, skipping generation."
+else
+    echo "Generating self-signed certificate..."
+    LAN_IP=$(python3 -c "import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(('8.8.8.8',80)); print(s.getsockname()[0]); s.close()" 2>/dev/null || echo "")
+    "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert(extra_ips=['${LAN_IP}'])" >> "$INSTALLER_LOG" 2>&1
+    if [ $? -eq 0 ]; then
+        if ! grep -q "^GITV_SSL_CERTFILE=" "$GITV_ROOT/.env" 2>/dev/null; then
+            echo "GITV_SSL_CERTFILE=data/ssl/cert.pem" >> "$GITV_ROOT/.env"
+            echo "GITV_SSL_KEYFILE=data/ssl/key.pem" >> "$GITV_ROOT/.env"
+        fi
+        echo "Certificate generated. HTTPS will be active."
+    else
+        echo "WARNING: Certificate generation failed."
+    fi
+fi
+
+# ============================================================
 # Start server
 # ============================================================
 echo "[6/6] Starting GitInTheVan..."
@@ -359,4 +381,4 @@ echo "============================================"
 echo
 
 cd "$GITV_ROOT"
-"$GITV_ROOT/.venv/bin/uvicorn" app.main:app --host 0.0.0.0 --port 8000
+"$GITV_ROOT/.venv/bin/python" -m app.main

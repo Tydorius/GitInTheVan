@@ -147,3 +147,31 @@ if _docs_dir.exists():
 # Proxy catch-all MUST be registered last so management API, health,
 # static files, and docs routes are matched first.
 app.include_router(proxy_router)
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    ssl_kwargs = {}
+    if settings.ssl_certfile and settings.ssl_keyfile:
+        cert_path = Path(settings.ssl_certfile)
+        key_path = Path(settings.ssl_keyfile)
+        if cert_path.exists() and key_path.exists():
+            ssl_kwargs = {
+                "ssl_certfile": str(cert_path),
+                "ssl_keyfile": str(key_path),
+            }
+            logger.info("Starting with HTTPS (cert: %s)", cert_path)
+        else:
+            logger.warning(
+                "SSL cert/key not found (%s, %s), starting without HTTPS",
+                cert_path, key_path,
+            )
+
+    uvicorn.run(
+        "app.main:app",
+        host=settings.host,
+        port=settings.port,
+        log_level=settings.log_level.lower(),
+        **ssl_kwargs,
+    )

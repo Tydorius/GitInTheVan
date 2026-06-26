@@ -558,6 +558,33 @@ if errorlevel 1 (
 )
 
 REM ============================================================
+REM ============================================================
+REM HTTPS setup for LAN access (auto-generates cert if missing)
+REM ============================================================
+echo.
+echo Setting up HTTPS for LAN access...
+echo Setting up HTTPS for LAN access... >> "%LOG_FILE%"
+if exist "%GITV_ROOT%\data\ssl\cert.pem" (
+    echo SSL certificate already exists, skipping generation. >> "%LOG_FILE%"
+) else (
+    echo Generating self-signed certificate...
+    echo Generating SSL certificate... >> "%LOG_FILE%"
+    for /f "delims=" %%i in ('"!GITV_ROOT!\.venv\Scripts\python" -c "import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(('8.8.8.8',80)); print(s.getsockname()[0]); s.close()" 2^>nul') do set LAN_IP=%%i
+    echo Detected LAN IP: !LAN_IP! >> "%LOG_FILE%"
+    "!GITV_ROOT!\.venv\Scripts\python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert(extra_ips=['!LAN_IP!'])" >> "%LOG_FILE%" 2>&1
+    if errorlevel 1 (
+        echo WARNING: Certificate generation failed. >> "%LOG_FILE%"
+    ) else (
+        findstr /b "GITV_SSL_CERTFILE=" "%GITV_ROOT%\.env" >nul 2>&1
+        if errorlevel 1 (
+            echo GITV_SSL_CERTFILE=data/ssl/cert.pem>> "%GITV_ROOT%\.env"
+            echo GITV_SSL_KEYFILE=data/ssl/key.pem>> "%GITV_ROOT%\.env"
+        )
+        echo Certificate generated. HTTPS will be active. >> "%LOG_FILE%"
+    )
+)
+
+REM ============================================================
 REM Start server
 REM ============================================================
 echo [6/6] Starting GitInTheVan...
@@ -574,5 +601,5 @@ echo Installer log saved to: %LOG_FILE%
 echo.
 
 cd /d "%GITV_ROOT%"
-"%GITV_ROOT%\.venv\Scripts\uvicorn" app.main:app --host 0.0.0.0 --port 8000
+"%GITV_ROOT%\.venv\Scripts\python" -m app.main
 pause
