@@ -41,6 +41,8 @@ async def lifespan(app: FastAPI):
     from app.services.log_manager import setup_file_logging
     setup_file_logging()
     logger.info("GitInTheVan starting up")
+    from app.services.firewall_check import check_firewall
+    check_firewall(settings.port)
     await init_db()
     yield
     logger.info("GitInTheVan shutting down")

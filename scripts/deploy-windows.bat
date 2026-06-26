@@ -448,6 +448,27 @@ if "!VERIFY_OK!"=="0" (
 echo All components verified.
 
 REM ============================================================
+REM Configure Windows Firewall
+REM ============================================================
+echo.
+echo Configuring Windows Firewall...
+set "FIREWALL_RULE_NAME=GitInTheVan"
+netsh advfirewall firewall show rule name="!FIREWALL_RULE_NAME!" >nul 2>&1
+if errorlevel 1 (
+    echo Creating firewall rule for port 8000...
+    netsh advfirewall firewall add rule name="!FIREWALL_RULE_NAME!" dir=in action=allow protocol=TCP localport=8000 >nul 2>&1
+    if errorlevel 1 (
+        echo WARNING: Could not create firewall rule automatically.
+        echo If you cannot connect from other devices, run this as administrator:
+        echo   netsh advfirewall firewall add rule name="GitInTheVan" dir=in action=allow protocol=TCP localport=8000
+    ) else (
+        echo Firewall rule created. Port 8000 is open for inbound connections.
+    )
+) else (
+    echo Firewall rule already exists.
+)
+
+REM ============================================================
 REM Start server
 REM ============================================================
 echo [6/6] Starting GitInTheVan...

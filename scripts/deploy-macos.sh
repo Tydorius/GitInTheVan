@@ -284,6 +284,25 @@ fi
 echo "All components verified."
 
 # ============================================================
+# Check macOS Firewall
+# ============================================================
+echo
+echo "Checking macOS Firewall..."
+if /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate 2>/dev/null | grep -q "enabled"; then
+    PYTHON_EXE="$GITV_ROOT/.venv/bin/python"
+    if /usr/libexec/ApplicationFirewall/socketfilterfw --getappblocked "$PYTHON_EXE" 2>/dev/null | grep -q "accepted"; then
+        echo "macOS Firewall: Python is allowed."
+    else
+        echo "WARNING: macOS Application Firewall is enabled and may block incoming connections."
+        echo "To allow GitInTheVan through the firewall, run:"
+        echo "  sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add '$PYTHON_EXE'"
+        echo "  sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp '$PYTHON_EXE'"
+    fi
+else
+    echo "macOS Firewall: Not enabled (no action needed)."
+fi
+
+# ============================================================
 # Start server
 # ============================================================
 echo "[6/6] Starting GitInTheVan..."

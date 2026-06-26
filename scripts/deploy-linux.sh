@@ -289,6 +289,42 @@ fi
 echo "All components verified."
 
 # ============================================================
+# Check Linux Firewall
+# ============================================================
+echo
+echo "Checking firewall..."
+if command -v ufw &> /dev/null; then
+    UFW_STATUS=$(ufw status 2>/dev/null)
+    if echo "$UFW_STATUS" | grep -q "Status: active"; then
+        if echo "$UFW_STATUS" | grep -qE "(8000|8000/tcp|8000/udp).*ALLOW"; then
+            echo "ufw: Port 8000 is open."
+        else
+            echo "WARNING: ufw is active but port 8000 is not open."
+            echo "To open port 8000, run:"
+            echo "  sudo ufw allow 8000/tcp"
+        fi
+    else
+        echo "ufw: Not active (no action needed)."
+    fi
+elif command -v firewall-cmd &> /dev/null; then
+    if firewall-cmd --state 2>/dev/null | grep -q "running"; then
+        if firewall-cmd --list-ports 2>/dev/null | grep -qw "8000/tcp"; then
+            echo "firewalld: Port 8000 is open."
+        else
+            echo "WARNING: firewalld is running but port 8000 is not open."
+            echo "To open port 8000, run:"
+            echo "  sudo firewall-cmd --permanent --add-port=8000/tcp"
+            echo "  sudo firewall-cmd --reload"
+        fi
+    else
+        echo "firewalld: Not running (no action needed)."
+    fi
+else
+    echo "No firewall management tool detected (ufw/firewalld)."
+    echo "If you have a custom iptables configuration, ensure port 8000 is open."
+fi
+
+# ============================================================
 # Start server
 # ============================================================
 echo "[6/6] Starting GitInTheVan..."
