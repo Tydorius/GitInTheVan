@@ -5,6 +5,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
+    http_redirect_port: int = 0
     debug: bool = False
     secret_key: str = "change-me-in-production"
     database_url: str = "sqlite+aiosqlite:///./data/gitinthevan.db"

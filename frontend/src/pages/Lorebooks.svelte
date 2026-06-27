@@ -234,10 +234,20 @@
     error = ''
     try {
       const data = JSON.parse(importJson)
+      let entries: any[]
+      if (Array.isArray(data)) {
+        entries = data
+      } else if (data.entries && Array.isArray(data.entries)) {
+        entries = data.entries
+      } else if (data.entries && typeof data.entries === 'object') {
+        entries = Object.values(data.entries)
+      } else {
+        entries = []
+      }
       const payload = {
-        name: importName || data.name || 'Imported Lorebook',
-        description: data.description || '',
-        entries: data.entries || [],
+        name: importName || (!Array.isArray(data) ? data.name : '') || 'Imported Lorebook',
+        description: Array.isArray(data) ? '' : (data.description || ''),
+        entries,
       }
       await api.importLorebook(payload)
       showImport = false

@@ -221,6 +221,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, _signal_handler)
 
     ssl_kwargs = {}
+    _use_ssl = False
     if settings.ssl_certfile and settings.ssl_keyfile:
         cert_path = Path(settings.ssl_certfile)
         key_path = Path(settings.ssl_keyfile)
@@ -229,6 +230,7 @@ if __name__ == "__main__":
                 "ssl_certfile": str(cert_path),
                 "ssl_keyfile": str(key_path),
             }
+            _use_ssl = True
             logger.info("Starting with HTTPS (cert: %s)", cert_path)
         else:
             logger.warning(
@@ -237,6 +239,51 @@ if __name__ == "__main__":
             )
     else:
         logger.info("Starting with HTTP (no SSL configured)")
+
+    redirect_thread = None
+    if _use_ssl and settings.http_redirect_port > 0:
+        import asyncio
+        import threading
+        from http import HTTPStatus
+
+        async def _redirect_handler(reader, writer):
+            try:
+                request_line = await reader.readline()
+                while True:
+                    header = await reader.readline()
+                    if header in (b"\r\n", b"\n", b""):
+                        break
+                parts = request_line.decode().split()
+                path = parts[1] if len(parts) > 1 else "/"
+                host = settings.host
+                if host == "0.0.0.0":
+                    host = "localhost"
+                redirect_url = f"https://{host}:{settings.port}{path}"
+                body = f'<html><body>Redirecting to <a href="{redirect_url}">{redirect_url}</a></body></html>'
+                response = (
+                    f"HTTP/1.1 {HTTPStatus.MOVED_PERMANENTLY.value} {HTTPStatus.MOVED_PERMANENTLY.phrase}\r\n"
+                    f"Location: {redirect_url}\r\n"
+                    f"Content-Type: text/html\r\n"
+                    f"Content-Length: {len(body)}\r\n"
+                    f"Connection: close\r\n"
+                    f"\r\n{body}"
+                )
+                writer.write(response.encode())
+                await writer.drain()
+            except Exception:
+                pass
+            finally:
+                writer.close()
+
+        def _run_redirect_server():
+            loop = asyncio.new_event_loop()
+            coro = asyncio.start_server(_redirect_handler, settings.host, settings.http_redirect_port)
+            loop.run_until_complete(coro)
+            logger.info("HTTP redirect server on port %d → https://:%d", settings.http_redirect_port, settings.port)
+            loop.run_forever()
+
+        redirect_thread = threading.Thread(target=_run_redirect_server, daemon=True)
+        redirect_thread.start()
 
     uvicorn.run(
         "app.main:app",
