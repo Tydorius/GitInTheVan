@@ -249,16 +249,24 @@ if __name__ == "__main__":
         async def _redirect_handler(reader, writer):
             try:
                 request_line = await reader.readline()
+                req_host = None
                 while True:
                     header = await reader.readline()
                     if header in (b"\r\n", b"\n", b""):
                         break
+                    decoded = header.decode(errors="replace").strip().lower()
+                    if decoded.startswith("host:"):
+                        req_host = decoded[5:].strip()
                 parts = request_line.decode().split()
                 path = parts[1] if len(parts) > 1 else "/"
-                host = settings.host
-                if host == "0.0.0.0":
-                    host = "localhost"
-                redirect_url = f"https://{host}:{settings.port}{path}"
+
+                if req_host:
+                    if ":" in req_host:
+                        req_host = req_host.rsplit(":", 1)[0]
+                    redirect_url = f"https://{req_host}:{settings.port}{path}"
+                else:
+                    redirect_url = f"https://localhost:{settings.port}{path}"
+
                 body = f'<html><body>Redirecting to <a href="{redirect_url}">{redirect_url}</a></body></html>'
                 response = (
                     f"HTTP/1.1 {HTTPStatus.MOVED_PERMANENTLY.value} {HTTPStatus.MOVED_PERMANENTLY.phrase}\r\n"
