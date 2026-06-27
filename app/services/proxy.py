@@ -1055,7 +1055,6 @@ async def _do_forward_litellm(
 
     except Exception as exc:
         import litellm as _litellm
-        logger.exception("litellm forward error: %s", exc)
 
         status_code = 500
         error_msg = str(exc)
@@ -1075,6 +1074,11 @@ async def _do_forward_litellm(
                 status_code = code
                 error_msg = msg or str(exc)
                 break
+
+        if status_code < 500:
+            logger.warning("litellm forward error (%d): %s", status_code, error_msg[:200])
+        else:
+            logger.exception("litellm forward error: %s", exc)
 
         _log_response(status_code, 0.0, error_msg)
         return {"error": {"message": error_msg, "type": error_type}}, status_code

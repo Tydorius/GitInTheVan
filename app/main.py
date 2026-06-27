@@ -43,8 +43,10 @@ async def lifespan(app: FastAPI):
     logger.info("GitInTheVan starting up")
 
     try:
-        import litellm
-        logger.info("LiteLLM %s loaded", litellm._version)
+        import importlib.metadata
+
+        importlib.metadata.version("litellm")
+        logger.info("LiteLLM %s loaded", importlib.metadata.version("litellm"))
     except ImportError:
         logger.warning(
             "LiteLLM not installed. Provider-based endpoints (Gemini, OpenRouter, etc.) will fail. "

@@ -151,11 +151,13 @@ async def run_audit(
     ))
 
     try:
-        import litellm
+        import importlib.metadata
+
+        litellm_ver = importlib.metadata.version("litellm")
         results.append(DiagnosticResult(
             check="LiteLLM",
             passed=True,
-            message=f"LiteLLM {litellm._version} installed",
+            message=f"LiteLLM {litellm_ver} installed",
         ))
     except ImportError:
         results.append(DiagnosticResult(
