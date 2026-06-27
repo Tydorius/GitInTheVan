@@ -530,6 +530,24 @@ if not exist "%DENO_EXE%" (
         echo   Install Deno manually from https://deno.land or set GITV_DENO_PATH
     )
 )
+if exist "%GITV_ROOT%\data\ssl\cert.pem" (
+    if not exist "%GITV_ROOT%\data\ssl\ca.pem" (
+        echo WARNING: cert.pem exists but ca.pem is missing. >> "%LOG_FILE%"
+        echo   Regenerating certificates with CA chain...
+        "!GITV_ROOT!\.venv\Scripts\python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert()" >> "%LOG_FILE%" 2>&1
+    )
+    if not exist "%GITV_ROOT%\data\ssl\key.pem" (
+        echo ERROR: SSL key.pem not found. >> "%LOG_FILE%"
+        set VERIFY_OK=0
+    )
+) else (
+    if exist "%GITV_ROOT%\.env" (
+        findstr /b "GITV_SSL_CERTFILE=" "%GITV_ROOT%\.env" >nul 2>&1
+        if not errorlevel 1 (
+            echo WARNING: SSL configured in .env but cert.pem not found. >> "%LOG_FILE%"
+        )
+    )
+)
 if "!VERIFY_OK!"=="0" (
     echo ERROR: Installation verification failed. >> "%LOG_FILE%"
     echo ERROR: Installation verification failed. See errors above.
@@ -558,6 +576,7 @@ if errorlevel 1 (
 ) else (
     echo Firewall rule already exists. >> "%LOG_FILE%"
 )
+netsh advfirewall firewall add rule name="GitInTheVan HTTP Redirect" dir=in action=allow protocol=TCP localport=80 >nul 2>&1
 
 REM ============================================================
 REM Detect LAN IP + generate SSL cert (single Python call)
@@ -574,8 +593,11 @@ if exist "%GITV_ROOT%\data\ssl\lan_ip.txt" (
 echo DEBUG: LAN_IP=[!LAN_IP!] >> "%LOG_FILE%"
 
 if exist "%GITV_ROOT%\data\ssl\cert.pem" (
-    echo SSL certificate already exists, skipping generation. >> "%LOG_FILE%"
-    goto :ssl_done
+    if exist "%GITV_ROOT%\data\ssl\ca.pem" (
+        echo SSL certificate and CA already exist, skipping generation. >> "%LOG_FILE%"
+        goto :ssl_done
+    )
+    echo cert.pem exists but ca.pem missing, regenerating with CA chain. >> "%LOG_FILE%"
 )
 
 echo Generating self-signed certificate...
