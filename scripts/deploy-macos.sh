@@ -321,6 +321,16 @@ if [ ! -f "$DENO_BIN" ] && ! command -v deno &> /dev/null; then
     echo "Cantrips will not work without Deno."
     echo "Install Deno manually from https://deno.land or set GITV_DENO_PATH."
 fi
+if [ -f "$GITV_ROOT/data/ssl/cert.pem" ]; then
+    if [ ! -f "$GITV_ROOT/data/ssl/ca.pem" ]; then
+        echo "WARNING: cert.pem exists but ca.pem is missing, regenerating with CA chain."
+        "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert()" >> "$INSTALLER_LOG" 2>&1
+    fi
+    if [ ! -f "$GITV_ROOT/data/ssl/key.pem" ]; then
+        echo "ERROR: SSL key.pem not found."
+        VERIFY_OK=0
+    fi
+fi
 if [ "$VERIFY_OK" = "0" ]; then
     echo ""
     echo "ERROR: Installation verification failed. See errors above."
@@ -357,9 +367,12 @@ LAN_IP=$("$GITV_ROOT/.venv/bin/python" -c "import socket; s=socket.socket(socket
 # ============================================================
 echo
 echo "Setting up HTTPS for LAN access..."
-if [ -f "$GITV_ROOT/data/ssl/cert.pem" ]; then
-    echo "SSL certificate already exists, skipping generation."
+if [ -f "$GITV_ROOT/data/ssl/cert.pem" ] && [ -f "$GITV_ROOT/data/ssl/ca.pem" ]; then
+    echo "SSL certificate and CA already exist, skipping generation."
 else
+    if [ -f "$GITV_ROOT/data/ssl/cert.pem" ]; then
+        echo "cert.pem exists but ca.pem missing, regenerating with CA chain."
+    fi
     echo "Generating self-signed certificate..."
     if [ -n "$LAN_IP" ]; then
         "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert(extra_ips=['${LAN_IP}'])" >> "$INSTALLER_LOG" 2>&1

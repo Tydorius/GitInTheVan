@@ -281,13 +281,23 @@ if __name__ == "__main__":
             except Exception:
                 pass
             finally:
-                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
 
         def _run_redirect_server():
             loop = asyncio.new_event_loop()
-            coro = asyncio.start_server(_redirect_handler, settings.host, settings.http_redirect_port)
-            loop.run_until_complete(coro)
-            logger.info("HTTP redirect server on port %d → https://:%d", settings.http_redirect_port, settings.port)
+            try:
+                coro = asyncio.start_server(_redirect_handler, settings.host, settings.http_redirect_port)
+                loop.run_until_complete(coro)
+                logger.info("HTTP redirect server on port %d → https://:%d", settings.http_redirect_port, settings.port)
+            except OSError as e:
+                logger.warning(
+                    "Could not bind HTTP redirect port %d (%s). "
+                    "Run as administrator/root for port 80, or set GITV_HTTP_REDIRECT_PORT to 0 to suppress.",
+                    settings.http_redirect_port, e,
+                )
             loop.run_forever()
 
         redirect_thread = threading.Thread(target=_run_redirect_server, daemon=True)
