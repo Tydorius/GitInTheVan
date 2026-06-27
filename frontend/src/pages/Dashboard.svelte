@@ -12,10 +12,15 @@
   let endpointModels: string[] = []
   let selectedModel = ''
   let loadingModels = false
+  let modelOverrideEnabled = false
+  let modelOverrideText = ''
+  let modelsAvailable = false
 
   async function loadModels() {
     endpointModels = []
     selectedModel = ''
+    modelsAvailable = false
+    modelOverrideEnabled = false
     if (!selectedEndpoint) return
     loadingModels = true
     try {
@@ -23,14 +28,36 @@
         headers: { 'Authorization': `Bearer ${localStorage.getItem('gitv_token')}` }
       }).then(r => r.json())
       endpointModels = data.models || []
-      const ep = endpoints.find(e => e.id === selectedEndpoint)
-      if (ep?.default_model) {
-        selectedModel = ep.default_model
-      } else if (endpointModels.length > 0) {
-        selectedModel = endpointModels[0]
+      if (endpointModels.length > 0) {
+        modelsAvailable = true
+        const ep = endpoints.find(e => e.id === selectedEndpoint)
+        if (ep?.default_model && endpointModels.includes(ep.default_model)) {
+          selectedModel = ep.default_model
+        } else {
+          selectedModel = endpointModels[0]
+        }
+      } else {
+        modelsAvailable = false
+        modelOverrideEnabled = true
+        const ep = endpoints.find(e => e.id === selectedEndpoint)
+        if (ep?.default_model) {
+          modelOverrideText = ep.default_model
+        }
       }
-    } catch {}
+    } catch {
+      modelsAvailable = false
+      modelOverrideEnabled = true
+    }
     finally { loadingModels = false }
+  }
+
+  function toggleOverride() {
+    modelOverrideEnabled = !modelOverrideEnabled
+  }
+
+  function effectiveModel(): string {
+    if (modelOverrideEnabled) return modelOverrideText.trim()
+    return selectedModel
   }
 
   async function runAudit() {
@@ -38,7 +65,8 @@
     try {
       const params = new URLSearchParams()
       if (selectedEndpoint) params.set('endpoint_id', selectedEndpoint)
-      if (selectedModel) params.set('model', selectedModel)
+      const model = effectiveModel()
+      if (model) params.set('model', model)
       const qs = params.toString()
       const data = await fetch(`/api/diagnostics/audit${qs ? '?' + qs : ''}`, {
         headers: { 'Authorization': `Bearer ${localStorage.getItem('gitv_token')}` }
@@ -123,11 +151,27 @@
       </div>
       <div class="form-group" style="flex: 1;">
         <label for="diag-model">Model {#if loadingModels}(loading...){/if}</label>
-        <select id="diag-model" bind:value={selectedModel}>
-          <option value="">Use endpoint default</option>
-          {#each endpointModels as m}<option value={m}>{m}</option>{/each}
+        <select id="diag-model" bind:value={selectedModel} disabled={!modelsAvailable || modelOverrideEnabled}>
+          {#if !modelsAvailable && !loadingModels}
+            <option value="">No model list</option>
+          {:else}
+            <option value="">Use endpoint default</option>
+            {#each endpointModels as m}<option value={m}>{m}</option>{/each}
+          {/if}
         </select>
       </div>
+    </div>
+    <div class="form-group" style="display: flex; align-items: flex-start; gap: 8px; margin-bottom: 12px;">
+      <label style="display: flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap; padding-top: 6px;">
+        <input type="checkbox" bind:checked={modelOverrideEnabled} onchange={toggleOverride} style="width: auto;">
+        Override model
+      </label>
+      <input
+        bind:value={modelOverrideText}
+        placeholder="Type a model name (e.g. gemini-2.0-flash)"
+        disabled={!modelOverrideEnabled}
+        style="flex: 1;"
+      />
     </div>
   {/if}
   <button class="primary" onclick={runAudit} disabled={auditRunning}>{auditRunning ? 'Checking...' : 'Run Diagnostic'}</button>

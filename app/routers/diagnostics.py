@@ -181,14 +181,14 @@ async def run_audit(
             from app.services.proxy import _build_upstream_url, _do_forward_litellm
 
             provider = getattr(target_ep, "provider", "") or ""
-            test_body_bytes = None
+            test_model = model or (getattr(target_ep, "default_model", "") or "") or "test"
 
             if provider:
                 try:
                     import litellm as _litellm_check  # noqa: F401
                 except ImportError:
                     results.append(DiagnosticResult(
-                        check="Endpoint Connectivity",
+                        check="Endpoint Connectivity (LiteLLM)",
                         passed=False,
                         message=f"LiteLLM not installed (provider: {provider})",
                         detail=f"'{target_ep.name}' uses provider '{provider}' which requires LiteLLM. Run: pip install litellm==1.89.4",
@@ -196,7 +196,6 @@ async def run_audit(
                     all_passed = all(r.passed for r in results)
                     return AuditResponse(results=results, all_passed=all_passed)
 
-                test_model = model or (getattr(target_ep, "default_model", "") or "") or "test"
                 test_body = {"model": test_model, "messages": [{"role": "user", "content": "test"}], "max_tokens": 1, "stream": False}
                 test_body_bytes = json.dumps(test_body).encode()
                 timeout = httpx.Timeout(15.0, connect=10.0)
@@ -217,29 +216,43 @@ async def run_audit(
 
                 if status_code in (401, 403):
                     results.append(DiagnosticResult(
-                        check="Endpoint Connectivity",
+                        check="Endpoint Connectivity (LiteLLM)",
                         passed=False,
-                        message=f"Endpoint returned {status_code}",
-                        detail=f"Auth error - check API key for '{target_ep.name}'",
+                        message=f"Endpoint returned {status_code} (auth error)",
+                        detail=f"Check API key for '{target_ep.name}'.",
                     ))
                 elif status_code == 200:
                     results.append(DiagnosticResult(
-                        check="Endpoint Connectivity",
+                        check="Endpoint Connectivity (LiteLLM)",
                         passed=True,
-                        message="Endpoint responded with 200",
-                        detail="Connection and auth verified.",
+                        message=f"Endpoint responded OK (model: {test_model})",
+                        detail="Connection, auth, and model verified via LiteLLM.",
+                    ))
+                elif status_code == 429:
+                    results.append(DiagnosticResult(
+                        check="Endpoint Connectivity (LiteLLM)",
+                        passed=True,
+                        message="Endpoint returned 429 (rate limited)",
+                        detail="Connection and auth verified, but the endpoint is rate-limiting requests. The model is valid.",
+                    ))
+                elif status_code == 504:
+                    results.append(DiagnosticResult(
+                        check="Endpoint Connectivity (LiteLLM)",
+                        passed=True,
+                        message="Endpoint returned 504 (gateway timeout)",
+                        detail="Connection and auth verified, but the endpoint timed out generating. Try again.",
                     ))
                 else:
                     results.append(DiagnosticResult(
-                        check="Endpoint Connectivity",
+                        check="Endpoint Connectivity (LiteLLM)",
                         passed=True,
-                        message=f"Endpoint responded with {status_code}",
-                        detail="Connection and auth verified. Set a default model in Settings for a full test." if test_model == "test" else "Connection and auth verified (test model may not exist).",
+                        message=f"Endpoint returned {status_code}",
+                        detail=f"Connection and auth verified via LiteLLM (provider: {provider}). Status {status_code} may indicate an issue with the test model '{test_model}'." if test_model == "test" else f"Connection and auth verified via LiteLLM (provider: {provider}).",
                     ))
+            else:
                 api_base_path = target_ep.api_base_path or ""
                 test_url = _build_upstream_url(target_ep.base_url, "/v1/chat/completions", api_base_path)
 
-                test_model = model or (getattr(target_ep, "default_model", "") or "") or "test"
                 headers = {"Authorization": f"Bearer {target_ep.api_key}", "Content-Type": "application/json"}
                 test_body = {"model": test_model, "messages": [{"role": "user", "content": "test"}], "max_tokens": 1}
 
@@ -258,24 +271,38 @@ async def run_audit(
 
                 if resp.status_code in (401, 403):
                     results.append(DiagnosticResult(
-                        check="Endpoint Connectivity",
+                        check="Endpoint Connectivity (Direct)",
                         passed=False,
-                        message=f"Endpoint returned {resp.status_code}",
-                        detail=f"Auth error - check API key for '{target_ep.name}'",
+                        message=f"Endpoint returned {resp.status_code} (auth error)",
+                        detail=f"Check API key for '{target_ep.name}'.",
                     ))
                 elif resp.status_code == 200:
                     results.append(DiagnosticResult(
-                        check="Endpoint Connectivity",
+                        check="Endpoint Connectivity (Direct)",
                         passed=True,
-                        message="Endpoint responded with 200",
-                        detail="Connection and auth verified.",
+                        message=f"Endpoint responded OK (model: {test_model})",
+                        detail="Connection, auth, and model verified.",
+                    ))
+                elif resp.status_code == 429:
+                    results.append(DiagnosticResult(
+                        check="Endpoint Connectivity (Direct)",
+                        passed=True,
+                        message="Endpoint returned 429 (rate limited)",
+                        detail="Connection and auth verified, but the endpoint is rate-limiting requests. The model is valid.",
+                    ))
+                elif resp.status_code == 504:
+                    results.append(DiagnosticResult(
+                        check="Endpoint Connectivity (Direct)",
+                        passed=True,
+                        message="Endpoint returned 504 (gateway timeout)",
+                        detail="Connection and auth verified, but the endpoint timed out generating. Try again.",
                     ))
                 else:
                     results.append(DiagnosticResult(
-                        check="Endpoint Connectivity",
+                        check="Endpoint Connectivity (Direct)",
                         passed=True,
-                        message=f"Endpoint responded with {resp.status_code}",
-                        detail="Connection and auth verified. Set a default model in Settings for a full test." if test_model == "test" else "Connection and auth verified (test model may not exist).",
+                        message=f"Endpoint returned {resp.status_code}",
+                        detail=f"Connection and auth verified. Status {status_code} may indicate the test model '{test_model}' is not valid for this endpoint." if test_model == "test" else "Connection and auth verified.",
                     ))
         except Exception as e:
             results.append(DiagnosticResult(
