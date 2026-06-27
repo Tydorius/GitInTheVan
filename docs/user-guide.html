@@ -78,9 +78,19 @@ body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-se
 </blockquote>
 <h4 id="platform-specific-notes">Platform-Specific Notes</h4>
 <p><strong>Firefox (all platforms):</strong>
-Navigate to the URL, click <strong>Advanced</strong> → <strong>Accept the Risk and Continue</strong>. If no warning page appears, add a manual exception: go to <code>about:preferences#privacy</code> → scroll to <strong>Certificates</strong> → <strong>View Certificates</strong> → <strong>Servers</strong> tab → <strong>Add Exception</strong> → enter the URL → <strong>Get Certificate</strong> → <strong>Confirm Security Exception</strong>.</p>
+<strong>Firefox (all platforms):</strong>
+Firefox uses its <strong>own certificate store</strong>, separate from the OS. Installing the CA in Windows Certificate Manager or macOS Keychain does NOT help Firefox. You must either:</p>
+<p><strong>Option A</strong> — Import the CA into Firefox directly:
+1. Go to <code>about:preferences#privacy</code> → scroll to <strong>Certificates</strong> → <strong>View Certificates</strong> → <strong>Authorities</strong> tab
+2. Click <strong>Import</strong> → select <code>ca.pem</code> (or <code>ca.crt</code>) from <code>data/ssl/</code>
+3. Check <strong>Trust this CA to identify websites</strong> → <strong>OK</strong>
+4. Restart Firefox</p>
+<p><strong>Option B</strong> — Enable enterprise root reading (uses the OS trust store):
+1. Go to <code>about:config</code>
+2. Set <code>security.enterprise_roots.enabled</code> to <code>true</code>
+3. Restart Firefox</p>
 <p><strong>Chrome / Edge (desktop):</strong>
-Click the warning page and type <code>thisisunsafe</code> (no spaces) to bypass. For localhost only, you can also enable <code>chrome://flags/#allow-insecure-localhost</code>.</p>
+Uses the OS trust store. After installing the CA certificate (see below), restart the browser. Alternatively, type <code>thisisunsafe</code> on the warning page to bypass.</p>
 <p><strong>Firefox on Android:</strong>
 Works via the standard warning page → <strong>Accept the Risk</strong>.</p>
 <h4 id="macos-15-sequoia-local-network-permissions">macOS 15 (Sequoia) Local Network Permissions</h4>
@@ -95,6 +105,19 @@ Works via the standard warning page → <strong>Accept the Risk</strong>.</p>
 <li>Quit and reopen the browser completely (Cmd+Q, then relaunch)</li>
 </ol>
 <p>After this, navigate to <code>https://YOUR-LAN-IP:8000</code> — the browser will reach the server and display the self-signed certificate warning with the "Accept the Risk" option.</p>
+<h4 id="windows-importing-the-ca-certificate">Windows: Importing the CA Certificate</h4>
+<p>Windows doesn't show a trust prompt for self-signed certs. Import the CA certificate into the trust store:</p>
+<ol>
+<li>Navigate to <code>data\ssl\</code> in your GitInTheVan folder</li>
+<li>Double-click <strong><code>ca.crt</code></strong> — this opens the Windows Certificate wizard</li>
+<li>Click <strong>Install Certificate</strong> → <strong>Local Machine</strong> → <strong>Next</strong></li>
+<li>Select <strong>Place all certificates in the following store</strong> → <strong>Browse</strong> → <strong>Trusted Root Certification Authorities</strong> → <strong>OK</strong></li>
+<li><strong>Next</strong> → <strong>Finish</strong></li>
+<li>Restart your browser</li>
+</ol>
+<p>Alternatively, from an admin command prompt:</p>
+<pre><code class="language-cmd">certutil -addstore -f &quot;ROOT&quot; &quot;data\ssl\ca.crt&quot;
+</code></pre>
 <h4 id="safari-macos-keychain-import">Safari (macOS): Keychain Import</h4>
 <p>Safari does not offer a self-signed cert bypass. Import the certificate into Keychain Access:
 1. Copy <code>data/ssl/cert.pem</code> from the server machine to the Mac

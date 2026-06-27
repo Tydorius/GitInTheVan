@@ -272,8 +272,17 @@ On every device/browser that will connect to GitInTheVan:
 
 **Platform-specific notes:**
 
-- **Firefox (all platforms)**: Navigate to the URL, click **Advanced** → **Accept the Risk and Continue**. If no warning page appears, go to `about:preferences#privacy` → scroll to **Certificates** → **View Certificates** → **Servers** tab → **Add Exception**, enter the URL, and confirm.
-- **Chrome/Edge (desktop)**: Click anywhere on the warning page and type `thisisunsafe` (no spaces) to bypass. Alternatively, go to `chrome://flags/#allow-insecure-localhost` and enable it (localhost only).
+- **Firefox (all platforms)**: Firefox uses its **own certificate store**, separate from the OS. Installing the CA in Windows Certificate Manager or macOS Keychain does NOT help Firefox. You must either:
+  - **Option A**: Import the CA into Firefox directly:
+    1. Go to `about:preferences#privacy` → scroll to **Certificates** → **View Certificates** → **Authorities** tab
+    2. Click **Import** → select `ca.pem` (or `ca.crt`) from `data/ssl/`
+    3. Check **Trust this CA to identify websites** → **OK**
+    4. Restart Firefox
+  - **Option B**: Enable enterprise root reading (uses the Windows trust store):
+    1. Go to `about:config`
+    2. Set `security.enterprise_roots.enabled` to `true`
+    3. Restart Firefox
+- **Chrome/Edge (desktop)**: Uses the OS trust store. After installing the CA certificate (see below), restart the browser. Alternatively, type `thisisunsafe` on the warning page to bypass.
 - **Safari (macOS/iOS)**: Safari does not offer a self-signed cert bypass for non-localhost addresses. You must import the certificate into **Keychain Access** (macOS) or install a profile (iOS). See below.
 - **Firefox on Android**: Works via the standard warning page → **Accept the Risk**.
 
@@ -295,7 +304,25 @@ After this, navigate to `https://YOUR-LAN-IP:8000` — Firefox will now reach th
 
 > Safari is typically granted local network access by default as a native Apple app, which is why it works without this step.
 
-**Importing the certificate into macOS Keychain (Safari/Chrome):**
+**Importing the certificate into Windows:**
+
+Windows doesn't show a trust prompt for self-signed certs. Import the CA certificate into the trust store:
+
+1. Navigate to `data\ssl\` in your GitInTheVan folder
+2. Double-click **`ca.crt`** (this opens the Windows Certificate wizard)
+3. Click **Install Certificate** → **Local Machine** → **Next**
+4. Select **Place all certificates in the following store** → **Browse** → **Trusted Root Certification Authorities** → **OK**
+5. **Next** → **Finish**
+6. Restart your browser
+
+Alternatively, from an admin command prompt:
+```cmd
+certutil -addstore -f "ROOT" "data\ssl\ca.crt"
+```
+
+> Install the **CA cert** (`ca.crt`), not the leaf cert. The CA signs the leaf, so trusting the CA trusts all leaf certs it generates.
+
+**Importing the certificate into macOS Keychain:**
 
 If a browser on macOS doesn't offer a cert bypass, add the certificate to the system trust store:
 
