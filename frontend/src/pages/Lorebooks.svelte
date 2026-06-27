@@ -158,7 +158,17 @@
     jsonError = ''
     try {
       const data = JSON.parse(jsonEditData)
-      for (const e of data.entries || []) {
+      let entries: any[]
+      if (Array.isArray(data)) {
+        entries = data
+      } else if (data.entries && Array.isArray(data.entries)) {
+        entries = data.entries
+      } else if (data.entries && typeof data.entries === 'object') {
+        entries = Object.values(data.entries)
+      } else {
+        entries = []
+      }
+      for (const e of entries) {
         await api.addLorebookEntry(selectedLorebook.id, {
           name: e.name || '',
           keys: Array.isArray(e.keys) ? e.keys : [],
