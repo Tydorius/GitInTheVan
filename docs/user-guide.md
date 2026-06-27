@@ -101,11 +101,13 @@ Safari does not offer a self-signed cert bypass. Import the certificate into Key
 7. Restart Safari
 
 **Safari / Chrome (iOS):**
-iOS requires installing a certificate profile:
-1. Download `cert.pem` onto the iOS device (e.g. via AirDrop, email, or a web link)
-2. Open **Settings** → **Profile Downloaded** → **Install**
-3. Go to **Settings** → **General** → **About** → **Certificate Trust Settings**
-4. Enable trust for the GitInTheVan certificate
+iOS requires installing the root CA certificate:
+1. On the GitInTheVan server, go to **Admin** → **Network** → download the CA certificate, or download `ca.pem` from `data/ssl/ca.pem`
+2. Get `ca.pem` onto the iOS device (AirDrop, email, or a web link)
+3. Open **Settings** → **Profile Downloaded** → **Install**
+4. Go to **Settings** → **General** → **About** → **Certificate Trust Settings**
+5. Enable trust for the GitInTheVan Local CA
+6. iOS requires a CA-signed certificate — a bare self-signed leaf cert cannot be trusted on iOS
 
 ### Configuring JanitorAI for LAN Access
 

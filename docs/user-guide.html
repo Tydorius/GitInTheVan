@@ -105,11 +105,13 @@ Works via the standard warning page → <strong>Accept the Risk</strong>.</p>
 6. Enter your macOS password to confirm
 7. Restart Safari</p>
 <p><strong>Safari / Chrome (iOS):</strong>
-iOS requires installing a certificate profile:
-1. Download <code>cert.pem</code> onto the iOS device (e.g. via AirDrop, email, or a web link)
-2. Open <strong>Settings</strong> → <strong>Profile Downloaded</strong> → <strong>Install</strong>
-3. Go to <strong>Settings</strong> → <strong>General</strong> → <strong>About</strong> → <strong>Certificate Trust Settings</strong>
-4. Enable trust for the GitInTheVan certificate</p>
+iOS requires installing the root CA certificate:
+1. On the GitInTheVan server, go to <strong>Admin</strong> → <strong>Network</strong> → download the CA certificate, or download <code>ca.pem</code> from <code>data/ssl/ca.pem</code>
+2. Get <code>ca.pem</code> onto the iOS device (AirDrop, email, or a web link)
+3. Open <strong>Settings</strong> → <strong>Profile Downloaded</strong> → <strong>Install</strong>
+4. Go to <strong>Settings</strong> → <strong>General</strong> → <strong>About</strong> → <strong>Certificate Trust Settings</strong>
+5. Enable trust for the GitInTheVan Local CA
+6. iOS requires a CA-signed certificate — a bare self-signed leaf cert cannot be trusted on iOS</p>
 <h3 id="configuring-janitorai-for-lan-access">Configuring JanitorAI for LAN Access</h3>
 <ol>
 <li>Complete the certificate trust steps above on the device running JanitorAI</li>

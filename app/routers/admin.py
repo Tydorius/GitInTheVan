@@ -150,6 +150,7 @@ class SSLStatusResponse(BaseModel):
     cert_exists: bool
     cert_path: str | None
     key_path: str | None
+    ca_cert_path: str | None
     cert_info: dict | None
     is_active: bool
 
@@ -176,8 +177,8 @@ async def generate_ssl_cert(
 ):
     from app.services.audit import create_log
     from app.services.ssl_manager import (
-        CERT_PATH,
-        KEY_PATH,
+        LEAF_CERT_PATH,
+        LEAF_KEY_PATH,
         generate_self_signed_cert,
         get_ssl_status,
     )
@@ -188,11 +189,11 @@ async def generate_ssl_cert(
     )
 
     env_path = Path(__file__).resolve().parent.parent.parent / ".env"
-    _update_env_ssl(env_path, str(CERT_PATH), str(KEY_PATH))
+    _update_env_ssl(env_path, str(LEAF_CERT_PATH), str(LEAF_KEY_PATH))
 
     await create_log(
-        db, admin.id, "ssl.generate", "ssl", "self-signed",
-        "Generated self-signed SSL certificate",
+        db, admin.id, "ssl.generate", "ssl", "ca-and-leaf",
+        "Generated local CA and leaf SSL certificate",
     )
 
     s = get_ssl_status()
@@ -226,3 +227,21 @@ def _update_env_ssl(env_path: Path, cert_val: str, key_val: str):
         lines.append(f"GITV_SSL_KEYFILE={key_val}")
 
     env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+@router.get("/ssl/ca-cert")
+async def download_ca_cert(
+    admin: Annotated[User, Depends(require_admin)],
+):
+    from fastapi.responses import Response
+
+    from app.services.ssl_manager import CA_CERT_PATH
+
+    if not CA_CERT_PATH.exists():
+        raise HTTPException(status_code=404, detail="CA certificate not found")
+
+    return Response(
+        content=CA_CERT_PATH.read_bytes(),
+        media_type="application/x-x509-ca-cert",
+        headers={"Content-Disposition": "attachment; filename=gitinthevan-ca.pem"},
+    )

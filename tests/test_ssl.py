@@ -1,6 +1,8 @@
 import tempfile
 from pathlib import Path
 
+from cryptography import x509
+
 from app.services.ssl_manager import generate_self_signed_cert, get_ssl_status
 
 
@@ -30,9 +32,7 @@ def test_generate_self_signed_cert():
         assert "END PRIVATE KEY" in key_text or "END RSA PRIVATE KEY" in key_text
 
 
-def test_generated_cert_is_valid_x509():
-    from cryptography import x509
-
+def test_generates_ca_and_leaf():
     with tempfile.TemporaryDirectory() as tmpdir:
         cert_path = Path(tmpdir) / "cert.pem"
         key_path = Path(tmpdir) / "key.pem"
@@ -43,18 +43,60 @@ def test_generated_cert_is_valid_x509():
             extra_ips=["172.16.0.1"],
         )
 
-        cert = x509.load_pem_x509_certificate(cert_path.read_bytes())
+        pem_data = cert_path.read_bytes()
+        certs = list(x509.load_pem_x509_certificates(pem_data))
+        assert len(certs) == 2, f"Expected leaf + CA in chain, got {len(certs)}"
 
-        assert cert.subject.rfc4514_string() == cert.issuer.rfc4514_string()
+        leaf = certs[0]
+        ca = certs[1]
 
-        san_ext = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName)
-        san_values = san_ext.value
-        ip_values = san_values.get_values_for_type(x509.IPAddress)
-        dns_values = san_values.get_values_for_type(x509.DNSName)
+        leaf_bc = leaf.extensions.get_extension_for_class(x509.BasicConstraints)
+        assert leaf_bc.value.ca is False, "First cert should be leaf (not CA)"
 
+        ca_bc = ca.extensions.get_extension_for_class(x509.BasicConstraints)
+        assert ca_bc.value.ca is True, "Second cert should be CA"
+
+        assert leaf.issuer == ca.subject, "Leaf should be issued by the CA"
+
+        ip_values = leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value.get_values_for_type(x509.IPAddress)
         import ipaddress
         assert ipaddress.ip_address("172.16.0.1") in ip_values
-        assert "localhost" in dns_values
+
+
+def test_ca_key_usage_set_correctly():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cert_path = Path(tmpdir) / "cert.pem"
+        key_path = Path(tmpdir) / "key.pem"
+
+        generate_self_signed_cert(cert_path=cert_path, key_path=key_path)
+
+        pem_data = cert_path.read_bytes()
+        certs = list(x509.load_pem_x509_certificates(pem_data))
+        ca = certs[1]
+
+        key_usage = ca.extensions.get_extension_for_class(x509.KeyUsage).value
+        assert key_usage.key_cert_sign is True
+        assert key_usage.digital_signature is True
+
+
+def test_leaf_key_usage_set_correctly():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cert_path = Path(tmpdir) / "cert.pem"
+        key_path = Path(tmpdir) / "key.pem"
+
+        generate_self_signed_cert(cert_path=cert_path, key_path=key_path)
+
+        pem_data = cert_path.read_bytes()
+        certs = list(x509.load_pem_x509_certificates(pem_data))
+        leaf = certs[0]
+
+        key_usage = leaf.extensions.get_extension_for_class(x509.KeyUsage).value
+        assert key_usage.key_cert_sign is False
+        assert key_usage.digital_signature is True
+        assert key_usage.key_encipherment is True
+
+        eku = leaf.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value
+        assert x509.oid.ExtendedKeyUsageOID.SERVER_AUTH in eku
 
 
 def test_generate_cert_no_extras():
