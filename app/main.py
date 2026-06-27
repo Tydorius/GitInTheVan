@@ -162,7 +162,63 @@ app.include_router(proxy_router)
 
 
 if __name__ == "__main__":
+    import atexit
+    import os
+    import signal
+    import sys
+
     import uvicorn
+
+    logging.basicConfig(
+        level=getattr(logging, settings.log_level.upper(), logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+    # Single-instance lock via PID file
+    _pid_file = Path(__file__).resolve().parent.parent / "data" / "gitv.pid"
+    _pid_file.parent.mkdir(parents=True, exist_ok=True)
+
+    def _is_process_running(pid: int) -> bool:
+        if sys.platform == "win32":
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            synchronize = 0x00100000
+            handle = kernel32.OpenProcess(synchronize, False, pid)
+            if handle:
+                kernel32.CloseHandle(handle)
+                return True
+            return False
+        else:
+            try:
+                os.kill(pid, 0)
+                return True
+            except (ProcessLookupError, PermissionError):
+                return False
+
+    if _pid_file.exists():
+        try:
+            old_pid = int(_pid_file.read_text().strip())
+            if _is_process_running(old_pid):
+                print(f"ERROR: GitInTheVan is already running (PID {old_pid}).", file=sys.stderr)
+                print(f"If this is incorrect, delete {_pid_file} and try again.", file=sys.stderr)
+                sys.exit(1)
+        except (ValueError, OSError):
+            pass
+        _pid_file.unlink(missing_ok=True)
+
+    _pid_file.write_text(str(os.getpid()))
+
+    def _cleanup_pid_file():
+        _pid_file.unlink(missing_ok=True)
+
+    atexit.register(_cleanup_pid_file)
+
+    def _signal_handler(signum, frame):
+        _cleanup_pid_file()
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, _signal_handler)
+    signal.signal(signal.SIGINT, _signal_handler)
 
     ssl_kwargs = {}
     if settings.ssl_certfile and settings.ssl_keyfile:
@@ -179,6 +235,8 @@ if __name__ == "__main__":
                 "SSL cert/key not found (%s, %s), starting without HTTPS",
                 cert_path, key_path,
             )
+    else:
+        logger.info("Starting with HTTP (no SSL configured)")
 
     uvicorn.run(
         "app.main:app",

@@ -65,10 +65,22 @@ On **every device and browser** that will connect to GitInTheVan:
 #### Platform-Specific Notes
 
 **Firefox (all platforms):**
-Navigate to the URL, click **Advanced** → **Accept the Risk and Continue**. If no warning page appears, add a manual exception: go to `about:preferences#privacy` → scroll to **Certificates** → **View Certificates** → **Servers** tab → **Add Exception** → enter the URL → **Get Certificate** → **Confirm Security Exception**.
+**Firefox (all platforms):**
+Firefox uses its **own certificate store**, separate from the OS. Installing the CA in Windows Certificate Manager or macOS Keychain does NOT help Firefox. You must either:
+
+**Option A** — Import the CA into Firefox directly:
+1. Go to `about:preferences#privacy` → scroll to **Certificates** → **View Certificates** → **Authorities** tab
+2. Click **Import** → select `ca.pem` (or `ca.crt`) from `data/ssl/`
+3. Check **Trust this CA to identify websites** → **OK**
+4. Restart Firefox
+
+**Option B** — Enable enterprise root reading (uses the OS trust store):
+1. Go to `about:config`
+2. Set `security.enterprise_roots.enabled` to `true`
+3. Restart Firefox
 
 **Chrome / Edge (desktop):**
-Click the warning page and type `thisisunsafe` (no spaces) to bypass. For localhost only, you can also enable `chrome://flags/#allow-insecure-localhost`.
+Uses the OS trust store. After installing the CA certificate (see below), restart the browser. Alternatively, type `thisisunsafe` on the warning page to bypass.
 
 **Firefox on Android:**
 Works via the standard warning page → **Accept the Risk**.
@@ -88,6 +100,22 @@ macOS 15 introduced a privacy feature requiring apps to request permission befor
 5. Quit and reopen the browser completely (Cmd+Q, then relaunch)
 
 After this, navigate to `https://YOUR-LAN-IP:8000` — the browser will reach the server and display the self-signed certificate warning with the "Accept the Risk" option.
+
+#### Windows: Importing the CA Certificate
+
+Windows doesn't show a trust prompt for self-signed certs. Import the CA certificate into the trust store:
+
+1. Navigate to `data\ssl\` in your GitInTheVan folder
+2. Double-click **`ca.crt`** — this opens the Windows Certificate wizard
+3. Click **Install Certificate** → **Local Machine** → **Next**
+4. Select **Place all certificates in the following store** → **Browse** → **Trusted Root Certification Authorities** → **OK**
+5. **Next** → **Finish**
+6. Restart your browser
+
+Alternatively, from an admin command prompt:
+```cmd
+certutil -addstore -f "ROOT" "data\ssl\ca.crt"
+```
 
 #### Safari (macOS): Keychain Import
 

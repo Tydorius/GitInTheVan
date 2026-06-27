@@ -136,6 +136,8 @@ def generate_self_signed_cert(
     leaf_key, leaf_cert = _generate_leaf(ca_key, ca_cert, extra_ips, extra_dns)
 
     CA_CERT_PATH.write_bytes(ca_cert.public_bytes(serialization.Encoding.PEM))
+    CA_CERT_PATH.with_suffix(".crt").write_bytes(ca_cert.public_bytes(serialization.Encoding.PEM))
+    CA_CERT_PATH.with_suffix(".der").write_bytes(ca_cert.public_bytes(serialization.Encoding.DER))
     CA_KEY_PATH.write_bytes(
         ca_key.private_bytes(
             encoding=serialization.Encoding.PEM,
@@ -147,6 +149,7 @@ def generate_self_signed_cert(
     leaf_pem = leaf_cert.public_bytes(serialization.Encoding.PEM)
     ca_pem = ca_cert.public_bytes(serialization.Encoding.PEM)
     cert_path.write_bytes(leaf_pem + ca_pem)
+    cert_path.with_suffix(".crt").write_bytes(leaf_pem + ca_pem)
     key_path.write_bytes(
         leaf_key.private_bytes(
             encoding=serialization.Encoding.PEM,
