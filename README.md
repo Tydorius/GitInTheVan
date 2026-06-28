@@ -257,16 +257,16 @@ Open `http://localhost:8000` in your browser to access the management UI.
 
 The deploy scripts automatically generate a self-signed SSL certificate so that GitInTheVan can be accessed from other devices on your local network. This is required because browsers block HTTP requests from HTTPS sites (like JanitorAI) — a restriction called *mixed content blocking*.
 
+The deploy scripts automatically generate a **local Root CA** and **CA-signed leaf certificate** in `data/ssl/`. The CA signs the leaf, so trusting the CA once trusts all future leaf certs. This is required for iOS/macOS Safari (which cannot trust bare leaf certs).
+
 **Trusting the certificate on each device:**
 
 On every device/browser that will connect to GitInTheVan:
 
 1. Open your GitInTheVan URL directly in the browser address bar (e.g. `https://10.0.0.187:8000`)
-2. You'll see a security warning about the self-signed certificate
-3. Click **Advanced** → **Accept the Risk and Continue** (Firefox) or **Proceed to site (unsafe)** (Chrome)
-4. The GitInTheVan login page will load — the certificate is now trusted for future requests
+2. Follow the platform-specific instructions below to trust the certificate
 
-> **Why this is necessary**: Browsers silently block background requests (like JanitorAI's API calls) to servers with untrusted certificates. Unlike direct navigation, there is no warning dialog — the request simply fails. You must accept the certificate via direct navigation first.
+> **Why this is necessary**: Browsers silently block background requests (like JanitorAI's API calls) to servers with untrusted certificates. Unlike direct navigation, there is no warning dialog — the request simply fails.
 
 > **"Unable to connect" instead of a cert warning?** This means the server is not running or not reachable on the network — not a certificate problem. Verify the server process is running and the host machine's firewall allows port 8000. On macOS 15+, also check [Local Network permissions](#macos-15-local-network-permissions) below.
 
@@ -379,10 +379,13 @@ Go to **Admin** → **Network** tab to view certificate status, regenerate with 
 | `GITV_LOG_RETENTION_DAYS` | `30` | Days to retain rotated log files |
 | `GITV_SSL_CERTFILE` | *(empty)* | Path to SSL certificate file. Set to enable HTTPS. |
 | `GITV_SSL_KEYFILE` | *(empty)* | Path to SSL private key file. Set to enable HTTPS. |
+| `GITV_HTTP_REDIRECT_PORT` | `80` | Port for HTTP→HTTPS redirect server. Set to 0 to disable. Requires admin/root for port 80. |
 
 ### Endpoints
 
 Endpoints support a custom **API Base Path** field. Most OpenAI-compatible APIs use `/v1` (the default). OpenWebUI and some other platforms use `/api` instead. You can paste the full URL (e.g. `https://example.com/api/chat/completions`) when creating an endpoint and the path will be auto-detected.
+
+Each endpoint can have a **Default Model** set, which is used for diagnostics tests and as a fallback when the client doesn't specify a model. The diagnostics pane on the Dashboard can query available models from the provider (for endpoints using LiteLLM) or accept a manually typed model name via the override checkbox.
 
 ### Client Configuration
 

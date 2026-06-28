@@ -63,7 +63,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="GitInTheVan",
     description="Self-hostable MITM LLM router/proxy for roleplay services",
-    version="0.14.1",
+    version="0.14.2",
     lifespan=lifespan,
 )
 

@@ -6,13 +6,33 @@ All notable changes to GitInTheVan are documented in this file.
 
 ### Added
 
+- **Local Root CA + Leaf Certificate**: Replaced bare self-signed certs with a proper local CA + CA-signed leaf cert chain for cross-platform trust (required for iOS which cannot trust leaf certs):
+  - `ca.pem`, `ca.crt`, `ca.der` — Root CA in PEM, CRT (double-click on Windows), and DER formats
+  - `cert.pem`, `cert.crt` — Leaf cert + CA chain in PEM and CRT formats
+  - `key.pem` — Leaf private key
+  - `ca-key.pem` — CA private key (for signing additional leaf certs)
+  - CA download endpoint: `GET /api/admin/ssl/ca-cert`
+  - Deploy scripts detect missing `ca.pem` on upgrades and auto-regenerate
+  - Install verification step checks for complete cert set
+- **Per-Endpoint Default Model**: Model configuration moved from user-level settings to per-endpoint, allowing different models per endpoint:
+  - Migration 031: `ALTER TABLE endpoints ADD COLUMN default_model`
+  - Proxy uses endpoint's `default_model` as fallback when client doesn't specify one
+  - `GET /api/endpoints/{id}/models` endpoint lists available models from provider
+  - Dashboard diagnostics includes model dropdown (queries provider or allows manual override)
+  - Removed `default_model` from Settings page (backward compat: old column preserved)
+- **HTTP→HTTPS Redirect**: Optional lightweight redirect server (port 80 by default) that redirects HTTP requests to HTTPS. Configurable via `GITV_HTTP_REDIRECT_PORT`, disabled when set to 0
+- **LiteLLM Validation**: Startup check verifies LiteLLM is installed and logs version. Diagnostics audit includes LiteLLM status check. Proxy returns clean error instead of unhandled crash when LiteLLM missing
+- **Single-Instance Lock**: Server writes PID file to prevent accidental double-launch. Cross-platform process detection (Win32 API on Windows, signals on Unix)
+- **`.env` Auto-Sync**: Deploy scripts run `app/services/env_sync.py` on every install to add missing keys from `.env.example` with default values
+- **Port Conflict Detection**: Deploy scripts check if port 8000 is already in use before starting the server
 - **HTTPS / SSL Support for LAN Access**: Self-hosted instances can now serve over HTTPS, required for cross-device access from HTTPS sites like JanitorAI (browsers block mixed HTTP content from HTTPS pages):
-  - Self-signed certificate generation via Admin panel (Network tab) or deploy scripts
+  - Certificate generation via Admin panel (Network tab) or deploy scripts
   - Certificates include LAN IP addresses in Subject Alternative Names (SANs) for browser trust
   - Configurable via `GITV_SSL_CERTFILE` and `GITV_SSL_KEYFILE` environment variables
   - Admin UI shows cert status, details, and step-by-step setup instructions
-  - Deploy scripts offer HTTPS setup during installation with automatic LAN IP detection
+  - Deploy scripts auto-generate certs during installation with automatic LAN IP detection
   - Server startup reads SSL config from `.env` via `python -m app.main` (replaces direct `uvicorn` invocation)
+  - Platform-specific trust instructions: Firefox (own cert store), Chrome/Edge (OS trust store), Safari (Keychain import), iOS (profile install), Windows (`ca.crt` double-click)
 - **Deploy Script Hardening**: Comprehensive improvements to Windows, macOS, and Linux deploy scripts:
   - All output logged to `scripts/installer.log` for debugging when windows close on failure
   - Node.js now downloads portable copy to `.node/` folder (no admin/sudo required) when not found on system
@@ -50,6 +70,20 @@ All notable changes to GitInTheVan are documented in this file.
   - Advisory locking during migrations prevents concurrent migration races when multiple instances start simultaneously (PostgreSQL `pg_advisory_lock`, MariaDB `GET_LOCK`)
   - WAL mode enabled for SQLite file databases for improved read concurrency
   - Server-side defaults added to `AdminSettings` model for cross-dialect INSERT compatibility
+
+### Fixed
+
+- **Lorebook bare-array import**: JSON files that are bare arrays of entries (no `entries` wrapper key) now import correctly. Previously, JavaScript's `Array.prototype.entries()` method was called instead of accessing the data, producing "function entries() { [native code] } is not iterable"
+- **Lorebook JSON edit/save**: Same bare-array fix applied to the JSON edit mode save path
+- **Duplicate diagnostics results**: Connectivity test ran both LiteLLM and raw HTTP tests for provider endpoints (missing `else:` branch). Now correctly runs only one test based on provider setting
+- **LiteLLM error log noise**: Provider errors (404, 429, 400, 401) now log as single WARNING lines instead of full tracebacks. Only true server errors (500+) get full exception logging
+- **LiteLLM version display**: Fixed startup log showing raw module object instead of version string
+- **Diagnostics test model**: Connectivity test now uses endpoint's configured model or user-selected model instead of hardcoded `"test"`, preventing misleading 404 errors from providers
+- **`_resolve_target` model propagation**: Endpoint's `default_model` is now passed through the routing pipeline and applied as fallback when the client doesn't specify a model (was silently discarded)
+- **.env file loading**: Added `env_file=".env"` to pydantic-settings config so SSL and other settings are actually read from `.env` (previously only OS environment variables were read)
+- **.env file corruption**: Deploy scripts now insert blank lines before appending settings, preventing two keys from merging onto one line
+- **Deploy script LAN_IP detection**: Replaced fragile batch `for /f` loop with temp-file approach; macOS/Linux scripts use venv Python instead of system Python
+- **Startup banner**: Shows correct protocol (https vs http), actual LAN IP, and cert trust instructions
 
 ## [0.14.0] - 2026-06-23
 
