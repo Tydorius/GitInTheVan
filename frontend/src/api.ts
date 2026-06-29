@@ -170,6 +170,20 @@ export const api = {
   exportLorebook: (id: string) =>
     request<any>(`/api/lorebooks/${id}/export`),
 
+  // Skills & Samples
+  listSkills: () => request<{ skills: any[] }>('/api/skills'),
+  createSkill: (data: { name: string; description?: string; content?: string; type: string }) =>
+    request<any>('/api/skills', { method: 'POST', body: JSON.stringify(data) }),
+  getSkill: (id: string) => request<any>(`/api/skills/${id}`),
+  updateSkill: (id: string, data: any) =>
+    request<any>(`/api/skills/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteSkill: (id: string) =>
+    request<void>(`/api/skills/${id}`, { method: 'DELETE' }),
+  attachSkill: (skillId: string, endpointId: string) =>
+    request<any>(`/api/skills/${skillId}/attach`, { method: 'POST', body: JSON.stringify({ endpoint_id: endpointId }) }),
+  detachSkill: (skillId: string, endpointId: string) =>
+    request<void>(`/api/skills/${skillId}/attach/${endpointId}`, { method: 'DELETE' }),
+
   // Verification
   listVerificationRules: () => request<{ rules: any[] }>('/api/verification/rules'),
   createVerificationRule: (data: any) =>

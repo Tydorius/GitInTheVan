@@ -20,13 +20,14 @@ GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:
 4. [Endpoints](#4-endpoints)
 5. [Cantrips](#5-cantrips)
 6. [Lorebooks](#6-lorebooks)
-7. [Verification](#7-verification)
-8. [Memories](#8-memories)
-9. [Command Tags](#9-command-tags)
-10. [Maps](#10-maps)
-11. [Content Packs](#11-content-packs)
-12. [Settings](#12-settings)
-13. [Admin](#13-admin)
+7. [Skills & Samples](#7-skills--samples)
+8. [Verification](#8-verification)
+9. [Memories](#9-memories)
+10. [Command Tags](#10-command-tags)
+11. [Maps](#11-maps)
+12. [Content Packs](#12-content-packs)
+13. [Settings](#13-settings)
+14. [Admin](#14-admin)
 
 ---
 
@@ -487,7 +488,47 @@ Lorebooks support the same four pipeline positions as cantrips (Pre-Driver, Driv
 
 ---
 
-## 7. Verification
+## 7. Skills & Samples
+
+Skills and Writing Samples are reusable instruction blocks that can be attached to specific endpoints. They allow you to define behavioral directives and style references that are automatically injected into requests.
+
+### Skills vs Writing Samples
+
+**Skills** are behavioral instructions injected into the system message alongside character definition and lorebooks. They shape *what* the model does:
+
+- "You are an expert at writing vivid combat scenes"
+- "Always use third-person limited perspective"
+- "Never break character during emotional moments"
+
+Skills are wrapped in `<skills>` tags and appended to the system message, after lorebook injection but before cantrip processing.
+
+**Writing Samples** are style references injected before the last user message. They shape *how* the model writes:
+
+- "Match this prose style: [example text]"
+- "Here is an example of the desired descriptive density"
+
+Samples are wrapped in `<writing_sample>` tags and inserted as a system message immediately before the last user message, after summarization but before prefill. This keeps the style reference fresh in context.
+
+### Creating Skills and Samples
+
+1. Navigate to **Skills & Samples** in the sidebar
+2. Use the **Skills** / **Writing Samples** tabs to switch between types
+3. Click **New Skill** or **New Writing Sample**
+4. Fill in name, description, and content (markdown supported)
+5. Select the type if needed (Skill or Writing Sample)
+
+### Attaching to Endpoints
+
+1. Create or edit a skill/sample
+2. In the edit modal, check the boxes next to endpoints you want to attach to
+3. A skill/sample can be attached to multiple endpoints
+4. Each endpoint can have multiple skills and samples
+
+When a request comes through an endpoint, all attached skills are injected into the system message, then all attached samples are injected before the last user message.
+
+---
+
+## 8. Verification
 
 Verification uses a separate LLM (the **Navigator**) to check the writing LLM's (the **Driver's**) responses against configurable rules. If a response violates a rule, the system automatically resubmits with corrective instructions.
 
@@ -573,7 +614,7 @@ The result shows whether the response was approved or rejected, along with the r
 
 ---
 
-## 8. Memories
+## 9. Memories
 
 ![Memories Page](media/gitv-memories.png)
 
@@ -627,7 +668,7 @@ Use **Edit** to modify a rule and the **ON/OFF** toggle to enable/disable withou
 
 ---
 
-## 9. Command Tags
+## 10. Command Tags
 
 Command tags are inline directives placed in the user's message text that override pipeline behavior. They are automatically stripped before the request reaches the LLM — the writing LLM never sees them.
 
@@ -675,7 +716,7 @@ Persistent overrides are scoped per-conversation. Different chats have independe
 
 ---
 
-## 10. Maps
+## 11. Maps
 
 ![Maps List](media/gitv-maps.png)
 
@@ -770,7 +811,7 @@ A complete example map — the Gambling Hall (a 3-stage casino game with driver-
 
 ---
 
-## 11. Content Packs
+## 12. Content Packs
 
 ![Content Packs](media/gitv-content-packs.png)
 
@@ -836,7 +877,7 @@ Click **Sync** on a repo to re-fetch the latest `descriptions.json` and file lis
 
 ---
 
-## 12. Settings
+## 13. Settings
 
 ![Settings Page](media/gitv-settings.png)
 
@@ -914,7 +955,7 @@ Admin actions (user creation, deletion, password resets) are recorded in the aud
 
 ---
 
-## 13. Admin
+## 14. Admin
 
 *Admin only. The Admin link in the sidebar is only visible to admin accounts.*
 

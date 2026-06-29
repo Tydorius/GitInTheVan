@@ -64,7 +64,7 @@ def _log_response(status_code: int, elapsed: float, response_body: str = "") -> 
         logger.debug("proxy error response body: %.500s", response_body[:500])
 
 
-async def _resolve_target(request: Request) -> tuple[str, str, str | None, str, str, str, str] | None:
+async def _resolve_target(request: Request) -> tuple[str, str, str | None, str, str, str, str, str] | None:
     auth_header = request.headers.get("authorization", "")
     if auth_header.lower().startswith("bearer "):
         token = auth_header[7:]
@@ -72,7 +72,7 @@ async def _resolve_target(request: Request) -> tuple[str, str, str | None, str, 
             async with async_session() as db:
                 result = await resolve_routing(token, db)
                 if result:
-                    return result.base_url, result.api_key, result.user_id, result.api_base_path, result.bypass_method, result.provider, result.model
+                    return result.base_url, result.api_key, result.user_id, result.api_base_path, result.bypass_method, result.provider, result.model, result.endpoint_id
                 return None
             return None
 
@@ -80,7 +80,7 @@ async def _resolve_target(request: Request) -> tuple[str, str, str | None, str, 
     api_key = settings.default_endpoint_api_key
     api_base_path = settings.default_endpoint_api_base_path
     if base_url:
-        return base_url, api_key, None, api_base_path, "none", "", ""
+        return base_url, api_key, None, api_base_path, "none", "", "", ""
     return None
 
 
@@ -114,7 +114,7 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
             },
         )
 
-    base_url, api_key, user_id, api_base_path, endpoint_bypass, provider, endpoint_model = target
+    base_url, api_key, user_id, api_base_path, endpoint_bypass, provider, endpoint_model, endpoint_id = target
 
     body = await request.body()
     path = request.url.path
@@ -231,6 +231,17 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
 
         body_json = await _apply_lorebook_injection(body_json, user_id, tags)
 
+        if user_id and endpoint_id:
+            from app.services.skills import inject_skills, load_skills_for_endpoint
+            async with async_session() as skills_db:
+                skill_contents, sample_contents = await load_skills_for_endpoint(
+                    endpoint_id, user_id, skills_db
+                )
+            if skill_contents:
+                body_json["messages"] = inject_skills(body_json["messages"], skill_contents)
+            if sample_contents:
+                body_json["_gitv_sample_contents"] = sample_contents
+
         from app.services.budget import prepare_budget
         await prepare_budget(body_json, user_id, tags)
 
@@ -273,6 +284,11 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
         from app.services.summarization import maybe_summarize
         if body_json.get("_gitv_command_overrides", {}).get("summary") is not False:
             body_json = await maybe_summarize(body_json, user_id, internal_chat_id, tags)
+
+        sample_contents = body_json.pop("_gitv_sample_contents", None)
+        if sample_contents:
+            from app.services.skills import inject_samples
+            body_json["messages"] = inject_samples(body_json["messages"], sample_contents)
 
         from app.services.driver_callable import (
             build_tool_notification,

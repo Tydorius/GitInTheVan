@@ -17,7 +17,7 @@ from typing import Any
 
 import httpx
 
-SERVER = "http://127.0.0.1:8000"
+SERVER = None  # Auto-detected
 ADMIN_USER = "admin"
 ADMIN_PASS = "adminpass123"
 TEST_USER = "flow_test_user"
@@ -43,7 +43,7 @@ def info(msg: str) -> None:
 
 class TestClient:
     def __init__(self):
-        self.server: str = SERVER
+        self.server: str = ""
         self.admin_user: str = ADMIN_USER
         self.admin_pass: str = ADMIN_PASS
         self.admin_token: str = ""
@@ -53,6 +53,22 @@ class TestClient:
         self.admin_endpoint: dict = {}
         self.model: str = ""
         self.timeout = httpx.Timeout(connect=15.0, read=300.0, write=30.0, pool=30.0)
+        self._detect_server()
+
+    def _detect_server(self):
+        """Try HTTPS first, fall back to HTTP."""
+        for proto in ("https", "http"):
+            url = f"{proto}://127.0.0.1:8000/health"
+            try:
+                resp = httpx.get(url, timeout=5.0, verify=False)
+                if resp.status_code == 200:
+                    self.server = f"{proto}://127.0.0.1:8000"
+                    self.client = httpx.Client(verify=False, timeout=self.timeout)
+                    return
+            except Exception:
+                continue
+        self.server = "http://127.0.0.1:8000"
+        self.client = httpx.Client(timeout=self.timeout)
 
     def admin_headers(self) -> dict:
         return {"Authorization": f"Bearer {self.admin_token}", "Content-Type": "application/json"}
@@ -71,7 +87,7 @@ class TestClient:
             api_base_path = endpoint.get("api_base_path", "") or "/v1"
             models_url = f"{base_url}{api_base_path}/models"
 
-            resp = httpx.get(models_url, headers={"Authorization": f"Bearer {api_key}"}, timeout=15.0)
+            resp = self.client.get(models_url, headers={"Authorization": f"Bearer {api_key}"}, timeout=15.0)
             if resp.status_code != 200:
                 info(f"Could not query models ({resp.status_code}), using default")
                 return "Gemma-4-31B-it"
@@ -110,7 +126,7 @@ class TestClient:
 
     def setup(self) -> bool:
         section("SETUP: Admin Login")
-        login = httpx.post(
+        login = self.client.post(
             f"{self.server}/api/auth/login",
             json={"username": self.admin_user, "password": self.admin_pass},
             timeout=10.0,
@@ -123,7 +139,7 @@ class TestClient:
         pass_test("Logged in as admin")
 
         section("SETUP: Get Admin Endpoint")
-        eps = httpx.get(f"{self.server}/api/endpoints", headers=self.admin_headers(), timeout=10.0)
+        eps = self.client.get(f"{self.server}/api/endpoints", headers=self.admin_headers(), timeout=10.0)
         endpoints = eps.json().get("endpoints", [])
         if not endpoints:
             fail_test("Admin has no endpoints configured")
@@ -132,8 +148,8 @@ class TestClient:
         self.admin_endpoint = endpoints[0]
         pass_test(f"Admin endpoint: {self.admin_endpoint['name']} ({self.admin_endpoint['base_url']})")
 
-        settings = httpx.get(f"{self.server}/api/settings", headers=self.admin_headers(), timeout=10.0)
-        self.model = settings.json().get("default_model", "")
+        settings = self.client.get(f"{self.server}/api/settings", headers=self.admin_headers(), timeout=10.0)
+        self.model = self.admin_endpoint.get("default_model", "") or settings.json().get("default_model", "")
 
         if not self.model:
             self.model = self._pick_model_from_endpoint(self.admin_endpoint)
@@ -144,12 +160,12 @@ class TestClient:
         pass_test(f"Using model: {self.model}")
 
         section("SETUP: Create Test User")
-        users = httpx.get(f"{self.server}/api/users", headers=self.admin_headers(), timeout=10.0)
+        users = self.client.get(f"{self.server}/api/users", headers=self.admin_headers(), timeout=10.0)
         existing = [u for u in users.json().get("users", []) if u["username"] == TEST_USER]
 
         if existing:
             info("Test user already exists, creating new one for fresh API key...")
-            create = httpx.post(
+            create = self.client.post(
                 f"{self.server}/api/users",
                 json={"username": f"{TEST_USER}_{int(time.time())}", "password": TEST_PASS},
                 headers=self.admin_headers(),
@@ -162,7 +178,7 @@ class TestClient:
             test_user_id = create.json()["id"]
             test_username = create.json()["username"]
         else:
-            create = httpx.post(
+            create = self.client.post(
                 f"{self.server}/api/users",
                 json={"username": TEST_USER, "password": TEST_PASS},
                 headers=self.admin_headers(),
@@ -177,7 +193,7 @@ class TestClient:
 
         pass_test(f"Test user: {test_username} (API key: {self.test_api_key[:12]}...)")
 
-        login_test = httpx.post(
+        login_test = self.client.post(
             f"{self.server}/api/auth/login",
             json={"username": test_username, "password": TEST_PASS},
             timeout=10.0,
@@ -189,13 +205,15 @@ class TestClient:
         pass_test("Test user logged in")
 
         section("SETUP: Copy Admin Endpoint to Test User")
-        create_ep = httpx.post(
+        create_ep = self.client.post(
             f"{self.server}/api/endpoints",
             json={
                 "name": "Flow Test Endpoint",
                 "base_url": self.admin_endpoint["base_url"],
                 "api_key": self.admin_endpoint.get("api_key", ""),
                 "api_base_path": self.admin_endpoint.get("api_base_path", ""),
+                "provider": self.admin_endpoint.get("provider", ""),
+                "default_model": self.admin_endpoint.get("default_model", "") or self.model,
                 "enabled": True,
             },
             headers=self.test_headers(),
@@ -207,7 +225,7 @@ class TestClient:
         self.endpoint_id = create_ep.json()["id"]
         pass_test(f"Endpoint created: {self.endpoint_id[:8]}...")
 
-        httpx.put(
+        self.client.put(
             f"{self.server}/api/settings",
             json={"default_endpoint_id": self.endpoint_id},
             headers=self.test_headers(),
@@ -215,7 +233,7 @@ class TestClient:
         )
         pass_test("Set as default endpoint for test user")
 
-        health = httpx.get(f"{self.server}/health", timeout=5.0)
+        health = self.client.get(f"{self.server}/health", timeout=5.0)
         if health.json().get("status") == "ok":
             pass_test("Server healthy")
 
@@ -224,20 +242,20 @@ class TestClient:
     def cleanup_test_user_resources(self) -> None:
         info("Cleaning up test resources...")
         for endpoint in ["/api/cantrips", "/api/lorebooks"]:
-            resp = httpx.get(f"{self.server}{endpoint}", headers=self.test_headers(), timeout=10.0)
+            resp = self.client.get(f"{self.server}{endpoint}", headers=self.test_headers(), timeout=10.0)
             resource_key = endpoint.split("/")[-1]
             for item in resp.json().get(resource_key, []):
                 if "FLOW_TEST" in item.get("name", ""):
-                    httpx.delete(f"{SERVER}{endpoint}/{item['id']}", headers=self.test_headers(), timeout=10.0)
+                    self.client.delete(f"{self.server}{endpoint}/{item['id']}", headers=self.test_headers(), timeout=10.0)
 
-        vr = httpx.get(f"{self.server}/api/verification/rules", headers=self.test_headers(), timeout=10.0)
+        vr = self.client.get(f"{self.server}/api/verification/rules", headers=self.test_headers(), timeout=10.0)
         for r in vr.json().get("rules", []):
             if "FLOW_TEST" in r.get("name", ""):
-                httpx.delete(f"{self.server}/api/verification/rules/{r['id']}", headers=self.test_headers(), timeout=10.0)
+                self.client.delete(f"{self.server}/api/verification/rules/{r['id']}", headers=self.test_headers(), timeout=10.0)
 
         self.set_summarization_settings({"summarization_enabled": False})
         for s in self.list_summaries():
-            httpx.delete(
+            self.client.delete(
                 f"{self.server}/api/summarization/summaries/{s['id']}",
                 headers=self.test_headers(),
                 timeout=10.0,
@@ -259,7 +277,7 @@ class TestClient:
         if extra_headers:
             headers.update(extra_headers)
 
-        resp = httpx.post(
+        resp = self.client.post(
             f"{self.server}/v1/chat/completions",
             json=body,
             headers=headers,
@@ -272,7 +290,7 @@ class TestClient:
         return resp.json()
 
     def create_cantrip(self, name: str, code: str, tag: str = "", is_active: bool = True) -> str | None:
-        resp = httpx.post(
+        resp = self.client.post(
             f"{self.server}/api/cantrips",
             json={"name": name, "code": code, "tag": tag, "is_active": is_active},
             headers=self.test_headers(),
@@ -283,7 +301,7 @@ class TestClient:
         return None
 
     def update_cantrip(self, cantrip_id: str, data: dict) -> bool:
-        resp = httpx.put(
+        resp = self.client.put(
             f"{self.server}/api/cantrips/{cantrip_id}",
             json=data,
             headers=self.test_headers(),
@@ -292,7 +310,7 @@ class TestClient:
         return resp.status_code == 200
 
     def create_lorebook(self, name: str, entries: list[dict], tag: str = "") -> str | None:
-        resp = httpx.post(
+        resp = self.client.post(
             f"{self.server}/api/lorebooks/import",
             json={"name": name, "description": "Flow test lorebook", "entries": entries, "tag": tag},
             headers=self.test_headers(),
@@ -303,7 +321,7 @@ class TestClient:
         return None
 
     def update_lorebook(self, lb_id: str, data: dict) -> bool:
-        resp = httpx.put(
+        resp = self.client.put(
             f"{self.server}/api/lorebooks/{lb_id}",
             json=data,
             headers=self.test_headers(),
@@ -315,11 +333,11 @@ class TestClient:
         url = f"{self.server}/api/memories"
         if conversation_id:
             url += f"?conversation_id={conversation_id}"
-        resp = httpx.get(url, headers=self.test_headers(), timeout=10.0)
+        resp = self.client.get(url, headers=self.test_headers(), timeout=10.0)
         return resp.json().get("memories", [])
 
     def set_summarization_settings(self, data: dict) -> bool:
-        resp = httpx.put(
+        resp = self.client.put(
             f"{self.server}/api/summarization/settings",
             json=data,
             headers=self.test_headers(),
@@ -328,7 +346,7 @@ class TestClient:
         return resp.status_code == 200
 
     def list_summaries(self) -> list:
-        resp = httpx.get(
+        resp = self.client.get(
             f"{self.server}/api/summarization/summaries",
             headers=self.test_headers(),
             timeout=10.0,
@@ -512,7 +530,7 @@ context.character.scenario += " [FLOW_TEST_MEMORY] The time of day is evening.";
 
 def test_verification(tc: TestClient) -> bool:
     section("TEST: Verification (if enabled)")
-    vs = httpx.get(f"{tc.server}/api/verification/settings", headers=tc.test_headers(), timeout=10.0)
+    vs = tc.client.get(f"{tc.server}/api/verification/settings", headers=tc.test_headers(), timeout=10.0)
     if not vs.json().get("verification_enabled"):
         info("Verification not enabled for test user - skipping test")
         return True
@@ -588,7 +606,7 @@ def test_forbidden_words(tc: TestClient) -> bool:
     section("TEST: Forbidden Words")
 
     test_phrase = "FLOW_TEST_FORBIDDEN"
-    resp = httpx.post(
+    resp = tc.client.post(
         f"{tc.server}/api/forbidden-words",
         json={"phrase": test_phrase},
         headers=tc.test_headers(),
@@ -599,7 +617,7 @@ def test_forbidden_words(tc: TestClient) -> bool:
         return False
     pass_test(f"Created forbidden word: '{test_phrase}'")
 
-    enable = httpx.put(
+    enable = tc.client.put(
         f"{tc.server}/api/forbidden-words/settings",
         json={"forbidden_words_enabled": True, "forbidden_words_case_sensitive": False},
         headers=tc.test_headers(),
@@ -610,7 +628,7 @@ def test_forbidden_words(tc: TestClient) -> bool:
         return False
     pass_test("Forbidden words check enabled")
 
-    test_resp = httpx.post(
+    test_resp = tc.client.post(
         f"{tc.server}/api/forbidden-words/test",
         json={"content": f"This text contains {test_phrase} which should be flagged."},
         headers=tc.test_headers(),
@@ -621,10 +639,10 @@ def test_forbidden_words(tc: TestClient) -> bool:
         pass_test(f"Scanner detected forbidden phrase ({test_data['match_count']} match(es))")
     else:
         fail_test("Scanner failed to detect forbidden phrase")
-        httpx.put(f"{tc.server}/api/forbidden-words/settings", json={"forbidden_words_enabled": False}, headers=tc.test_headers(), timeout=10.0)
+        tc.client.put(f"{tc.server}/api/forbidden-words/settings", json={"forbidden_words_enabled": False}, headers=tc.test_headers(), timeout=10.0)
         return False
 
-    no_match_resp = httpx.post(
+    no_match_resp = tc.client.post(
         f"{tc.server}/api/forbidden-words/test",
         json={"content": "This text is clean and should not match."},
         headers=tc.test_headers(),
@@ -635,13 +653,13 @@ def test_forbidden_words(tc: TestClient) -> bool:
     else:
         fail_test("Scanner false-positive on clean text")
 
-    fw_list = httpx.get(f"{tc.server}/api/forbidden-words", headers=tc.test_headers(), timeout=10.0)
+    fw_list = tc.client.get(f"{tc.server}/api/forbidden-words", headers=tc.test_headers(), timeout=10.0)
     for w in fw_list.json().get("words", []):
         if w["phrase"] == test_phrase:
-            httpx.delete(f"{tc.server}/api/forbidden-words/{w['id']}", headers=tc.test_headers(), timeout=10.0)
+            tc.client.delete(f"{tc.server}/api/forbidden-words/{w['id']}", headers=tc.test_headers(), timeout=10.0)
     pass_test("Cleaned up forbidden word")
 
-    httpx.put(
+    tc.client.put(
         f"{tc.server}/api/forbidden-words/settings",
         json={"forbidden_words_enabled": False},
         headers=tc.test_headers(),
@@ -656,7 +674,7 @@ def test_multi_position_cantrip(tc: TestClient) -> bool:
     code = '''
 context.response.content = context.response.content.replace("FLOW_TEST_MARKER", "PROCESSED");
 '''
-    resp = httpx.post(
+    resp = tc.client.post(
         f"{tc.server}/api/cantrips",
         json={
             "name": "FLOW_TEST_PreNav",
@@ -700,7 +718,7 @@ if (context.tool_call) {
     context.tool_result = "No tool call received.";
 }
 '''
-    resp = httpx.post(
+    resp = tc.client.post(
         f"{tc.server}/api/cantrips",
         json={
             "name": "dice_roll",
@@ -730,7 +748,7 @@ if (context.tool_call) {
     else:
         info("Warning: LLM instructions not stored")
 
-    httpx.put(
+    tc.client.put(
         f"{tc.server}/api/settings",
         json={"driver_callable_turns": 1},
         headers=tc.test_headers(),
@@ -750,13 +768,13 @@ if (context.tool_call) {
         else:
             info("Empty response (LLM may not have produced output for the tool call)")
             tc.update_cantrip(cid, {"is_active": False})
-            httpx.put(f"{tc.server}/api/settings", json={"driver_callable_turns": 0}, headers=tc.test_headers(), timeout=10.0)
+            tc.client.put(f"{tc.server}/api/settings", json={"driver_callable_turns": 0}, headers=tc.test_headers(), timeout=10.0)
             info("Disabled driver-callable and cleaned up")
             return True
     else:
         fail_test("Unexpected response during driver-callable test")
         tc.update_cantrip(cid, {"is_active": False})
-        httpx.put(f"{tc.server}/api/settings", json={"driver_callable_turns": 0}, headers=tc.test_headers(), timeout=10.0)
+        tc.client.put(f"{tc.server}/api/settings", json={"driver_callable_turns": 0}, headers=tc.test_headers(), timeout=10.0)
         return False
 
     call_tags_present = "<call:" in json.dumps(result)
@@ -772,7 +790,7 @@ if (context.tool_call) {
         fail_test("Tool result blocks leaked into response")
 
     tc.update_cantrip(cid, {"is_active": False})
-    httpx.put(
+    tc.client.put(
         f"{tc.server}/api/settings",
         json={"driver_callable_turns": 0},
         headers=tc.test_headers(),
@@ -864,7 +882,7 @@ def test_jslorebook_extraction(tc: TestClient) -> bool:
 def test_prefill_normalization(tc: TestClient) -> bool:
     section("TEST: Prefill Normalization")
 
-    httpx.put(
+    tc.client.put(
         f"{tc.server}/api/settings",
         json={"prefill_enabled": True},
         headers=tc.test_headers(),
@@ -887,7 +905,7 @@ def test_prefill_normalization(tc: TestClient) -> bool:
     else:
         fail_test("Unexpected response with prefill")
 
-    httpx.put(
+    tc.client.put(
         f"{tc.server}/api/settings",
         json={"prefill_enabled": False},
         headers=tc.test_headers(),
@@ -902,7 +920,7 @@ def test_content_bypass(tc: TestClient) -> bool:
 
     bypass_test_phrase = "FLOW_TEST_BYPASS"
 
-    httpx.put(
+    tc.client.put(
         f"{tc.server}/api/settings",
         json={"bypass_method": "space_separation"},
         headers=tc.test_headers(),
@@ -924,7 +942,7 @@ def test_content_bypass(tc: TestClient) -> bool:
     else:
         fail_test("Unexpected response with bypass")
 
-    httpx.put(
+    tc.client.put(
         f"{tc.server}/api/settings",
         json={"bypass_method": "none"},
         headers=tc.test_headers(),
@@ -945,7 +963,7 @@ def test_map_pipeline(tc: TestClient) -> bool:
     map_data = json.loads(map_json_path.read_text(encoding="utf-8"))
     pass_test(f"Loaded map JSON: {map_data['name']} ({len(map_data.get('stages', []))} stages)")
 
-    resp = httpx.post(
+    resp = tc.client.post(
         f"{tc.server}/api/maps/import",
         json={"data": map_data, "name": "FLOW_TEST_Gambling"},
         headers=tc.test_headers(),
@@ -959,7 +977,7 @@ def test_map_pipeline(tc: TestClient) -> bool:
     stage_count = len(resp.json().get("stages", []))
     pass_test(f"Map imported: {map_id[:8]}... ({stage_count} stages)")
 
-    update_resp = httpx.put(
+    update_resp = tc.client.put(
         f"{tc.server}/api/maps/{map_id}",
         json={"tag": "flow-test-gambling", "is_active": True},
         headers=tc.test_headers(),
@@ -969,16 +987,16 @@ def test_map_pipeline(tc: TestClient) -> bool:
         pass_test("Map tagged as 'flow-test-gambling' and activated")
     else:
         fail_test(f"Map tag/update failed: {update_resp.status_code}")
-        httpx.delete(f"{tc.server}/api/maps/{map_id}", headers=tc.test_headers(), timeout=10.0)
+        tc.client.delete(f"{tc.server}/api/maps/{map_id}", headers=tc.test_headers(), timeout=10.0)
         return False
 
-    v_settings = httpx.get(
+    v_settings = tc.client.get(
         f"{tc.server}/api/verification/settings",
         headers=tc.test_headers(),
         timeout=10.0,
     )
     if not v_settings.json().get("verification_endpoint_id"):
-        httpx.put(
+        tc.client.put(
             f"{tc.server}/api/verification/settings",
             json={
                 "verification_enabled": True,
@@ -1021,12 +1039,12 @@ def test_map_pipeline(tc: TestClient) -> bool:
         result = tc.send_proxy_request(messages)
     except Exception as e:
         fail_test(f"Map pipeline request failed: {e}")
-        httpx.delete(f"{tc.server}/api/maps/{map_id}", headers=tc.test_headers(), timeout=10.0)
+        tc.client.delete(f"{tc.server}/api/maps/{map_id}", headers=tc.test_headers(), timeout=10.0)
         return False
 
     if isinstance(result, dict):
         if _check_upstream_error(result):
-            httpx.delete(f"{tc.server}/api/maps/{map_id}", headers=tc.test_headers(), timeout=10.0)
+            tc.client.delete(f"{tc.server}/api/maps/{map_id}", headers=tc.test_headers(), timeout=10.0)
             return False
         content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
         if content:
@@ -1044,7 +1062,7 @@ def test_map_pipeline(tc: TestClient) -> bool:
     else:
         fail_test(f"Unexpected response type: {str(result)[:200]}")
 
-    export_resp = httpx.get(
+    export_resp = tc.client.get(
         f"{tc.server}/api/maps/{map_id}/export",
         headers=tc.test_headers(),
         timeout=10.0,
@@ -1065,16 +1083,16 @@ def test_map_pipeline(tc: TestClient) -> bool:
     else:
         fail_test(f"Map export failed: {export_resp.status_code}")
 
-    httpx.delete(f"{tc.server}/api/maps/{map_id}", headers=tc.test_headers(), timeout=10.0)
+    tc.client.delete(f"{tc.server}/api/maps/{map_id}", headers=tc.test_headers(), timeout=10.0)
     pass_test("Cleaned up test map")
 
     for endpoint in ["/api/cantrips", "/api/lorebooks"]:
-        resp_list = httpx.get(f"{tc.server}{endpoint}", headers=tc.test_headers(), timeout=10.0)
+        resp_list = tc.client.get(f"{tc.server}{endpoint}", headers=tc.test_headers(), timeout=10.0)
         resource_key = endpoint.split("/")[-1]
         for item in resp_list.json().get(resource_key, []):
             name = item.get("name", "")
             if name in ("Card Dealer", "Money Tracker", "Personality Manager", "Gambling Hall Rules", "Gambling Hall Map"):
-                httpx.delete(f"{tc.server}{endpoint}/{item['id']}", headers=tc.test_headers(), timeout=10.0)
+                tc.client.delete(f"{tc.server}{endpoint}/{item['id']}", headers=tc.test_headers(), timeout=10.0)
     pass_test("Cleaned up imported cantrips and lorebooks")
 
     return True
@@ -1086,21 +1104,24 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="GitInTheVan flow-based integration tests")
     parser.add_argument("--admin-user", default=ADMIN_USER, help="Admin username")
     parser.add_argument("--admin-pass", default=ADMIN_PASS, help="Admin password")
-    parser.add_argument("--server", default=SERVER, help="Server URL")
+    parser.add_argument("--server", default=None, help="Server URL (auto-detected if omitted)")
     args = parser.parse_args()
 
-    server_url = args.server
+    tc = TestClient()
+
+    if args.server:
+        tc.server = args.server
+        tc.client = httpx.Client(verify=False, timeout=tc.timeout)
+
+    tc.admin_user = args.admin_user
+    tc.admin_pass = args.admin_pass
 
     print(f"\n{'=' * 70}")
     print("  GitInTheVan - Flow-Based Integration Tests")
-    print(f"  Server: {server_url}")
+    print(f"  Server: {tc.server}")
     print(f"  Admin: {args.admin_user}")
     print(f"{'=' * 70}")
 
-    tc = TestClient()
-    tc.server = server_url
-    tc.admin_user = args.admin_user
-    tc.admin_pass = args.admin_pass
     if not tc.setup():
         print("\nSetup failed. Exiting.")
         sys.exit(1)

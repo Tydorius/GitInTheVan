@@ -25,6 +25,7 @@ from app.routers.memory_rules import router as memory_rules_router
 from app.routers.packs import router as packs_router
 from app.routers.proxy import router as proxy_router
 from app.routers.settings import router as settings_router
+from app.routers.skills import router as skills_router
 from app.routers.summarization import router as summarization_router
 from app.routers.users import router as users_router
 from app.routers.verification import router as verification_router
@@ -63,7 +64,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="GitInTheVan",
     description="Self-hostable MITM LLM router/proxy for roleplay services",
-    version="0.14.2",
+    version="0.14.3",
     lifespan=lifespan,
 )
 
@@ -122,6 +123,7 @@ app.include_router(diagnostics_router)
 app.include_router(verification_router)
 app.include_router(summarization_router)
 app.include_router(forbidden_words_router)
+app.include_router(skills_router)
 app.include_router(packs_router)
 app.include_router(audit_router)
 app.include_router(admin_router)
@@ -303,10 +305,15 @@ if __name__ == "__main__":
         redirect_thread = threading.Thread(target=_run_redirect_server, daemon=True)
         redirect_thread.start()
 
+    uvicorn_kwargs: dict = {"host": settings.host, "port": settings.port, "log_level": settings.log_level.lower()}
+    uvicorn_kwargs.update(ssl_kwargs)
+
+    if settings.behind_proxy:
+        uvicorn_kwargs["proxy_headers"] = True
+        uvicorn_kwargs["forwarded_allow_ips"] = "*"
+        logger.info("Behind proxy mode: trusting X-Forwarded-* headers")
+
     uvicorn.run(
         "app.main:app",
-        host=settings.host,
-        port=settings.port,
-        log_level=settings.log_level.lower(),
-        **ssl_kwargs,
+        **uvicorn_kwargs,
     )

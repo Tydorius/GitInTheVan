@@ -43,13 +43,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-se
 <li><a href="#4-endpoints">Endpoints</a></li>
 <li><a href="#5-cantrips">Cantrips</a></li>
 <li><a href="#6-lorebooks">Lorebooks</a></li>
-<li><a href="#7-verification">Verification</a></li>
-<li><a href="#8-memories">Memories</a></li>
-<li><a href="#9-command-tags">Command Tags</a></li>
-<li><a href="#10-maps">Maps</a></li>
-<li><a href="#11-content-packs">Content Packs</a></li>
-<li><a href="#12-settings">Settings</a></li>
-<li><a href="#13-admin">Admin</a></li>
+<li><a href="#7-skills--samples">Skills &amp; Samples</a></li>
+<li><a href="#8-verification">Verification</a></li>
+<li><a href="#9-memories">Memories</a></li>
+<li><a href="#10-command-tags">Command Tags</a></li>
+<li><a href="#11-maps">Maps</a></li>
+<li><a href="#12-content-packs">Content Packs</a></li>
+<li><a href="#13-settings">Settings</a></li>
+<li><a href="#14-admin">Admin</a></li>
 </ol>
 <hr />
 <h2 id="1-login-and-admin-setup">1. Login and Admin Setup</h2>
@@ -449,7 +450,40 @@ if (!budget) {
 <h3 id="lorebook-pipeline-positions">Lorebook Pipeline Positions</h3>
 <p>Lorebooks support the same four pipeline positions as cantrips (Pre-Driver, Driver-Callable, Pre-Navigator, Post-Navigator). Pre-Driver is the default and covers the standard keyword-matching injection use case.</p>
 <hr />
-<h2 id="7-verification">7. Verification</h2>
+<h2 id="7-skills-samples">7. Skills &amp; Samples</h2>
+<p>Skills and Writing Samples are reusable instruction blocks that can be attached to specific endpoints. They allow you to define behavioral directives and style references that are automatically injected into requests.</p>
+<h3 id="skills-vs-writing-samples">Skills vs Writing Samples</h3>
+<p><strong>Skills</strong> are behavioral instructions injected into the system message alongside character definition and lorebooks. They shape <em>what</em> the model does:</p>
+<ul>
+<li>"You are an expert at writing vivid combat scenes"</li>
+<li>"Always use third-person limited perspective"</li>
+<li>"Never break character during emotional moments"</li>
+</ul>
+<p>Skills are wrapped in <code>&lt;skills&gt;</code> tags and appended to the system message, after lorebook injection but before cantrip processing.</p>
+<p><strong>Writing Samples</strong> are style references injected before the last user message. They shape <em>how</em> the model writes:</p>
+<ul>
+<li>"Match this prose style: [example text]"</li>
+<li>"Here is an example of the desired descriptive density"</li>
+</ul>
+<p>Samples are wrapped in <code>&lt;writing_sample&gt;</code> tags and inserted as a system message immediately before the last user message, after summarization but before prefill. This keeps the style reference fresh in context.</p>
+<h3 id="creating-skills-and-samples">Creating Skills and Samples</h3>
+<ol>
+<li>Navigate to <strong>Skills &amp; Samples</strong> in the sidebar</li>
+<li>Use the <strong>Skills</strong> / <strong>Writing Samples</strong> tabs to switch between types</li>
+<li>Click <strong>New Skill</strong> or <strong>New Writing Sample</strong></li>
+<li>Fill in name, description, and content (markdown supported)</li>
+<li>Select the type if needed (Skill or Writing Sample)</li>
+</ol>
+<h3 id="attaching-to-endpoints">Attaching to Endpoints</h3>
+<ol>
+<li>Create or edit a skill/sample</li>
+<li>In the edit modal, check the boxes next to endpoints you want to attach to</li>
+<li>A skill/sample can be attached to multiple endpoints</li>
+<li>Each endpoint can have multiple skills and samples</li>
+</ol>
+<p>When a request comes through an endpoint, all attached skills are injected into the system message, then all attached samples are injected before the last user message.</p>
+<hr />
+<h2 id="8-verification">8. Verification</h2>
 <p>Verification uses a separate LLM (the <strong>Navigator</strong>) to check the writing LLM's (the <strong>Driver's</strong>) responses against configurable rules. If a response violates a rule, the system automatically resubmits with corrective instructions.</p>
 <p>The Verification page has five tabs: <strong>Rules</strong>, <strong>Settings</strong>, <strong>Logs</strong>, <strong>Forbidden Words</strong>, and <strong>Test</strong>.</p>
 <h3 id="rules-tab">Rules Tab</h3>
@@ -510,7 +544,7 @@ if (!budget) {
 </ol>
 <p>The result shows whether the response was approved or rejected, along with the reason and severity.</p>
 <hr />
-<h2 id="8-memories">8. Memories</h2>
+<h2 id="9-memories">9. Memories</h2>
 <p><img alt="Memories Page" src="media/gitv-memories.png" /></p>
 <p>The Memories page shows persistent data and summarization overrides.</p>
 <h3 id="persistent-memory-flags">Persistent Memory (Flags)</h3>
@@ -547,7 +581,7 @@ if (!budget) {
 4. Click <strong>Create</strong></p>
 <p>Use <strong>Edit</strong> to modify a rule and the <strong>ON/OFF</strong> toggle to enable/disable without deleting.</p>
 <hr />
-<h2 id="9-command-tags">9. Command Tags</h2>
+<h2 id="10-command-tags">10. Command Tags</h2>
 <p>Command tags are inline directives placed in the user's message text that override pipeline behavior. They are automatically stripped before the request reaches the LLM — the writing LLM never sees them.</p>
 <h3 id="syntax">Syntax</h3>
 <pre><code>&lt;COMMAND:setting&gt;          One-off override (this request only)
@@ -615,7 +649,7 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 </code></pre>
 <p>Persistent overrides are scoped per-conversation. Different chats have independent override state. Overrides appear as memory entries with the <code>__cmd_persist_</code> prefix on the Memories page.</p>
 <hr />
-<h2 id="10-maps">10. Maps</h2>
+<h2 id="11-maps">11. Maps</h2>
 <p><img alt="Maps List" src="media/gitv-maps.png" /></p>
 <p>Maps are workflow presets that chain multiple LLM stages into a single request. Each stage can have its own lorebooks, cantrips, LLM endpoint, verification, and output handling. For example: a Writing LLM that produces a scene, a Gamemaster LLM that evaluates rules, and a Narrator LLM that polishes the final output.</p>
 <p>When no map is active, the standard single-stage pipeline runs.</p>
@@ -714,7 +748,7 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <h3 id="example-map">Example Map</h3>
 <p>A complete example map — the Gambling Hall (a 3-stage casino game with driver-callable card dealing, money tracking, and personality assignment) — is included in <code>docs/examples/map/</code>. It contains individual cantrip/lorebook components with build instructions, plus a pre-exported <code>map_gambling_hall.json</code> you can import directly. See the <a href="examples/map/README.md">example map guide</a> for setup instructions.</p>
 <hr />
-<h2 id="11-content-packs">11. Content Packs</h2>
+<h2 id="12-content-packs">12. Content Packs</h2>
 <p><img alt="Content Packs" src="media/gitv-content-packs.png" /></p>
 <p>The Content Packs page lets you browse and install resources from any git repository. GitInTheVan works with any standard git endpoint (GitHub, Gitea, GitLab, local repos, etc.).</p>
 <p><strong>WARNING</strong>: Content from external repositories is not verified by GitInTheVan. Download and install at your own risk.</p>
@@ -783,7 +817,7 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <h3 id="syncing-repos">Syncing Repos</h3>
 <p>Click <strong>Sync</strong> on a repo to re-fetch the latest <code>descriptions.json</code> and file list. This checks for new files and updates.</p>
 <hr />
-<h2 id="12-settings">12. Settings</h2>
+<h2 id="13-settings">13. Settings</h2>
 <p><img alt="Settings Page" src="media/gitv-settings.png" /></p>
 <p>The Settings page configures your default proxy behavior, streaming UX, summarization, and pipeline features.</p>
 <h3 id="proxy-configuration">Proxy Configuration</h3>
@@ -878,7 +912,7 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 </table>
 <p>Admin actions (user creation, deletion, password resets) are recorded in the audit log, viewable via the <strong>Admin</strong> page. Global caps for driver-callable turns and verification retries are also configured in the Admin page.</p>
 <hr />
-<h2 id="13-admin">13. Admin</h2>
+<h2 id="14-admin">14. Admin</h2>
 <p><em>Admin only. The Admin link in the sidebar is only visible to admin accounts.</em></p>
 <p><img alt="Admin" src="media/gitv-admin-global-caps.png" /></p>
 <p>The Admin page provides system-wide management with five tabs: <strong>Global Caps</strong>, <strong>Users</strong>, <strong>Debug</strong>, <strong>Audit Logs</strong>, and <strong>Server Logs</strong>.</p>

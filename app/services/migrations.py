@@ -491,6 +491,28 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
         ALTER TABLE endpoints ADD COLUMN default_model VARCHAR(128) DEFAULT '' NOT NULL;
         """,
     ),
+    (
+        "032_create_skills_tables",
+        """
+        CREATE TABLE IF NOT EXISTS skills (
+            id VARCHAR(36) PRIMARY KEY NOT NULL,
+            user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            name VARCHAR(128) NOT NULL,
+            description VARCHAR(512) NOT NULL DEFAULT '',
+            content TEXT NOT NULL DEFAULT '',
+            type VARCHAR(16) NOT NULL DEFAULT 'skill',
+            created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS endpoint_skills (
+            id VARCHAR(36) PRIMARY KEY NOT NULL,
+            endpoint_id VARCHAR(36) NOT NULL REFERENCES endpoints(id) ON DELETE CASCADE,
+            skill_id VARCHAR(36) NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+            created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            CONSTRAINT uq_endpoint_skill UNIQUE (endpoint_id, skill_id)
+        );
+        """,
+    ),
 ]
 
 

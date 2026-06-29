@@ -363,30 +363,39 @@ fi
 LAN_IP=$("$GITV_ROOT/.venv/bin/python" -c "import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(('8.8.8.8',80)); print(s.getsockname()[0]); s.close()" 2>/dev/null || echo "")
 
 # ============================================================
-# HTTPS setup for LAN access (auto-generates cert if missing)
+# SSL Certificate Setup (skipped if GITV_GENERATE_CERTS=false)
 # ============================================================
-echo
-echo "Setting up HTTPS for LAN access..."
-if [ -f "$GITV_ROOT/data/ssl/cert.pem" ] && [ -f "$GITV_ROOT/data/ssl/ca.pem" ]; then
-    echo "SSL certificate and CA already exist, skipping generation."
+GENERATE_CERTS=true
+if grep -q "^GITV_GENERATE_CERTS=false" "$GITV_ROOT/.env" 2>/dev/null; then
+    GENERATE_CERTS=false
+fi
+
+if [ "$GENERATE_CERTS" = "false" ]; then
+    echo "GITV_GENERATE_CERTS=false, skipping certificate generation."
+    echo "Running in HTTP mode. Use a reverse proxy for HTTPS."
 else
-    if [ -f "$GITV_ROOT/data/ssl/cert.pem" ]; then
-        echo "cert.pem exists but ca.pem missing, regenerating with CA chain."
-    fi
-    echo "Generating self-signed certificate..."
-    if [ -n "$LAN_IP" ]; then
-        "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert(extra_ips=['${LAN_IP}'])" >> "$INSTALLER_LOG" 2>&1
+    echo "Setting up HTTPS for LAN access..."
+    if [ -f "$GITV_ROOT/data/ssl/cert.pem" ] && [ -f "$GITV_ROOT/data/ssl/ca.pem" ]; then
+        echo "SSL certificate and CA already exist, skipping generation."
     else
-        "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert()" >> "$INSTALLER_LOG" 2>&1
-    fi
-    if [ $? -eq 0 ]; then
-        if ! grep -q "^GITV_SSL_CERTFILE=" "$GITV_ROOT/.env" 2>/dev/null; then
-            echo "GITV_SSL_CERTFILE=data/ssl/cert.pem" >> "$GITV_ROOT/.env"
-            echo "GITV_SSL_KEYFILE=data/ssl/key.pem" >> "$GITV_ROOT/.env"
+        if [ -f "$GITV_ROOT/data/ssl/cert.pem" ]; then
+            echo "cert.pem exists but ca.pem missing, regenerating with CA chain."
         fi
-        echo "Certificate generated. HTTPS will be active."
-    else
-        echo "WARNING: Certificate generation failed."
+        echo "Generating self-signed certificate..."
+        if [ -n "$LAN_IP" ]; then
+            "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert(extra_ips=['${LAN_IP}'])" >> "$INSTALLER_LOG" 2>&1
+        else
+            "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert()" >> "$INSTALLER_LOG" 2>&1
+        fi
+        if [ $? -eq 0 ]; then
+            if ! grep -q "^GITV_SSL_CERTFILE=" "$GITV_ROOT/.env" 2>/dev/null; then
+                echo "GITV_SSL_CERTFILE=data/ssl/cert.pem" >> "$GITV_ROOT/.env"
+                echo "GITV_SSL_KEYFILE=data/ssl/key.pem" >> "$GITV_ROOT/.env"
+            fi
+            echo "Certificate generated. HTTPS will be active."
+        else
+            echo "WARNING: Certificate generation failed."
+        fi
     fi
 fi
 

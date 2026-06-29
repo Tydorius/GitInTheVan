@@ -5,6 +5,7 @@
   import Endpoints from './pages/Endpoints.svelte'
   import Cantrips from './pages/Cantrips.svelte'
   import Lorebooks from './pages/Lorebooks.svelte'
+  import Skills from './pages/Skills.svelte'
   import Verification from './pages/Verification.svelte'
   import Memories from './pages/Memories.svelte'
   import Maps from './pages/Maps.svelte'
@@ -17,6 +18,7 @@
     { path: '/endpoints', label: 'Endpoints', icon: '⇄' },
     { path: '/cantrips', label: 'Cantrips', icon: '⚡' },
     { path: '/lorebooks', label: 'Lorebooks', icon: '📖' },
+    { path: '/skills', label: 'Skills & Samples', icon: '✎' },
     { path: '/verification', label: 'Verification', icon: '✓' },
     { path: '/memories', label: 'Memories', icon: '🧠' },
     { path: '/maps', label: 'Maps', icon: '🗺' },
@@ -79,6 +81,8 @@
         <Cantrips />
       {:else if page === '/lorebooks'}
         <Lorebooks />
+      {:else if page === '/skills'}
+        <Skills />
       {:else if page === '/verification'}
         <Verification />
       {:else if page === '/memories'}

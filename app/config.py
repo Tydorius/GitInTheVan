@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     log_retention_days: int = 30
     ssl_certfile: str = ""
     ssl_keyfile: str = ""
+    generate_certs: bool = True
+    behind_proxy: bool = False
 
     @field_validator("default_endpoint_url")
     @classmethod
