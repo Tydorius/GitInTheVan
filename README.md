@@ -379,7 +379,80 @@ Go to **Admin** → **Network** tab to view certificate status, regenerate with 
 | `GITV_LOG_RETENTION_DAYS` | `30` | Days to retain rotated log files |
 | `GITV_SSL_CERTFILE` | *(empty)* | Path to SSL certificate file. Set to enable HTTPS. |
 | `GITV_SSL_KEYFILE` | *(empty)* | Path to SSL private key file. Set to enable HTTPS. |
-| `GITV_HTTP_REDIRECT_PORT` | `80` | Port for HTTP→HTTPS redirect server. Set to 0 to disable. Requires admin/root for port 80. |
+| `GITV_GENERATE_CERTS` | `true` | Auto-generate self-signed certificates during install. Set to `false` when behind a reverse proxy or providing your own certs. |
+| `GITV_BEHIND_PROXY` | `false` | Set to `true` when behind a reverse proxy. Enables `X-Forwarded-*` header processing. |
+| `GITV_HTTP_REDIRECT_PORT` | `80` | Port for HTTP→HTTPS redirect server. Set to 0 to disable. Only active when SSL is enabled and not behind a proxy. |
+
+### Deployment Modes
+
+GitInTheVan supports four deployment scenarios depending on how you expose it to clients:
+
+#### Local Network (Default)
+
+Auto-generates self-signed certificates. Devices must trust the CA certificate once.
+
+```
+Device ──https──> GitInTheVan :8000
+```
+
+No configuration needed — this is the default behavior.
+
+#### Behind a Reverse Proxy (Pangolin, Cloudflare Tunnel, Tailscale Funnel)
+
+The external service handles TLS. GitInTheVan runs plain HTTP internally.
+
+```env
+GITV_GENERATE_CERTS=false
+GITV_BEHIND_PROXY=true
+```
+
+```
+JanitorAI ──https──> Tunnel/Proxy ──http──> GitInTheVan :8000
+```
+
+#### Direct Internet with Your Own Certs (Let's Encrypt)
+
+GitInTheVan runs HTTPS directly with real certificates.
+
+```env
+GITV_GENERATE_CERTS=false
+GITV_SSL_CERTFILE=/etc/letsencrypt/live/your-domain/fullchain.pem
+GITV_SSL_KEYFILE=/etc/letsencrypt/live/your-domain/privkey.pem
+```
+
+#### Behind nginx/Caddy/Apache
+
+The web server handles TLS and reverse proxies to GitInTheVan.
+
+```env
+GITV_GENERATE_CERTS=false
+GITV_BEHIND_PROXY=true
+```
+
+Example Caddyfile (automatic HTTPS):
+```
+gitv.your-domain.com {
+    reverse_proxy localhost:8000
+}
+```
+
+Example nginx config:
+```nginx
+server {
+    listen 443 ssl;
+    server_name gitv.your-domain.com;
+
+    ssl_certificate /etc/letsencrypt/live/your-domain/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/your-domain/privkey.pem;
+
+    location / {
+        proxy_pass http://localhost:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
 
 ### Endpoints
 

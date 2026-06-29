@@ -6,6 +6,14 @@ All notable changes to GitInTheVan are documented in this file.
 
 ### Added
 
+- **Skills & Writing Samples**: Reusable instruction sets and style references that can be attached to specific endpoints:
+  - Skills inject behavioral instructions into the system message (after lorebooks, before cantrips)
+  - Writing Samples inject style references before the last user message (after summarization, before prefill)
+  - Many-to-many relationship: skills/samples can be attached to multiple endpoints, each endpoint can have multiple skills/samples
+  - Per-endpoint assignment via checkbox UI in the edit modal
+  - Two-tab UI: Skills and Writing Samples with separate creation/editing
+  - API: `/api/skills` CRUD, `/api/skills/{id}/attach`, `/api/skills/for-endpoint/{id}`
+  - Migration 032: Creates `skills` and `endpoint_skills` tables
 - **Local Root CA + Leaf Certificate**: Replaced bare self-signed certs with a proper local CA + CA-signed leaf cert chain for cross-platform trust (required for iOS which cannot trust leaf certs):
   - `ca.pem`, `ca.crt`, `ca.der` — Root CA in PEM, CRT (double-click on Windows), and DER formats
   - `cert.pem`, `cert.crt` — Leaf cert + CA chain in PEM and CRT formats

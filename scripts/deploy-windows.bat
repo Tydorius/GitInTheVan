@@ -579,9 +579,18 @@ if errorlevel 1 (
 netsh advfirewall firewall add rule name="GitInTheVan HTTP Redirect" dir=in action=allow protocol=TCP localport=80 >nul 2>&1
 
 REM ============================================================
-REM Detect LAN IP + generate SSL cert (single Python call)
+REM SSL Certificate Setup (skipped if GITV_GENERATE_CERTS=false)
 REM ============================================================
-echo.
+set "GENERATE_CERTS=true"
+findstr /b "GITV_GENERATE_CERTS=false" "%GITV_ROOT%\.env" >nul 2>&1
+if not errorlevel 1 set "GENERATE_CERTS=false"
+
+if "!GENERATE_CERTS!"=="false" (
+    echo GITV_GENERATE_CERTS=false, skipping certificate generation. >> "%LOG_FILE%"
+    echo Running in HTTP mode. Use a reverse proxy for HTTPS.
+    goto :ssl_done
+)
+
 echo Setting up HTTPS for LAN access...
 echo Setting up HTTPS for LAN access... >> "%LOG_FILE%"
 "!GITV_ROOT!\.venv\Scripts\python" -c "import socket, os; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(('8.8.8.8',80)); ip=s.getsockname()[0]; s.close(); open(os.path.join(os.environ.get('GITV_ROOT','.'),'data','ssl','lan_ip.txt'),'w').write(ip)" >nul 2>&1
