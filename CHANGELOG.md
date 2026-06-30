@@ -14,6 +14,10 @@ All notable changes to GitInTheVan are documented in this file.
   - Two-tab UI: Skills and Writing Samples with separate creation/editing
   - API: `/api/skills` CRUD, `/api/skills/{id}/attach`, `/api/skills/for-endpoint/{id}`
   - Migration 032: Creates `skills` and `endpoint_skills` tables
+- **Deployment Modes**: Support for reverse proxy, tunnel, and direct internet deployments:
+  - `GITV_GENERATE_CERTS=false` — skip cert generation for reverse proxy / tunnel setups
+  - `GITV_BEHIND_PROXY=true` — trust X-Forwarded-* headers, enable proxy-aware uvicorn
+  - README documents four deployment scenarios with example nginx and Caddy configs
 - **Local Root CA + Leaf Certificate**: Replaced bare self-signed certs with a proper local CA + CA-signed leaf cert chain for cross-platform trust (required for iOS which cannot trust leaf certs):
   - `ca.pem`, `ca.crt`, `ca.der` — Root CA in PEM, CRT (double-click on Windows), and DER formats
   - `cert.pem`, `cert.crt` — Leaf cert + CA chain in PEM and CRT formats
