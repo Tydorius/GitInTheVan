@@ -186,6 +186,7 @@
   $: filteredResources = packTab === 'create'
     ? allResources.filter(f => !filterType || f.type === filterType)
     : []
+  $: allFiles = browseData?.files || []
   $: authors = [...new Set(allFiles.map((f: any) => f.author).filter(Boolean))].sort()
   $: filteredFiles = allFiles
     .filter((f: any) => !filterType || f.type === filterType)
