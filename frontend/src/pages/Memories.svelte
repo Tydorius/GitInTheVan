@@ -5,6 +5,15 @@
   let memories: any[] = []
   let summaries: any[] = []
   let memoryRules: any[] = []
+  let scenarioRules: any[] = []
+  let endpoints: any[] = []
+  let showScenarioForm = false
+  let editingScenarioId: string | null = null
+  let scenarioForm = {
+    name: '', token_threshold: 2000, fire_position: 'pre',
+    endpoint_id: '' as string | null, model: '', prompt: '', is_active: true,
+  }
+  let defaultScenarioPrompt = ''
   let loading = true
   let error = ''
   let filterConversation = ''
@@ -41,14 +50,20 @@
   async function load() {
     loading = true
     try {
-      const [memData, sumData, ruleData] = await Promise.all([
+      const [memData, sumData, ruleData, srData, epData, dpData] = await Promise.all([
         api.listMemories(filterConversation || undefined),
         api.listSummaries(),
         api.listMemoryRules(),
+        api.listScenarioRules(),
+        api.listEndpoints(),
+        api.getScenarioDefaultPrompt().catch(() => ({ prompt: '' })),
       ])
       memories = memData.memories
       summaries = sumData.summaries
       memoryRules = ruleData.rules
+      scenarioRules = srData.rules
+      endpoints = epData.endpoints
+      defaultScenarioPrompt = dpData.prompt
     } catch (e: any) { error = e.message }
     finally { loading = false }
   }
@@ -102,6 +117,53 @@
   async function toggleRuleActive(r: any) {
     try { await api.updateMemoryRule(r.id, { is_active: !r.is_active }); await load() }
     catch (e: any) { error = e.message }
+  }
+
+  function resetScenarioForm() {
+    scenarioForm = { name: '', token_threshold: 2000, fire_position: 'pre', endpoint_id: '', model: '', prompt: '', is_active: true }
+    editingScenarioId = null
+  }
+
+  function startEditScenarioRule(r: any) {
+    editingScenarioId = r.id
+    scenarioForm = {
+      name: r.name, token_threshold: r.token_threshold,
+      fire_position: r.fire_position, endpoint_id: r.endpoint_id || '',
+      model: r.model || '', prompt: r.prompt || '', is_active: r.is_active,
+    }
+    showScenarioForm = true
+  }
+
+  async function handleSaveScenarioRule() {
+    error = ''
+    try {
+      const payload = { ...scenarioForm, endpoint_id: scenarioForm.endpoint_id || null }
+      if (editingScenarioId) {
+        await api.updateScenarioRule(editingScenarioId, payload)
+      } else {
+        await api.createScenarioRule(payload)
+      }
+      showScenarioForm = false
+      resetScenarioForm()
+      await load()
+    } catch (e: any) { error = e.message }
+  }
+
+  async function handleDeleteScenarioRule(id: string) {
+    if (!confirm('Delete this scenario rule?')) return
+    try { await api.deleteScenarioRule(id); await load() }
+    catch (e: any) { error = e.message }
+  }
+
+  async function toggleScenarioRuleActive(r: any) {
+    try { await api.updateScenarioRule(r.id, { is_active: !r.is_active }); await load() }
+    catch (e: any) { error = e.message }
+  }
+
+  function endpointName(id: string | null): string {
+    if (!id) return 'Default'
+    const ep = endpoints.find(e => e.id === id)
+    return ep?.name || id.slice(0, 8)
   }
 
   onMount(load)
@@ -273,6 +335,96 @@
             <td>
               <button onclick={() => startEditRule(r)} style="font-size: 12px;">Edit</button>
               <button class="danger" onclick={() => handleDeleteRule(r.id)} style="font-size: 12px;">Delete</button>
+            </td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  {/if}
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h3>Scenario Summarization Rules</h3>
+    <button class="primary" onclick={() => { resetScenarioForm(); showScenarioForm = true; }}>+ Add Rule</button>
+  </div>
+  <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
+    Automatically summarize the system message (character definition + scenario) when it exceeds a token threshold.
+    <strong>Pre</strong> rules fire before lorebooks/cantrips (controls author-provided scenario size).
+    <strong>Post</strong> rules fire after cantrips/skills (controls final system message size).
+    Only the highest-triggered rule per position fires.
+  </p>
+  {#if showScenarioForm}
+    <div class="card" style="background: var(--bg-elevated); margin-bottom: 16px;">
+      <div class="form-group">
+        <label for="sr-name">Name</label>
+        <input id="sr-name" bind:value={scenarioForm.name} placeholder="e.g. Large Scenario Compressor" />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="sr-threshold">Token Threshold</label>
+          <input id="sr-threshold" type="number" bind:value={scenarioForm.token_threshold} min="100" />
+          <p style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">Summarize when system message exceeds this many tokens</p>
+        </div>
+        <div class="form-group">
+          <label for="sr-position">Fire Position</label>
+          <select id="sr-position" bind:value={scenarioForm.fire_position}>
+            <option value="pre">Pre (before lorebooks/cantrips)</option>
+            <option value="post">Post (after cantrips/skills)</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="sr-endpoint">Endpoint (blank = default)</label>
+          <select id="sr-endpoint" bind:value={scenarioForm.endpoint_id}>
+            <option value="">Use default endpoint</option>
+            {#each endpoints as ep}<option value={ep.id}>{ep.name}</option>{/each}
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="sr-model">Model (blank = endpoint default)</label>
+          <input id="sr-model" bind:value={scenarioForm.model} placeholder="e.g. gemini-2.0-flash" />
+        </div>
+      </div>
+      <div class="form-group">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <label for="sr-prompt">Custom Prompt (empty = use default)</label>
+          {#if defaultScenarioPrompt}
+            <button type="button" onclick={() => scenarioForm.prompt = defaultScenarioPrompt} style="font-size: 11px; padding: 2px 8px;">Load Default</button>
+          {/if}
+        </div>
+        <textarea id="sr-prompt" bind:value={scenarioForm.prompt} rows="4" style="width: 100%; font-family: monospace; font-size: 12px;"></textarea>
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <button class="primary" onclick={handleSaveScenarioRule}>{editingScenarioId ? 'Update' : 'Create'}</button>
+        <button onclick={() => { showScenarioForm = false; resetScenarioForm(); }}>Cancel</button>
+      </div>
+    </div>
+  {/if}
+  {#if scenarioRules.length === 0}
+    <div class="empty-state" style="padding: 16px;">
+      No scenario rules configured. Rules automatically compress large system messages to save context window.
+    </div>
+  {:else}
+    <table>
+      <thead>
+        <tr><th>Name</th><th>Position</th><th>Threshold</th><th>Endpoint</th><th>Model</th><th>Active</th><th>Actions</th></tr>
+      </thead>
+      <tbody>
+        {#each scenarioRules as r}
+          <tr>
+            <td>{r.name}</td>
+            <td><span class="badge {r.fire_position === 'pre' ? 'approved' : 'active'}" style="font-size: 10px;">{r.fire_position === 'pre' ? 'Pre' : 'Post'}</span></td>
+            <td style="font-size: 12px;">{r.token_threshold} tok</td>
+            <td style="font-size: 12px;">{endpointName(r.endpoint_id)}</td>
+            <td style="font-size: 12px;">{r.model || 'default'}</td>
+            <td>
+              <button onclick={() => toggleScenarioRuleActive(r)} style="padding: 2px 8px; font-size: 11px;" class={r.is_active ? 'primary' : ''}>{r.is_active ? 'ON' : 'OFF'}</button>
+            </td>
+            <td>
+              <button onclick={() => startEditScenarioRule(r)} style="font-size: 12px;">Edit</button>
+              <button class="danger" onclick={() => handleDeleteScenarioRule(r.id)} style="font-size: 12px;">Delete</button>
             </td>
           </tr>
         {/each}

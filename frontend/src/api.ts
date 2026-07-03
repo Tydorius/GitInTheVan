@@ -184,6 +184,18 @@ export const api = {
   detachSkill: (skillId: string, endpointId: string) =>
     request<void>(`/api/skills/${skillId}/attach/${endpointId}`, { method: 'DELETE' }),
 
+  // Scenario Rules
+  listScenarioRules: () => request<{ rules: any[] }>('/api/scenario-rules'),
+  createScenarioRule: (data: any) =>
+    request<any>('/api/scenario-rules', { method: 'POST', body: JSON.stringify(data) }),
+  getScenarioRule: (id: string) => request<any>(`/api/scenario-rules/${id}`),
+  updateScenarioRule: (id: string, data: any) =>
+    request<any>(`/api/scenario-rules/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteScenarioRule: (id: string) =>
+    request<void>(`/api/scenario-rules/${id}`, { method: 'DELETE' }),
+  getScenarioDefaultPrompt: () =>
+    request<{ prompt: string }>('/api/scenario-rules/default-prompt'),
+
   // Verification
   listVerificationRules: () => request<{ rules: any[] }>('/api/verification/rules'),
   createVerificationRule: (data: any) =>

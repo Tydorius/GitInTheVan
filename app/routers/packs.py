@@ -286,6 +286,8 @@ async def install_file(
         resource_type = "lorebook"
     elif resource_type == "map":
         resource_type = "map"
+    elif resource_type == "scenario_rule":
+        resource_type = "scenario_rule"
 
     scan_result = scan_file(raw_content, resource_type)
 
@@ -532,6 +534,21 @@ async def _create_local_resource(
         await db.flush()
         return rule.id
 
+    if resource_type == "scenario_rule":
+        from app.models.scenario_rule import ScenarioRule
+        sr = ScenarioRule(
+            user_id=user_id,
+            name=data.get("name", "Imported"),
+            token_threshold=data.get("token_threshold", 2000),
+            fire_position=data.get("fire_position", "pre"),
+            model=data.get("model", ""),
+            prompt=data.get("prompt", ""),
+            is_active=False,
+        )
+        db.add(sr)
+        await db.flush()
+        return sr.id
+
     return ""
 
 
@@ -553,6 +570,12 @@ async def _toggle_local_resource(
         obj = result.scalar_one_or_none()
         if obj:
             obj.is_active = enabled
+    elif resource_type == "scenario_rule":
+        from app.models.scenario_rule import ScenarioRule
+        result = await db.execute(select(ScenarioRule).where(ScenarioRule.id == local_id))
+        obj = result.scalar_one_or_none()
+        if obj:
+            obj.is_active = enabled
 
 
 async def _delete_local_resource(
@@ -570,6 +593,12 @@ async def _delete_local_resource(
             await db.delete(obj)
     elif resource_type == "rule":
         result = await db.execute(select(VerificationRule).where(VerificationRule.id == local_id))
+        obj = result.scalar_one_or_none()
+        if obj:
+            await db.delete(obj)
+    elif resource_type == "scenario_rule":
+        from app.models.scenario_rule import ScenarioRule
+        result = await db.execute(select(ScenarioRule).where(ScenarioRule.id == local_id))
         obj = result.scalar_one_or_none()
         if obj:
             await db.delete(obj)

@@ -6,6 +6,16 @@ All notable changes to GitInTheVan are documented in this file.
 
 ### Added
 
+- **Scenario Summarization**: Automatically compress large system messages to save context window space:
+  - Rule-based: create rules with token thresholds, fire positions, endpoints, models, and custom prompts
+  - Dual position: Pre rules fire before lorebooks/cantrips (controls author scenario), Post rules fire after cantrips/skills (controls final message)
+  - Each position independently picks the highest-triggered rule (sorted by threshold descending)
+  - Both positions can fire on the same request (pre summarizes first, post evaluates after)
+  - Respects `<SUMMARY:off>` command tag
+  - Content pack support: scenario rules can be imported from packs via `scenario_rules/` folder
+  - UI: "Scenario Summarization Rules" card on Memories page
+  - API: `/api/scenario-rules` CRUD + `/api/scenario-rules/default-prompt`
+  - Migration 033: Creates `scenario_rules` table
 - **Skills & Writing Samples**: Reusable instruction sets and style references that can be attached to specific endpoints:
   - Skills inject behavioral instructions into the system message (after lorebooks, before cantrips)
   - Writing Samples inject style references before the last user message (after summarization, before prefill)
