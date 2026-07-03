@@ -840,7 +840,9 @@ A complete example map — the Gambling Hall (a 3-stage casino game with driver-
 
 ![Content Packs](media/gitv-content-packs.png)
 
-The Content Packs page lets you browse and install resources from any git repository. GitInTheVan works with any standard git endpoint (GitHub, Gitea, GitLab, local repos, etc.).
+The Content Packs page lets you browse and install resources from git repositories or local folders. GitInTheVan works with any standard git endpoint (GitHub, Gitea, GitLab) plus admin-linked local folders.
+
+The page has two tabs: **Browse** (link, browse, sync, and install from repos) and **Create Pack** (export your own resources as a git-ready pack).
 
 **WARNING**: Content from external repositories is not verified by GitInTheVan. Download and install at your own risk.
 
@@ -855,7 +857,34 @@ The Content Packs page lets you browse and install resources from any git reposi
 5. Optionally enter a **Token** for private repos
 6. Click **Link**
 
-GitInTheVan clones the repo and reads `descriptions.json` (the manifest). If no manifest exists, it auto-discovers files from the `cantrips/`, `lorebooks/`, `rules/`, and `maps/` folders.
+GitInTheVan clones the repo and reads `descriptions.json` (the manifest). If no manifest exists, it auto-discovers files from the `cantrips/`, `lorebooks/`, `rules/`, `scenario_rules/`, `skills/`, and `maps/` folders.
+
+### Linking a Local Folder (Admin Only)
+
+Admins can link a local filesystem path as a content pack source:
+
+1. Click **"+ Link Local Folder"** (visible to admins only)
+2. Enter a display name and the folder path on the server
+3. Optionally uncheck "Global" if you don't want all users to see it
+4. Click **Link**
+
+Global repos are visible to all users. Non-admin users can browse and install from them but cannot remove them. Only the admin who created a global repo can remove it.
+
+### Creating a Content Pack
+
+The **Create Pack** tab lets you export your own resources as a git-ready pack:
+
+1. Switch to the **Create Pack** tab
+2. Enter pack name, author, and description
+3. Filter by type and check the resources you want to include
+4. Click **Export Pack**
+
+The downloaded zip contains:
+- Serialized JSON files for each resource (in type folders)
+- `descriptions.json` manifest
+- `README.md` with deployment and sharing instructions
+
+The README includes notes about NSFW-friendly platforms (Gitea, Forgejo) since some platforms like GitHub may not be suitable for adult content packs.
 
 ### Browsing Files
 
@@ -911,7 +940,8 @@ The Settings page configures your default proxy behavior, streaming UX, summariz
 ### Proxy Configuration
 
 - **Default Endpoint**: Which endpoint to use when no specific routing applies
-- **Default Model Override**: Force a specific model regardless of what the client sends (leave blank to use the client's model selection)
+
+Model configuration is now per-endpoint. Set the **Default Model** on each endpoint in the Endpoints page. The endpoint's model is used as a fallback when the client doesn't specify one.
 
 ### Streaming and Status
 
