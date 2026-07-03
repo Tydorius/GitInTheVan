@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { api } from '../api'
+  import { api, getToken } from '../api'
   import { onMount } from 'svelte'
+  import { isAdmin } from '../stores'
 
   let repos: any[] = []
   let installed: any[] = []
@@ -12,6 +13,16 @@
   let showLinkForm = false
   let linkForm = { name: '', url: '', branch: 'main', token: '' }
   let linking = false
+
+  let showLocalForm = false
+  let localForm = { name: '', path: '', is_global: true }
+  let localLinking = false
+
+  let packTab = 'browse'
+  let allResources: any[] = []
+  let selectedResources: Record<string, boolean> = {}
+  let packMeta = { pack_name: '', pack_author: '', pack_description: '' }
+  let creatingPack = false
 
   function autofillName() {
     if (linkForm.name.trim()) return
@@ -30,6 +41,9 @@
   let filterType = ''
   let filterAuthor = ''
   let sortBy = 'name'
+
+  let browseRepoId = ''
+  let installingPath = ''
 
   async function load() {
     loading = true
@@ -56,6 +70,7 @@
   async function browse(id: string) {
     try {
       browseData = await api.browseRepo(id)
+      browseRepoId = id
       filterRepo = id
     } catch (e: any) { error = e.message }
   }
@@ -63,6 +78,7 @@
   async function sync(id: string) {
     try {
       browseData = await api.syncRepo(id)
+      browseRepoId = id
       await load()
     } catch (e: any) { error = e.message }
   }
@@ -84,6 +100,7 @@
 
   async function install(repoId: string, filePath: string, fork: boolean) {
     error = ''
+    installingPath = filePath
     try {
       const result = await api.installFile({ repo_id: repoId, file_path: filePath, fork })
       if (result.scan?.max_severity === 'critical') {
@@ -93,6 +110,7 @@
       }
       await load()
     } catch (e: any) { error = e.message }
+    finally { installingPath = '' }
   }
 
   async function toggleItem(id: string) {
@@ -112,7 +130,62 @@
     catch (e: any) { error = e.message }
   }
 
-  $: allFiles = browseData?.files || []
+  async function linkLocalRepo() {
+    localLinking = true; error = ''
+    try {
+      browseData = await api.linkLocalRepo(localForm)
+      showLocalForm = false
+      localForm = { name: '', path: '', is_global: true }
+      await load()
+    } catch (e: any) { error = e.message }
+    finally { localLinking = false }
+  }
+
+  async function loadAllResources() {
+    try {
+      const [cantrips, lorebooks, skills, scenarioRules, verifyRules, maps] = await Promise.all([
+        api.listCantrips(), api.listLorebooks(), api.listSkills(),
+        api.listScenarioRules(), api.listVerificationRules(), api.listMaps(),
+      ])
+      allResources = [
+        ...cantrips.cantrips.map((c: any) => ({ id: c.id, type: 'cantrip', name: c.name, description: c.description || '' })),
+        ...lorebooks.lorebooks.map((l: any) => ({ id: l.id, type: 'lorebook', name: l.name, description: l.description || '' })),
+        ...skills.skills.map((s: any) => ({ id: s.id, type: 'skill', name: s.name, description: s.description || '' })),
+        ...scenarioRules.rules.map((r: any) => ({ id: r.id, type: 'scenario_rule', name: r.name, description: '' })),
+        ...verifyRules.rules.map((r: any) => ({ id: r.id, type: 'rule', name: r.name, description: r.description || '' })),
+        ...maps.maps.map((m: any) => ({ id: m.id, type: 'map', name: m.name, description: '' })),
+      ]
+    } catch (e: any) { error = e.message }
+  }
+
+  async function handleCreatePack() {
+    error = ''
+    const resources = Object.entries(selectedResources)
+      .filter(([_, checked]) => checked)
+      .map(([key, _]) => {
+        const [type, id] = key.split(':')
+        return { type, id }
+      })
+    if (resources.length === 0) {
+      error = 'Select at least one resource'
+      return
+    }
+    creatingPack = true
+    try {
+      const blob = await api.createPack({ ...packMeta, resources })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${(packMeta.pack_name || 'content-pack').toLowerCase().replace(/\s+/g, '-')}.zip`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e: any) { error = e.message }
+    finally { creatingPack = false }
+  }
+
+  $: filteredResources = packTab === 'create'
+    ? allResources.filter(f => !filterType || f.type === filterType)
+    : []
   $: authors = [...new Set(allFiles.map((f: any) => f.author).filter(Boolean))].sort()
   $: filteredFiles = allFiles
     .filter((f: any) => !filterType || f.type === filterType)
@@ -133,17 +206,89 @@
 
 <div class="page-header">
   <h2>Content Packs <a class="help-link" href="/help/user-guide.html#content-packs" target="_blank" title="Open documentation">?</a></h2>
-  <button class="primary" onclick={() => showLinkForm = true}>+ Link Repository</button>
+  <div>
+    <button onclick={() => packTab = 'browse'} class={packTab === 'browse' ? 'primary' : ''}>Browse</button>
+    <button onclick={() => { packTab = 'create'; loadAllResources(); }} class={packTab === 'create' ? 'primary' : ''} style="margin-left: 8px;">Create Pack</button>
+  </div>
 </div>
 
 {#if error}<div class="error-msg">{error}</div>{/if}
 
-<div class="error-msg" style="font-size: 11px;">
-  {disclaimer || 'Content from external repositories is not verified. Download at your own risk.'}
-</div>
+{#if packTab === 'create'}
+  <div class="card">
+    <h3>Create Content Pack</h3>
+    <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
+      Select resources to export as a git-ready content pack. Includes <code>descriptions.json</code> and <code>README.md</code> with deployment instructions.
+    </p>
+    <div class="form-row" style="margin-bottom: 12px;">
+      <div class="form-group">
+        <label for="pk-name">Pack Name</label>
+        <input id="pk-name" bind:value={packMeta.pack_name} placeholder="My Awesome Pack" />
+      </div>
+      <div class="form-group">
+        <label for="pk-author">Author</label>
+        <input id="pk-author" bind:value={packMeta.pack_author} placeholder="Your name" />
+      </div>
+    </div>
+    <div class="form-group" style="margin-bottom: 16px;">
+      <label for="pk-desc">Description</label>
+      <input id="pk-desc" bind:value={packMeta.pack_description} placeholder="What's in this pack?" />
+    </div>
+    <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center;">
+      <select bind:value={filterType} style="width: auto;">
+        <option value="">All Types</option>
+        <option value="cantrip">Cantrips</option>
+        <option value="lorebook">Lorebooks</option>
+        <option value="skill">Skills</option>
+        <option value="scenario_rule">Scenario Rules</option>
+        <option value="rule">Verification Rules</option>
+        <option value="map">Maps</option>
+      </select>
+      <button type="button" onclick={() => { for (const r of filteredResources) selectedResources[`${r.type}:${r.id}`] = true }}>Select All</button>
+      <button type="button" onclick={() => { selectedResources = {} }}>Clear</button>
+      <span style="font-size: 11px; color: var(--text-dim);">
+        {Object.values(selectedResources).filter(Boolean).length} selected
+      </span>
+    </div>
+    {#if filteredResources.length === 0}
+      <div class="empty-state">No resources found.</div>
+    {:else}
+      <table>
+        <thead><tr><th style="width: 30px;"></th><th>Name</th><th>Type</th><th>Description</th></tr></thead>
+        <tbody>
+          {#each filteredResources as r}
+            <tr>
+              <td><input type="checkbox" bind:checked={selectedResources[`${r.type}:${r.id}`]} style="width: auto;" /></td>
+              <td><strong>{r.name}</strong></td>
+              <td style="font-size: 11px;">{r.type}</td>
+              <td style="font-size: 11px; color: var(--text-dim);">{r.description || '—'}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    {/if}
+    <div style="margin-top: 16px;">
+      <button class="primary" onclick={handleCreatePack} disabled={creatingPack}>
+        {creatingPack ? 'Creating...' : 'Export Pack'}
+      </button>
+    </div>
+  </div>
+{/if}
 
-{#if loading}<div class="loading">Loading...</div>
-{:else}
+{#if packTab === 'browse'}
+  <div style="margin: 12px 0;">
+    <button class="primary" onclick={() => showLinkForm = true}>+ Link Repository</button>
+    {#if $isAdmin}
+      <button onclick={() => showLocalForm = true} style="margin-left: 8px;">+ Link Local Folder</button>
+    {/if}
+  </div>
+
+  <div class="error-msg" style="font-size: 11px;">
+    {disclaimer || 'Content from external repositories is not verified. Download at your own risk.'}
+  </div>
+
+  {#if loading}<div class="loading">Loading...</div>
+  {:else}
   {#if repos.length > 0}
     <div class="card">
       <h3>Linked Repositories</h3>
@@ -152,8 +297,12 @@
         <tbody>
           {#each repos as r}
             <tr>
-              <td>{r.name}</td>
-              <td style="font-size: 11px; color: var(--text-dim);">{r.url}</td>
+              <td>
+                {r.name}
+                {#if r.is_global}<span class="badge approved" style="font-size: 9px; margin-left: 4px;">Global</span>{/if}
+                {#if r.is_local}<span class="badge active" style="font-size: 9px; margin-left: 4px;">Local</span>{/if}
+              </td>
+              <td style="font-size: 11px; color: var(--text-dim);">{r.is_local ? r.url : r.url}</td>
               <td style="font-size: 11px;">{r.branch}</td>
               <td>{r.file_count}</td>
               <td style="font-size: 11px; color: var(--text-dim);">{r.last_synced ? new Date(r.last_synced).toLocaleString() : 'Never'}</td>
@@ -161,7 +310,9 @@
                 <button onclick={() => browse(r.id)} style="font-size: 12px;">Browse</button>
                 <button onclick={() => sync(r.id)} style="font-size: 12px;">Sync</button>
                 <button onclick={() => checkUpdates(r.id)} style="font-size: 12px;">Updates</button>
-                <button class="danger" onclick={() => deleteRepo(r.id)} style="font-size: 12px;">Remove</button>
+                {#if r.can_remove}
+                  <button class="danger" onclick={() => deleteRepo(r.id)} style="font-size: 12px;">Remove</button>
+                {/if}
               </td>
             </tr>
           {/each}
@@ -194,6 +345,7 @@
           <option value="cantrip">Cantrips</option>
           <option value="lorebook">Lorebooks</option>
           <option value="rule">Rules</option>
+          <option value="scenario_rule">Scenario Rules</option>
           <option value="map">Maps</option>
         </select>
         <select bind:value={filterAuthor} style="width: auto;">
@@ -223,9 +375,11 @@
                 <td>
                   {#if isInstalled(f.path)}
                     <span style="font-size: 11px; color: var(--success);">Installed</span>
+                  {:else if installingPath === f.path}
+                    <button class="primary" disabled style="font-size: 12px;">Installing...</button>
                   {:else}
-                    <button class="primary" onclick={() => install(browseData ? (repos.find(r => r.name === browseData.pack_name)?.id || filterRepo) : '', f.path, false)} style="font-size: 12px;">Install</button>
-                    <button onclick={() => install(browseData ? (repos.find(r => r.name === browseData.pack_name)?.id || filterRepo) : '', f.path, true)} style="font-size: 12px;">Fork</button>
+                    <button class="primary" onclick={() => install(browseRepoId, f.path, false)} style="font-size: 12px;">Install</button>
+                    <button onclick={() => install(browseRepoId, f.path, true)} style="font-size: 12px;">Fork</button>
                   {/if}
                 </td>
               </tr>
@@ -282,33 +436,62 @@
     </div>
   {/if}
 {/if}
+{/if}
 
 {#if showLinkForm}
-  <div class="modal-overlay" onclick={(e) => { if (e.target === e.currentTarget) showLinkForm = false; }}>
+  <div class="modal-overlay" role="dialog" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) showLinkForm = false; }}>
     <div class="modal">
       <h3>Link Repository</h3>
       <form onsubmit={(e) => { e.preventDefault(); linkRepo(); }}>
         <div class="form-group">
-          <label>Name</label>
-          <input bind:value={linkForm.name} placeholder="My Content Pack" required />
+          <label for="lr-name">Name</label>
+          <input id="lr-name" bind:value={linkForm.name} placeholder="My Content Pack" required />
         </div>
         <div class="form-group">
-          <label>Git URL</label>
-          <input bind:value={linkForm.url} placeholder="https://github.com/user/repo or https://gitea.example.com/user/repo" required onblur={autofillName} />
+          <label for="lr-url">Git URL</label>
+          <input id="lr-url" bind:value={linkForm.url} placeholder="https://github.com/user/repo" required onblur={autofillName} />
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label>Branch</label>
-            <input bind:value={linkForm.branch} placeholder="main" />
+            <label for="lr-branch">Branch</label>
+            <input id="lr-branch" bind:value={linkForm.branch} placeholder="main" />
           </div>
           <div class="form-group">
-            <label>Token (optional)</label>
-            <input type="password" bind:value={linkForm.token} placeholder="Access token for private repos" />
+            <label for="lr-token">Token (optional)</label>
+            <input id="lr-token" type="password" bind:value={linkForm.token} placeholder="Access token for private repos" />
           </div>
         </div>
         <div class="modal-actions">
           <button onclick={() => showLinkForm = false}>Cancel</button>
           <button type="submit" class="primary" disabled={linking}>{linking ? 'Linking...' : 'Link'}</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{/if}
+
+{#if showLocalForm}
+  <div class="modal-overlay" role="dialog" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) showLocalForm = false; }}>
+    <div class="modal">
+      <h3>Link Local Folder</h3>
+      <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
+        Link a folder on this server as a content pack source. All users will be able to browse and install from it.
+      </p>
+      <form onsubmit={(e) => { e.preventDefault(); linkLocalRepo(); }}>
+        <div class="form-group">
+          <label for="lf-name">Display Name</label>
+          <input id="lf-name" bind:value={localForm.name} placeholder="Admin Content Pack" required />
+        </div>
+        <div class="form-group">
+          <label for="lf-path">Folder Path</label>
+          <input id="lf-path" bind:value={localForm.path} placeholder="/data/my-pack or C:\content\my-pack" required />
+        </div>
+        <div class="form-group">
+          <label><input type="checkbox" bind:checked={localForm.is_global} style="width: auto;"> Make visible to all users (Global)</label>
+        </div>
+        <div class="modal-actions">
+          <button onclick={() => showLocalForm = false}>Cancel</button>
+          <button type="submit" class="primary" disabled={localLinking}>{localLinking ? 'Linking...' : 'Link'}</button>
         </div>
       </form>
     </div>

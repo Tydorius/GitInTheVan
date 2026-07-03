@@ -327,6 +327,17 @@ export const api = {
     request<void>(`/api/packs/repos/${id}`, { method: 'DELETE' }),
   checkUpdates: (id: string) =>
     request<any>(`/api/packs/repos/${id}/check-updates`, { method: 'POST' }),
+  linkLocalRepo: (data: { name: string; path: string; is_global?: boolean }) =>
+    request<any>('/api/packs/repos/local', { method: 'POST', body: JSON.stringify(data) }),
+  createPack: (data: any) =>
+    fetch('/api/packs/create', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }).then(async r => {
+      if (!r.ok) throw new Error((await r.json()).detail || 'Failed to create pack');
+      return r.blob();
+    }),
   installFile: (data: { repo_id: string; file_path: string; fork?: boolean }) =>
     request<any>('/api/packs/install', { method: 'POST', body: JSON.stringify(data) }),
   listInstalled: () =>

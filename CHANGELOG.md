@@ -6,6 +6,15 @@ All notable changes to GitInTheVan are documented in this file.
 
 ### Added
 
+- **Local Folder Repos**: Admins can link local filesystem paths as content pack sources, visible globally to all users
+  - `POST /api/packs/repos/local` (admin only)
+  - `is_local` and `is_global` columns on `linked_repos` (migration 034)
+  - Global repos visible to all users; only admin owner can remove
+  - Browse/sync/install work identically to remote repos
+- **Content Pack Creator**: Export selected resources as a git-ready zip with auto-generated `descriptions.json` and deployment README
+  - `POST /api/packs/create` — serializes cantrips, lorebooks, skills, scenario rules, verification rules, and maps
+  - README includes local deployment instructions and NSFW platform warnings
+  - Two-tab UI on Content Packs page: Browse and Create Pack
 - **Scenario Summarization**: Automatically compress large system messages to save context window space:
   - Rule-based: create rules with token thresholds, fire positions, endpoints, models, and custom prompts
   - Dual position: Pre rules fire before lorebooks/cantrips (controls author scenario), Post rules fire after cantrips/skills (controls final message)

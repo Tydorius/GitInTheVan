@@ -20,7 +20,7 @@
     { path: '/lorebooks', label: 'Lorebooks', icon: '📖' },
     { path: '/skills', label: 'Skills & Samples', icon: '✎' },
     { path: '/verification', label: 'Verification', icon: '✓' },
-    { path: '/memories', label: 'Memories', icon: '🧠' },
+    { path: '/memories', label: 'Memory', icon: '🧠' },
     { path: '/maps', label: 'Maps', icon: '🗺' },
     { path: '/packs', label: 'Content Packs', icon: '📦' },
     { path: '/settings', label: 'Settings', icon: '⚙' },

@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, require_admin
 from app.models.cantrip import Cantrip
 from app.models.linked_repo import InstalledItem, LinkedRepo
 from app.models.lorebook import Lorebook
@@ -27,6 +27,153 @@ DISCLAIMER = (
     "Download and install at your own risk."
 )
 
+PACK_README_TEMPLATE = """# {pack_name}
+
+This content pack was created with GitInTheVan's Pack Creator.
+
+## Contents
+
+{contents}
+
+## Deploying Locally (Admin)
+
+If you are a GitInTheVan admin, you can make this pack available to all users
+via Local Folder Linking:
+
+1. Extract this zip to a folder on the server (e.g., `data/packs/{pack_slug}/`)
+2. In GitInTheVan, go to Content Packs → Link Local Folder
+3. Enter the folder path
+4. The pack will be visible to all users for browsing and installation
+
+## Sharing Publicly
+
+To share this pack with other GitInTheVan users:
+
+1. Create a new git repository (GitHub, Gitea, etc.)
+2. Extract this zip and commit the files to the repository
+3. Share the repository URL — users link it via Content Packs
+
+**Important:** Some platforms (e.g., GitHub) have content policies that may
+not be friendly to NSFW content. Consider using Gitea, Forgejo, or other
+self-hosted git platforms for adult content packs.
+"""
+
+
+def _repo_to_response(r: LinkedRepo, counts: dict[str, int]) -> dict:
+    return RepoResponse(
+        id=r.id,
+        name=r.name,
+        url=r.url,
+        branch=r.branch,
+        last_synced=r.last_synced.isoformat() if r.last_synced else None,
+        file_count=counts.get(r.id, 0),
+    ).model_dump()
+
+
+async def _resolve_repo_access(repo_id: str, user_id: str, db: AsyncSession) -> LinkedRepo:
+    """Find a repo that belongs to the user OR is global."""
+    result = await db.execute(
+        select(LinkedRepo).where(LinkedRepo.id == repo_id)
+    )
+    repo = result.scalar_one_or_none()
+    if repo is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repo not found")
+    if repo.user_id != user_id and not repo.is_global:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to this repo")
+    return repo
+
+
+def _fetch_local_repo_info(path: str) -> dict:
+    """Discover files in a local filesystem path."""
+    from pathlib import Path
+
+    repo_path = Path(path)
+    if not repo_path.exists():
+        raise GitCloneError(f"Local path does not exist: {path}")
+    if not repo_path.is_dir():
+        raise GitCloneError(f"Local path is not a directory: {path}")
+
+    manifest_path = repo_path / "descriptions.json"
+    has_manifest = manifest_path.exists()
+
+    if has_manifest:
+        with open(manifest_path, encoding="utf-8") as f:
+            manifest = json.load(f)
+    else:
+        manifest = {
+            "pack_name": repo_path.name,
+            "pack_author": "",
+            "pack_version": "1.0.0",
+            "pack_description": "",
+            "files": [],
+        }
+
+    if not manifest.get("files"):
+        manifest["files"] = _discover_local_files(repo_path)
+    else:
+        manifest["has_manifest"] = True
+
+    readme = ""
+    for readme_name in ("README.md", "readme.md", "README.txt"):
+        readme_path = repo_path / readme_name
+        if readme_path.exists():
+            readme = readme_path.read_text(encoding="utf-8")
+            break
+
+    manifest["readme"] = readme
+    manifest["has_manifest"] = has_manifest
+    return manifest
+
+
+def _discover_local_files(repo_path) -> list[dict]:
+    """Auto-discover JSON files in recognized subdirectories."""
+    import os
+
+    type_folders = {
+        "cantrips": "cantrip",
+        "lorebooks": "lorebook",
+        "rules": "rule",
+        "scenario_rules": "scenario_rule",
+        "skills": "skill",
+        "maps": "map",
+    }
+
+    files = []
+    for folder, resource_type in type_folders.items():
+        dir_path = repo_path / folder
+        if not dir_path.is_dir():
+            continue
+        for filename in sorted(os.listdir(dir_path)):
+            if not filename.endswith(".json"):
+                continue
+            file_path = f"{folder}/{filename}"
+            try:
+                with open(dir_path / filename, encoding="utf-8") as f:
+                    data = json.load(f)
+                files.append({
+                    "path": file_path,
+                    "type": resource_type,
+                    "name": data.get("name", filename.rsplit(".", 1)[0]),
+                    "description": data.get("description", ""),
+                    "author": data.get("author", ""),
+                    "version": data.get("version", "1.0.0"),
+                    "updated": data.get("updated", ""),
+                    "tags": data.get("tags", []),
+                })
+            except (json.JSONDecodeError, OSError):
+                pass
+
+    return files
+
+
+def _fetch_local_file_content(path: str, file_path: str) -> str:
+    """Read a file from a local repo path."""
+    from pathlib import Path
+    full_path = Path(path) / file_path
+    if not full_path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
+    return full_path.read_text(encoding="utf-8")
+
 
 class RepoLinkRequest(BaseModel):
     name: str
@@ -42,6 +189,9 @@ class RepoResponse(BaseModel):
     branch: str
     last_synced: str | None
     file_count: int
+    is_local: bool = False
+    is_global: bool = False
+    can_remove: bool = True
 
 
 class FileEntryResponse(BaseModel):
@@ -99,8 +249,15 @@ async def list_repos(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    from sqlalchemy import or_
+
     result = await db.execute(
-        select(LinkedRepo).where(LinkedRepo.user_id == current_user.id)
+        select(LinkedRepo).where(
+            or_(
+                LinkedRepo.user_id == current_user.id,
+                LinkedRepo.is_global.is_(True),
+            )
+        )
     )
     repos = result.scalars().all()
 
@@ -114,14 +271,12 @@ async def list_repos(
 
     return {
         "repos": [
-            RepoResponse(
-                id=r.id,
-                name=r.name,
-                url=r.url,
-                branch=r.branch,
-                last_synced=r.last_synced.isoformat() if r.last_synced else None,
-                file_count=counts.get(r.id, 0),
-            ).model_dump()
+            {
+                **_repo_to_response(r, counts),
+                "is_local": r.is_local,
+                "is_global": r.is_global,
+                "can_remove": r.user_id == current_user.id,
+            }
             for r in repos
         ],
         "disclaimer": DISCLAIMER,
@@ -162,6 +317,53 @@ async def link_repo(
     ).model_dump()
 
 
+class LocalRepoLinkRequest(BaseModel):
+    name: str
+    path: str
+    is_global: bool = True
+
+
+@router.post("/repos/local", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin)])
+async def link_local_repo(
+    req: LocalRepoLinkRequest,
+    current_user: Annotated[User, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    import os
+    if not os.path.isdir(req.path):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Path does not exist or is not a directory: {req.path}")
+
+    try:
+        info = _fetch_local_repo_info(req.path)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    repo = LinkedRepo(
+        user_id=current_user.id,
+        name=req.name,
+        url=req.path,
+        branch="local",
+        token="",
+        is_local=True,
+        is_global=req.is_global,
+        descriptions_cache=json.dumps(info),
+    )
+    db.add(repo)
+    await db.commit()
+    await db.refresh(repo)
+
+    return RepoBrowseResponse(
+        pack_name=info["pack_name"],
+        pack_author=info["pack_author"],
+        pack_version=info["pack_version"],
+        pack_description=info["pack_description"],
+        files=info["files"],
+        has_manifest=info["has_manifest"],
+        disclaimer=DISCLAIMER,
+        readme=info.get("readme", ""),
+    ).model_dump()
+
+
 @router.post("/repos/{repo_id}/sync")
 async def sync_repo(
     repo_id: str,
@@ -170,18 +372,16 @@ async def sync_repo(
 ):
     from datetime import UTC, datetime
 
-    result = await db.execute(
-        select(LinkedRepo).where(
-            LinkedRepo.id == repo_id, LinkedRepo.user_id == current_user.id
-        )
-    )
-    repo = result.scalar_one_or_none()
-    if repo is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repo not found")
+    repo = await _resolve_repo_access(repo_id, current_user.id, db)
 
     try:
-        info = fetch_repo_info(repo.url, repo.branch, repo.token)
+        if repo.is_local:
+            info = _fetch_local_repo_info(repo.url)
+        else:
+            info = fetch_repo_info(repo.url, repo.branch, repo.token)
     except GitCloneError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     repo.descriptions_cache = json.dumps(info)
@@ -206,23 +406,21 @@ async def browse_repo(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    result = await db.execute(
-        select(LinkedRepo).where(
-            LinkedRepo.id == repo_id, LinkedRepo.user_id == current_user.id
-        )
-    )
-    repo = result.scalar_one_or_none()
-    if repo is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repo not found")
+    repo = await _resolve_repo_access(repo_id, current_user.id, db)
 
     if repo.descriptions_cache:
         info = json.loads(repo.descriptions_cache)
     else:
         try:
-            info = fetch_repo_info(repo.url, repo.branch, repo.token)
+            if repo.is_local:
+                info = _fetch_local_repo_info(repo.url)
+            else:
+                info = fetch_repo_info(repo.url, repo.branch, repo.token)
             repo.descriptions_cache = json.dumps(info)
             await db.commit()
         except GitCloneError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        except Exception as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     return RepoBrowseResponse(
@@ -250,7 +448,7 @@ async def delete_repo(
     )
     repo = result.scalar_one_or_none()
     if repo is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repo not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repo not found or you do not have permission to remove it")
     await db.delete(repo)
     await db.commit()
 
@@ -261,17 +459,13 @@ async def install_file(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    result = await db.execute(
-        select(LinkedRepo).where(
-            LinkedRepo.id == req.repo_id, LinkedRepo.user_id == current_user.id
-        )
-    )
-    repo = result.scalar_one_or_none()
-    if repo is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repo not found")
+    repo = await _resolve_repo_access(req.repo_id, current_user.id, db)
 
     try:
-        raw_content = fetch_file_content(repo.url, req.file_path, repo.token)
+        if repo.is_local:
+            raw_content = _fetch_local_file_content(repo.url, req.file_path)
+        else:
+            raw_content = fetch_file_content(repo.url, req.file_path, repo.token)
     except GitCloneError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except FileNotFoundError as e:
@@ -430,14 +624,7 @@ async def check_updates(
     """Check if any installed items from this repo have updates available."""
     from app.services.git_sync import check_for_updates as do_check
 
-    result = await db.execute(
-        select(LinkedRepo).where(
-            LinkedRepo.id == repo_id, LinkedRepo.user_id == current_user.id
-        )
-    )
-    repo = result.scalar_one_or_none()
-    if repo is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repo not found")
+    repo = await _resolve_repo_access(repo_id, current_user.id, db)
 
     items_result = await db.execute(
         select(InstalledItem).where(
@@ -471,6 +658,203 @@ async def check_updates(
         "updates_available": update_count,
         "results": results,
     }
+
+
+class CreatePackRequest(BaseModel):
+    pack_name: str = "My Content Pack"
+    pack_author: str = ""
+    pack_description: str = ""
+    resources: list[dict] = []
+
+
+@router.post("/create")
+async def create_pack(
+    req: CreatePackRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    import io
+    import zipfile
+
+    from fastapi.responses import StreamingResponse
+
+    if not req.resources:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one resource")
+
+    serialized_files: list[tuple[str, bytes]] = []
+    manifest_files: list[dict] = []
+    contents_summary: list[str] = []
+
+    for resource in req.resources:
+        rtype = resource.get("type", "")
+        rid = resource.get("id", "")
+        data, file_path, manifest_entry = await _serialize_resource(db, current_user.id, rtype, rid)
+        if data is None:
+            continue
+
+        file_bytes = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
+        serialized_files.append((file_path, file_bytes))
+        manifest_files.append(manifest_entry)
+        contents_summary.append(f"- {manifest_entry['type']}: {manifest_entry['name']} ({file_path})")
+
+    pack_slug = req.pack_name.lower().replace(" ", "-").replace("/", "-")[:64] or "content-pack"
+    manifest = {
+        "pack_name": req.pack_name,
+        "pack_author": req.pack_author,
+        "pack_version": "1.0.0",
+        "pack_description": req.pack_description,
+        "pack_url": "",
+        "files": manifest_files,
+    }
+
+    manifest_bytes = json.dumps(manifest, indent=2, ensure_ascii=False).encode("utf-8")
+    serialized_files.append(("descriptions.json", manifest_bytes))
+
+    readme_text = PACK_README_TEMPLATE.format(
+        pack_name=req.pack_name,
+        pack_slug=pack_slug,
+        contents="\n".join(contents_summary) or "(no resources)",
+    )
+    serialized_files.append(("README.md", readme_text.encode("utf-8")))
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for path, data in serialized_files:
+            zf.writestr(path, data)
+
+    zip_buffer.seek(0)
+    filename = f"{pack_slug}.zip"
+
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+async def _serialize_resource(
+    db: AsyncSession, user_id: str, rtype: str, rid: str
+) -> tuple[dict | None, str, dict]:
+    """Serialize a resource to JSON, returning (data, file_path, manifest_entry)."""
+
+    if rtype == "cantrip":
+        result = await db.execute(select(Cantrip).where(Cantrip.id == rid, Cantrip.user_id == user_id))
+        obj = result.scalar_one_or_none()
+        if not obj:
+            return None, "", {}
+        data = {
+            "name": obj.name, "description": obj.description or "",
+            "llm_instructions": obj.llm_instructions or "",
+            "code": obj.code or "",
+            "author": "", "version": "1.0.0",
+            "updated": obj.created_at.isoformat() if obj.created_at else "",
+        }
+        slug = obj.name.lower().replace(" ", "_")[:64]
+        return data, f"cantrips/{slug}.json", {"path": f"cantrips/{slug}.json", "type": "cantrip", **data}
+
+    if rtype == "lorebook":
+        result = await db.execute(
+            select(Lorebook).where(Lorebook.id == rid, Lorebook.user_id == user_id)
+        )
+        obj = result.scalar_one_or_none()
+        if not obj:
+            return None, "", {}
+        entries_result = await db.execute(
+            select(LorebookEntry).where(LorebookEntry.lorebook_id == rid)
+        )
+        entries = entries_result.scalars().all()
+        entry_list = []
+        for e in entries:
+            entry_list.append({
+                "name": e.name, "keys": json.loads(e.keys) if e.keys else [],
+                "secondary_keys": json.loads(e.secondary_keys) if e.secondary_keys else [],
+                "content": e.content, "position": e.position,
+                "insertion_order": e.insertion_order,
+                "is_constant": e.is_constant, "is_selective": e.is_selective,
+                "is_disabled": e.is_disabled,
+            })
+        data = {
+            "name": obj.name, "description": obj.description or "",
+            "entries": entry_list, "author": "", "version": "1.0.0",
+            "updated": obj.created_at.isoformat() if obj.created_at else "",
+        }
+        slug = obj.name.lower().replace(" ", "_")[:64]
+        return data, f"lorebooks/{slug}.json", {"path": f"lorebooks/{slug}.json", "type": "lorebook", **data}
+
+    if rtype == "skill":
+        from app.models.skill import Skill
+        result = await db.execute(select(Skill).where(Skill.id == rid, Skill.user_id == user_id))
+        obj = result.scalar_one_or_none()
+        if not obj:
+            return None, "", {}
+        data = {
+            "name": obj.name, "description": obj.description or "",
+            "content": obj.content or "", "type": obj.type,
+            "author": "", "version": "1.0.0",
+            "updated": obj.created_at.isoformat() if obj.created_at else "",
+        }
+        slug = obj.name.lower().replace(" ", "_")[:64]
+        return data, f"skills/{slug}.json", {"path": f"skills/{slug}.json", "type": "skill", **data}
+
+    if rtype == "scenario_rule":
+        from app.models.scenario_rule import ScenarioRule
+        result = await db.execute(select(ScenarioRule).where(ScenarioRule.id == rid, ScenarioRule.user_id == user_id))
+        obj = result.scalar_one_or_none()
+        if not obj:
+            return None, "", {}
+        data = {
+            "name": obj.name, "description": "",
+            "token_threshold": obj.token_threshold,
+            "fire_position": obj.fire_position,
+            "model": obj.model or "", "prompt": obj.prompt or "",
+            "author": "", "version": "1.0.0",
+            "updated": obj.created_at.isoformat() if obj.created_at else "",
+        }
+        slug = obj.name.lower().replace(" ", "_")[:64]
+        return data, f"scenario_rules/{slug}.json", {"path": f"scenario_rules/{slug}.json", "type": "scenario_rule", **data}
+
+    if rtype == "rule":
+        result = await db.execute(select(VerificationRule).where(VerificationRule.id == rid, VerificationRule.user_id == user_id))
+        obj = result.scalar_one_or_none()
+        if not obj:
+            return None, "", {}
+        data = {
+            "name": obj.name, "description": obj.description or "",
+            "prompt": obj.prompt or "",
+            "max_retries": obj.max_retries,
+            "execution_order": obj.execution_order,
+            "resubmission_strategy": obj.resubmission_strategy,
+            "author": "", "version": "1.0.0",
+            "updated": obj.created_at.isoformat() if obj.created_at else "",
+        }
+        slug = obj.name.lower().replace(" ", "_")[:64]
+        return data, f"rules/{slug}.json", {"path": f"rules/{slug}.json", "type": "rule", **data}
+
+    if rtype == "map":
+        from app.models.map import Map, MapStage
+        result = await db.execute(select(Map).where(Map.id == rid, Map.user_id == user_id))
+        obj = result.scalar_one_or_none()
+        if not obj:
+            return None, "", {}
+        stages_result = await db.execute(select(MapStage).where(MapStage.map_id == rid))
+        stages = stages_result.scalars().all()
+        stage_list = []
+        for s in stages:
+            stage_list.append({
+                "name": s.name, "system_instructions": s.system_instructions or "",
+                "endpoint_id": s.endpoint_id, "model_override": s.model_override or "",
+                "driver_callable_turns": s.driver_callable_turns,
+                "output_mode": s.output_mode,
+            })
+        data = {
+            "name": obj.name, "description": "",
+            "stages": stage_list, "author": "", "version": "1.0.0",
+            "updated": obj.created_at.isoformat() if obj.created_at else "",
+        }
+        slug = obj.name.lower().replace(" ", "_")[:64]
+        return data, f"maps/{slug}.json", {"path": f"maps/{slug}.json", "type": "map", **data}
+
+    return None, "", {}
 
 
 async def _create_local_resource(
