@@ -771,7 +771,8 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <hr />
 <h2 id="12-content-packs">12. Content Packs</h2>
 <p><img alt="Content Packs" src="media/gitv-content-packs.png" /></p>
-<p>The Content Packs page lets you browse and install resources from any git repository. GitInTheVan works with any standard git endpoint (GitHub, Gitea, GitLab, local repos, etc.).</p>
+<p>The Content Packs page lets you browse and install resources from git repositories or local folders. GitInTheVan works with any standard git endpoint (GitHub, Gitea, GitLab) plus admin-linked local folders.</p>
+<p>The page has two tabs: <strong>Browse</strong> (link, browse, sync, and install from repos) and <strong>Create Pack</strong> (export your own resources as a git-ready pack).</p>
 <p><strong>WARNING</strong>: Content from external repositories is not verified by GitInTheVan. Download and install at your own risk.</p>
 <h3 id="linking-a-repository">Linking a Repository</h3>
 <p><img alt="Link Repository" src="media/gitv-content-packs-link-repository.png" /></p>
@@ -783,7 +784,29 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <li>Optionally enter a <strong>Token</strong> for private repos</li>
 <li>Click <strong>Link</strong></li>
 </ol>
-<p>GitInTheVan clones the repo and reads <code>descriptions.json</code> (the manifest). If no manifest exists, it auto-discovers files from the <code>cantrips/</code>, <code>lorebooks/</code>, <code>rules/</code>, and <code>maps/</code> folders.</p>
+<p>GitInTheVan clones the repo and reads <code>descriptions.json</code> (the manifest). If no manifest exists, it auto-discovers files from the <code>cantrips/</code>, <code>lorebooks/</code>, <code>rules/</code>, <code>scenario_rules/</code>, <code>skills/</code>, and <code>maps/</code> folders.</p>
+<h3 id="linking-a-local-folder-admin-only">Linking a Local Folder (Admin Only)</h3>
+<p>Admins can link a local filesystem path as a content pack source:</p>
+<ol>
+<li>Click <strong>"+ Link Local Folder"</strong> (visible to admins only)</li>
+<li>Enter a display name and the folder path on the server</li>
+<li>Optionally uncheck "Global" if you don't want all users to see it</li>
+<li>Click <strong>Link</strong></li>
+</ol>
+<p>Global repos are visible to all users. Non-admin users can browse and install from them but cannot remove them. Only the admin who created a global repo can remove it.</p>
+<h3 id="creating-a-content-pack">Creating a Content Pack</h3>
+<p>The <strong>Create Pack</strong> tab lets you export your own resources as a git-ready pack:</p>
+<ol>
+<li>Switch to the <strong>Create Pack</strong> tab</li>
+<li>Enter pack name, author, and description</li>
+<li>Filter by type and check the resources you want to include</li>
+<li>Click <strong>Export Pack</strong></li>
+</ol>
+<p>The downloaded zip contains:
+- Serialized JSON files for each resource (in type folders)
+- <code>descriptions.json</code> manifest
+- <code>README.md</code> with deployment and sharing instructions</p>
+<p>The README includes notes about NSFW-friendly platforms (Gitea, Forgejo) since some platforms like GitHub may not be suitable for adult content packs.</p>
 <h3 id="browsing-files">Browsing Files</h3>
 <p><img alt="Browse Files" src="media/gitv-content-packs-browse.png" /></p>
 <p>After linking or syncing, the browser shows all available files with:</p>
@@ -844,8 +867,8 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <h3 id="proxy-configuration">Proxy Configuration</h3>
 <ul>
 <li><strong>Default Endpoint</strong>: Which endpoint to use when no specific routing applies</li>
-<li><strong>Default Model Override</strong>: Force a specific model regardless of what the client sends (leave blank to use the client's model selection)</li>
 </ul>
+<p>Model configuration is now per-endpoint. Set the <strong>Default Model</strong> on each endpoint in the Endpoints page. The endpoint's model is used as a fallback when the client doesn't specify one.</p>
 <h3 id="streaming-and-status">Streaming and Status</h3>
 <p>These settings affect how responses are delivered when verification is enabled. Since verification requires buffering the full response, these options control the streaming experience:</p>
 <ul>
