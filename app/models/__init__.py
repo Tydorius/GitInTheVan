@@ -16,6 +16,7 @@ from app.models.lorebook_entry import LorebookEntry
 from app.models.map import Map, MapStage, MapStageResource
 from app.models.memory import Memory
 from app.models.memory_rule import MemoryRule
+from app.models.scenario_rule import ScenarioRule
 from app.models.skill import EndpointSkill, Skill
 from app.models.user import User
 from app.models.user_data import UserData
@@ -51,4 +52,5 @@ __all__ = [
     "VerificationLog",
     "Skill",
     "EndpointSkill",
+    "ScenarioRule",
 ]

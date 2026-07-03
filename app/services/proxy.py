@@ -229,6 +229,10 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
                     msgs.insert(0, {"role": "system", "content": memory_block})
                 logger.info("Memory injection: %d keys for chat %s", len(memories), internal_chat_id[:12])
 
+        if user_id and command_overrides.to_dict().get("summary") is not False:
+            from app.services.scenario_summarizer import maybe_summarize_scenario
+            body_json = await maybe_summarize_scenario(body_json, user_id, "pre")
+
         body_json = await _apply_lorebook_injection(body_json, user_id, tags)
 
         if user_id and endpoint_id:
@@ -284,6 +288,10 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
         from app.services.summarization import maybe_summarize
         if body_json.get("_gitv_command_overrides", {}).get("summary") is not False:
             body_json = await maybe_summarize(body_json, user_id, internal_chat_id, tags)
+
+        if user_id and body_json.get("_gitv_command_overrides", {}).get("summary") is not False:
+            from app.services.scenario_summarizer import maybe_summarize_scenario
+            body_json = await maybe_summarize_scenario(body_json, user_id, "post")
 
         sample_contents = body_json.pop("_gitv_sample_contents", None)
         if sample_contents:

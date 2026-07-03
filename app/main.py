@@ -24,6 +24,7 @@ from app.routers.memories import router as memories_router
 from app.routers.memory_rules import router as memory_rules_router
 from app.routers.packs import router as packs_router
 from app.routers.proxy import router as proxy_router
+from app.routers.scenario_rules import router as scenario_rules_router
 from app.routers.settings import router as settings_router
 from app.routers.skills import router as skills_router
 from app.routers.summarization import router as summarization_router
@@ -64,7 +65,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="GitInTheVan",
     description="Self-hostable MITM LLM router/proxy for roleplay services",
-    version="0.14.3",
+    version="0.14.4",
     lifespan=lifespan,
 )
 
@@ -124,6 +125,7 @@ app.include_router(verification_router)
 app.include_router(summarization_router)
 app.include_router(forbidden_words_router)
 app.include_router(skills_router)
+app.include_router(scenario_rules_router)
 app.include_router(packs_router)
 app.include_router(audit_router)
 app.include_router(admin_router)

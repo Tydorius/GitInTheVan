@@ -513,6 +513,23 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
         );
         """,
     ),
+    (
+        "033_create_scenario_rules",
+        """
+        CREATE TABLE IF NOT EXISTS scenario_rules (
+            id VARCHAR(36) PRIMARY KEY NOT NULL,
+            user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            name VARCHAR(128) NOT NULL,
+            token_threshold INTEGER NOT NULL DEFAULT 2000,
+            fire_position VARCHAR(16) NOT NULL DEFAULT 'pre',
+            endpoint_id VARCHAR(36) REFERENCES endpoints(id) ON DELETE SET NULL,
+            model VARCHAR(128) NOT NULL DEFAULT '',
+            prompt TEXT NOT NULL DEFAULT '',
+            is_active BOOLEAN NOT NULL DEFAULT 1,
+            created_at TIMESTAMP WITH TIME ZONE NOT NULL
+        );
+        """,
+    ),
 ]
 
 

@@ -666,6 +666,31 @@ To create a memory rule:
 
 Use **Edit** to modify a rule and the **ON/OFF** toggle to enable/disable without deleting.
 
+### Scenario Summarization Rules
+
+Scenario summarization automatically compresses the system message (character definition + scenario + lorebooks) when it exceeds a token threshold. This is critical for large lorebooks or complex character cards that can consume thousands of tokens.
+
+**Two firing positions:**
+
+- **Pre** — Fires after memory injection, before lorebooks and cantrips. Controls the size of the author-provided scenario (character card, OOC instructions, stored memories).
+- **Post** — Fires after cantrips, skills, and lorebooks have been applied. Controls the final system message size before it reaches the model.
+
+Both positions can fire on the same request. Each position independently picks the highest-triggered rule (sorted by threshold descending). For example:
+- A Pre rule at 3,000 tokens summarizes a bloated 6,000-token character card down to 2,500
+- GITV adds lorebooks and skills bringing it to 5,000 tokens
+- A Post rule at 6,000 tokens does not trigger (5,000 < 6,000) — good, it's within budget
+
+**Rule fields:**
+- **Token Threshold**: Summarize when system message exceeds this
+- **Fire Position**: Pre or Post
+- **Endpoint**: Which LLM endpoint to use (default = main endpoint)
+- **Model**: Specific model for summarization (default = endpoint's default model)
+- **Prompt**: Custom summarization prompt (empty = use built-in default)
+
+> Use a fast, cheap model for low-threshold rules and a more capable model for high-threshold rules. Scenario summarization only sends the system message (never chat messages) to the summarization LLM.
+
+Scenario rules can be shared via content packs in the `scenario_rules/` folder.
+
 ---
 
 ## 10. Command Tags

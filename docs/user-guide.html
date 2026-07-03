@@ -580,6 +580,27 @@ if (!budget) {
 3. Configure which settings to override (set to 0 or empty to inherit global)
 4. Click <strong>Create</strong></p>
 <p>Use <strong>Edit</strong> to modify a rule and the <strong>ON/OFF</strong> toggle to enable/disable without deleting.</p>
+<h3 id="scenario-summarization-rules">Scenario Summarization Rules</h3>
+<p>Scenario summarization automatically compresses the system message (character definition + scenario + lorebooks) when it exceeds a token threshold. This is critical for large lorebooks or complex character cards that can consume thousands of tokens.</p>
+<p><strong>Two firing positions:</strong></p>
+<ul>
+<li><strong>Pre</strong> — Fires after memory injection, before lorebooks and cantrips. Controls the size of the author-provided scenario (character card, OOC instructions, stored memories).</li>
+<li><strong>Post</strong> — Fires after cantrips, skills, and lorebooks have been applied. Controls the final system message size before it reaches the model.</li>
+</ul>
+<p>Both positions can fire on the same request. Each position independently picks the highest-triggered rule (sorted by threshold descending). For example:
+- A Pre rule at 3,000 tokens summarizes a bloated 6,000-token character card down to 2,500
+- GITV adds lorebooks and skills bringing it to 5,000 tokens
+- A Post rule at 6,000 tokens does not trigger (5,000 &lt; 6,000) — good, it's within budget</p>
+<p><strong>Rule fields:</strong>
+- <strong>Token Threshold</strong>: Summarize when system message exceeds this
+- <strong>Fire Position</strong>: Pre or Post
+- <strong>Endpoint</strong>: Which LLM endpoint to use (default = main endpoint)
+- <strong>Model</strong>: Specific model for summarization (default = endpoint's default model)
+- <strong>Prompt</strong>: Custom summarization prompt (empty = use built-in default)</p>
+<blockquote>
+<p>Use a fast, cheap model for low-threshold rules and a more capable model for high-threshold rules. Scenario summarization only sends the system message (never chat messages) to the summarization LLM.</p>
+</blockquote>
+<p>Scenario rules can be shared via content packs in the <code>scenario_rules/</code> folder.</p>
 <hr />
 <h2 id="10-command-tags">10. Command Tags</h2>
 <p>Command tags are inline directives placed in the user's message text that override pipeline behavior. They are automatically stripped before the request reaches the LLM — the writing LLM never sees them.</p>
