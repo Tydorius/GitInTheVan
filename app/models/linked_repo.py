@@ -20,6 +20,8 @@ class LinkedRepo(Base):
     url: Mapped[str] = mapped_column(Text, nullable=False)
     branch: Mapped[str] = mapped_column(String(128), nullable=False, default="main")
     token: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    is_local: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
+    is_global: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
     last_synced: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

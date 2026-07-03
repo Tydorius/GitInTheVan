@@ -530,6 +530,13 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
         );
         """,
     ),
+    (
+        "034_add_repo_local_global",
+        """
+        ALTER TABLE linked_repos ADD COLUMN is_local BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE linked_repos ADD COLUMN is_global BOOLEAN DEFAULT 0 NOT NULL;
+        """,
+    ),
 ]
 
 
