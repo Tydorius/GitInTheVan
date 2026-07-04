@@ -198,6 +198,7 @@ export const api = {
 
   // Verification
   listVerificationRules: () => request<{ rules: any[] }>('/api/verification/rules'),
+  getVerificationRule: (id: string) => request<any>(`/api/verification/rules/${id}`),
   createVerificationRule: (data: any) =>
     request<any>('/api/verification/rules', { method: 'POST', body: JSON.stringify(data) }),
   updateVerificationRule: (id: string, data: any) =>
