@@ -6,6 +6,26 @@ All notable changes to GitInTheVan are documented in this file.
 
 ### Added
 
+- **End-to-End Debug Mode**: Full pipeline stage tracking with timeline UI
+  - Stage-based capture system: every pipeline step records before/after message snapshots, metadata, and settings
+  - 16 capture points: memory injection, scenario summarization (pre/post), lorebook injection, skills, budget preparation, cantrip processing, conversation summarization, writing samples, driver-callable, prefill, bypass encoding, final messages, verification, bypass decoding, LLM response, memory extraction
+  - Response-side stages track content transformations (cantrips, forbidden words, verification results)
+  - Each stage shows what changed (with "changed" badge), relevant setting, and metadata (keywords matched, budget allocation, tool calls, debug logs, memory keys)
+  - New Debug.svelte with expandable timeline: click any stage to see before/after diff
+  - Debug moved from Admin tab to standalone sidebar page (visible to all users, gated by debug_mode)
+  - Debug Mode toggle moved from Context Budgeting to Proxy Configuration in Settings
+  - Backward compatible: old-format debug exchanges auto-migrated to stage-based format
+  - 18 tests covering capture logic, API endpoints, and legacy migration
+
+### Changed
+
+- Debug page removed from Admin tabs (now standalone sidebar entry)
+- Debug mode toggle relocated from Context Budgeting section to Proxy Configuration in Settings
+
+## [0.14.5] - Previous
+
+### Added
+
 - **Local Folder Repos**: Admins can link local filesystem paths as content pack sources, visible globally to all users
   - `POST /api/packs/repos/local` (admin only)
   - `is_local` and `is_global` columns on `linked_repos` (migration 034)

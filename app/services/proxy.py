@@ -183,14 +183,10 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
 
         body_json["_gitv_tags"] = tags
 
-        from app.services.debug import is_debug_mode
+        from app.services.debug import debug_capture, init_debug, is_debug_mode
         debug_on = await is_debug_mode(user_id)
         if debug_on:
-            import json as _json
-            body_json["_gitv_debug"] = {
-                "original_messages": _json.dumps(body_json.get("messages", []), default=str),
-                "tags": [t.get("raw", "") for t in tags],
-            }
+            init_debug(body_json, tags)
 
         from app.services.conversation import (
             load_memories_for_chat,
@@ -209,7 +205,6 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
 
         cmd_overrides_mem = body_json.get("_gitv_command_overrides", {})
         memory_disabled = cmd_overrides_mem.get("memory") is False
-
         memories = {} if memory_disabled else await load_memories_for_chat(internal_chat_id, user_id)
         if memories:
             memory_block = _build_mem_block(memories)
@@ -228,12 +223,32 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
                 else:
                     msgs.insert(0, {"role": "system", "content": memory_block})
                 logger.info("Memory injection: %d keys for chat %s", len(memories), internal_chat_id[:12])
+                if debug_on:
+                    debug_capture(body_json, "memory_injection", "Memory Injection",
+                        detail=f"Injected {len(memories)} memories for chat {internal_chat_id[:12]}",
+                        setting="memory_enabled", setting_value=not memory_disabled,
+                        metadata={"memory_keys": list(memories.keys())})
+        elif debug_on:
+            debug_capture(body_json, "memory_injection", "Memory Injection",
+                detail="No memories found" if not memory_disabled else "Disabled by command override",
+                setting="memory_enabled", setting_value=not memory_disabled)
 
         if user_id and command_overrides.to_dict().get("summary") is not False:
             from app.services.scenario_summarizer import maybe_summarize_scenario
+            pre_summary_msgs = json.dumps(body_json.get("messages", []), default=str)
             body_json = await maybe_summarize_scenario(body_json, user_id, "pre")
+            if debug_on:
+                did_change = json.dumps(body_json.get("messages", []), default=str) != pre_summary_msgs
+                debug_capture(body_json, "scenario_summarization_pre", "Scenario Summarization (Pre)",
+                    detail="Summarized" if did_change else "No summarization triggered",
+                    setting="scenario_summary_enabled", setting_value=True,
+                    metadata={"changed": did_change})
 
         body_json = await _apply_lorebook_injection(body_json, user_id, tags)
+        if debug_on:
+            debug_capture(body_json, "lorebook_injection", "Lorebook Injection",
+                detail="Lorebook entries processed",
+                metadata={"tags": [t.get("raw", "") for t in (tags or [])]})
 
         if user_id and endpoint_id:
             from app.services.skills import inject_skills, load_skills_for_endpoint
@@ -245,9 +260,21 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
                 body_json["messages"] = inject_skills(body_json["messages"], skill_contents)
             if sample_contents:
                 body_json["_gitv_sample_contents"] = sample_contents
+            if debug_on:
+                debug_capture(body_json, "skills_injection", "Skills Injection",
+                    detail=f"{len(skill_contents)} skill(s), {len(sample_contents)} sample(s) loaded",
+                    setting="endpoint_skills", setting_value=len(skill_contents) > 0,
+                    metadata={"skill_count": len(skill_contents), "sample_count": len(sample_contents)})
+        elif debug_on:
+            debug_capture(body_json, "skills_injection", "Skills Injection",
+                detail="No endpoint configured", setting="endpoint_skills", setting_value=False)
 
         from app.services.budget import prepare_budget
         await prepare_budget(body_json, user_id, tags)
+        if debug_on:
+            debug_capture(body_json, "budget_preparation", "Budget Preparation",
+                detail="Context budget allocated",
+                metadata={"budget": body_json.get("_gitv_budget", {})})
 
         from app.services.map_pipeline import resolve_map, run_map_pipeline
         cmd_overrides_map = body_json.get("_gitv_command_overrides", {})
@@ -287,16 +314,38 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
 
         from app.services.summarization import maybe_summarize
         if body_json.get("_gitv_command_overrides", {}).get("summary") is not False:
+            pre_summ_msgs = json.dumps(body_json.get("messages", []), default=str)
             body_json = await maybe_summarize(body_json, user_id, internal_chat_id, tags)
+            if debug_on:
+                summ_changed = json.dumps(body_json.get("messages", []), default=str) != pre_summ_msgs
+                debug_capture(body_json, "conversation_summarization", "Conversation Summarization",
+                    detail="Summarized" if summ_changed else "Not triggered",
+                    setting="summarization_enabled", setting_value=True,
+                    metadata={"changed": summ_changed})
 
         if user_id and body_json.get("_gitv_command_overrides", {}).get("summary") is not False:
             from app.services.scenario_summarizer import maybe_summarize_scenario
+            pre_post_scn = json.dumps(body_json.get("messages", []), default=str)
             body_json = await maybe_summarize_scenario(body_json, user_id, "post")
+            if debug_on:
+                post_scn_changed = json.dumps(body_json.get("messages", []), default=str) != pre_post_scn
+                debug_capture(body_json, "scenario_summarization_post", "Scenario Summarization (Post)",
+                    detail="Summarized" if post_scn_changed else "No summarization triggered",
+                    setting="scenario_summary_enabled", setting_value=True,
+                    metadata={"changed": post_scn_changed})
 
         sample_contents = body_json.pop("_gitv_sample_contents", None)
         if sample_contents:
             from app.services.skills import inject_samples
             body_json["messages"] = inject_samples(body_json["messages"], sample_contents)
+            if debug_on:
+                debug_capture(body_json, "writing_samples", "Writing Samples Injection",
+                    detail=f"{len(sample_contents)} sample(s) injected before last message",
+                    setting="endpoint_samples", setting_value=True,
+                    metadata={"sample_count": len(sample_contents)})
+        elif debug_on:
+            debug_capture(body_json, "writing_samples", "Writing Samples Injection",
+                detail="No writing samples configured", setting="endpoint_samples", setting_value=False)
 
         from app.services.driver_callable import (
             build_tool_notification,
@@ -325,6 +374,15 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
                 body_json["messages"] = inject_tool_notification_safe(
                     body_json.get("messages", []), notification
                 )
+                if debug_on:
+                    debug_capture(body_json, "driver_callable", "Driver-Callable Tools",
+                        detail=f"{len(dc_config.tools)} tool(s), {dc_config.turns} turn(s)",
+                        setting="driver_callable_enabled", setting_value=True,
+                        metadata={"tools": [t.name for t in dc_config.tools], "turns": dc_config.turns})
+        elif debug_on:
+            debug_capture(body_json, "driver_callable", "Driver-Callable Tools",
+                detail="Disabled" if not dc_config.tools else "No tools configured",
+                setting="driver_callable_enabled", setting_value=False)
 
         from app.services.bypass import apply_bypass_encode
         from app.services.prefill import normalize_prefill
@@ -339,18 +397,28 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
 
         if prefill_on:
             body_json = normalize_prefill(body_json, base_url, enabled=True)
+            if debug_on:
+                debug_capture(body_json, "prefill", "Prefill Normalization",
+                    detail="Prefill applied",
+                    setting="prefill_enabled", setting_value=True)
+        elif debug_on:
+            debug_capture(body_json, "prefill", "Prefill Normalization",
+                detail="Disabled", setting="prefill_enabled", setting_value=False)
 
         if bypass_method != "none":
             body_json = apply_bypass_encode(body_json, bypass_method)
             body_json["_gitv_bypass_method"] = bypass_method
+            if debug_on:
+                debug_capture(body_json, "bypass_encoding", "Bypass Encoding",
+                    detail=f"Method: {bypass_method}",
+                    setting="bypass_method", setting_value=bypass_method)
+        elif debug_on:
+            debug_capture(body_json, "bypass_encoding", "Bypass Encoding",
+                detail="No bypass", setting="bypass_method", setting_value="none")
 
         if debug_on:
-            import json as _json
-            debug_data = body_json.get("_gitv_debug", {})
-            debug_data["modified_messages"] = _json.dumps(body_json.get("messages", []), default=str)
-            if body_json.get("_gitv_budget"):
-                debug_data["budget"] = body_json["_gitv_budget"]
-            body_json["_gitv_debug"] = debug_data
+            debug_capture(body_json, "final_messages", "Final Messages (Pre-Forward)",
+                detail="Messages ready to send to upstream LLM")
 
         body = json.dumps({k: v for k, v in body_json.items() if not k.startswith("_gitv")}).encode()
 
@@ -579,6 +647,14 @@ async def _extract_response_memories(
     if chat_id and memories:
         await save_memories_for_chat(chat_id, user_id, memories)
         logger.info("Memory extraction: %d keys saved for chat %s", len(memories), chat_id[:12])
+
+    if chat_id and body_json.get("_gitv_debug") is not None:
+        from app.services.debug import debug_capture_response
+        debug_capture_response(body_json, "memory_extraction", "Memory Extraction",
+            content_before=content[:500],
+            content_after=cleaned[:500],
+            detail=f"Extracted {len(memories)} memories" if memories else "No memories found",
+            metadata={"memory_keys": list(memories.keys()) if memories else []})
 
     if chat_id:
         await record_post_hash(messages_for_hash, cleaned, chat_id, user_id)
@@ -832,9 +908,7 @@ async def _save_debug_exchange(
     vresult: Any = None,
 ) -> None:
     """Capture pipeline data and response for debug mode."""
-    from app.services.debug import capture_exchange
-
-    debug_data = body_json.get("_gitv_debug", {})
+    from app.services.debug import capture_exchange, debug_capture_response
 
     response_content = ""
     choices = response_data.get("choices", []) if isinstance(response_data, dict) else []
@@ -854,10 +928,24 @@ async def _save_debug_exchange(
                 for c in vresult.check_history
             ],
         }
+        debug_capture_response(body_json, "verification", "Verification",
+            content_after=response_content[:500],
+            detail=f"{'Approved' if vresult.approved else 'Rejected'}, {vresult.retries_used} retry/retries",
+            metadata=verification_data)
+    elif body_json.get("_gitv_debug"):
+        debug_capture_response(body_json, "verification", "Verification",
+            detail="Not enabled")
 
-    pipeline_data = {
-        k: v for k, v in debug_data.items()
-    }
+    if body_json.get("_gitv_bypass_method"):
+        debug_capture_response(body_json, "bypass_decoding", "Bypass Decoding",
+            content_after=response_content[:500],
+            detail=f"Method: {body_json['_gitv_bypass_method']}")
+
+    debug_capture_response(body_json, "llm_response", "LLM Response",
+        content_after=response_content[:500],
+        detail="Final response from upstream LLM")
+
+    pipeline_data = body_json.get("_gitv_debug", {})
 
     await capture_exchange(
         user_id=user_id,
@@ -888,6 +976,7 @@ async def _apply_post_driver_processing(
 
     tags = body_json.get("_gitv_tags", [])
     body_json_for_cantrip = {k: v for k, v in body_json.items() if not k.startswith("_gitv")}
+    debug_on = body_json.get("_gitv_debug") is not None
 
     try:
         new_content = await process_cantrips_post_driver(
@@ -898,6 +987,16 @@ async def _apply_post_driver_processing(
             response_data["choices"][0]["message"]["content"] = new_content
             content = new_content
             logger.info("Pre-navigator cantrips modified response")
+            if debug_on:
+                from app.services.debug import debug_capture_response
+                debug_capture_response(body_json, "pre_navigator_cantrips", "Pre-Navigator Cantrips",
+                    content_before=response_data["choices"][0]["message"]["content"][:500],
+                    content_after=content[:500],
+                    detail="Response modified by pre-navigator cantrips")
+        elif debug_on:
+            from app.services.debug import debug_capture_response
+            debug_capture_response(body_json, "pre_navigator_cantrips", "Pre-Navigator Cantrips",
+                detail="No changes")
     except Exception:
         logger.exception("Pre-navigator cantrip processing failed")
 
@@ -912,6 +1011,15 @@ async def _apply_post_driver_processing(
                     "Forbidden words: %d phrase(s) matched",
                     len(scan_result.matches),
                 )
+                if debug_on:
+                    from app.services.debug import debug_capture_response
+                    debug_capture_response(body_json, "forbidden_words", "Forbidden Words Scan",
+                        detail=f"{len(scan_result.matches)} match(es) found",
+                        metadata={"matches": [m.word if hasattr(m, 'word') else str(m) for m in scan_result.matches]})
+            elif debug_on:
+                from app.services.debug import debug_capture_response
+                debug_capture_response(body_json, "forbidden_words", "Forbidden Words Scan",
+                    detail="No matches")
     except Exception:
         logger.exception("Forbidden word scan failed")
 
@@ -937,6 +1045,7 @@ async def _apply_post_navigator_processing(
 
     tags = body_json.get("_gitv_tags", [])
     body_json_for_cantrip = {k: v for k, v in body_json.items() if not k.startswith("_gitv")}
+    debug_on = body_json.get("_gitv_debug") is not None
 
     try:
         new_content = await process_cantrips_post_driver(
@@ -946,6 +1055,15 @@ async def _apply_post_navigator_processing(
         if new_content != content:
             response_data["choices"][0]["message"]["content"] = new_content
             logger.info("Post-navigator cantrips modified response")
+            if debug_on:
+                from app.services.debug import debug_capture_response
+                debug_capture_response(body_json, "post_navigator_cantrips", "Post-Navigator Cantrips",
+                    content_before=content[:500], content_after=new_content[:500],
+                    detail="Response modified by post-navigator cantrips")
+        elif debug_on:
+            from app.services.debug import debug_capture_response
+            debug_capture_response(body_json, "post_navigator_cantrips", "Post-Navigator Cantrips",
+                detail="No changes")
     except Exception:
         logger.exception("Post-navigator cantrip processing failed")
 

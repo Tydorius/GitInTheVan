@@ -10,6 +10,7 @@
   import Memories from './pages/Memories.svelte'
   import Maps from './pages/Maps.svelte'
   import Packs from './pages/Packs.svelte'
+  import Debug from './pages/Debug.svelte'
   import Settings from './pages/Settings.svelte'
   import Admin from './pages/Admin.svelte'
 
@@ -23,6 +24,7 @@
     { path: '/memories', label: 'Memory', icon: '🧠' },
     { path: '/maps', label: 'Maps', icon: '🗺' },
     { path: '/packs', label: 'Content Packs', icon: '📦' },
+    { path: '/debug', label: 'Debug', icon: '🔧' },
     { path: '/settings', label: 'Settings', icon: '⚙' },
     { path: '/admin', label: 'Admin', icon: '🛡', admin: true },
   ]
@@ -91,6 +93,8 @@
         <Maps />
       {:else if page === '/packs'}
         <Packs />
+      {:else if page === '/debug'}
+        <Debug />
       {:else if page === '/settings'}
         <Settings />
       {:else if page === '/admin'}
