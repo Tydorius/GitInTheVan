@@ -153,7 +153,7 @@
         ...skills.skills.map((s: any) => ({ id: s.id, type: 'skill', name: s.name, description: s.description || '' })),
         ...scenarioRules.rules.map((r: any) => ({ id: r.id, type: 'scenario_rule', name: r.name, description: '' })),
         ...verifyRules.rules.map((r: any) => ({ id: r.id, type: 'rule', name: r.name, description: r.description || '' })),
-        ...maps.maps.map((m: any) => ({ id: m.id, type: 'map', name: m.name, description: '' })),
+        ...maps.maps.map((m: any) => ({ id: m.id, type: 'map', name: m.name, description: m.description || '' })),
       ]
     } catch (e: any) { error = e.message }
   }
@@ -181,6 +181,75 @@
       URL.revokeObjectURL(url)
     } catch (e: any) { error = e.message }
     finally { creatingPack = false }
+  }
+
+  let editingResource: any = null
+  let editName = ''
+  let editDescription = ''
+  let savingResource = false
+
+  function startEditResource(r: any) {
+    editingResource = r
+    editName = r.name
+    editDescription = r.description || ''
+  }
+
+  async function saveResourceEdit() {
+    if (!editingResource) return
+    savingResource = true
+    error = ''
+    try {
+      const { type, id } = editingResource
+      const updates: any = { name: editName }
+      if (type !== 'scenario_rule') {
+        updates.description = editDescription
+      }
+      if (type === 'cantrip') await api.updateCantrip(id, updates)
+      else if (type === 'lorebook') await api.updateLorebook(id, updates)
+      else if (type === 'skill') await api.updateSkill(id, updates)
+      else if (type === 'scenario_rule') await api.updateScenarioRule(id, updates)
+      else if (type === 'rule') await api.updateVerificationRule(id, updates)
+      else if (type === 'map') await api.updateMap(id, updates)
+      editingResource = null
+      await loadAllResources()
+    } catch (e: any) { error = e.message }
+    finally { savingResource = false }
+  }
+
+  let previewingResource: any = null
+  let previewData: any = null
+  let previewLoading = false
+
+    async function previewResource(r: any) {
+    previewingResource = r
+    previewData = null
+    previewLoading = true
+    try {
+      const { type, id } = r
+      if (type === 'cantrip') previewData = await api.getCantrip(id)
+      else if (type === 'lorebook') previewData = await api.getLorebook(id)
+      else if (type === 'skill') previewData = await api.getSkill(id)
+      else if (type === 'scenario_rule') previewData = await api.getScenarioRule(id)
+      else if (type === 'rule') previewData = await api.getVerificationRule(id)
+      else if (type === 'map') previewData = await api.getMap(id)
+    } catch (e: any) { error = e.message }
+    finally { previewLoading = false }
+  }
+
+  const typeRoutes: Record<string, string> = {
+    cantrip: '/cantrips',
+    lorebook: '/lorebooks',
+    skill: '/skills',
+    scenario_rule: '/memories',
+    rule: '/verification',
+    map: '/maps',
+  }
+
+  function gotoResource(r: any) {
+    const route = typeRoutes[r.type]
+    if (route) {
+      window.location.hash = `${route}?id=${r.id}`
+    }
   }
 
   $: filteredResources = packTab === 'create'
@@ -255,7 +324,7 @@
       <div class="empty-state">No resources found.</div>
     {:else}
       <table>
-        <thead><tr><th style="width: 30px;"></th><th>Name</th><th>Type</th><th>Description</th></tr></thead>
+        <thead><tr><th style="width: 30px;"></th><th>Name</th><th>Type</th><th>Description</th><th style="width: 100px;">Actions</th></tr></thead>
         <tbody>
           {#each filteredResources as r}
             <tr>
@@ -263,6 +332,11 @@
               <td><strong>{r.name}</strong></td>
               <td style="font-size: 11px;">{r.type}</td>
               <td style="font-size: 11px; color: var(--text-dim);">{r.description || '—'}</td>
+              <td style="white-space: nowrap;">
+                <button title="Edit name/description" onclick={() => startEditResource(r)} style="font-size: 11px; padding: 2px 6px;">✎</button>
+                <button title="Preview" onclick={() => previewResource(r)} style="font-size: 11px; padding: 2px 6px;">👁</button>
+                <button title="Open in editor" onclick={() => gotoResource(r)} style="font-size: 11px; padding: 2px 6px;">↗</button>
+              </td>
             </tr>
           {/each}
         </tbody>
@@ -495,6 +569,50 @@
           <button type="submit" class="primary" disabled={localLinking}>{localLinking ? 'Linking...' : 'Link'}</button>
         </div>
       </form>
+    </div>
+  </div>
+{/if}
+
+{#if editingResource}
+  <div class="modal-overlay" role="dialog" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) editingResource = null; }}>
+    <div class="modal">
+      <h3>Edit {editingResource.type}: {editingResource.name}</h3>
+      <form onsubmit={(e) => { e.preventDefault(); saveResourceEdit(); }}>
+        <div class="form-group">
+          <label for="er-name">Name</label>
+          <input id="er-name" bind:value={editName} required />
+        </div>
+        {#if editingResource.type !== 'scenario_rule'}
+          <div class="form-group">
+            <label for="er-desc">Description</label>
+            <input id="er-desc" bind:value={editDescription} placeholder="Short description" />
+          </div>
+        {/if}
+        <div class="modal-actions">
+          <button onclick={() => editingResource = null}>Cancel</button>
+          <button type="submit" class="primary" disabled={savingResource}>{savingResource ? 'Saving...' : 'Save'}</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{/if}
+
+{#if previewingResource}
+  <div class="modal-overlay" role="dialog" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) previewingResource = null; }}>
+    <div class="modal" style="width: 700px;">
+      <h3>Preview: {previewingResource.name}</h3>
+      {#if previewLoading}
+        <div class="loading">Loading...</div>
+      {:else if previewData}
+        <div style="background: var(--bg-elevated); border-radius: 8px; padding: 12px; max-height: 500px; overflow-y: auto; font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 11px; line-height: 1.6; white-space: pre-wrap; word-break: break-all;">
+          {JSON.stringify(previewData, null, 2)}
+        </div>
+      {:else}
+        <div class="empty-state">Could not load preview.</div>
+      {/if}
+      <div class="modal-actions">
+        <button onclick={() => previewingResource = null}>Close</button>
+      </div>
     </div>
   </div>
 {/if}
