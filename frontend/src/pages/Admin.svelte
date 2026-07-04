@@ -219,7 +219,6 @@
   <div>
     <button onclick={() => tab = 'caps'} class={tab === 'caps' ? 'primary' : ''}>Global Caps</button>
     <button onclick={() => tab = 'users'} class={tab === 'users' ? 'primary' : ''}>Users</button>
-    <button onclick={() => tab = 'debug'} class={tab === 'debug' ? 'primary' : ''}>Debug</button>
     <button onclick={() => tab = 'audit'} class={tab === 'audit' ? 'primary' : ''}>Audit Logs</button>
     <button onclick={() => tab = 'logs'} class={tab === 'logs' ? 'primary' : ''}>Server Logs</button>
     <button onclick={() => tab = 'network'} class={tab === 'network' ? 'primary' : ''}>Network</button>
@@ -444,8 +443,6 @@
     {/if}
   </div>
 
-{:else if tab === 'debug'}
-  <Debug />
 {/if}
 
 {#if showUserForm}

@@ -50,7 +50,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-se
 <li><a href="#11-maps">Maps</a></li>
 <li><a href="#12-content-packs">Content Packs</a></li>
 <li><a href="#13-settings">Settings</a></li>
-<li><a href="#14-admin">Admin</a></li>
+<li><a href="#14-debug">Debug</a></li>
+<li><a href="#15-admin">Admin</a></li>
 </ol>
 <hr />
 <h2 id="1-login-and-admin-setup">1. Login and Admin Setup</h2>
@@ -867,6 +868,7 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <h3 id="proxy-configuration">Proxy Configuration</h3>
 <ul>
 <li><strong>Default Endpoint</strong>: Which endpoint to use when no specific routing applies</li>
+<li><strong>Debug Mode</strong>: Capture pipeline stage data for the last 20 exchanges. View captured data on the Debug page in the sidebar.</li>
 </ul>
 <p>Model configuration is now per-endpoint. Set the <strong>Default Model</strong> on each endpoint in the Endpoints page. The endpoint's model is used as a fallback when the client doesn't specify one.</p>
 <h3 id="streaming-and-status">Streaming and Status</h3>
@@ -903,7 +905,6 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <ul>
 <li><strong>Injection Budget (%)</strong>: Percentage of the context window reserved for injections (default 10). Set to 0 to disable budgeting entirely.</li>
 <li><strong>Context Window Override</strong>: Manually set the model's context window size in tokens. Set to 0 to auto-detect from the model name (e.g., GPT-4o = 128K, Claude 3.5 = 200K, Gemini 2 = 1M).</li>
-<li><strong>Debug Mode</strong>: Capture pipeline stages for the last 20 exchanges. View them on the Debug tab in the Admin page.</li>
 </ul>
 <p>When enabled, each active cantrip and lorebook receives a proportional share of the budget based on their <strong>Budget Weight</strong> field (found on each cantrip/lorebook edit form). Cantrips can read <code>context.budget.detail_level</code> to choose between full, summary, or bullet-point output.</p>
 <h3 id="security-settings">Security Settings</h3>
@@ -956,10 +957,24 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 </table>
 <p>Admin actions (user creation, deletion, password resets) are recorded in the audit log, viewable via the <strong>Admin</strong> page. Global caps for driver-callable turns and verification retries are also configured in the Admin page.</p>
 <hr />
-<h2 id="14-admin">14. Admin</h2>
+<h2 id="14-debug">14. Debug</h2>
+<p><em>Available to all users. Enable Debug Mode in Settings first.</em></p>
+<p>The Debug page provides full pipeline visibility for troubleshooting. When Debug Mode is enabled in Settings, GitInTheVan captures the last 20 exchanges with every pipeline stage preserved as a timeline.</p>
+<p>The left panel shows recent captured exchanges, newest first. Each entry shows the model, timestamp, stage count, and a verified badge.</p>
+<p>Select an exchange to see the <strong>Pipeline Timeline</strong>:</p>
+<ul>
+<li>Each pipeline stage appears as a numbered row, showing its label, a short detail summary, and a <strong>changed</strong> badge if it modified the messages</li>
+<li>Click any stage to expand it and see the before/after message snapshots, metadata (matched keywords, memory keys, budget allocation, cantrip debug logs, tool calls, etc.), and the setting that controls it</li>
+<li>Response-side stages (verification, cantrips, forbidden words, memory extraction) show content before/after</li>
+<li>The final response content and verification details (if enabled) appear at the bottom</li>
+</ul>
+<p>Tags detected in the original request are shown at the top of the timeline.</p>
+<p>Use <strong>Clear All</strong> to wipe captured exchanges. Captures are automatically pruned to the most recent 20 per user.</p>
+<hr />
+<h2 id="15-admin">15. Admin</h2>
 <p><em>Admin only. The Admin link in the sidebar is only visible to admin accounts.</em></p>
 <p><img alt="Admin" src="media/gitv-admin-global-caps.png" /></p>
-<p>The Admin page provides system-wide management with five tabs: <strong>Global Caps</strong>, <strong>Users</strong>, <strong>Debug</strong>, <strong>Audit Logs</strong>, and <strong>Server Logs</strong>.</p>
+<p>The Admin page provides system-wide management with four tabs: <strong>Global Caps</strong>, <strong>Users</strong>, <strong>Audit Logs</strong>, and <strong>Server Logs</strong>. Debug is now a separate page in the sidebar.</p>
 <h3 id="global-caps-tab">Global Caps Tab</h3>
 <p>Prevents users from causing internal denial-of-service by setting absurdly high turn or retry counts. The effective limit is the lower of the user's setting and the global cap — user preferences are not overwritten.</p>
 <ul>
@@ -993,17 +1008,6 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 </ul>
 <p>Admin users cannot be disabled or deleted.</p>
 <p>Click <strong>"+ Add User"</strong> and enter a username and password. After creation, the user's API key is shown once — save it immediately.</p>
-<h3 id="debug-tab">Debug Tab</h3>
-<p><img alt="Debug" src="media/gitv-admin-debug.png" /></p>
-<p>The Debug tab provides full pipeline visibility for troubleshooting. When Debug Mode is enabled in Settings, GitInTheVan captures the last 20 exchanges with every pipeline stage preserved.</p>
-<p>The left panel shows recent captured exchanges, newest first. Each entry shows the model, timestamp, stage count, and a verified badge.</p>
-<p>Select an exchange to see three views:</p>
-<ul>
-<li><strong>Original</strong>: The messages as received from the client, before any pipeline processing. Tags detected in the request are shown.</li>
-<li><strong>Modified</strong>: The messages as sent to the Driver, after lorebooks, cantrips, memory injection, budget calculation, and summarization. Budget allocation data is shown if budgeting is enabled.</li>
-<li><strong>Response</strong>: The Driver's response content and verification results (if verification ran). Shows approval status, retry count, and any violations detected.</li>
-</ul>
-<p>Use <strong>Clear All</strong> to wipe captured exchanges. Captures are automatically pruned to the most recent 20 per user.</p>
 <h3 id="audit-logs-tab">Audit Logs Tab</h3>
 <p><img alt="Audit Logs" src="media/gitv-admin-audit-logs.png" /></p>
 <p>Read-only view of admin actions. Each entry shows the action type, target, details, and timestamp. Logs are auto-pruned to 1000 entries. Use <strong>Refresh</strong> or toggle <strong>Auto</strong> for automatic refresh every 15 seconds.</p>

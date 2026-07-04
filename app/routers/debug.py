@@ -53,7 +53,7 @@ async def list_debug_exchanges(
             created_at=e["created_at"],
             has_response=bool(e.get("response_content")),
             has_verification=bool(e.get("verification_data")),
-            stage_count=len(e.get("pipeline_data", {})),
+            stage_count=len(e.get("pipeline_data", {}).get("stages", [])),
         )
         for e in exchanges
     ]

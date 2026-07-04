@@ -70,7 +70,7 @@
 
   async function save() {
     error = ''; saved = false
-    try { await api.updateSettings(settings); saved = true }
+    try { await api.updateSettings({ ...settings, debug_mode: debugMode }); saved = true }
     catch (e: any) { error = e.message }
   }
 
@@ -102,7 +102,7 @@
   async function saveBudget() {
     error = ''
     try {
-      await api.updateSettings({ context_budget_percent: budgetPercent, context_window_override: contextWindowOverride, debug_mode: debugMode, default_map_id: defaultMapId } as any)
+      await api.updateSettings({ context_budget_percent: budgetPercent, context_window_override: contextWindowOverride, default_map_id: defaultMapId } as any)
     } catch (e: any) { error = e.message }
   }
 
@@ -141,6 +141,15 @@
       <option value="">None</option>
       {#each endpoints as ep}<option value={ep.id}>{ep.name}</option>{/each}
     </select>
+  </div>
+  <div class="form-group">
+    <label>
+      <input type="checkbox" bind:checked={debugMode} style="width: auto;">
+      Debug Mode
+    </label>
+    <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+      Captures pipeline stage data for the last 20 exchanges. View in the Debug page.
+    </p>
   </div>
   <button class="primary" onclick={save}>Save Settings</button>
 </div>
@@ -271,12 +280,6 @@
     <label for="ctx-window">Context Window Override (tokens)</label>
     <input id="ctx-window" type="number" bind:value={contextWindowOverride} min="0" step="1000" style="width: 120px;">
     <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">Override the model's context window size. 0 = auto-detect from model name.</p>
-  </div>
-  <div class="form-group">
-    <label>
-      <input type="checkbox" bind:checked={debugMode} style="width: auto;">
-      Debug Mode (capture pipeline stages for last 20 exchanges)
-    </label>
   </div>
   <div class="form-group">
     <label for="default-map">Default Map (applied when no <code>&lt;#map-tag#&gt;</code> is present)</label>

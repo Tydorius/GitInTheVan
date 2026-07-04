@@ -27,7 +27,8 @@ GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:
 11. [Maps](#11-maps)
 12. [Content Packs](#12-content-packs)
 13. [Settings](#13-settings)
-14. [Admin](#14-admin)
+14. [Debug](#14-debug)
+15. [Admin](#15-admin)
 
 ---
 
@@ -940,6 +941,7 @@ The Settings page configures your default proxy behavior, streaming UX, summariz
 ### Proxy Configuration
 
 - **Default Endpoint**: Which endpoint to use when no specific routing applies
+- **Debug Mode**: Capture pipeline stage data for the last 20 exchanges. View captured data on the Debug page in the sidebar.
 
 Model configuration is now per-endpoint. Set the **Default Model** on each endpoint in the Endpoints page. The endpoint's model is used as a fallback when the client doesn't specify one.
 
@@ -988,7 +990,6 @@ Allocates a percentage of the model's context window for injected content (cantr
 
 - **Injection Budget (%)**: Percentage of the context window reserved for injections (default 10). Set to 0 to disable budgeting entirely.
 - **Context Window Override**: Manually set the model's context window size in tokens. Set to 0 to auto-detect from the model name (e.g., GPT-4o = 128K, Claude 3.5 = 200K, Gemini 2 = 1M).
-- **Debug Mode**: Capture pipeline stages for the last 20 exchanges. View them on the Debug tab in the Admin page.
 
 When enabled, each active cantrip and lorebook receives a proportional share of the budget based on their **Budget Weight** field (found on each cantrip/lorebook edit form). Cantrips can read `context.budget.detail_level` to choose between full, summary, or bullet-point output.
 
@@ -1010,13 +1011,34 @@ Admin actions (user creation, deletion, password resets) are recorded in the aud
 
 ---
 
-## 14. Admin
+## 14. Debug
+
+*Available to all users. Enable Debug Mode in Settings first.*
+
+The Debug page provides full pipeline visibility for troubleshooting. When Debug Mode is enabled in Settings, GitInTheVan captures the last 20 exchanges with every pipeline stage preserved as a timeline.
+
+The left panel shows recent captured exchanges, newest first. Each entry shows the model, timestamp, stage count, and a verified badge.
+
+Select an exchange to see the **Pipeline Timeline**:
+
+- Each pipeline stage appears as a numbered row, showing its label, a short detail summary, and a **changed** badge if it modified the messages
+- Click any stage to expand it and see the before/after message snapshots, metadata (matched keywords, memory keys, budget allocation, cantrip debug logs, tool calls, etc.), and the setting that controls it
+- Response-side stages (verification, cantrips, forbidden words, memory extraction) show content before/after
+- The final response content and verification details (if enabled) appear at the bottom
+
+Tags detected in the original request are shown at the top of the timeline.
+
+Use **Clear All** to wipe captured exchanges. Captures are automatically pruned to the most recent 20 per user.
+
+---
+
+## 15. Admin
 
 *Admin only. The Admin link in the sidebar is only visible to admin accounts.*
 
 ![Admin](media/gitv-admin-global-caps.png)
 
-The Admin page provides system-wide management with five tabs: **Global Caps**, **Users**, **Debug**, **Audit Logs**, and **Server Logs**.
+The Admin page provides system-wide management with four tabs: **Global Caps**, **Users**, **Audit Logs**, and **Server Logs**. Debug is now a separate page in the sidebar.
 
 ### Global Caps Tab
 
@@ -1057,22 +1079,6 @@ Full user management. Each user row shows:
 Admin users cannot be disabled or deleted.
 
 Click **"+ Add User"** and enter a username and password. After creation, the user's API key is shown once — save it immediately.
-
-### Debug Tab
-
-![Debug](media/gitv-admin-debug.png)
-
-The Debug tab provides full pipeline visibility for troubleshooting. When Debug Mode is enabled in Settings, GitInTheVan captures the last 20 exchanges with every pipeline stage preserved.
-
-The left panel shows recent captured exchanges, newest first. Each entry shows the model, timestamp, stage count, and a verified badge.
-
-Select an exchange to see three views:
-
-- **Original**: The messages as received from the client, before any pipeline processing. Tags detected in the request are shown.
-- **Modified**: The messages as sent to the Driver, after lorebooks, cantrips, memory injection, budget calculation, and summarization. Budget allocation data is shown if budgeting is enabled.
-- **Response**: The Driver's response content and verification results (if verification ran). Shows approval status, retry count, and any violations detected.
-
-Use **Clear All** to wipe captured exchanges. Captures are automatically pruned to the most recent 20 per user.
 
 ### Audit Logs Tab
 
