@@ -19,7 +19,7 @@ All notable changes to GitInTheVan are documented in this file.
 
 ### Changed
 
-- Debug page removed from Admin tabs (now standalone sidebar entry)
+- Debug moved from standalone sidebar page to a tab under Dashboard (visible to all users)
 - Debug mode toggle relocated from Context Budgeting section to Proxy Configuration in Settings
 
 ## [0.14.5] - Previous

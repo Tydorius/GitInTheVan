@@ -27,8 +27,7 @@ GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:
 11. [Maps](#11-maps)
 12. [Content Packs](#12-content-packs)
 13. [Settings](#13-settings)
-14. [Debug](#14-debug)
-15. [Admin](#15-admin)
+14. [Admin](#14-admin)
 
 ---
 
@@ -173,6 +172,25 @@ The sidebar on the left navigates to all management pages. The logo is at the to
 ![Dashboard Diagnostic Result](media/gitv-dashboard-diagnostic-result-example.png)
 
 The **Diagnostics** tool runs an automated check of your endpoints and configuration. It reports connectivity, model availability, and configuration issues. Run it whenever a connection is not working as expected.
+
+### Debug Tab
+
+*Available to all users. Enable Debug Mode in Settings first.*
+
+The **Debug** tab (under Dashboard) provides full pipeline visibility for troubleshooting. When Debug Mode is enabled in Settings, GitInTheVan captures the last 20 exchanges with every pipeline stage preserved as a timeline.
+
+The left panel shows recent captured exchanges, newest first. Each entry shows the model, timestamp, stage count, and a verified badge.
+
+Select an exchange to see the **Pipeline Timeline**:
+
+- Each pipeline stage appears as a numbered row, showing its label, a short detail summary, and a **changed** badge if it modified the messages
+- Click any stage to expand it and see the before/after message snapshots, metadata (matched keywords, memory keys, budget allocation, cantrip debug logs, tool calls, etc.), and the setting that controls it
+- Response-side stages (verification, cantrips, forbidden words, memory extraction) show content before/after
+- The final response content and verification details (if enabled) appear at the bottom
+
+Tags detected in the original request are shown at the top of the timeline.
+
+Use **Clear All** to wipe captured exchanges. Captures are automatically pruned to the most recent 20 per user.
 
 ---
 
@@ -941,7 +959,7 @@ The Settings page configures your default proxy behavior, streaming UX, summariz
 ### Proxy Configuration
 
 - **Default Endpoint**: Which endpoint to use when no specific routing applies
-- **Debug Mode**: Capture pipeline stage data for the last 20 exchanges. View captured data on the Debug page in the sidebar.
+- **Debug Mode**: Capture pipeline stage data for the last 20 exchanges. View captured data on the Debug tab under Dashboard.
 
 Model configuration is now per-endpoint. Set the **Default Model** on each endpoint in the Endpoints page. The endpoint's model is used as a fallback when the client doesn't specify one.
 
@@ -1011,34 +1029,13 @@ Admin actions (user creation, deletion, password resets) are recorded in the aud
 
 ---
 
-## 14. Debug
-
-*Available to all users. Enable Debug Mode in Settings first.*
-
-The Debug page provides full pipeline visibility for troubleshooting. When Debug Mode is enabled in Settings, GitInTheVan captures the last 20 exchanges with every pipeline stage preserved as a timeline.
-
-The left panel shows recent captured exchanges, newest first. Each entry shows the model, timestamp, stage count, and a verified badge.
-
-Select an exchange to see the **Pipeline Timeline**:
-
-- Each pipeline stage appears as a numbered row, showing its label, a short detail summary, and a **changed** badge if it modified the messages
-- Click any stage to expand it and see the before/after message snapshots, metadata (matched keywords, memory keys, budget allocation, cantrip debug logs, tool calls, etc.), and the setting that controls it
-- Response-side stages (verification, cantrips, forbidden words, memory extraction) show content before/after
-- The final response content and verification details (if enabled) appear at the bottom
-
-Tags detected in the original request are shown at the top of the timeline.
-
-Use **Clear All** to wipe captured exchanges. Captures are automatically pruned to the most recent 20 per user.
-
----
-
-## 15. Admin
+## 14. Admin
 
 *Admin only. The Admin link in the sidebar is only visible to admin accounts.*
 
 ![Admin](media/gitv-admin-global-caps.png)
 
-The Admin page provides system-wide management with four tabs: **Global Caps**, **Users**, **Audit Logs**, and **Server Logs**. Debug is now a separate page in the sidebar.
+The Admin page provides system-wide management with four tabs: **Global Caps**, **Users**, **Audit Logs**, and **Server Logs**. Debug is available as a tab on the Dashboard.
 
 ### Global Caps Tab
 

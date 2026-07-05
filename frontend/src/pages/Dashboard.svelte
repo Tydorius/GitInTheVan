@@ -1,6 +1,9 @@
 <script lang="ts">
   import { api } from '../api'
   import { onMount } from 'svelte'
+  import Debug from './Debug.svelte'
+
+  let activeTab = 'overview'
 
   let stats = { endpoints: 0, cantrips: 0, lorebooks: 0, rules: 0 }
   let health = ''
@@ -112,7 +115,15 @@
 
 <div class="page-header">
   <h2>Dashboard <a class="help-link" href="/help/user-guide.html#dashboard" target="_blank" title="Open documentation">?</a></h2>
+  <div>
+    <button onclick={() => activeTab = 'overview'} class={activeTab === 'overview' ? 'primary' : ''}>Overview</button>
+    <button onclick={() => activeTab = 'debug'} class={activeTab === 'debug' ? 'primary' : ''}>Debug</button>
+  </div>
 </div>
+
+{#if activeTab === 'debug'}
+  <Debug />
+{:else}
 
 <div class="stats-grid">
   <div class="stat-card">
@@ -202,3 +213,4 @@
     <p>5. Point your client at <code style="color: var(--accent);">http://localhost:8000/v1/chat/completions</code> using your gitv_ API key</p>
   </div>
 </div>
+{/if}
