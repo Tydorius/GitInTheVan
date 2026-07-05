@@ -537,6 +537,32 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
         ALTER TABLE linked_repos ADD COLUMN is_global BOOLEAN DEFAULT 0 NOT NULL;
         """,
     ),
+    (
+        "035_create_tag_groups",
+        """
+        CREATE TABLE IF NOT EXISTS tag_groups (
+            id VARCHAR(36) PRIMARY KEY NOT NULL,
+            user_id VARCHAR(36) NOT NULL,
+            name VARCHAR(128) NOT NULL,
+            tag VARCHAR(128) NOT NULL DEFAULT '',
+            is_active BOOLEAN NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS ix_tag_groups_user_id ON tag_groups (user_id);
+
+        CREATE TABLE IF NOT EXISTS tag_group_members (
+            id VARCHAR(36) PRIMARY KEY NOT NULL,
+            group_id VARCHAR(36) NOT NULL,
+            member_type VARCHAR(32) NOT NULL,
+            member_id VARCHAR(36) NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (group_id) REFERENCES tag_groups(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS ix_tag_group_members_group_id ON tag_group_members (group_id);
+        """,
+    ),
 ]
 
 

@@ -6,6 +6,7 @@
   import Cantrips from './pages/Cantrips.svelte'
   import Lorebooks from './pages/Lorebooks.svelte'
   import Skills from './pages/Skills.svelte'
+  import TagGroups from './pages/TagGroups.svelte'
   import Verification from './pages/Verification.svelte'
   import Memories from './pages/Memories.svelte'
   import Maps from './pages/Maps.svelte'
@@ -19,6 +20,7 @@
     { path: '/cantrips', label: 'Cantrips', icon: '⚡' },
     { path: '/lorebooks', label: 'Lorebooks', icon: '📖' },
     { path: '/skills', label: 'Skills & Samples', icon: '✎' },
+    { path: '/tags', label: 'Tags and Groups', icon: '🏷' },
     { path: '/verification', label: 'Verification', icon: '✓' },
     { path: '/memories', label: 'Memory', icon: '🧠' },
     { path: '/maps', label: 'Maps', icon: '🗺' },
@@ -83,6 +85,8 @@
         <Lorebooks />
       {:else if page === '/skills'}
         <Skills />
+      {:else if page === '/tags'}
+        <TagGroups />
       {:else if page === '/verification'}
         <Verification />
       {:else if page === '/memories'}

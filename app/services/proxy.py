@@ -188,6 +188,18 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
         if debug_on:
             init_debug(body_json, tags)
 
+        from app.services.group_resolver import resolve_group_tags
+        async with async_session() as group_db:
+            tags, activated_group_names = await resolve_group_tags(group_db, user_id, tags)
+        if activated_group_names:
+            body_json["_gitv_tags"] = tags
+            body_json["_gitv_activated_groups"] = activated_group_names
+            logger.info("Tag groups activated: %s", activated_group_names)
+            if debug_on:
+                debug_capture(body_json, "tag_group_resolution", "Tag Group Resolution",
+                    detail=f"Activated groups: {', '.join(activated_group_names)}",
+                    metadata={"groups": activated_group_names, "expanded_tag_count": len(tags)})
+
         from app.services.conversation import (
             load_memories_for_chat,
             resolve_conversation,
