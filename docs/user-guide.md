@@ -26,8 +26,9 @@ GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:
 10. [Command Tags](#10-command-tags)
 11. [Maps](#11-maps)
 12. [Content Packs](#12-content-packs)
-13. [Settings](#13-settings)
-14. [Admin](#14-admin)
+13. [Tags and Groups](#13-tags-and-groups)
+14. [Settings](#14-settings)
+15. [Admin](#15-admin)
 
 ---
 
@@ -950,7 +951,39 @@ Click **Sync** on a repo to re-fetch the latest `descriptions.json` and file lis
 
 ---
 
-## 13. Settings
+## 13. Tags and Groups
+
+The Tags and Groups page provides centralized management of all your lorebook and cantrip tags, plus the ability to create group collections activated by a single tag.
+
+### Groups Tab
+
+Groups let you activate multiple lorebooks and cantrips with a single tag. Instead of embedding five separate tags in your persona or scenario, create a group with tag `castlescene` and embed `<#castlescene#>`.
+
+**Creating a Group:**
+
+1. Click **+ Create Group**
+2. Enter a **Name** and **Group Tag**
+3. Check the lorebooks and cantrips to include
+4. Optionally enable **Active** (blanket-applied on every message without needing the tag)
+
+**Group behavior:**
+
+- Groups are always private (only the owner can use them)
+- Groups activate in the normal pre-LLM phase
+- Groups cannot nest into each other
+- If a member lorebook or cantrip is deleted, the group logs a warning and continues
+- If a resource is called multiple times in the same pipeline stage (e.g., via both its own tag and a group), only one instance activates
+
+### Tags Tab
+
+The Tags tab shows all your lorebooks and cantrips in one table with their tags and visibility settings.
+
+- **Tag**: Click the edit icon to change the tag. Shows the full activation tag (e.g., `<#lore-mytag#>`)
+- **Visibility**: Toggle between Public and Private. Private tags only work for the owner. Public tags work for all users.
+
+---
+
+## 14. Settings
 
 ![Settings Page](media/gitv-settings.png)
 
@@ -1029,7 +1062,7 @@ Admin actions (user creation, deletion, password resets) are recorded in the aud
 
 ---
 
-## 14. Admin
+## 15. Admin
 
 *Admin only. The Admin link in the sidebar is only visible to admin accounts.*
 

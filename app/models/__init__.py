@@ -18,6 +18,7 @@ from app.models.memory import Memory
 from app.models.memory_rule import MemoryRule
 from app.models.scenario_rule import ScenarioRule
 from app.models.skill import EndpointSkill, Skill
+from app.models.tag_group import TagGroup, TagGroupMember
 from app.models.user import User
 from app.models.user_data import UserData
 from app.models.user_settings import UserSettings
@@ -53,4 +54,6 @@ __all__ = [
     "Skill",
     "EndpointSkill",
     "ScenarioRule",
+    "TagGroup",
+    "TagGroupMember",
 ]

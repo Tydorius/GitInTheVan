@@ -351,4 +351,15 @@ export const api = {
   // Tags - browse public tagged resources
   listPublicLorebooks: () => request<{ lorebooks: any[] }>('/api/lorebooks/public'),
   listPublicCantrips: () => request<{ cantrips: any[] }>('/api/cantrips/public'),
+
+  // Tag Groups
+  listTagGroups: () => request<{ groups: any[] }>('/api/tag-groups'),
+  createTagGroup: (data: { name: string; tag?: string; is_active?: boolean; members?: any[] }) =>
+    request<any>('/api/tag-groups', { method: 'POST', body: JSON.stringify(data) }),
+  getTagGroup: (id: string) => request<any>(`/api/tag-groups/${id}`),
+  updateTagGroup: (id: string, data: { name?: string; tag?: string; is_active?: boolean }) =>
+    request<any>(`/api/tag-groups/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteTagGroup: (id: string) => request<void>(`/api/tag-groups/${id}`, { method: 'DELETE' }),
+  updateTagGroupMembers: (id: string, members: any[]) =>
+    request<any>(`/api/tag-groups/${id}/members`, { method: 'PUT', body: JSON.stringify({ members }) }),
 };

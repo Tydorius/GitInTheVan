@@ -6,6 +6,18 @@ All notable changes to GitInTheVan are documented in this file.
 
 ### Added
 
+- **Tags and Groups**: Centralized tag management and group collections for multi-resource activation
+  - **Groups tab**: Create named collections of lorebooks and cantrips activated by a single `<#grouptag#>` tag
+  - Groups can be blanket-active (applied every message) or tag-activated (activated when group tag appears in messages)
+  - Groups are always private to the owner, activate in pre-LLM phase, and cannot nest
+  - Missing members are silently skipped with a console warning
+  - Deduplication: resources called multiple times in the same stage only activate once
+  - **Tags tab**: Centralized view of all lorebook/cantrip tags with inline editing and public/private toggle
+  - `tag_groups` + `tag_group_members` tables (migration 035)
+  - API: `/api/tag-groups` CRUD + `/api/tag-groups/{id}/members`
+  - Debug capture for tag group resolution stage (rule 16)
+  - 16 tests covering API CRUD, group resolution, pipeline integration, deduplication, missing members
+
 - **End-to-End Debug Mode**: Full pipeline stage tracking with timeline UI
   - Stage-based capture system: every pipeline step records before/after message snapshots, metadata, and settings
   - 16 capture points: memory injection, scenario summarization (pre/post), lorebook injection, skills, budget preparation, cantrip processing, conversation summarization, writing samples, driver-callable, prefill, bypass encoding, final messages, verification, bypass decoding, LLM response, memory extraction
