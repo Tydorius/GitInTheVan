@@ -61,12 +61,9 @@
   onMount(load)
 </script>
 
-<div class="page-header">
-  <h2>Debug <a class="help-link" href="/help/user-guide.html#debug" target="_blank" title="Open documentation">?</a></h2>
-  <div>
-    <button onclick={load}>Refresh</button>
-    <button class="danger" onclick={handleClear} disabled={exchanges.length === 0}>Clear All</button>
-  </div>
+<div style="display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 16px;">
+  <button onclick={load}>Refresh</button>
+  <button class="danger" onclick={handleClear} disabled={exchanges.length === 0}>Clear All</button>
 </div>
 
 {#if error}<div class="error-msg">{error}</div>{/if}
