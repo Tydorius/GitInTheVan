@@ -63,7 +63,7 @@ if exist "%GITV_ROOT%\data\gitinthevan.db" (
 echo.
 
 REM ============================================================
- reinstall dependencies
+REM Reinstall dependencies
 REM ============================================================
 echo [3/5] Reinstalling Python dependencies...
 echo [3/5] Reinstalling Python dependencies... >> "%LOG_FILE%"

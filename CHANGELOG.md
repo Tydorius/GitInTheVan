@@ -2,6 +2,17 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.15.2] - 2026-07-07
+
+### Added
+
+- **Changelog-driven release notes**: Update check now fetches CHANGELOG.md from the repo and extracts the relevant sections between the current and latest version headers, showing full release notes for multi-version jumps
+- **Update tab badge**: Red alert symbol on the Update tab button in Admin panel when an update is available (matches the sidebar badge)
+
+### Fixed
+
+- **Update script crash**: `update-windows.bat` line 66 had a missing `REM` prefix causing `'reinstall' is not recognized as an internal or external command` error
+
 ## [0.15.0] - 2026-07-07
 
 ### Added
