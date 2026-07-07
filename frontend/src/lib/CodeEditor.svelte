@@ -37,6 +37,42 @@
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   }
 
+  function splitHighlightedLines(html: string): string[] {
+    const lines = html.split('\n')
+    const result: string[] = []
+    let openSpans: string[] = []
+
+    for (const line of lines) {
+      let lineHtml = openSpans.map(cls => `<span class="${cls}">`).join('')
+      let stackAfter = [...openSpans]
+
+      let i = 0
+      while (i < line.length) {
+        const openMatch = line.slice(i).match(/^<span class="([^"]+)">/)
+        if (openMatch) {
+          lineHtml += openMatch[0]
+          stackAfter.push(openMatch[1])
+          i += openMatch[0].length
+          continue
+        }
+        if (line.slice(i).startsWith('</span>')) {
+          lineHtml += '</span>'
+          stackAfter.pop()
+          i += 7
+          continue
+        }
+        lineHtml += line[i]
+        i++
+      }
+
+      lineHtml += '</span>'.repeat(Math.max(0, stackAfter.length))
+      result.push(lineHtml)
+      openSpans = stackAfter
+    }
+
+    return result
+  }
+
   function updateHighlight() {
     if (!value) {
       highlighted = ''
@@ -44,33 +80,31 @@
       return
     }
 
-    const lines = value.split('\n')
-    const lineCount = lines.length
+    let fullHighlighted: string
+    try {
+      fullHighlighted = hljs.highlight(value, { language }).value
+    } catch {
+      fullHighlighted = escapeHtml(value)
+    }
+
+    const hlLines = splitHighlightedLines(fullHighlighted)
 
     let numberedLines: string[] = []
-    for (let i = 0; i < lineCount; i++) {
+    for (let i = 0; i < hlLines.length; i++) {
       const lineNum = i + 1
-      let escaped = lines[i] || ''
-
-      if (escaped.trim()) {
-        try {
-          escaped = hljs.highlight(escaped, { language }).value
-        } catch {
-          escaped = escapeHtml(escaped)
-        }
-      }
+      let lineHtml = hlLines[i] || '&nbsp;'
 
       if (errorLine === lineNum) {
-        escaped = `<span class="ce-error-line">${escaped || '&nbsp;'}</span>`
+        lineHtml = `<span class="ce-error-line">${lineHtml}</span>`
       }
 
-      numberedLines.push(`<span class="ce-code-line">${escaped || '&nbsp;'}</span>`)
+      numberedLines.push(`<span class="ce-code-line">${lineHtml}</span>`)
     }
 
     highlighted = numberedLines.join('')
 
     let nums: string[] = []
-    for (let i = 1; i <= lineCount; i++) {
+    for (let i = 1; i <= hlLines.length; i++) {
       const cls = errorLine === i ? 'ce-ln-error' : ''
       nums.push(`<span class="${cls}">${i}</span>`)
     }
