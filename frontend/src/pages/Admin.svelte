@@ -230,7 +230,7 @@
   <div>
     <button onclick={() => tab = 'caps'} class={tab === 'caps' ? 'primary' : ''}>Global Caps</button>
     <button onclick={() => tab = 'users'} class={tab === 'users' ? 'primary' : ''}>Users</button>
-    <button onclick={() => tab = 'update'} class={tab === 'update' ? 'primary' : ''}>Update</button>
+    <button onclick={() => tab = 'update'} class={tab === 'update' ? 'primary' : ''}>Update{#if updateInfo?.update_available}<span style="color: #ef4444; margin-left: 4px; font-weight: bold;">⓵</span>{/if}</button>
     <button onclick={() => tab = 'audit'} class={tab === 'audit' ? 'primary' : ''}>Audit Logs</button>
     <button onclick={() => tab = 'logs'} class={tab === 'logs' ? 'primary' : ''}>Server Logs</button>
     <button onclick={() => tab = 'network'} class={tab === 'network' ? 'primary' : ''}>Network</button>
