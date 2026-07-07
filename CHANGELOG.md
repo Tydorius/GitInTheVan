@@ -2,7 +2,7 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
-## [Unreleased]
+## [0.15.0] - 2026-07-07
 
 ### Added
 
@@ -39,7 +39,7 @@ All notable changes to GitInTheVan are documented in this file.
 - **Update System**: In-app update notifications and update scripts
   - Backend: `GET /api/admin/update/check` checks GitHub releases API for newer versions
   - Backend: `GET /api/admin/update/download-info` returns zip URL and update instructions
-  - Frontend: Red badge (⓵) on Admin sidebar button when update is available
+  - Frontend: Red badge on Admin sidebar button when update is available
   - Frontend: "Update" tab in Admin page with version comparison, release notes, download link, and step-by-step instructions
   - Auto-checks for updates on page load and every 5 minutes (admin users only)
   - Update scripts: `scripts/update-windows.bat`, `scripts/update-macos.sh`, `scripts/update-linux.sh`
@@ -50,8 +50,12 @@ All notable changes to GitInTheVan are documented in this file.
 
 - Debug moved from standalone sidebar page to a tab under Dashboard (visible to all users)
 - Debug mode toggle relocated from Context Budgeting section to Proxy Configuration in Settings
+- Verification tester now sends `rule_id` in test requests (bug fix)
 
-## [0.14.5] - Previous
+### Fixed
+
+- CodeEditor multi-line syntax highlighting: highlight.js now processes the full code block instead of per-line, correctly highlighting multi-line comments (`/* ... */`), template literals, and other multi-line tokens
+- Verification tester "Either prompt or rule_id must be provided" error: `rule_id` was collected in the dropdown but not sent in the API request
 
 ### Added
 
