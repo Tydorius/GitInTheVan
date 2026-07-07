@@ -556,7 +556,7 @@ if (!budget) {
 <li>Select an <strong>endpoint</strong> and <strong>model</strong> for the check</li>
 <li>Click <strong>Run Verification Check</strong></li>
 </ol>
-<p>The result shows whether the response was approved or rejected, along with the reason and severity.</p>
+<p>The result shows whether the response was approved or rejected, along with the reason and severity. If the verification model returns thinking/reasoning output, it is displayed in a highlighted <strong>Model Thinking</strong> section. The raw LLM response is available in a collapsible <strong>Raw LLM Response</strong> section.</p>
 <hr />
 <h2 id="9-memories">9. Memories</h2>
 <p><img alt="Memories Page" src="media/gitv-memories.png" /></p>
@@ -999,7 +999,7 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <h2 id="15-admin">15. Admin</h2>
 <p><em>Admin only. The Admin link in the sidebar is only visible to admin accounts.</em></p>
 <p><img alt="Admin" src="media/gitv-admin-global-caps.png" /></p>
-<p>The Admin page provides system-wide management with four tabs: <strong>Global Caps</strong>, <strong>Users</strong>, <strong>Audit Logs</strong>, and <strong>Server Logs</strong>. Debug is available as a tab on the Dashboard.</p>
+<p>The Admin page provides system-wide management with five tabs: <strong>Global Caps</strong>, <strong>Users</strong>, <strong>Update</strong>, <strong>Audit Logs</strong>, and <strong>Server Logs</strong>. Debug is available as a tab on the Dashboard. A red badge appears on the Admin sidebar button when an update is available.</p>
 <h3 id="global-caps-tab">Global Caps Tab</h3>
 <p>Prevents users from causing internal denial-of-service by setting absurdly high turn or retry counts. The effective limit is the lower of the user's setting and the global cap — user preferences are not overwritten.</p>
 <ul>
@@ -1039,5 +1039,17 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <h3 id="server-logs-tab">Server Logs Tab</h3>
 <p><img alt="Server Logs" src="media/gitv-admin-server-logs.png" /></p>
 <p>Read-only view of recent server log output (last 200 lines). Logs are read from the file configured by <code>GITV_LOG_FILE</code> (auto-creates <code>data/logs/gitinthevan.log</code> if unset). Use <strong>Refresh</strong> or toggle <strong>Auto</strong> for automatic refresh every 15 seconds.</p>
+<h3 id="update-tab">Update Tab</h3>
+<p>The Update tab checks for new releases from the official GitHub repository. It automatically checks on page load and every 5 minutes.</p>
+<p>When an update is available:</p>
+<ul>
+<li>A red notification banner shows the current and latest version numbers</li>
+<li>Release notes are available in a collapsible section</li>
+<li>A <strong>Download Update (.zip)</strong> link and <strong>View on GitHub</strong> link are provided</li>
+<li>Step-by-step update instructions are displayed for local installs (stop server, backup database, extract zip, run platform-specific update script)</li>
+<li>Docker/container update instructions are also provided</li>
+</ul>
+<p>When you're up to date, a green confirmation banner is shown with the current version.</p>
+<p>The platform-specific update scripts (<code>scripts/update-windows.bat</code>, <code>scripts/update-macos.sh</code>, <code>scripts/update-linux.sh</code>) handle stopping the server, backing up the database, reinstalling dependencies, rebuilding the frontend, and restarting the server.</p>
 </body>
 </html>

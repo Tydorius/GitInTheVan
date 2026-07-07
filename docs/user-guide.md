@@ -630,7 +630,7 @@ The test panel lets you check sample responses against a verification rule witho
 3. Select an **endpoint** and **model** for the check
 4. Click **Run Verification Check**
 
-The result shows whether the response was approved or rejected, along with the reason and severity.
+The result shows whether the response was approved or rejected, along with the reason and severity. If the verification model returns thinking/reasoning output, it is displayed in a highlighted **Model Thinking** section. The raw LLM response is available in a collapsible **Raw LLM Response** section.
 
 ---
 
@@ -1068,7 +1068,7 @@ Admin actions (user creation, deletion, password resets) are recorded in the aud
 
 ![Admin](media/gitv-admin-global-caps.png)
 
-The Admin page provides system-wide management with four tabs: **Global Caps**, **Users**, **Audit Logs**, and **Server Logs**. Debug is available as a tab on the Dashboard.
+The Admin page provides system-wide management with five tabs: **Global Caps**, **Users**, **Update**, **Audit Logs**, and **Server Logs**. Debug is available as a tab on the Dashboard. A red badge appears on the Admin sidebar button when an update is available.
 
 ### Global Caps Tab
 
@@ -1121,3 +1121,25 @@ Read-only view of admin actions. Each entry shows the action type, target, detai
 ![Server Logs](media/gitv-admin-server-logs.png)
 
 Read-only view of recent server log output (last 200 lines). Logs are read from the file configured by `GITV_LOG_FILE` (auto-creates `data/logs/gitinthevan.log` if unset). Use **Refresh** or toggle **Auto** for automatic refresh every 15 seconds.
+
+### Update Tab
+
+The Update tab checks for new releases from the official GitHub repository. It automatically checks on page load and every 5 minutes.
+
+When an update is available:
+
+- A red notification banner shows the current and latest version numbers
+- Release notes are available in a collapsible section
+- A **Download Update (.zip)** link and **View on GitHub** link are provided
+- Step-by-step update instructions are displayed for local installs (stop server, backup database, extract zip, run platform-specific update script)
+- Docker/container update instructions are also provided
+
+When you're up to date, a green confirmation banner is shown with the current version.
+
+The platform-specific update scripts (`scripts/update-windows.bat`, `scripts/update-macos.sh`, `scripts/update-linux.sh`) handle:
+
+1. Stopping the running server
+2. Backing up the database to a timestamped file
+3. Reinstalling Python dependencies
+4. Rebuilding the frontend
+5. Starting the server

@@ -57,117 +57,10 @@ All notable changes to GitInTheVan are documented in this file.
 - CodeEditor multi-line syntax highlighting: highlight.js now processes the full code block instead of per-line, correctly highlighting multi-line comments (`/* ... */`), template literals, and other multi-line tokens
 - Verification tester "Either prompt or rule_id must be provided" error: `rule_id` was collected in the dropdown but not sent in the API request
 
-### Added
+### Also includes all features and fixes from the unreleased 0.14.5 cycle:
 
-- **Local Folder Repos**: Admins can link local filesystem paths as content pack sources, visible globally to all users
-  - `POST /api/packs/repos/local` (admin only)
-  - `is_local` and `is_global` columns on `linked_repos` (migration 034)
-  - Global repos visible to all users; only admin owner can remove
-  - Browse/sync/install work identically to remote repos
-- **Content Pack Creator**: Export selected resources as a git-ready zip with auto-generated `descriptions.json` and deployment README
-  - `POST /api/packs/create` — serializes cantrips, lorebooks, skills, scenario rules, verification rules, and maps
-  - README includes local deployment instructions and NSFW platform warnings
-  - Two-tab UI on Content Packs page: Browse and Create Pack
-- **Scenario Summarization**: Automatically compress large system messages to save context window space:
-  - Rule-based: create rules with token thresholds, fire positions, endpoints, models, and custom prompts
-  - Dual position: Pre rules fire before lorebooks/cantrips (controls author scenario), Post rules fire after cantrips/skills (controls final message)
-  - Each position independently picks the highest-triggered rule (sorted by threshold descending)
-  - Both positions can fire on the same request (pre summarizes first, post evaluates after)
-  - Respects `<SUMMARY:off>` command tag
-  - Content pack support: scenario rules can be imported from packs via `scenario_rules/` folder
-  - UI: "Scenario Summarization Rules" card on Memories page
-  - API: `/api/scenario-rules` CRUD + `/api/scenario-rules/default-prompt`
-  - Migration 033: Creates `scenario_rules` table
-- **Skills & Writing Samples**: Reusable instruction sets and style references that can be attached to specific endpoints:
-  - Skills inject behavioral instructions into the system message (after lorebooks, before cantrips)
-  - Writing Samples inject style references before the last user message (after summarization, before prefill)
-  - Many-to-many relationship: skills/samples can be attached to multiple endpoints, each endpoint can have multiple skills/samples
-  - Per-endpoint assignment via checkbox UI in the edit modal
-  - Two-tab UI: Skills and Writing Samples with separate creation/editing
-  - API: `/api/skills` CRUD, `/api/skills/{id}/attach`, `/api/skills/for-endpoint/{id}`
-  - Migration 032: Creates `skills` and `endpoint_skills` tables
-- **Deployment Modes**: Support for reverse proxy, tunnel, and direct internet deployments:
-  - `GITV_GENERATE_CERTS=false` — skip cert generation for reverse proxy / tunnel setups
-  - `GITV_BEHIND_PROXY=true` — trust X-Forwarded-* headers, enable proxy-aware uvicorn
-  - README documents four deployment scenarios with example nginx and Caddy configs
-- **Local Root CA + Leaf Certificate**: Replaced bare self-signed certs with a proper local CA + CA-signed leaf cert chain for cross-platform trust (required for iOS which cannot trust leaf certs):
-  - `ca.pem`, `ca.crt`, `ca.der` — Root CA in PEM, CRT (double-click on Windows), and DER formats
-  - `cert.pem`, `cert.crt` — Leaf cert + CA chain in PEM and CRT formats
-  - `key.pem` — Leaf private key
-  - `ca-key.pem` — CA private key (for signing additional leaf certs)
-  - CA download endpoint: `GET /api/admin/ssl/ca-cert`
-  - Deploy scripts detect missing `ca.pem` on upgrades and auto-regenerate
-  - Install verification step checks for complete cert set
-- **Per-Endpoint Default Model**: Model configuration moved from user-level settings to per-endpoint, allowing different models per endpoint:
-  - Migration 031: `ALTER TABLE endpoints ADD COLUMN default_model`
-  - Proxy uses endpoint's `default_model` as fallback when client doesn't specify one
-  - `GET /api/endpoints/{id}/models` endpoint lists available models from provider
-  - Dashboard diagnostics includes model dropdown (queries provider or allows manual override)
-  - Removed `default_model` from Settings page (backward compat: old column preserved)
-- **HTTP→HTTPS Redirect**: Optional lightweight redirect server (port 80 by default) that redirects HTTP requests to HTTPS. Configurable via `GITV_HTTP_REDIRECT_PORT`, disabled when set to 0
-- **LiteLLM Validation**: Startup check verifies LiteLLM is installed and logs version. Diagnostics audit includes LiteLLM status check. Proxy returns clean error instead of unhandled crash when LiteLLM missing
-- **Single-Instance Lock**: Server writes PID file to prevent accidental double-launch. Cross-platform process detection (Win32 API on Windows, signals on Unix)
-- **`.env` Auto-Sync**: Deploy scripts run `app/services/env_sync.py` on every install to add missing keys from `.env.example` with default values
-- **Port Conflict Detection**: Deploy scripts check if port 8000 is already in use before starting the server
-- **HTTPS / SSL Support for LAN Access**: Self-hosted instances can now serve over HTTPS, required for cross-device access from HTTPS sites like JanitorAI (browsers block mixed HTTP content from HTTPS pages):
-  - Certificate generation via Admin panel (Network tab) or deploy scripts
-  - Certificates include LAN IP addresses in Subject Alternative Names (SANs) for browser trust
-  - Configurable via `GITV_SSL_CERTFILE` and `GITV_SSL_KEYFILE` environment variables
-  - Admin UI shows cert status, details, and step-by-step setup instructions
-  - Deploy scripts auto-generate certs during installation with automatic LAN IP detection
-  - Server startup reads SSL config from `.env` via `python -m app.main` (replaces direct `uvicorn` invocation)
-  - Platform-specific trust instructions: Firefox (own cert store), Chrome/Edge (OS trust store), Safari (Keychain import), iOS (profile install), Windows (`ca.crt` double-click)
-- **Deploy Script Hardening**: Comprehensive improvements to Windows, macOS, and Linux deploy scripts:
-  - All output logged to `scripts/installer.log` for debugging when windows close on failure
-  - Node.js now downloads portable copy to `.node/` folder (no admin/sudo required) when not found on system
-  - Node.js version check fixed (was rejecting valid v24 due to cmd.exe redirect operator bug)
-  - All file paths converted to absolute (`GITV_ROOT`) to prevent PowerShell working directory issues
-  - Python detection: fixed empty `PYTHON_CMD` bug when system Python was already 3.12+
-  - Missing frontend is now a hard failure (prevents confusing "no endpoint configured" proxy error)
-  - Deno download/extract verified with post-check; directory listed on failure
-  - Windows Firewall rule auto-created via `netsh` (or manual command printed if not admin)
-  - macOS/Linux firewall detection with `sudo` commands printed as warnings
-  - App-level firewall check on every server boot via `app/services/firewall_check.py`
-  - PowerShell detection: resolves full path to `powershell.exe` when not on PATH (fixes Deno/Node download failure on systems with modified PATH)
-  - Deno is now a soft requirement: missing Deno warns but does not abort installation (cantrips are skipped, proxy/lorebooks/verification/maps all work without Deno)
-- **Docker Distribution**: Multi-stage Dockerfile with three docker-compose configurations for production deployment:
-  - `docker-compose.sqlite.yml` — Single-instance with SQLite (default, zero-config)
-  - `docker-compose.mariadb.yml` — App + MariaDB container with persistent volume
-  - `docker-compose.postgres.yml` — App + PostgreSQL container with persistent volume
-  - All three tested and verified: builds succeed, health checks pass, all 26 tables and 30 migrations apply cleanly
-  - Image includes Deno binary, PostgreSQL/MariaDB client tools, and built frontend
-- **LiteLLM Provider Compatibility**: Endpoints can now select a provider (Gemini, OpenAI, Anthropic, OpenRouter, DeepSeek, xAI, Ollama, OpenAI-Compatible) to enable LiteLLM integration. LiteLLM handles per-provider parameter translation (e.g., stripping unsupported `top_k` for Gemini), auth format differences, response normalization, and error handling for 100+ LLM providers. Endpoints without a provider set continue to use raw HTTP passthrough (fully backward compatible).
-  - Pinned `litellm==1.89.4` (MIT licensed)
-  - Provider dropdown added to endpoint form in UI
-  - Diagnostics connectivity test uses LiteLLM when provider is set
-  - All outbound calls (Driver, Navigator, Summarizer, Map stages) benefit from LiteLLM when provider is set
-- **Expanded Memory System**: Two new persistent memory scopes for cantrips:
-  - `context.user_data` — per-user global key-value store, shared across all chats and all cantrips for that user
-  - `context.cantrip_data` — per-user per-cantrip key-value store, persists across chats but scoped to one specific cantrip
-  - Same `get`/`set`/`keys`/`delete` API as `chat_data`
-  - `user_data` is shared across all cantrips in a pipeline run; `cantrip_data` is isolated per cantrip
-  - `cantrip_data` cascade-deletes when the cantrip is deleted
-- **Multi-Database Support**: PostgreSQL and MariaDB/MySQL backends in addition to the default SQLite. Enables horizontal scaling with multiple application instances sharing a single database server.
-  - Optional driver dependencies: `pip install -e ".[postgres]"` (asyncpg) or `pip install -e ".[mysql]"` (aiomysql)
-  - Connection pooling with configurable pool size, overflow, and recycle (`GITV_DB_POOL_SIZE`, `GITV_DB_MAX_OVERFLOW`, `GITV_DB_POOL_RECYCLE`)
-  - Dialect-aware migrations: SQLite `rowid` replaced with `ROW_NUMBER()` for PostgreSQL/MariaDB; `INSERT OR IGNORE` replaced with `ON CONFLICT DO NOTHING` / `INSERT IGNORE`
-  - Advisory locking during migrations prevents concurrent migration races when multiple instances start simultaneously (PostgreSQL `pg_advisory_lock`, MariaDB `GET_LOCK`)
-  - WAL mode enabled for SQLite file databases for improved read concurrency
-  - Server-side defaults added to `AdminSettings` model for cross-dialect INSERT compatibility
-
-### Fixed
-
-- **Lorebook bare-array import**: JSON files that are bare arrays of entries (no `entries` wrapper key) now import correctly. Previously, JavaScript's `Array.prototype.entries()` method was called instead of accessing the data, producing "function entries() { [native code] } is not iterable"
-- **Lorebook JSON edit/save**: Same bare-array fix applied to the JSON edit mode save path
-- **Duplicate diagnostics results**: Connectivity test ran both LiteLLM and raw HTTP tests for provider endpoints (missing `else:` branch). Now correctly runs only one test based on provider setting
-- **LiteLLM error log noise**: Provider errors (404, 429, 400, 401) now log as single WARNING lines instead of full tracebacks. Only true server errors (500+) get full exception logging
-- **LiteLLM version display**: Fixed startup log showing raw module object instead of version string
-- **Diagnostics test model**: Connectivity test now uses endpoint's configured model or user-selected model instead of hardcoded `"test"`, preventing misleading 404 errors from providers
-- **`_resolve_target` model propagation**: Endpoint's `default_model` is now passed through the routing pipeline and applied as fallback when the client doesn't specify a model (was silently discarded)
-- **.env file loading**: Added `env_file=".env"` to pydantic-settings config so SSL and other settings are actually read from `.env` (previously only OS environment variables were read)
-- **.env file corruption**: Deploy scripts now insert blank lines before appending settings, preventing two keys from merging onto one line
-- **Deploy script LAN_IP detection**: Replaced fragile batch `for /f` loop with temp-file approach; macOS/Linux scripts use venv Python instead of system Python
-- **Startup banner**: Shows correct protocol (https vs http), actual LAN IP, and cert trust instructions
+- Local Folder Repos, Content Pack Creator, Scenario Summarization, Skills & Writing Samples, Deployment Modes, Local Root CA + Leaf Certificate, Per-Endpoint Default Model, HTTP→HTTPS Redirect, LiteLLM Provider Compatibility, Expanded Memory System (`user_data`/`cantrip_data`), Multi-Database Support (PostgreSQL/MariaDB), Docker Distribution, Deploy Script Hardening
+- Fixes: Lorebook bare-array import, duplicate diagnostics results, LiteLLM error log noise, .env file loading/corruption, deploy script LAN_IP detection, startup banner
 
 ## [0.14.0] - 2026-06-23
 
@@ -196,37 +89,30 @@ All notable changes to GitInTheVan are documented in this file.
 
 ### Added
 
-- **Per-Endpoint API Keys in UI**: Each endpoint card now shows its associated GitInTheVan API keys with enable/disable/delete controls. Default keys (no endpoint mapping) shown in a separate section. API Key card removed from Settings.
+- **Per-Endpoint API Keys**: Create multiple `gitv_` API keys per user, each mapped to a specific endpoint. Enables multi-platform routing from a single GitInTheVan instance (e.g., one key for JanitorAI routing to endpoint A, another for SillyTavern routing to endpoint B). Each endpoint card shows its associated keys with enable/disable/delete controls. Default keys (no endpoint mapping) shown in a separate section
 - **Admin Panel**: New Admin page (visible to admins only) with three tabs:
-  - **Global Caps**: Set max driver-callable turns (default 2), max verification retries (default 3), and per-server rate limits. Uses `min(user_setting, global_cap)` — doesn't overwrite user preferences.
-  - **Audit Logs**: Read-only view of admin actions (user creation, deletion).
-  - **Server Logs**: Read-only view of recent server log output with runtime log level override (DEBUG/INFO/WARNING/ERROR/CRITICAL). Takes effect immediately without restart.
-- **Per-Endpoint Content Bypass**: Bypass method moved from a global user setting to individual endpoint configuration. Each endpoint card shows its bypass method. The global Content Bypass card has been removed from Settings.
+  - **Global Caps**: Set max driver-callable turns (default 2), max verification retries (default 3), and per-server rate limits. Uses `min(user_setting, global_cap)` — doesn't overwrite user preferences
+  - **Audit Logs**: Read-only view of admin actions (user creation, deletion)
+  - **Server Logs**: Read-only view of recent server log output with runtime log level override (DEBUG/INFO/WARNING/ERROR/CRITICAL). Takes effect immediately without restart
+- **Per-Endpoint Content Bypass**: Bypass method moved from a global user setting to individual endpoint configuration. Each endpoint card shows its bypass method. The global Content Bypass card has been removed from Settings
+- **Rate Limiting**: In-memory sliding window rate limiter on proxy endpoints (default 60/min) and management API (default 120/min). Configurable via `GITV_RATE_LIMIT_ENABLED`, `GITV_RATE_LIMIT_PROXY_PER_MIN`, `GITV_RATE_LIMIT_API_PER_MIN`. Returns HTTP 429 with `Retry-After` header when exceeded
+- **Request Body Size Limit**: Rejects requests exceeding configurable maximum (default 10MB) with HTTP 413. Set via `GITV_MAX_REQUEST_BODY_SIZE`
+- **Password Strength Validation**: Passwords must be at least 8 characters (configurable via `GITV_MIN_PASSWORD_LENGTH`) and contain at least one letter and one number. Enforced on setup, user creation, and password reset
+- **Audit Logging**: Admin actions (user creation, user deletion, password reset) are logged with timestamp, action type, and target. Viewable via `/api/audit` endpoint. Auto-pruned to 1000 entries per user
+- **CORS Configuration**: Origins are now configurable via `GITV_CORS_ORIGINS` environment variable (comma-separated, default `*`). When non-wildcard, `allow_credentials` is properly enforced
+- **JWT Expiration Configuration**: Token lifetime now configurable via `GITV_JWT_EXPIRATION_HOURS` (default 24)
 
 ### Changed
 
 - Content bypass is now resolved per-endpoint via routing, not from UserSettings
 - `_resolve_target` returns `bypass_method` from the endpoint record
 - Rate limit values from admin settings override env var defaults at runtime
+- CORS middleware now uses configurable origins instead of hardcoded wildcard
+- API key table (`api_keys`) now wired into routing — checked before legacy `User.gitv_api_key` fallback
 
 ### Fixed
 
 - Deploy scripts: pip upgrade before install, Python version enforcement, auto-install prompt
-
-### Added
-
-- **Per-Endpoint API Keys**: Create multiple `gitv_` API keys per user, each mapped to a specific endpoint. Enables multi-platform routing from a single GitInTheVan instance (e.g., one key for JanitorAI routing to endpoint A, another for SillyTavern routing to endpoint B). Managed via new API Keys section in Settings.
-- **Rate Limiting**: In-memory sliding window rate limiter on proxy endpoints (default 60/min) and management API (default 120/min). Configurable via `GITV_RATE_LIMIT_ENABLED`, `GITV_RATE_LIMIT_PROXY_PER_MIN`, `GITV_RATE_LIMIT_API_PER_MIN`. Returns HTTP 429 with `Retry-After` header when exceeded.
-- **Request Body Size Limit**: Rejects requests exceeding configurable maximum (default 10MB) with HTTP 413. Set via `GITV_MAX_REQUEST_BODY_SIZE`.
-- **Password Strength Validation**: Passwords must be at least 8 characters (configurable via `GITV_MIN_PASSWORD_LENGTH`) and contain at least one letter and one number. Enforced on setup, user creation, and password reset.
-- **Audit Logging**: Admin actions (user creation, user deletion, password reset) are logged with timestamp, action type, and target. Viewable via `/api/audit` endpoint. Auto-pruned to 1000 entries per user.
-- **CORS Configuration**: Origins are now configurable via `GITV_CORS_ORIGINS` environment variable (comma-separated, default `*`). When non-wildcard, `allow_credentials` is properly enforced.
-- **JWT Expiration Configuration**: Token lifetime now configurable via `GITV_JWT_EXPIRATION_HOURS` (default 24).
-
-### Changed
-
-- CORS middleware now uses configurable origins instead of hardcoded wildcard
-- API key table (`api_keys`) now wired into routing — checked before legacy `User.gitv_api_key` fallback
 
 ### Security
 

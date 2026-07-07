@@ -73,20 +73,23 @@ I will stress that I am not going to replicate or 100% replace Lorebary's functi
 - **Embedded Lorebook Extraction** — `<jslorebook>` tags in character card scenario content are automatically extracted, desanitized, and stripped before forwarding. Scripts available for execution alongside user cantrips
 - **Prefill Normalization** — Provider-specific assistant message prefilling. Converts trailing assistant messages to system instructions for OpenAI-compatible endpoints. Anthropic/Google pass through natively
 - **Content Bypass Plugins** — Three encoding methods (space separation, dot separation, character replacement) configurable per endpoint. Each endpoint can have its own bypass strategy. Includes ToS violation warning
-- **Tagging System** — Activate lorebooks, cantrips, and verification rules via `<#type-name#>` delimiters in persona or message text. Tags are auto-stripped before forwarding to the LLM
+- **Tagging System** — Activate lorebooks, cantrips, and verification rules via `<#type-name#>` delimiters in persona or message text. Tags are auto-stripped before forwarding to the LLM. Centralized tag management on the Tags and Groups page
+- **Tags and Groups** — Centralized tag management for all lorebooks and cantrips. Create group collections that activate multiple resources via a single `<#grouptag#>` tag. Groups can be blanket-active (every message) or tag-activated. Members are deduplicated and missing members are handled gracefully
 - **Content Discovery and Sync** — Link any git repository as a content pack. Browse, install (linked with update tracking), or fork (independent copy) cantrips, lorebooks, skills, scenario rules, and maps. Safety scanner checks for malicious code. Admins can link local filesystem folders as global content sources. Create your own packs from existing resources via the Pack Creator
 - **Skills & Writing Samples** — Reusable instruction sets and style references attached to endpoints. Skills inject behavioral directives into the system message; Writing Samples inject style references before the last user message
 - **Diagnostics** — Automated endpoint and configuration checker for troubleshooting connectivity issues
 - **Security Hardening** — Rate limiting (proxy + management API), configurable CORS origins, password strength validation, request body size limits, audit logging for admin actions, configurable JWT expiration, global caps for driver-callable turns and verification retries
 - **Per-Endpoint API Keys** — Create multiple `gitv_` API keys per user, each mapped to a specific endpoint for multi-platform routing. Managed on each endpoint card in the UI
-- **Admin Panel** — Global caps (turns/retries use min of user/global), Users tab (create, edit, disable, delete, password reset, key regeneration), Debug tab (pipeline capture viewer), read-only audit logs, read-only server logs with runtime log level override without restart. All in a single Admin page with five tabs
+- **Admin Panel** — Global caps (turns/retries use min of user/global), Users tab (create, edit, disable, delete, password reset, key regeneration), Update tab (in-app version check with GitHub release notifications and download links), read-only audit logs, read-only server logs with runtime log level override without restart. Red badge on Admin sidebar button when updates are available
 - **Maps** — Multi-stage LLM pipelines that chain multiple Driver passes (e.g., Writing LLM > Gamemaster LLM > Narrator LLM) into a single request. Each stage has its own lorebooks, cantrips, endpoint, model, driver-callable turns, and verification. Output modes (persist/sanitize/discard) control how stage output feeds the next stage. Sticky vs stage-only resource attachments. Activated via `<#map-tag#>` tags. Export/import as self-contained JSON with resource dedup options (keep_both/reuse/overwrite)
 - **Web UI** — Full management interface built with Svelte 5 including cantrip tester, verification tester, forbidden word scanner, code editor with syntax highlighting, jump-to-top/bottom navigation, and log viewer
 - **Multi-Database Support** — SQLite (default), PostgreSQL, and MariaDB/MySQL backends. SQLite for single-instance self-hosting; PostgreSQL or MariaDB for multi-instance horizontal scaling with a shared database server
 - **LiteLLM Provider Compatibility** — Optional provider selection on endpoints enables LiteLLM integration for automatic parameter translation, auth format handling, and response normalization across 100+ LLM providers (Gemini, OpenAI, Anthropic, OpenRouter, DeepSeek, xAI, and more). Endpoints without a provider set use raw HTTP passthrough (backward compatible)
 - **Context Budgeting** — Weighted token budget allocation across cantrips and lorebooks. Cantrips access their share via `context.budget` and can dynamically scale output detail (full/summary/bullets) based on remaining tokens. Configurable per-user budget percentage and context window override
 - **Memory Rules** — Taggable per-conversation summarization overrides. Rules can override the token threshold, keep-recent count, prompt, or disable summarization entirely for specific conversations. Activate via `<#memory-rule-tag#>` tags
-- **Debug Mode** — Captures the last 20 pipeline exchanges with full visibility (original messages, modified messages after pipeline processing, Driver response, and verification results). Dedicated Debug page for troubleshooting pipeline behavior
+- **Debug Mode** — Stage-based pipeline timeline capturing 16 pipeline stages (memory injection, lorebooks, cantrips, skills, scenario summarization, verification, and more) with before/after message snapshots, metadata (keywords matched, budget allocation, tool calls, cantrip debug logs), and per-stage change detection. Available as a tab under Dashboard, gated by Debug Mode toggle in Settings
+- **Thinking/Reasoning Output** — `preserve_thinking` setting controls whether `<think>` blocks and `reasoning_content` fields are stripped from or preserved in client-facing responses. Verification tester displays model thinking output alongside judgment results. Debug pipeline captures thinking content in metadata
+- **Update System** — In-app update notifications: checks GitHub releases automatically, shows red badge on Admin sidebar button when updates are available. Admin Update tab displays version comparison, release notes, and download links with step-by-step instructions. Platform-specific update scripts (Windows/macOS/Linux) handle server stop, database backup, dependency reinstall, frontend rebuild, and server restart
 
 ## Database Support
 
@@ -733,27 +736,27 @@ Maps are managed on the **Maps** page and integrate with content packs (`maps/` 
 
 ## Debug Mode
 
-Debug Mode captures pipeline data for the last 20 exchanges, providing full visibility into how GitInTheVan transforms requests and responses.
+Debug Mode captures pipeline data for the last 20 exchanges as an expandable timeline, showing every transformation step with before/after snapshots.
 
 ### What It Captures
 
-Each captured exchange includes:
-- **Original Messages**: The request as received from the client (before any pipeline processing)
-- **Modified Messages**: The request as sent to the Driver (after lorebooks, cantrips, memory, budget, summarization)
-- **Budget Data**: Token budget calculations and allocations
-- **Tags**: Any activation tags detected
-- **Driver Response**: The raw response from the writing LLM
-- **Verification Results**: Check history with violations and retry details
+Each captured exchange shows a **Pipeline Timeline** with 16 capture points:
+
+- **Request-side stages**: Memory injection, scenario summarization (pre/post), lorebook injection, skills injection, budget preparation, cantrip processing, conversation summarization, writing samples, driver-callable tools, prefill normalization, bypass encoding
+- **Response-side stages**: Pre-Navigator cantrips, forbidden words scan, verification checks, post-Navigator cantrips, memory extraction, bypass decoding
+- Each stage shows: label, detail summary, "changed" badge if messages were modified, before/after message diff, metadata (matched keywords, memory keys, budget allocation, tool calls, cantrip debug logs), and the setting that controls it
+- LLM thinking/reasoning content captured in metadata for models that return `reasoning_content`
+- Tags detected in the request are shown at the top of the timeline
 
 ### Using Debug Mode
 
-1. Enable **Debug Mode** in **Settings > Context Budgeting**
+1. Enable **Debug Mode** in **Settings > Proxy Configuration**
 2. Send requests through the proxy as normal
-3. Open the **Debug** page in the sidebar
-4. Select an exchange from the list to view the pipeline stages
-5. Toggle between **Original**, **Modified**, and **Response** views
+3. Open the **Debug** tab under **Dashboard**
+4. Select an exchange from the list to view the pipeline timeline
+5. Click any stage to expand it and see the before/after diff
 
-Debug exchanges are automatically pruned to the most recent 20 per user. Use **Clear All** to wipe all captured data.
+Debug exchanges are automatically pruned to the most recent 20 per user. Use **Clear All** to wipe all captured data. Old-format debug exchanges from prior versions are auto-migrated to the stage-based format.
 
 ## Command Tags
 
