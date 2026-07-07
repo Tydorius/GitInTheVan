@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import logging
 import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -12,6 +16,9 @@ logger = logging.getLogger(__name__)
 
 GITHUB_API = "https://api.github.com/repos/Tydorius/GitInTheVan/releases/latest"
 CHANGELOG_URL = "https://raw.githubusercontent.com/Tydorius/GitInTheVan/main/CHANGELOG.md"
+
+_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+_SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent / "scripts"
 
 
 def get_current_version() -> str:
@@ -145,3 +152,69 @@ async def check_for_update() -> dict[str, Any]:
             "update_available": False,
             "error": str(e),
         }
+
+
+async def execute_update() -> dict[str, Any]:
+    """Download update zip, stage update script, and launch it.
+
+    1. Fetch latest release info from GitHub
+    2. Download zip to data/gitinthevan.zip
+    3. Copy platform-specific update script to data/auto-update.{ext}
+    4. Spawn it as a detached process (with 3-second delay)
+    5. Return status so the HTTP response can be sent before the server dies
+    """
+    check = await check_for_update()
+    if not check.get("update_available"):
+        return {"success": False, "error": "No update available"}
+
+    zip_url = check.get("zip_url", "")
+    if not zip_url:
+        return {"success": False, "error": "No download URL available for this release"}
+
+    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    zip_path = _DATA_DIR / "gitinthevan.zip"
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+            resp = await client.get(zip_url)
+            if resp.status_code != 200:
+                return {"success": False, "error": f"Download failed: HTTP {resp.status_code}"}
+            zip_path.write_bytes(resp.content)
+    except Exception as e:
+        return {"success": False, "error": f"Download failed: {e}"}
+
+    is_windows = sys.platform == "win32"
+    if is_windows:
+        script_src = _SCRIPTS_DIR / "update-windows.bat"
+        script_dst = _DATA_DIR / "auto-update.bat"
+    else:
+        script_src = _SCRIPTS_DIR / ("update-macos.sh" if sys.platform == "darwin" else "update-linux.sh")
+        script_dst = _DATA_DIR / "auto-update.sh"
+
+    if not script_src.exists():
+        return {"success": False, "error": f"Update script not found: {script_src.name}"}
+
+    shutil.copy2(script_src, script_dst)
+    if not is_windows:
+        script_dst.chmod(0o755)
+
+    try:
+        if is_windows:
+            subprocess.Popen(
+                ["cmd", "/c", str(script_dst)],
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+                cwd=str(_DATA_DIR.parent),
+            )
+        else:
+            subprocess.Popen(
+                ["bash", str(script_dst)],
+                start_new_session=True,
+                cwd=str(_DATA_DIR.parent),
+            )
+    except Exception as e:
+        return {"success": False, "error": f"Failed to launch update script: {e}"}
+
+    return {
+        "success": True,
+        "message": "Update script launched. The server will restart shortly.",
+    }

@@ -9,6 +9,8 @@
   let updateInfo: any = null
   let updateChecking = false
   let updateError = ''
+  let updating = false
+  let updateLaunched = false
 
   let adminSettings: any = null
   let auditLogs: any[] = []
@@ -208,6 +210,20 @@
       updateInfo = await api.checkUpdate()
     } catch (e: any) { updateError = e.message }
     finally { updateChecking = false }
+  }
+
+  async function launchUpdate() {
+    if (!confirm('This will download the update, stop the server, and restart it automatically. The page will lose connection temporarily. Continue?')) return
+    updating = true
+    try {
+      const result = await api.executeUpdate()
+      if (result.success) {
+        updateLaunched = true
+      } else {
+        updateError = result.error || 'Update failed'
+      }
+    } catch (e: any) { updateError = e.message }
+    finally { updating = false }
   }
 
   onDestroy(() => {
@@ -464,11 +480,26 @@
 
     {#if updateChecking}
       <div class="loading">Checking for updates...</div>
-    {:else if updateError}
+    {:else if updateError && !updateInfo}
       <div class="error-msg">{updateError}</div>
       <button onclick={checkUpdate} style="margin-top: 8px;">Retry</button>
-    {:else if updateInfo}
-      {#if updateInfo.update_available}
+    {:else if updateLaunched}
+        <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid #3b82f6; border-radius: 4px; padding: 16px; margin-bottom: 16px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+            <span style="font-size: 18px;">⟳</span>
+            <strong style="font-size: 14px; color: #3b82f6;">Update in Progress</strong>
+          </div>
+          <div style="font-size: 13px; line-height: 1.8;">
+            The update script is running. The server will:<br>
+            1. Stop<br>
+            2. Back up the database<br>
+            3. Extract the new version<br>
+            4. Reinstall dependencies and rebuild the frontend<br>
+            5. Restart<br><br>
+            <strong>The page will lose connection shortly.</strong> Wait about 1-2 minutes, then refresh.
+          </div>
+        </div>
+    {:else if updateInfo?.update_available}
         <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; border-radius: 4px; padding: 16px; margin-bottom: 16px;">
           <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
             <span style="font-size: 18px;">⓵</span>
@@ -486,10 +517,16 @@
               </div>
             </details>
           {/if}
+          {#if updateError}
+            <div class="error-msg" style="margin-top: 8px;">{updateError}</div>
+          {/if}
           <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+            <button class="primary" onclick={launchUpdate} disabled={updating} style="font-size: 13px; padding: 6px 16px;">
+              {updating ? 'Downloading...' : 'Update Now'}
+            </button>
             {#if updateInfo.zip_url}
-              <a href={updateInfo.zip_url} target="_blank" class="primary" style="text-decoration: none; padding: 6px 16px; border-radius: 4px; font-size: 13px;">
-                Download Update (.zip)
+              <a href={updateInfo.zip_url} target="_blank" style="text-decoration: none; padding: 6px 16px; border-radius: 4px; font-size: 13px;">
+                Download (.zip)
               </a>
             {/if}
             {#if updateInfo.release_url}
@@ -501,28 +538,30 @@
         </div>
 
         <div style="margin-top: 16px;">
-          <h4 style="font-size: 13px; margin-bottom: 8px;">Update Instructions (Local Install)</h4>
-          <ol style="font-size: 12px; line-height: 2; padding-left: 20px; color: var(--text-dim);">
-            <li>Download the update zip using the button above</li>
-            <li><strong>Stop the running server</strong> (Ctrl+C in the server terminal)</li>
-            <li><strong>Back up your database</strong>: copy <code>data/gitinthevan.db</code> to a safe location</li>
-            <li>Extract the zip file over your existing GitInTheVan folder, overwriting all files</li>
-            <li>Run the update script for your platform:
-              <ul style="margin: 4px 0; padding-left: 20px;">
-                <li><strong>Windows</strong>: Double-click <code>scripts\update-windows.bat</code></li>
-                <li><strong>macOS</strong>: Run <code>./scripts/update-macos.sh</code> in Terminal</li>
-                <li><strong>Linux</strong>: Run <code>./scripts/update-linux.sh</code> in Terminal</li>
-              </ul>
-            </li>
-            <li>The script will reinstall dependencies, rebuild the frontend, and start the server</li>
-          </ol>
+          <details>
+            <summary style="font-size: 12px; cursor: pointer; color: var(--text-dim);">Manual Update Instructions (Local Install)</summary>
+            <ol style="font-size: 12px; line-height: 2; padding-left: 20px; color: var(--text-dim); margin-top: 8px;">
+              <li>Download the update zip using the button above</li>
+              <li><strong>Stop the running server</strong> (Ctrl+C in the server terminal)</li>
+              <li><strong>Back up your database</strong>: copy <code>data/gitinthevan.db</code> to a safe location</li>
+              <li>Extract the zip file over your existing GitInTheVan folder, overwriting all files</li>
+              <li>Run the update script for your platform:
+                <ul style="margin: 4px 0; padding-left: 20px;">
+                  <li><strong>Windows</strong>: Double-click <code>scripts\update-windows.bat</code></li>
+                  <li><strong>macOS</strong>: Run <code>./scripts/update-macos.sh</code> in Terminal</li>
+                  <li><strong>Linux</strong>: Run <code>./scripts/update-linux.sh</code> in Terminal</li>
+                </ul>
+              </li>
+              <li>The script will reinstall dependencies, rebuild the frontend, and start the server</li>
+            </ol>
+          </details>
         </div>
 
         <div style="margin-top: 16px; padding: 12px; background: var(--bg-elevated); border-radius: 4px; font-size: 11px; color: var(--text-dim);">
           <strong>Docker/Container updates:</strong> Pull the latest image with <code>docker pull ghcr.io/tydorius/gitinthevan:latest</code>,
           then recreate the container. Your database (in the mounted volume) is preserved automatically.
         </div>
-      {:else}
+    {:else if updateInfo}
         <div style="background: rgba(34, 197, 94, 0.1); border: 1px solid #22c55e; border-radius: 4px; padding: 16px;">
           <div style="display: flex; align-items: center; gap: 8px;">
             <span style="font-size: 18px;">✓</span>
@@ -533,7 +572,6 @@
           </div>
         </div>
         <button onclick={checkUpdate} style="margin-top: 12px;">Check Again</button>
-      {/if}
     {:else}
       <button class="primary" onclick={checkUpdate}>Check for Updates</button>
     {/if}
