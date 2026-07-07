@@ -108,6 +108,7 @@
       testResult = await api.testVerification({
         content: testForm.content,
         prompt: testForm.prompt || undefined,
+        rule_id: testForm.rule_id || undefined,
         endpoint_id: testForm.endpoint_id || undefined,
         model: testForm.model || undefined,
       })
