@@ -283,6 +283,8 @@ export const api = {
     error: string }>('/api/admin/update/check'),
   getUpdateDownloadInfo: () =>
     request<{ zip_url: string; current_version: string; latest_version: string; instructions: string }>('/api/admin/update/download-info'),
+  executeUpdate: () =>
+    request<{ success: boolean; message: string; error: string }>('/api/admin/update/execute', { method: 'POST' }),
 
   // Debug
   listDebugExchanges: () =>

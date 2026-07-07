@@ -291,3 +291,18 @@ async def get_update_download_info(
             "See the update scripts in the scripts/ directory."
         ),
     )
+
+
+class UpdateExecuteResponse(BaseModel):
+    success: bool
+    message: str = ""
+    error: str = ""
+
+
+@router.post("/update/execute", response_model=UpdateExecuteResponse)
+async def execute_update(
+    admin: Annotated[User, Depends(require_admin)],
+):
+    from app.services.updater import execute_update
+    result = await execute_update()
+    return UpdateExecuteResponse(**result)

@@ -6,8 +6,10 @@ All notable changes to GitInTheVan are documented in this file.
 
 ### Added
 
+- **One-click auto-update**: "Update Now" button in Admin Update tab downloads the zip, copies the update script to `data/`, and launches it as a detached process that handles the full update cycle (stop server, backup DB, extract, reinstall, rebuild, restart)
 - **Changelog-driven release notes**: Update check now fetches CHANGELOG.md from the repo and extracts the relevant sections between the current and latest version headers, showing full release notes for multi-version jumps
 - **Update tab badge**: Red alert symbol on the Update tab button in Admin panel when an update is available (matches the sidebar badge)
+- **Auto-update scripts**: `update-windows.bat`, `update-macos.sh`, `update-linux.sh` now handle zip extraction (including GitHub zipball nested-folder format), 3-second startup delay for HTTP response, and self-cleanup of staged script
 
 ### Fixed
 

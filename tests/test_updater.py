@@ -202,3 +202,30 @@ class TestUpdateCheckAPI:
         assert "latest_version" in data
         assert "instructions" in data
         assert data["zip_url"] == "https://example.com/dl"
+
+    @pytest.mark.asyncio
+    async def test_execute_update_requires_admin(self, client):
+        resp = await client.post("/api/admin/update/execute")
+        assert resp.status_code in (401, 403)
+
+    @pytest.mark.asyncio
+    async def test_execute_update_no_release(self, admin_client, httpx_mock):
+        """If GitHub has no newer release, execute returns failure."""
+        client, _, _ = admin_client
+        current = get_current_version()
+
+        httpx_mock.add_response(
+            url="https://api.github.com/repos/Tydorius/GitInTheVan/releases/latest",
+            json={
+                "tag_name": f"v{current}",
+                "html_url": "https://github.com/Tydorius/GitInTheVan",
+                "body": "Same version",
+                "assets": [],
+            },
+            status_code=200,
+        )
+
+        resp = await client.post("/api/admin/update/execute")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
