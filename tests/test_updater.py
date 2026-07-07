@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.services.updater import _parse_version, get_current_version
+from app.services.updater import _extract_changelog_section, _parse_version, get_current_version
 
 
 class TestVersionParsing:
@@ -34,6 +34,65 @@ class TestGetCurrentVersion:
         assert len(v) > 0
 
 
+class TestChangelogExtraction:
+    SAMPLE_CHANGELOG = """# Changelog
+
+## [0.16.0] - 2026-08-01
+
+### Added
+
+- Feature A
+- Feature B
+
+### Fixed
+
+- Bug X
+
+## [0.15.0] - 2026-07-07
+
+### Added
+
+- Feature C
+
+## [0.14.5] - 2026-06-20
+
+### Added
+
+- Feature D
+
+## [0.14.0] - 2026-06-01
+"""
+
+    def test_single_version_jump(self):
+        result = _extract_changelog_section(self.SAMPLE_CHANGELOG, "0.15.0", "0.16.0")
+        assert "Feature A" in result
+        assert "Feature B" in result
+        assert "Bug X" in result
+        assert "Feature C" not in result
+        assert "## [0.16.0]" in result
+
+    def test_multi_version_jump(self):
+        result = _extract_changelog_section(self.SAMPLE_CHANGELOG, "0.14.0", "0.16.0")
+        assert "Feature A" in result
+        assert "Feature C" in result
+        assert "Feature D" in result
+        assert "## [0.16.0]" in result
+        assert "## [0.15.0]" in result
+        assert "## [0.14.5]" in result
+
+    def test_no_update_returns_empty(self):
+        result = _extract_changelog_section(self.SAMPLE_CHANGELOG, "0.16.0", "0.16.0")
+        assert result == ""
+
+    def test_no_headers_returns_empty(self):
+        result = _extract_changelog_section("No headers here", "0.1.0", "0.2.0")
+        assert result == ""
+
+    def test_version_not_found_returns_empty(self):
+        result = _extract_changelog_section(self.SAMPLE_CHANGELOG, "9.9.9", "9.9.10")
+        assert result == ""
+
+
 class TestUpdateCheckAPI:
     @pytest.mark.asyncio
     async def test_update_check_requires_admin(self, client):
@@ -54,6 +113,11 @@ class TestUpdateCheckAPI:
                     {"name": "gitinthevan.zip", "browser_download_url": "https://example.com/zip"}
                 ],
             },
+            status_code=200,
+        )
+        httpx_mock.add_response(
+            url="https://raw.githubusercontent.com/Tydorius/GitInTheVan/main/CHANGELOG.md",
+            text="## [99.99.99]\n\n### Added\n\n- Test feature\n",
             status_code=200,
         )
 
@@ -121,6 +185,12 @@ class TestUpdateCheckAPI:
                 "body": "Release",
                 "assets": [{"name": "release.zip", "browser_download_url": "https://example.com/dl"}],
             },
+            status_code=200,
+        )
+
+        httpx_mock.add_response(
+            url="https://raw.githubusercontent.com/Tydorius/GitInTheVan/main/CHANGELOG.md",
+            text="## [99.99.99]\n\n### Added\n\n- Test\n",
             status_code=200,
         )
 
