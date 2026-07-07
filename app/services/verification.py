@@ -36,6 +36,8 @@ class VerificationJudgment:
     reason: str
     severity: str
     rule_name: str = ""
+    raw_response: str = ""
+    thinking: str = ""
 
     @property
     def passed(self) -> bool:
@@ -88,6 +90,7 @@ def _build_verification_messages(
 
 
 def _parse_judgment(text: str, rule_name: str = "") -> VerificationJudgment:
+    raw = text
     text = text.strip()
 
     start = text.find("{")
@@ -102,6 +105,7 @@ def _parse_judgment(text: str, rule_name: str = "") -> VerificationJudgment:
             reason=str(data.get("reason", "")),
             severity=str(data.get("severity", "none")),
             rule_name=rule_name,
+            raw_response=raw,
         )
     except (json.JSONDecodeError, TypeError):
         logger.warning("Could not parse verification response: %s", text[:200])
@@ -110,6 +114,7 @@ def _parse_judgment(text: str, rule_name: str = "") -> VerificationJudgment:
             reason="Verification LLM returned unparseable response",
             severity="none",
             rule_name=rule_name,
+            raw_response=raw,
         )
 
 
@@ -184,13 +189,15 @@ async def check_response(
                         continue
 
                     data = resp.json()
-                    llm_content = (
+                    message = (
                         data.get("choices", [{}])[0]
                         .get("message", {})
-                        .get("content", "")
                     )
+                    llm_content = message.get("content", "")
+                    thinking = message.get("reasoning_content", "") or message.get("thinking", "")
 
                     judgment = _parse_judgment(llm_content, rule.name)
+                    judgment.thinking = thinking
                     judgments.append(judgment)
                     if judgment.violation:
                         violations.append(judgment)

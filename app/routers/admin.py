@@ -245,3 +245,49 @@ async def download_ca_cert(
         media_type="application/x-x509-ca-cert",
         headers={"Content-Disposition": "attachment; filename=gitinthevan-ca.pem"},
     )
+
+
+class UpdateCheckResponse(BaseModel):
+    current_version: str
+    latest_version: str
+    update_available: bool
+    release_url: str = ""
+    release_notes: str = ""
+    zip_url: str = ""
+    error: str = ""
+
+
+@router.get("/update/check", response_model=UpdateCheckResponse)
+async def check_update(
+    admin: Annotated[User, Depends(require_admin)],
+):
+    from app.services.updater import check_for_update
+    result = await check_for_update()
+    return UpdateCheckResponse(**result)
+
+
+class UpdateDownloadResponse(BaseModel):
+    zip_url: str
+    current_version: str
+    latest_version: str
+    instructions: str
+
+
+@router.get("/update/download-info", response_model=UpdateDownloadResponse)
+async def get_update_download_info(
+    admin: Annotated[User, Depends(require_admin)],
+):
+    from app.services.updater import check_for_update, get_current_version
+    result = await check_for_update()
+    current = get_current_version()
+    latest = result.get("latest_version", current)
+    return UpdateDownloadResponse(
+        zip_url=result.get("zip_url", ""),
+        current_version=current,
+        latest_version=latest,
+        instructions=(
+            "Download the zip, stop the server, back up your database (data/gitinthevan.db), "
+            "extract the zip over your existing installation, then run the deploy script for your platform. "
+            "See the update scripts in the scripts/ directory."
+        ),
+    )

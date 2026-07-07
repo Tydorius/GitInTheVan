@@ -1,12 +1,14 @@
 <script lang="ts">
   import { api } from '../api'
   import { onMount, onDestroy } from 'svelte'
-  import Debug from './Debug.svelte'
 
   let tab = 'caps'
   let loading = true
   let error = ''
   let saved = false
+  let updateInfo: any = null
+  let updateChecking = false
+  let updateError = ''
 
   let adminSettings: any = null
   let auditLogs: any[] = []
@@ -200,6 +202,14 @@
     finally { sslGenerating = false }
   }
 
+  async function checkUpdate() {
+    updateChecking = true; updateError = ''
+    try {
+      updateInfo = await api.checkUpdate()
+    } catch (e: any) { updateError = e.message }
+    finally { updateChecking = false }
+  }
+
   onDestroy(() => {
     if (auditInterval) clearInterval(auditInterval)
     if (serverLogInterval) clearInterval(serverLogInterval)
@@ -211,6 +221,7 @@
     loadServerLogs()
     loadUsers()
     loadSSL()
+    checkUpdate()
   })
 </script>
 
@@ -219,6 +230,7 @@
   <div>
     <button onclick={() => tab = 'caps'} class={tab === 'caps' ? 'primary' : ''}>Global Caps</button>
     <button onclick={() => tab = 'users'} class={tab === 'users' ? 'primary' : ''}>Users</button>
+    <button onclick={() => tab = 'update'} class={tab === 'update' ? 'primary' : ''}>Update</button>
     <button onclick={() => tab = 'audit'} class={tab === 'audit' ? 'primary' : ''}>Audit Logs</button>
     <button onclick={() => tab = 'logs'} class={tab === 'logs' ? 'primary' : ''}>Server Logs</button>
     <button onclick={() => tab = 'network'} class={tab === 'network' ? 'primary' : ''}>Network</button>
@@ -440,6 +452,90 @@
             <code>https://YOUR-IP:{location.port}/v1/chat/completions</code></li>
         </ol>
       </div>
+    {/if}
+  </div>
+
+{:else if tab === 'update'}
+  <div class="card">
+    <h3>Update GitInTheVan</h3>
+    <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
+      Check for updates from the official GitHub repository.
+    </p>
+
+    {#if updateChecking}
+      <div class="loading">Checking for updates...</div>
+    {:else if updateError}
+      <div class="error-msg">{updateError}</div>
+      <button onclick={checkUpdate} style="margin-top: 8px;">Retry</button>
+    {:else if updateInfo}
+      {#if updateInfo.update_available}
+        <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; border-radius: 4px; padding: 16px; margin-bottom: 16px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+            <span style="font-size: 18px;">⓵</span>
+            <strong style="font-size: 14px; color: #ef4444;">Update Available!</strong>
+          </div>
+          <div style="font-size: 13px; margin-bottom: 8px;">
+            Current version: <code>{updateInfo.current_version}</code>
+            &rarr; Latest version: <code>{updateInfo.latest_version}</code>
+          </div>
+          {#if updateInfo.release_notes}
+            <details style="margin-top: 8px;">
+              <summary style="font-size: 12px; cursor: pointer; color: var(--text-dim);">Release Notes</summary>
+              <div style="font-size: 12px; white-space: pre-wrap; margin-top: 8px; max-height: 300px; overflow-y: auto; background: var(--bg-elevated); padding: 12px; border-radius: 4px;">
+                {updateInfo.release_notes}
+              </div>
+            </details>
+          {/if}
+          <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+            {#if updateInfo.zip_url}
+              <a href={updateInfo.zip_url} target="_blank" class="primary" style="text-decoration: none; padding: 6px 16px; border-radius: 4px; font-size: 13px;">
+                Download Update (.zip)
+              </a>
+            {/if}
+            {#if updateInfo.release_url}
+              <a href={updateInfo.release_url} target="_blank" style="padding: 6px 16px; font-size: 13px;">
+                View on GitHub
+              </a>
+            {/if}
+          </div>
+        </div>
+
+        <div style="margin-top: 16px;">
+          <h4 style="font-size: 13px; margin-bottom: 8px;">Update Instructions (Local Install)</h4>
+          <ol style="font-size: 12px; line-height: 2; padding-left: 20px; color: var(--text-dim);">
+            <li>Download the update zip using the button above</li>
+            <li><strong>Stop the running server</strong> (Ctrl+C in the server terminal)</li>
+            <li><strong>Back up your database</strong>: copy <code>data/gitinthevan.db</code> to a safe location</li>
+            <li>Extract the zip file over your existing GitInTheVan folder, overwriting all files</li>
+            <li>Run the update script for your platform:
+              <ul style="margin: 4px 0; padding-left: 20px;">
+                <li><strong>Windows</strong>: Double-click <code>scripts\update-windows.bat</code></li>
+                <li><strong>macOS</strong>: Run <code>./scripts/update-macos.sh</code> in Terminal</li>
+                <li><strong>Linux</strong>: Run <code>./scripts/update-linux.sh</code> in Terminal</li>
+              </ul>
+            </li>
+            <li>The script will reinstall dependencies, rebuild the frontend, and start the server</li>
+          </ol>
+        </div>
+
+        <div style="margin-top: 16px; padding: 12px; background: var(--bg-elevated); border-radius: 4px; font-size: 11px; color: var(--text-dim);">
+          <strong>Docker/Container updates:</strong> Pull the latest image with <code>docker pull ghcr.io/tydorius/gitinthevan:latest</code>,
+          then recreate the container. Your database (in the mounted volume) is preserved automatically.
+        </div>
+      {:else}
+        <div style="background: rgba(34, 197, 94, 0.1); border: 1px solid #22c55e; border-radius: 4px; padding: 16px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 18px;">✓</span>
+            <strong style="color: #22c55e;">You're up to date!</strong>
+          </div>
+          <div style="font-size: 13px; margin-top: 4px;">
+            Running version <code>{updateInfo.current_version}</code>
+          </div>
+        </div>
+        <button onclick={checkUpdate} style="margin-top: 12px;">Check Again</button>
+      {/if}
+    {:else}
+      <button class="primary" onclick={checkUpdate}>Check for Updates</button>
     {/if}
   </div>
 

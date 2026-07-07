@@ -277,6 +277,13 @@ export const api = {
   generateSSLCert: (extra_ips?: string[], extra_dns?: string[]) =>
     request<any>('/api/admin/ssl/generate', { method: 'POST', body: JSON.stringify({ extra_ips: extra_ips || null, extra_dns: extra_dns || null }) }),
 
+  // Update management
+  checkUpdate: () =>
+    request<{ current_version: string; latest_version: string; update_available: boolean; release_url: string; release_notes: str;
+    error: string }>('/api/admin/update/check'),
+  getUpdateDownloadInfo: () =>
+    request<{ zip_url: string; current_version: string; latest_version: string; instructions: string }>('/api/admin/update/download-info'),
+
   // Debug
   listDebugExchanges: () =>
     request<{ exchanges: any[] }>('/api/debug'),

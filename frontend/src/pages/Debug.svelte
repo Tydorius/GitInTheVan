@@ -157,7 +157,16 @@
                     {#if stage.metadata && Object.keys(stage.metadata).length > 0}
                       <div style="margin-bottom: 8px;">
                         <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 4px;">Metadata:</div>
-                        <pre style="background: var(--bg-elevated); padding: 8px; border-radius: 4px; font-size: 11px; overflow-x: auto; margin: 0;">{JSON.stringify(stage.metadata, null, 2)}</pre>
+                        {#if stage.metadata.thinking}
+                          <div style="background: var(--bg-elevated); padding: 8px; border-radius: 4px; white-space: pre-wrap; font-size: 11px; max-height: 200px; overflow-y: auto; font-family: monospace; border-left: 3px solid var(--accent); margin-bottom: 4px;">
+                            {stage.metadata.thinking}
+                          </div>
+                          {#if Object.keys(stage.metadata).length > 1}
+                            <pre style="background: var(--bg-elevated); padding: 8px; border-radius: 4px; font-size: 11px; overflow-x: auto; margin: 0;">{JSON.stringify(Object.fromEntries(Object.entries(stage.metadata).filter(([k]) => k !== 'thinking')), null, 2)}</pre>
+                          {/if}
+                        {:else}
+                          <pre style="background: var(--bg-elevated); padding: 8px; border-radius: 4px; font-size: 11px; overflow-x: auto; margin: 0;">{JSON.stringify(stage.metadata, null, 2)}</pre>
+                        {/if}
                       </div>
                     {/if}
 

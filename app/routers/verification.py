@@ -128,6 +128,8 @@ class VerificationTestResponse(BaseModel):
     severity: str
     rule_name: str
     approved: bool
+    thinking: str = ""
+    raw_response: str = ""
 
 
 class VerificationSettingsResponse(BaseModel):
@@ -390,6 +392,8 @@ async def test_verification(
             severity=j.severity,
             rule_name=j.rule_name,
             approved=check_result.approved,
+            thinking=j.thinking,
+            raw_response=j.raw_response,
         )
 
     return VerificationTestResponse(
