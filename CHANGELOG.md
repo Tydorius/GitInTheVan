@@ -23,11 +23,28 @@ All notable changes to GitInTheVan are documented in this file.
   - 16 capture points: memory injection, scenario summarization (pre/post), lorebook injection, skills, budget preparation, cantrip processing, conversation summarization, writing samples, driver-callable, prefill, bypass encoding, final messages, verification, bypass decoding, LLM response, memory extraction
   - Response-side stages track content transformations (cantrips, forbidden words, verification results)
   - Each stage shows what changed (with "changed" badge), relevant setting, and metadata (keywords matched, budget allocation, tool calls, debug logs, memory keys)
+  - LLM thinking/reasoning content captured in debug metadata for models that return `reasoning_content` or `thinking` fields
   - New Debug.svelte with expandable timeline: click any stage to see before/after diff
-  - Debug moved from Admin tab to standalone sidebar page (visible to all users, gated by debug_mode)
+  - Debug moved from Admin tab to Dashboard tab (visible to all users, gated by debug_mode)
   - Debug Mode toggle moved from Context Budgeting to Proxy Configuration in Settings
   - Backward compatible: old-format debug exchanges auto-migrated to stage-based format
   - 18 tests covering capture logic, API endpoints, and legacy migration
+
+- **Thinking/Reasoning Output Support**: `preserve_thinking` setting now functional
+  - SSE conversion (`_convert_to_sse`) now passes `preserve_thinking` to strip or keep `<think>` tags
+  - LiteLLM streaming path captures `reasoning_content` deltas alongside `content` deltas
+  - Verification tester displays model thinking output and raw LLM response in collapsible sections
+  - Verification check history includes thinking content from each judgment
+
+- **Update System**: In-app update notifications and update scripts
+  - Backend: `GET /api/admin/update/check` checks GitHub releases API for newer versions
+  - Backend: `GET /api/admin/update/download-info` returns zip URL and update instructions
+  - Frontend: Red badge (⓵) on Admin sidebar button when update is available
+  - Frontend: "Update" tab in Admin page with version comparison, release notes, download link, and step-by-step instructions
+  - Auto-checks for updates on page load and every 5 minutes (admin users only)
+  - Update scripts: `scripts/update-windows.bat`, `scripts/update-macos.sh`, `scripts/update-linux.sh`
+  - Scripts: stop server, backup database, reinstall dependencies, rebuild frontend, restart server
+  - 13 tests for version parsing and update check API
 
 ### Changed
 

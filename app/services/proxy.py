@@ -315,6 +315,7 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
                     model or body_json.get("model", ""),
                     gitv_status=ux_settings.get("gitv_status", False),
                     simulated_speed=ux_settings.get("simulated_streaming_speed", 0),
+                    preserve_thinking=ux_settings.get("preserve_thinking", True),
                 )
 
             return JSONResponse(status_code=200, content=response_data)
@@ -471,6 +472,7 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
                     response, model or body_json.get("model", ""),
                     gitv_status=ux_settings.get("gitv_status", False),
                     simulated_speed=ux_settings.get("simulated_streaming_speed", 0),
+                    preserve_thinking=ux_settings.get("preserve_thinking", True),
                 )
             return response
 
@@ -503,18 +505,30 @@ async def _load_ux_settings(user_id: str) -> dict[str, Any]:
     return {"gitv_status": False, "simulated_streaming_speed": 0, "preserve_thinking": True}
 
 
+def _strip_think_tags(content: str) -> str:
+    """Remove <think>...</think> blocks from content."""
+    import re
+    return re.sub(r"<think>.*?</think>\s*", "", content, flags=re.DOTALL)
+
+
 def _convert_to_sse(
     response: JSONResponse,
     model: str,
     gitv_status: bool = False,
     simulated_speed: int = 0,
+    preserve_thinking: bool = True,
 ) -> StreamingResponse:
     import time
 
     data = json.loads(response.body)
-    content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+    message = data.get("choices", [{}])[0].get("message", {})
+    content = message.get("content", "")
+    reasoning = message.get("reasoning_content", "") or message.get("thinking", "")
     chunk_id = data.get("id", "chatcmpl-converted")
     created = data.get("created", 0)
+
+    if not preserve_thinking and content:
+        content = _strip_think_tags(content)
 
     def make_chunk(delta_content: str, finish: str | None = None) -> str:
         chunk = {
@@ -530,6 +544,9 @@ def _convert_to_sse(
         if gitv_status:
             status_text = "<think>\n<gitv>\nVerification complete. Streaming response to client.\n</gitv>\n</think>\n"
             yield make_chunk(status_text)
+
+        if reasoning and preserve_thinking:
+            yield make_chunk(reasoning)
 
         if simulated_speed > 0 and content:
             words = content.split(" ")
@@ -923,9 +940,12 @@ async def _save_debug_exchange(
     from app.services.debug import capture_exchange, debug_capture_response
 
     response_content = ""
+    response_thinking = ""
     choices = response_data.get("choices", []) if isinstance(response_data, dict) else []
     if choices:
-        response_content = choices[0].get("message", {}).get("content", "")
+        message = choices[0].get("message", {})
+        response_content = message.get("content", "")
+        response_thinking = message.get("reasoning_content", "") or message.get("thinking", "")
 
     verification_data: dict[str, Any] = {}
     if vresult:
@@ -936,6 +956,7 @@ async def _save_debug_exchange(
                 {
                     "approved": c.approved,
                     "violations": c.violations,
+                    "thinking": c.judgments[0].thinking if c.judgments else "",
                 }
                 for c in vresult.check_history
             ],
@@ -955,7 +976,8 @@ async def _save_debug_exchange(
 
     debug_capture_response(body_json, "llm_response", "LLM Response",
         content_after=response_content[:500],
-        detail="Final response from upstream LLM")
+        detail="Final response from upstream LLM",
+        metadata={"thinking": response_thinking[:500]} if response_thinking else None)
 
     pipeline_data = body_json.get("_gitv_debug", {})
 
@@ -1176,6 +1198,7 @@ async def _do_forward_litellm(
         if stream:
             chunks: list[dict[str, Any]] = []
             content_parts: list[str] = []
+            reasoning_parts: list[str] = []
             final_metadata: dict[str, Any] = {}
             async for chunk in response:
                 chunk_dict = chunk.model_dump() if hasattr(chunk, "model_dump") else chunk
@@ -1184,6 +1207,8 @@ async def _do_forward_litellm(
                     delta = chunk_dict["choices"][0].get("delta", {})
                     if delta.get("content"):
                         content_parts.append(delta["content"])
+                    if delta.get("reasoning_content"):
+                        reasoning_parts.append(delta["reasoning_content"])
                 if chunk_dict.get("usage"):
                     final_metadata["usage"] = chunk_dict["usage"]
                 if chunk_dict.get("model"):
@@ -1195,7 +1220,11 @@ async def _do_forward_litellm(
                 "model": final_metadata.get("model", model),
                 "choices": [{
                     "index": 0,
-                    "message": {"role": "assistant", "content": "".join(content_parts)},
+                    "message": {
+                        "role": "assistant",
+                        "content": "".join(content_parts),
+                        **({"reasoning_content": "".join(reasoning_parts)} if reasoning_parts else {}),
+                    },
                     "finish_reason": chunks[-1]["choices"][0].get("finish_reason", "stop") if chunks and chunks[-1].get("choices") else "stop",
                 }],
                 **final_metadata,
@@ -1319,9 +1348,11 @@ async def _forward_streaming_with_memory(
     if status_code == 200:
         response_data = await _extract_response_memories(response_data, user_id, body_json)
         model = body_json.get("model", "")
+        ux_settings = await _load_ux_settings(user_id)
         return _convert_to_sse(
             JSONResponse(status_code=200, content=response_data),
             model,
+            preserve_thinking=ux_settings.get("preserve_thinking", True),
         )
 
     return JSONResponse(status_code=status_code, content=response_data)

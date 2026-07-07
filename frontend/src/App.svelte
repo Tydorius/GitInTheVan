@@ -1,5 +1,7 @@
 <script lang="ts">
   import { isAuthenticated, currentRoute, logout, isAdmin, initializeAuth } from './stores'
+  import { onMount } from 'svelte'
+  import { api } from './api'
   import Login from './pages/Login.svelte'
   import Dashboard from './pages/Dashboard.svelte'
   import Endpoints from './pages/Endpoints.svelte'
@@ -30,7 +32,23 @@
   ]
 
   let sidebarCollapsed = true
+  let updateAvailable = false
+  let latestVersion = ''
 
+  async function checkForUpdates() {
+    if (!$isAdmin) return
+    try {
+      const data = await api.checkUpdate()
+      updateAvailable = data.update_available
+      latestVersion = data.latest_version
+    } catch {}
+  }
+
+  onMount(() => {
+    initializeAuth()
+    setTimeout(checkForUpdates, 3000)
+    setInterval(checkForUpdates, 300000)
+  })
   function handleLogout() {
     logout()
   }
@@ -45,8 +63,6 @@
 
   $: route = $currentRoute || '/'
   $: page = route.split('?')[0]
-
-  initializeAuth()
 </script>
 
 {#if !$isAuthenticated}
@@ -65,6 +81,9 @@
           {#if !item.admin || $isAdmin}
             <a href={`#${item.path}`} class={page === item.path ? 'active' : ''} onclick={closeSidebar}>
               <span>{item.icon}</span> {item.label}
+              {#if item.admin && updateAvailable}
+                <span style="margin-left: 4px; color: #ef4444; font-weight: bold; position: relative;">⓵</span>
+              {/if}
             </a>
           {/if}
         {/each}
