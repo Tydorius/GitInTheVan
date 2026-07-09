@@ -209,8 +209,7 @@ echo.
 
 cd /d "%GITV_ROOT%"
 
-REM Clean up auto-update script
+REM Start server in a new process, then clean up this script
+start "" "%GITV_ROOT%\.venv\Scripts\python" -m app.main
 del "%GITV_ROOT%\data\auto-update.bat" >nul 2>&1
-
-"%GITV_ROOT%\.venv\Scripts\python" -m app.main
-pause
+exit
