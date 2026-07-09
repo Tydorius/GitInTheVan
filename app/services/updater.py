@@ -200,14 +200,13 @@ async def execute_update() -> dict[str, Any]:
 
     try:
         if is_windows:
+            logger.info("Launching update script: %s from %s", script_dst, _DATA_DIR.parent)
             subprocess.Popen(
-                ["cmd", "/c", "start", "/b", str(script_dst)],
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                ["cmd", "/c", str(script_dst)],
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
                 cwd=str(_DATA_DIR.parent),
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
             )
+            logger.info("Update script launched successfully")
         else:
             subprocess.Popen(
                 ["bash", str(script_dst)],
@@ -215,6 +214,7 @@ async def execute_update() -> dict[str, Any]:
                 cwd=str(_DATA_DIR.parent),
             )
     except Exception as e:
+        logger.error("Failed to launch update script: %s", e)
         return {"success": False, "error": f"Failed to launch update script: {e}"}
 
     return {
