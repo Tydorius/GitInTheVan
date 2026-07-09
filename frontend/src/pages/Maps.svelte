@@ -2,6 +2,7 @@
   import { api } from '../api'
   import { onMount } from 'svelte'
   import CodeEditor from '../lib/CodeEditor.svelte'
+  import { withScroll } from '../lib/scroll'
 
   let maps: any[] = []
   let loading = true
@@ -97,13 +98,13 @@
       }
       editing = false
       selectedMap = null
-      await load()
+      await withScroll(load)
     } catch (e: any) { error = e.message }
   }
 
   async function deleteMap(id: string) {
     if (!confirm('Delete this map?')) return
-    try { await api.deleteMap(id); await load() }
+    try { await api.deleteMap(id); await withScroll(load) }
     catch (e: any) { error = e.message }
   }
 
@@ -160,7 +161,7 @@
       importJson = ''
       importName = ''
       importMode = 'keep_both'
-      await load()
+      await withScroll(load)
     } catch (e: any) { error = e.message || 'Invalid JSON' }
   }
 
@@ -356,7 +357,7 @@
     <thead><tr><th>Name</th><th>Stages</th><th>Tag</th><th>Active</th><th>Actions</th></tr></thead>
     <tbody>
       {#each maps as m}
-        <tr>
+        <tr data-scroll-anchor={m.id}>
           <td>
             <strong>{m.name}</strong>
             {#if m.description}<div style="font-size: 11px; color: var(--text-dim);">{m.description}</div>{/if}
@@ -369,7 +370,7 @@
             {/if}
           </td>
           <td>
-            <button onclick={() => { api.updateMap(m.id, { is_active: !m.is_active }).then(load) }}
+            <button onclick={() => { api.updateMap(m.id, { is_active: !m.is_active }).then(() => withScroll(load)) }}
                    style="font-size: 11px;" class={m.is_active ? 'primary' : ''}>{m.is_active ? 'ON' : 'OFF'}</button>
           </td>
           <td>

@@ -3,6 +3,7 @@
   import { onMount } from 'svelte'
   import CodeEditor from '../lib/CodeEditor.svelte'
   import TagEditModal from '../lib/TagEditModal.svelte'
+  import { withScroll } from '../lib/scroll'
 
   let rules: any[] = []
   let endpoints: any[] = []
@@ -71,18 +72,18 @@
     try {
       if (editingId) await api.updateVerificationRule(editingId, form)
       else await api.createVerificationRule(form)
-      showForm = false; resetForm(); await load()
+      showForm = false; resetForm(); await withScroll(load)
     } catch (e: any) { error = e.message }
   }
 
   async function handleDelete(id: string) {
     if (!confirm('Delete this rule?')) return
-    try { await api.deleteVerificationRule(id); await load() }
+    try { await api.deleteVerificationRule(id); await withScroll(load) }
     catch (e: any) { error = e.message }
   }
 
   async function toggleRuleActive(r: any) {
-    try { await api.updateVerificationRule(r.id, { is_active: !r.is_active }); await load() }
+    try { await api.updateVerificationRule(r.id, { is_active: !r.is_active }); await withScroll(load) }
     catch (e: any) { error = e.message }
   }
 
@@ -92,7 +93,7 @@
   }
 
   async function saveTag(tag: string) {
-    try { await api.updateVerificationRule(tagModal.id, { tag }); tagModal.show = false; await load() }
+    try { await api.updateVerificationRule(tagModal.id, { tag }); tagModal.show = false; await withScroll(load) }
     catch (e: any) { tagError = e.message }
   }
 
@@ -194,7 +195,7 @@
     {#if rules.length === 0}<div class="empty-state">No verification rules configured.</div>
     {:else}
       {#each rules as r}
-        <div class="card">
+        <div class="card" data-scroll-anchor={r.id}>
           <div class="card-header">
             <div>
               <strong>{r.name}</strong>

@@ -3,6 +3,7 @@
   import { onMount } from 'svelte'
   import CodeEditor from '../lib/CodeEditor.svelte'
   import TagEditModal from '../lib/TagEditModal.svelte'
+  import { withScroll } from '../lib/scroll'
 
   let lorebooks: any[] = []
   let loading = true
@@ -92,7 +93,7 @@
         run_post_navigator: positionLb.run_post_navigator,
       })
       positionLb = null
-      await load()
+      await withScroll(load)
     } catch (e: any) { error = e.message }
   }
 
@@ -100,7 +101,7 @@
     if (!confirm('Delete this lorebook and all its entries?')) return
     try {
       if (selectedLorebook?.id === id) selectedLorebook = null
-      await api.deleteLorebook(id); await load()
+      await api.deleteLorebook(id); await withScroll(load)
     }
     catch (e: any) { error = e.message }
   }
@@ -114,14 +115,14 @@
   }
 
   async function saveTag(tag: string) {
-    try { await api.updateLorebook(tagModal.id, { tag }); tagModal.show = false; await load() }
+    try { await api.updateLorebook(tagModal.id, { tag }); tagModal.show = false; await withScroll(load) }
     catch (e: any) { error = e.message }
   }
 
   async function toggleActive(lb: any) {
     try {
       await api.updateLorebook(lb.id, { is_active: !lb.is_active })
-      await load()
+      await withScroll(load)
     } catch (e: any) { error = e.message }
   }
 
@@ -321,7 +322,7 @@
       <thead><tr><th>Name</th><th>Entries</th><th>Active</th><th>Visibility</th><th>Actions</th></tr></thead>
       <tbody>
         {#each lorebooks as lb}
-          <tr>
+          <tr data-scroll-anchor={lb.id}>
             <td>
               <div><a href="#" onclick={(e) => { e.preventDefault(); openLorebook(lb); }}>{lb.name}</a></div>
               {#if lb.tag}

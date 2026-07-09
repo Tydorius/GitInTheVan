@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from '../api'
   import { onMount } from 'svelte'
+  import { withScroll } from '../lib/scroll'
 
   let endpoints: any[] = []
   let apiKeys: any[] = []
@@ -80,13 +81,13 @@
       }
       showForm = false
       resetForm()
-      await load()
+      await withScroll(load)
     } catch (e: any) { error = e.message }
   }
 
   async function handleDelete(id: string) {
     if (!confirm('Delete this endpoint?')) return
-    try { await api.deleteEndpoint(id); await load() }
+    try { await api.deleteEndpoint(id); await withScroll(load) }
     catch (e: any) { error = e.message }
   }
 
@@ -109,18 +110,18 @@
       const result = await api.createApiKey({ label: keyFormLabel || 'default', endpoint_id: keyFormEndpointId })
       newKeyResult = result.api_key
       newKeyId = result.id
-      await load()
+      await withScroll(load)
     } catch (e: any) { error = e.message }
   }
 
   async function deleteKey(keyId: string) {
     if (!confirm('Delete this API key? It will stop working immediately.')) return
-    try { await api.deleteApiKey(keyId); await load() }
+    try { await api.deleteApiKey(keyId); await withScroll(load) }
     catch (e: any) { error = e.message }
   }
 
   async function toggleKey(keyId: string) {
-    try { await api.toggleApiKey(keyId); await load() }
+    try { await api.toggleApiKey(keyId); await withScroll(load) }
     catch (e: any) { error = e.message }
   }
 
@@ -145,7 +146,7 @@
   <div class="empty-state">No endpoints configured. Click "Add Endpoint" to get started.</div>
 {:else}
   {#each endpoints as ep}
-    <div class="card">
+    <div class="card" data-scroll-anchor={ep.id}>
       <div class="card-header">
         <div>
           <strong>{ep.name}</strong>

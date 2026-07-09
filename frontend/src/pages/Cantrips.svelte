@@ -3,6 +3,7 @@
   import { onMount } from 'svelte'
   import CodeEditor from '../lib/CodeEditor.svelte'
   import TagEditModal from '../lib/TagEditModal.svelte'
+  import { withScroll } from '../lib/scroll'
 
   let cantrips: any[] = []
   let loading = true
@@ -95,18 +96,18 @@
     try {
       if (editingId) { await api.updateCantrip(editingId, form) }
       else { await api.createCantrip(form) }
-      showForm = false; resetForm(); await load()
+      showForm = false; resetForm(); await withScroll(load)
     } catch (e: any) { error = e.message }
   }
 
   async function handleDelete(id: string) {
     if (!confirm('Delete this cantrip?')) return
-    try { await api.deleteCantrip(id); await load() }
+    try { await api.deleteCantrip(id); await withScroll(load) }
     catch (e: any) { error = e.message }
   }
 
   async function toggleActive(s: any) {
-    try { await api.updateCantrip(s.id, { is_active: !s.is_active }); await load() }
+    try { await api.updateCantrip(s.id, { is_active: !s.is_active }); await withScroll(load) }
     catch (e: any) { error = e.message }
   }
 
@@ -249,7 +250,7 @@
   <div class="empty-state">No cantrips configured.</div>
 {:else}
   {#each cantrips as s}
-    <div class="card">
+    <div class="card" data-scroll-anchor={s.id}>
       <div class="card-header">
         <div>
           <strong>{s.name}</strong>

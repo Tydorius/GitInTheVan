@@ -2,6 +2,7 @@
   import { api } from '../api'
   import { onMount } from 'svelte'
   import CodeEditor from '../lib/CodeEditor.svelte'
+  import { withScroll } from '../lib/scroll'
 
   let skills: any[] = []
   let endpoints: any[] = []
@@ -53,7 +54,7 @@
       resetForm()
       saved = true
       setTimeout(() => saved = false, 2000)
-      await load()
+      await withScroll(load)
     } catch (e: any) { error = e.message }
   }
 
@@ -62,7 +63,7 @@
     error = ''
     try {
       await api.deleteSkill(s.id)
-      await load()
+      await withScroll(load)
     } catch (e: any) { error = e.message }
   }
 
@@ -74,7 +75,7 @@
       } else {
         await api.attachSkill(skillId, endpointId)
       }
-      await load()
+      await withScroll(load)
     } catch (e: any) { error = e.message }
   }
 
@@ -127,7 +128,7 @@
       </thead>
       <tbody>
         {#each filteredSkills as s}
-          <tr>
+          <tr data-scroll-anchor={s.id}>
             <td><strong>{s.name}</strong></td>
             <td style="font-size: 12px; color: var(--text-dim); max-width: 300px;">{s.description || '—'}</td>
             <td style="font-size: 12px;">
