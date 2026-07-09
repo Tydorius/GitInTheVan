@@ -2,6 +2,10 @@
   import { api } from '../api'
   import { onMount } from 'svelte'
   import { withScroll } from '../lib/scroll'
+  import CollapsibleCard from '../lib/CollapsibleCard.svelte'
+  import { CollapseController } from '../lib/collapse'
+
+  let collapse = new CollapseController('memories', ['summaries', 'memory-rules', 'scenario-rules', 'how-memory-works'])
 
   let memories: any[] = []
   let summaries: any[] = []
@@ -172,7 +176,11 @@
 
 <div class="page-header">
   <h2>Memory <a class="help-link" href="/help/user-guide.html#memories" target="_blank" title="Open documentation">?</a></h2>
-  <button onclick={load}>Refresh</button>
+  <div style="display: flex; gap: 4px;">
+    <button onclick={() => collapse.setAll(true)}>Collapse All</button>
+    <button onclick={() => collapse.setAll(false)}>Expand All</button>
+    <button onclick={load}>Refresh</button>
+  </div>
 </div>
 
 {#if error}<div class="error-msg">{error}</div>{/if}
@@ -228,8 +236,7 @@
   </table>
 {/if}
 
-<div class="card">
-  <h3>Conversation Summaries</h3>
+<CollapsibleCard title="Conversation Summaries" cardKey="summaries" {collapse}>
   <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
     Auto-generated summaries of older conversation history, used to compress long conversations. Configure thresholds in Settings.
   </p>
@@ -265,11 +272,10 @@
       </tbody>
     </table>
   {/if}
-</div>
+</CollapsibleCard>
 
-<div class="card">
-  <div class="card-header">
-    <h3>Memory Rules</h3>
+<CollapsibleCard title="Memory Rules" cardKey="memory-rules" {collapse}>
+  <div style="margin-top: 12px;">
     <button class="primary" onclick={() => { resetRuleForm(); showRuleForm = true; }}>+ Add Rule</button>
   </div>
   <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
@@ -342,11 +348,10 @@
       </tbody>
     </table>
   {/if}
-</div>
+</CollapsibleCard>
 
-<div class="card">
-  <div class="card-header">
-    <h3>Scenario Summarization Rules</h3>
+<CollapsibleCard title="Scenario Summarization Rules" cardKey="scenario-rules" {collapse}>
+  <div style="margin-top: 12px;">
     <button class="primary" onclick={() => { resetScenarioForm(); showScenarioForm = true; }}>+ Add Rule</button>
   </div>
   <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
@@ -432,10 +437,9 @@
       </tbody>
     </table>
   {/if}
-</div>
+</CollapsibleCard>
 
-<div class="card">
-  <h3>How Memory Works</h3>
+<CollapsibleCard title="How Memory Works" cardKey="how-memory-works" {collapse}>
   <div style="color: var(--text-dim); font-size: 12px; line-height: 1.8; margin-top: 8px;">
     <p>The LLM can store persistent memories by including special tags in its responses:</p>
     <p><code style="color: var(--accent);">&lt;memstore key="location"&gt;Tavern&lt;/memstore&gt;</code></p>
@@ -443,4 +447,4 @@
     <p>On the next message, all stored memories for that conversation are injected as a <code style="color: var(--accent);">[PERSISTENT MEMORY]</code> system context block.</p>
     <p>This does NOT depend on zero-width characters or LLM cooperation for persistence — the database is the source of truth.</p>
   </div>
-</div>
+</CollapsibleCard>

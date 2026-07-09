@@ -1,6 +1,8 @@
 <script lang="ts">
   import { api, getApiKey, setApiKey } from '../api'
   import { onMount } from 'svelte'
+  import CollapsibleCard from '../lib/CollapsibleCard.svelte'
+  import { CollapseController } from '../lib/collapse'
 
   let settings = {
     default_endpoint_id: '' as string | null,
@@ -29,10 +31,11 @@
   let error = ''
   let saved = false
   let sumSaved = false
-  let showKey = false
   let copied = false
   let regenerating = false
   let newKeyNotice = false
+
+  let collapse = new CollapseController('settings', ['proxy', 'streaming', 'summarization', 'driver', 'prefill', 'budget'])
 
   async function load() {
     try {
@@ -65,7 +68,9 @@
           defaultMapId = (s as any).default_map_id ?? null
         }
       } catch {}
+
     } catch (e: any) { error = e.message }
+    finally { }
   }
 
   async function save() {
@@ -87,9 +92,8 @@
 
   async function saveDriverCallable() {
     error = ''
-    try {
-      await api.updateSettings({ driver_callable_turns: driverCallableTurns } as any)
-    } catch (e: any) { error = e.message }
+    try { await api.updateSettings({ driver_callable_turns: driverCallableTurns } as any) }
+    catch (e: any) { error = e.message }
   }
 
   async function saveBypassPrefill() {
@@ -128,13 +132,18 @@
   onMount(load)
 </script>
 
-<div class="page-header"><h2>Settings <a class="help-link" href="/help/user-guide.html#settings" target="_blank" title="Open documentation">?</a></h2></div>
+<div class="page-header">
+  <h2>Settings <a class="help-link" href="/help/user-guide.html#settings" target="_blank" title="Open documentation">?</a></h2>
+  <div style="display: flex; gap: 4px;">
+    <button onclick={() => collapse.setAll(true)}>Collapse All</button>
+    <button onclick={() => collapse.setAll(false)}>Expand All</button>
+  </div>
+</div>
 
 {#if error}<div class="error-msg">{error}</div>{/if}
 {#if saved}<div class="success-msg">Settings saved.</div>{/if}
 
-<div class="card">
-  <h3>Proxy Configuration</h3>
+<CollapsibleCard title="Proxy Configuration" cardKey="proxy" {collapse}>
   <div class="form-group">
     <label for="default-ep">Default Endpoint</label>
     <select id="default-ep" bind:value={settings.default_endpoint_id}>
@@ -148,15 +157,14 @@
       Debug Mode
     </label>
     <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
-      Captures pipeline stage data for the last 20 exchanges. View in the Debug page.
+      Captures pipeline stage data for the last 20 exchanges. View in the Debug tab under Dashboard.
     </p>
   </div>
   <button class="primary" onclick={save}>Save Settings</button>
-</div>
+</CollapsibleCard>
 
-<div class="card">
-  <h3>Streaming and Status</h3>
-  <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
+<CollapsibleCard title="Streaming and Status" cardKey="streaming" {collapse}>
+  <p style="color: var(--text-dim); font-size: 12px; margin-top: 12px; margin-bottom: 16px;">
     These settings affect how responses are delivered when verification is enabled. Since verification requires buffering the full response, these options let you control the streaming experience.
   </p>
   <div class="form-group">
@@ -185,11 +193,10 @@
     </p>
   </div>
   <button class="primary" onclick={save}>Save Settings</button>
-</div>
+</CollapsibleCard>
 
-<div class="card">
-  <h3>Conversation Summarization</h3>
-  <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
+<CollapsibleCard title="Conversation Summarization" cardKey="summarization" {collapse}>
+  <p style="color: var(--text-dim); font-size: 12px; margin-top: 12px; margin-bottom: 16px;">
     Automatically compress older conversation history into a summary when the token count exceeds the threshold. The summary is injected as context so the model retains long-running conversation details without filling the context window. Triggered before forwarding; works for both streaming and non-streaming requests.
   </p>
   {#if sumSaved}<div class="success-msg">Summarization settings saved.</div>{/if}
@@ -235,11 +242,10 @@
     </p>
   </div>
   <button class="primary" onclick={saveSummarization}>Save Summarization Settings</button>
-</div>
+</CollapsibleCard>
 
-<div class="card">
-  <h3>Driver-Callable Tools</h3>
-  <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
+<CollapsibleCard title="Driver-Callable Tools" cardKey="driver" {collapse}>
+  <p style="color: var(--text-dim); font-size: 12px; margin-top: 12px; margin-bottom: 16px;">
     When cantrips or lorebooks with the Driver-Callable position are active, the writing LLM can invoke them as tools via call tags. This setting controls the maximum number of tool-call rounds per request. Set to 0 to disable tool access entirely.
   </p>
   <div class="form-group">
@@ -250,11 +256,10 @@
     </p>
   </div>
   <button class="primary" onclick={saveDriverCallable}>Save</button>
-</div>
+</CollapsibleCard>
 
-<div class="card">
-  <h3>Prefill Normalization</h3>
-  <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
+<CollapsibleCard title="Prefill Normalization" cardKey="prefill" {collapse}>
+  <p style="color: var(--text-dim); font-size: 12px; margin-top: 12px; margin-bottom: 16px;">
     When a trailing assistant message is detected (prefill pattern), convert it to a system instruction for OpenAI-compatible providers that don't support native prefill. Anthropic and Google endpoints pass through as-is.
   </p>
   <div class="form-group">
@@ -264,11 +269,10 @@
     </label>
   </div>
   <button class="primary" onclick={saveBypassPrefill}>Save</button>
-</div>
+</CollapsibleCard>
 
-<div class="card">
-  <h3>Context Budgeting</h3>
-  <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
+<CollapsibleCard title="Context Budgeting" cardKey="budget" {collapse}>
+  <p style="color: var(--text-dim); font-size: 12px; margin-top: 12px; margin-bottom: 16px;">
     Allocates a percentage of the context window for injected content (cantrips, lorebooks, memory). Cantrips can access their allocation via <code>context.budget</code> to dynamically scale their output (full / summary / bullets). Set to 0 to disable.
   </p>
   <div class="form-group">
@@ -289,4 +293,4 @@
     </select>
   </div>
   <button class="primary" onclick={saveBudget}>Save</button>
-</div>
+</CollapsibleCard>
