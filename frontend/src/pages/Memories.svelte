@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from '../api'
   import { onMount } from 'svelte'
+  import { withScroll } from '../lib/scroll'
 
   let memories: any[] = []
   let summaries: any[] = []
@@ -73,19 +74,19 @@
     try {
       await api.updateMemory(editingId, editValue)
       editingId = null
-      await load()
+      await withScroll(load)
     } catch (e: any) { error = e.message }
   }
 
   async function handleDelete(id: string) {
     if (!confirm('Delete this memory?')) return
-    try { await api.deleteMemory(id); await load() }
+    try { await api.deleteMemory(id); await withScroll(load) }
     catch (e: any) { error = e.message }
   }
 
   async function handleDeleteSummary(id: string) {
     if (!confirm('Delete this conversation summary? The conversation will be re-summarized next time it exceeds the threshold.')) return
-    try { await api.deleteSummary(id); await load() }
+    try { await api.deleteSummary(id); await withScroll(load) }
     catch (e: any) { error = e.message }
   }
 
@@ -104,18 +105,18 @@
       }
       showRuleForm = false
       resetRuleForm()
-      await load()
+      await withScroll(load)
     } catch (e: any) { error = e.message }
   }
 
   async function handleDeleteRule(id: string) {
     if (!confirm('Delete this memory rule?')) return
-    try { await api.deleteMemoryRule(id); await load() }
+    try { await api.deleteMemoryRule(id); await withScroll(load) }
     catch (e: any) { error = e.message }
   }
 
   async function toggleRuleActive(r: any) {
-    try { await api.updateMemoryRule(r.id, { is_active: !r.is_active }); await load() }
+    try { await api.updateMemoryRule(r.id, { is_active: !r.is_active }); await withScroll(load) }
     catch (e: any) { error = e.message }
   }
 
@@ -145,18 +146,18 @@
       }
       showScenarioForm = false
       resetScenarioForm()
-      await load()
+      await withScroll(load)
     } catch (e: any) { error = e.message }
   }
 
   async function handleDeleteScenarioRule(id: string) {
     if (!confirm('Delete this scenario rule?')) return
-    try { await api.deleteScenarioRule(id); await load() }
+    try { await api.deleteScenarioRule(id); await withScroll(load) }
     catch (e: any) { error = e.message }
   }
 
   async function toggleScenarioRuleActive(r: any) {
-    try { await api.updateScenarioRule(r.id, { is_active: !r.is_active }); await load() }
+    try { await api.updateScenarioRule(r.id, { is_active: !r.is_active }); await withScroll(load) }
     catch (e: any) { error = e.message }
   }
 

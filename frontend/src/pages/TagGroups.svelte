@@ -2,6 +2,7 @@
   import { api } from '../api'
   import { onMount } from 'svelte'
   import TagEditModal from '../lib/TagEditModal.svelte'
+  import { withScroll } from '../lib/scroll'
 
   type Tab = 'groups' | 'tags'
   let tab: Tab = 'groups'
@@ -102,7 +103,7 @@
         })
       }
       showForm = false
-      await load()
+      await withScroll(load)
       saved = true
       setTimeout(() => saved = false, 2000)
     } catch (e: any) { error = e.message }
@@ -111,7 +112,7 @@
   async function toggleActive(g: any) {
     try {
       await api.updateTagGroup(g.id, { is_active: !g.is_active })
-      await load()
+      await withScroll(load)
     } catch (e: any) { error = e.message }
   }
 
@@ -119,7 +120,7 @@
     if (!confirm('Delete this tag group?')) return
     try {
       await api.deleteTagGroup(id)
-      await load()
+      await withScroll(load)
     } catch (e: any) { error = e.message }
   }
 
@@ -209,7 +210,7 @@
         <thead><tr><th>Name</th><th>Tag</th><th>Members</th><th>Active</th><th>Actions</th></tr></thead>
         <tbody>
           {#each groups as g}
-            <tr>
+            <tr data-scroll-anchor={g.id}>
               <td><strong>{g.name}</strong></td>
               <td>
                 {#if g.tag}
