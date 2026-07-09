@@ -17,8 +17,8 @@ echo   GitInTheVan - Auto-Update
 echo ============================================
 echo.
 
-REM 3-second delay to let the HTTP response return
-timeout /t 3 /nobreak >nul
+REM 3-second delay to let the HTTP response return (ping used instead of timeout for no-console compatibility)
+ping -n 4 127.0.0.1 >nul
 
 REM ============================================================
 REM Stop running server

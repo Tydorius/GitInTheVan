@@ -201,9 +201,12 @@ async def execute_update() -> dict[str, Any]:
     try:
         if is_windows:
             subprocess.Popen(
-                ["cmd", "/c", str(script_dst)],
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+                ["cmd", "/c", "start", "/b", str(script_dst)],
+                creationflags=subprocess.CREATE_NO_WINDOW,
                 cwd=str(_DATA_DIR.parent),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
         else:
             subprocess.Popen(
