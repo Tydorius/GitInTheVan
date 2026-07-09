@@ -2,6 +2,27 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.15.42] - 2026-07-09
+
+### Added
+
+- **Collapsible cards**: Cards on Settings, Admin (Global Caps tab), Memories, Verification (Forbidden Words tab), Dashboard (Quick Start), Endpoints, and Cantrips can be individually collapsed/expanded. State persists across sessions via localStorage. Expand All / Collapse All buttons on applicable pages
+- **Per-card collapse for Cantrips**: Each cantrip card has a toggle that hides description and hook/order/timeout details
+- **Nested collapse for Endpoints**: Each endpoint card collapses details, with a separate toggle for API keys list. Expand/Collapse All controls both levels
+- **Scroll position preservation**: All list pages (Lorebooks, Cantrips, Endpoints, TagGroups, Skills, Verification, Memories, Maps) preserve scroll position after mutations (toggle, delete, save) using anchor-based tracking
+- **Multi-line syntax highlighting fix**: CodeEditor now highlights the full code block at once instead of per-line, correctly rendering multi-line comments, template literals, and other multi-line tokens
+
+### Fixed
+
+- **Auto-update process launch**: Fixed `CREATE_NEW_CONSOLE` flag for Windows so the update batch file gets a real console window (previous flags caused silent hangs)
+- **Auto-update self-deletion**: Fixed batch file crash when deleting itself while still executing — server now starts in a detached process before cleanup
+- **Auto-update delay command**: Replaced `timeout` with `ping` for no-console compatibility
+- **Verification tester rule_id**: Fixed `rule_id` not being sent in test requests, causing "Either prompt or rule_id must be provided" error
+
+### Changed
+
+- AGENTS.md: Added Svelte 5 Frontend Guidelines section documenting `children` snippet pattern, prop naming rules, reactive dependency tracking, and collapsible card patterns
+
 ## [0.15.2] - 2026-07-07
 
 ### Added
