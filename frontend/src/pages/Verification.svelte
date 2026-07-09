@@ -4,6 +4,10 @@
   import CodeEditor from '../lib/CodeEditor.svelte'
   import TagEditModal from '../lib/TagEditModal.svelte'
   import { withScroll } from '../lib/scroll'
+  import CollapsibleCard from '../lib/CollapsibleCard.svelte'
+  import { CollapseController } from '../lib/collapse'
+
+  let collapse = new CollapseController('verification', ['settings', 'forbidden', 'forbidden-list', 'forbidden-test', 'tester'])
 
   let rules: any[] = []
   let endpoints: any[] = []
@@ -175,7 +179,12 @@
 
 <div class="page-header">
   <h2>Verification <a class="help-link" href="/help/user-guide.html#verification" target="_blank" title="Open documentation">?</a></h2>
-  <div>
+  <div style="display: flex; gap: 4px; align-items: center;">
+    {#if tab === 'forbidden'}
+      <button onclick={() => collapse.setAll(true)}>Collapse All</button>
+      <button onclick={() => collapse.setAll(false)}>Expand All</button>
+      <span style="width: 1px; height: 20px; background: var(--border); margin: 0 4px;"></span>
+    {/if}
     <button onclick={() => tab = 'rules'} class={tab === 'rules' ? 'primary' : ''}>Rules</button>
     <button onclick={() => tab = 'settings'} class={tab === 'settings' ? 'primary' : ''}>Settings</button>
     <button onclick={() => tab = 'logs'} class={tab === 'logs' ? 'primary' : ''}>Logs</button>
@@ -277,8 +286,7 @@
   {/if}
 
 {:else if tab === 'forbidden'}
-  <div class="card">
-    <h3>Forbidden Words &amp; Phrases</h3>
+  <CollapsibleCard title="Forbidden Words & Phrases" cardKey="forbidden" {collapse}>
     <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
       Phrases checked case-insensitively against the Driver's response before the Navigator runs. Matches are surfaced to the Navigator as concrete violations. Works with or without verification rules.
     </p>
@@ -295,10 +303,9 @@
       </label>
     </div>
     <button class="primary" onclick={saveForbiddenSettings}>Save Settings</button>
-  </div>
+  </CollapsibleCard>
 
-  <div class="card">
-    <h3>Forbidden Phrases</h3>
+  <CollapsibleCard title="Forbidden Phrases" cardKey="forbidden-list" {collapse}>
     <div style="display: flex; gap: 8px; margin-bottom: 12px;">
       <input bind:value={newForbiddenPhrase} placeholder="Enter a word or phrase..." onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addForbiddenWord(); } }} />
       <button class="primary" onclick={addForbiddenWord} disabled={!newForbiddenPhrase.trim()}>Add</button>
@@ -319,10 +326,9 @@
         </tbody>
       </table>
     {/if}
-  </div>
+  </CollapsibleCard>
 
-  <div class="card">
-    <h3>Test Forbidden Words</h3>
+  <CollapsibleCard title="Test Forbidden Words" cardKey="forbidden-test" {collapse}>
     <div class="form-group">
       <textarea bind:value={forbiddenTestContent} placeholder="Paste response text to check..." style="min-height: 80px;"></textarea>
     </div>
@@ -341,7 +347,7 @@
         {/if}
       </div>
     {/if}
-  </div>
+  </CollapsibleCard>
 
 {:else if tab === 'test'}
   <div class="card">

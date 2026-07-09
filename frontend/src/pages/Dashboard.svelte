@@ -2,8 +2,11 @@
   import { api } from '../api'
   import { onMount } from 'svelte'
   import Debug from './Debug.svelte'
+  import CollapsibleCard from '../lib/CollapsibleCard.svelte'
+  import { CollapseController } from '../lib/collapse'
 
   let activeTab = 'overview'
+  let collapse = new CollapseController('dashboard', ['quickstart'])
 
   let stats = { endpoints: 0, cantrips: 0, lorebooks: 0, rules: 0 }
   let health = ''
@@ -203,8 +206,7 @@
   {/if}
 </div>
 
-<div class="card">
-  <h3>Quick Start</h3>
+<CollapsibleCard title="Quick Start" cardKey="quickstart" {collapse}>
   <div style="margin-top: 12px; color: var(--text-dim); line-height: 1.8;">
     <p>1. <a href="#/endpoints">Configure an endpoint</a> with your LLM API URL and key</p>
     <p>2. <a href="#/cantrips">Add cantrips</a> for dynamic lore injection (JanitorAI-compatible)</p>
@@ -212,5 +214,5 @@
     <p>4. <a href="#/verification">Set up verification</a> to auto-check LLM responses</p>
     <p>5. Point your client at <code style="color: var(--accent);">http://localhost:8000/v1/chat/completions</code> using your gitv_ API key</p>
   </div>
-</div>
+</CollapsibleCard>
 {/if}

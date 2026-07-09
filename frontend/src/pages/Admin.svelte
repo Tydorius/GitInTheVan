@@ -1,8 +1,11 @@
 <script lang="ts">
   import { api } from '../api'
   import { onMount, onDestroy } from 'svelte'
+  import CollapsibleCard from '../lib/CollapsibleCard.svelte'
+  import { CollapseController } from '../lib/collapse'
 
   let tab = 'caps'
+  let collapse = new CollapseController('admin', ['caps-limits', 'caps-logging', 'logs-viewer', 'network-ssl', 'update-panel'])
   let loading = true
   let error = ''
   let saved = false
@@ -243,7 +246,12 @@
 
 <div class="page-header">
   <h2>Admin <a class="help-link" href="/help/user-guide.html#admin" target="_blank" title="Open documentation">?</a></h2>
-  <div>
+  <div style="display: flex; gap: 4px; align-items: center;">
+    {#if tab === 'caps'}
+      <button onclick={() => collapse.setAll(true)}>Collapse All</button>
+      <button onclick={() => collapse.setAll(false)}>Expand All</button>
+      <span style="width: 1px; height: 20px; background: var(--border); margin: 0 4px;"></span>
+    {/if}
     <button onclick={() => tab = 'caps'} class={tab === 'caps' ? 'primary' : ''}>Global Caps</button>
     <button onclick={() => tab = 'users'} class={tab === 'users' ? 'primary' : ''}>Users</button>
     <button onclick={() => tab = 'update'} class={tab === 'update' ? 'primary' : ''}>Update{#if updateInfo?.update_available}<span style="color: #ef4444; margin-left: 4px; font-weight: bold;">⓵</span>{/if}</button>
@@ -258,8 +266,7 @@
 
 {#if loading && tab === 'caps'}<div class="loading">Loading...</div>
 {:else if tab === 'caps'}
-  <div class="card">
-    <h3>Global Limits</h3>
+  <CollapsibleCard title="Global Limits" cardKey="caps-limits" {collapse}>
     <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
       These caps prevent users from causing internal denial-of-service by setting absurdly high turn or retry counts.
       The effective limit is the lower of the user's setting and the global cap.
@@ -289,10 +296,9 @@
       </div>
     </div>
     <button class="primary" onclick={saveCaps}>Save</button>
-  </div>
+  </CollapsibleCard>
 
-  <div class="card">
-    <h3>Runtime Log Level</h3>
+  <CollapsibleCard title="Runtime Log Level" cardKey="caps-logging" {collapse}>
     <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
       Temporarily change the server log level without restarting. This takes effect immediately.
       Leave blank to use the startup default ({adminSettings?.effective_log_level || 'INFO'}).
@@ -317,7 +323,7 @@
     <p style="color: var(--text-dim); font-size: 11px;">
       Current effective level: <strong>{adminSettings?.effective_log_level || 'INFO'}</strong>
     </p>
-  </div>
+  </CollapsibleCard>
 
 {:else if tab === 'users'}
   <div style="margin-bottom: 12px;">

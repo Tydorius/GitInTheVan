@@ -4,6 +4,35 @@
   import CodeEditor from '../lib/CodeEditor.svelte'
   import TagEditModal from '../lib/TagEditModal.svelte'
   import { withScroll } from '../lib/scroll'
+  import CollapsibleCard from '../lib/CollapsibleCard.svelte'
+  import { CollapseController } from '../lib/collapse'
+
+  let collapse = new CollapseController('cantrips', ['tester', 'templates'])
+
+  let collapsedCards: { [key: string]: boolean } = {}
+
+  function toggleCard(id: string) {
+    collapsedCards[id] = !(collapsedCards[id] ?? false)
+    collapsedCards = { ...collapsedCards }
+  }
+
+  function expandAllCards() {
+    const expanded: { [key: string]: boolean } = {}
+    for (const s of cantrips) {
+      expanded[`cantrip-${s.id}`] = false
+    }
+    collapsedCards = expanded
+    collapse.setAll(false)
+  }
+
+  function collapseAllCards() {
+    const collapsed: { [key: string]: boolean } = {}
+    for (const s of cantrips) {
+      collapsed[`cantrip-${s.id}`] = true
+    }
+    collapsedCards = collapsed
+    collapse.setAll(true)
+  }
 
   let cantrips: any[] = []
   let loading = true
@@ -163,7 +192,16 @@
 
 <div class="page-header">
   <h2>Cantrips <a class="help-link" href="/help/user-guide.html#cantrips" target="_blank" title="Open documentation">?</a></h2>
-  <div>
+  <div style="display: flex; gap: 4px; align-items: center;">
+    {#if showTemplates || showTest}
+      <button onclick={collapseAllCards}>Collapse All</button>
+      <button onclick={expandAllCards}>Expand All</button>
+      <span style="width: 1px; height: 20px; background: var(--border); margin: 0 4px;"></span>
+    {:else}
+      <button onclick={collapseAllCards}>Collapse All</button>
+      <button onclick={expandAllCards}>Expand All</button>
+      <span style="width: 1px; height: 20px; background: var(--border); margin: 0 4px;"></span>
+    {/if}
     <button onclick={() => { loadTemplates(); showTemplates = !showTemplates; }}>Templates</button>
     <button onclick={() => { showTest = !showTest; testResults = null; }}>Test Panel</button>
     <button class="primary" onclick={() => { resetForm(); showForm = true; }}>+ Add Cantrip</button>
@@ -173,8 +211,7 @@
 {#if error}<div class="error-msg">{error}</div>{/if}
 
 {#if showTemplates}
-  <div class="card">
-    <h3>Cantrip Templates</h3>
+  <CollapsibleCard title="Cantrip Templates" cardKey="templates" {collapse}>
     <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">Install pre-built cantrips with one click. You can customize them after installation.</p>
     {#if templates.length === 0}
       <div class="loading">Loading templates...</div>
@@ -191,12 +228,11 @@
         </div>
       {/each}
     {/if}
-  </div>
+  </CollapsibleCard>
 {/if}
 
 {#if showTest}
-  <div class="card">
-    <h3>Cantrip Tester</h3>
+  <CollapsibleCard title="Cantrip Tester" cardKey="tester" {collapse}>
     <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 12px;">Run a saved cantrip against test context without forwarding to an LLM.</p>
     <div class="form-group">
       <label for="test-script">Cantrip to Test</label>
@@ -242,7 +278,7 @@
         {/if}
       </div>
     {/if}
-  </div>
+  </CollapsibleCard>
 {/if}
 
 {#if loading}<div class="loading">Loading...</div>
@@ -275,12 +311,17 @@
           <button onclick={() => openTest(s.id)}>Test</button>
           <button onclick={() => startEdit(s)}>Edit</button>
           <button class="danger" onclick={() => handleDelete(s.id)}>Delete</button>
+          <button onclick={() => toggleCard(`cantrip-${s.id}`)} style="padding: 2px 4px; font-size: 14px; border: none; background: none; cursor: pointer;" title={(collapsedCards[`cantrip-${s.id}`] ?? false) ? 'Expand' : 'Collapse'}>
+            {(collapsedCards[`cantrip-${s.id}`] ?? false) ? '▶' : '▼'}
+          </button>
         </div>
       </div>
-      {#if s.description}<p style="color: var(--text-dim); font-size: 12px; margin-bottom: 8px;">{s.description}</p>{/if}
-      <div style="color: var(--text-dim); font-size: 11px;">
-        Hook: {s.hook_type} | Order: {s.execution_order} | Timeout: {s.timeout_ms}ms
-      </div>
+      {#if !(collapsedCards[`cantrip-${s.id}`] ?? false)}
+        {#if s.description}<p style="color: var(--text-dim); font-size: 12px; margin-bottom: 8px;">{s.description}</p>{/if}
+        <div style="color: var(--text-dim); font-size: 11px;">
+          Hook: {s.hook_type} | Order: {s.execution_order} | Timeout: {s.timeout_ms}ms
+        </div>
+      {/if}
     </div>
   {/each}
 {/if}

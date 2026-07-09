@@ -2,6 +2,45 @@
   import { api } from '../api'
   import { onMount } from 'svelte'
   import { withScroll } from '../lib/scroll'
+  import CollapsibleCard from '../lib/CollapsibleCard.svelte'
+  import { CollapseController } from '../lib/collapse'
+
+  let collapse = new CollapseController('endpoints', ['default-keys'])
+
+  let collapsedCards: { [key: string]: boolean } = {}
+  let collapsedKeys: { [key: string]: boolean } = {}
+
+  function toggleCard(id: string) {
+    collapsedCards[id] = !(collapsedCards[id] ?? false)
+    collapsedCards = { ...collapsedCards }
+  }
+
+  function toggleKeys(id: string) {
+    collapsedKeys[id] = !(collapsedKeys[id] ?? false)
+    collapsedKeys = { ...collapsedKeys }
+  }
+
+  function expandAllAll() {
+    const expanded: { [key: string]: boolean } = {}
+    const expandedK: { [key: string]: boolean } = {}
+    for (const ep of endpoints) {
+      expanded[`endpoint-${ep.id}`] = false
+      expandedK[`keys-${ep.id}`] = false
+    }
+    collapsedCards = expanded
+    collapsedKeys = expandedK
+  }
+
+  function collapseAllAll() {
+    const collapsed: { [key: string]: boolean } = {}
+    const collapsedK: { [key: string]: boolean } = {}
+    for (const ep of endpoints) {
+      collapsed[`endpoint-${ep.id}`] = true
+      collapsedK[`keys-${ep.id}`] = true
+    }
+    collapsedCards = collapsed
+    collapsedKeys = collapsedK
+  }
 
   let endpoints: any[] = []
   let apiKeys: any[] = []
@@ -136,7 +175,11 @@
 
 <div class="page-header">
   <h2>Endpoints <a class="help-link" href="/help/user-guide.html#endpoints" target="_blank" title="Open documentation">?</a></h2>
-  <button class="primary" onclick={() => { resetForm(); showForm = true; }}>+ Add Endpoint</button>
+  <div style="display: flex; gap: 4px;">
+    <button onclick={collapseAllAll}>Collapse All</button>
+    <button onclick={expandAllAll}>Expand All</button>
+    <button class="primary" onclick={() => { resetForm(); showForm = true; }}>+ Add Endpoint</button>
+  </div>
 </div>
 
 {#if error}<div class="error-msg">{error}</div>{/if}
@@ -157,45 +200,54 @@
         <div>
           <button onclick={() => startEdit(ep)}>Edit</button>
           <button class="danger" onclick={() => handleDelete(ep.id)}>Delete</button>
+          <button onclick={() => toggleCard(`endpoint-${ep.id}`)} style="padding: 2px 4px; font-size: 14px; border: none; background: none; cursor: pointer;" title={(collapsedCards[`endpoint-${ep.id}`] ?? false) ? 'Expand' : 'Collapse'}>
+            {(collapsedCards[`endpoint-${ep.id}`] ?? false) ? '▶' : '▼'}
+          </button>
         </div>
       </div>
-      <div style="color: var(--text-dim); font-size: 12px; margin-bottom: 12px;">
-        <div>URL: {ep.base_url}</div>
-        <div>API Path: {ep.api_base_path || '/v1 (default)'}</div>
-        <div>Provider Key: {ep.api_key ? ep.api_key.slice(0, 8) + '...' : 'none'}</div>
-        <div>Provider: {ep.provider ? providers.find(p => p.value === ep.provider)?.label || ep.provider : 'Custom (passthrough)'}</div>
-        <div>Bypass: {ep.bypass_method || 'none'}</div>
-      </div>
+      {#if !(collapsedCards[`endpoint-${ep.id}`] ?? false)}
+        <div style="color: var(--text-dim); font-size: 12px; margin-bottom: 12px;">
+          <div>URL: {ep.base_url}</div>
+          <div>API Path: {ep.api_base_path || '/v1 (default)'}</div>
+          <div>Provider Key: {ep.api_key ? ep.api_key.slice(0, 8) + '...' : 'none'}</div>
+          <div>Provider: {ep.provider ? providers.find(p => p.value === ep.provider)?.label || ep.provider : 'Custom (passthrough)'}</div>
+          <div>Bypass: {ep.bypass_method || 'none'}</div>
+        </div>
 
-      <div style="border-top: 1px solid var(--border); padding-top: 12px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-          <strong style="font-size: 13px;">GitInTheVan API Keys</strong>
-          <button onclick={() => openKeyForm(ep.id)} style="font-size: 11px; padding: 2px 8px;">+ Add Key</button>
-        </div>
-        {#each getKeysForEndpoint(ep.id) as k}
-          <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px; font-size: 12px;">
-            <span class="badge {k.is_active ? 'active' : 'inactive'}" style="font-size: 10px;">{k.is_active ? 'ON' : 'OFF'}</span>
-            <span style="color: var(--text-dim); min-width: 80px;">{k.label}</span>
-            <span style="flex: 1; font-size: 10px; padding: 2px 6px; color: var(--text-dim);">
-              gitv_•••••••• (shown only at creation)
-            </span>
-            <button onclick={() => toggleKey(k.id)} style="padding: 2px 8px; font-size: 11px;" title="Enable/Disable">{k.is_active ? 'Disable' : 'Enable'}</button>
-            <button class="danger" onclick={() => deleteKey(k.id)} style="padding: 2px 8px; font-size: 11px;">Delete</button>
+        <div style="border-top: 1px solid var(--border); padding-top: 12px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <strong style="font-size: 13px;">GitInTheVan API Keys</strong>
+            <div style="display: flex; gap: 4px;">
+              <button onclick={() => toggleKeys(`keys-${ep.id}`)} style="font-size: 14px; padding: 2px 4px; border: none; background: none; cursor: pointer;" title={(collapsedKeys[`keys-${ep.id}`] ?? false) ? 'Expand Keys' : 'Collapse Keys'}>
+                {(collapsedKeys[`keys-${ep.id}`] ?? false) ? '▶' : '▼'}
+              </button>
+              <button onclick={() => openKeyForm(ep.id)} style="font-size: 11px; padding: 2px 8px;">+ Add Key</button>
+            </div>
           </div>
-        {/each}
-        {#if getKeysForEndpoint(ep.id).length === 0}
-          <p style="color: var(--text-dim); font-size: 11px;">No endpoint-specific keys. Requests using your default key will route here based on your Settings default.</p>
-        {/if}
-      </div>
+          {#if !(collapsedKeys[`keys-${ep.id}`] ?? false)}
+            {#each getKeysForEndpoint(ep.id) as k}
+              <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px; font-size: 12px;">
+                <span class="badge {k.is_active ? 'active' : 'inactive'}" style="font-size: 10px;">{k.is_active ? 'ON' : 'OFF'}</span>
+                <span style="color: var(--text-dim); min-width: 80px;">{k.label}</span>
+                <span style="flex: 1; font-size: 10px; padding: 2px 6px; color: var(--text-dim);">
+                  gitv_•••••••• (shown only at creation)
+                </span>
+                <button onclick={() => toggleKey(k.id)} style="padding: 2px 8px; font-size: 11px;" title="Enable/Disable">{k.is_active ? 'Disable' : 'Enable'}</button>
+                <button class="danger" onclick={() => deleteKey(k.id)} style="padding: 2px 8px; font-size: 11px;">Delete</button>
+              </div>
+            {/each}
+            {#if getKeysForEndpoint(ep.id).length === 0}
+              <p style="color: var(--text-dim); font-size: 11px;">No endpoint-specific keys. Requests using your default key will route here based on your Settings default.</p>
+            {/if}
+          {/if}
+        </div>
+      {/if}
     </div>
   {/each}
 
-  <div class="card" style="margin-top: 16px;">
-    <div style="display: flex; justify-content: space-between; align-items: center;">
-      <div>
-        <strong>Default API Keys</strong>
-        <p style="color: var(--text-dim); font-size: 12px;">Routes to your default endpoint when no endpoint-specific key matches.</p>
-      </div>
+  <CollapsibleCard title="Default API Keys" cardKey="default-keys" {collapse}>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px;">
+      <p style="color: var(--text-dim); font-size: 12px; margin: 0;">Routes to your default endpoint when no endpoint-specific key matches.</p>
       <button onclick={() => openKeyForm(null)} style="font-size: 11px;">+ Add Default Key</button>
     </div>
     {#each apiKeys.filter((k: any) => !k.endpoint_id) as k}
@@ -209,7 +261,7 @@
         <button class="danger" onclick={() => deleteKey(k.id)} style="padding: 2px 8px; font-size: 11px;">Delete</button>
       </div>
     {/each}
-  </div>
+  </CollapsibleCard>
 {/if}
 
 {#if showForm}
