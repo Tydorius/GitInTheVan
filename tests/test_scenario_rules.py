@@ -77,6 +77,24 @@ class TestScenarioRuleCRUD:
         assert resp.status_code == 200
         assert "Summarize" in resp.json()["prompt"]
 
+    async def test_create_exceeds_prompt_size_limit(self, auth_client):
+        from app.services.admin import update_admin_settings
+        await update_admin_settings({"max_rule_size_kb": 1})
+        resp = await auth_client.post("/api/scenario-rules", json={
+            "name": "TooBig", "prompt": "x" * 2000,
+        })
+        assert resp.status_code == 413
+        await update_admin_settings({"max_rule_size_kb": 25})
+
+    async def test_update_exceeds_prompt_size_limit(self, auth_client):
+        from app.services.admin import update_admin_settings
+        create = await auth_client.post("/api/scenario-rules", json={"name": "Small", "prompt": "short"})
+        rule_id = create.json()["id"]
+        await update_admin_settings({"max_rule_size_kb": 1})
+        resp = await auth_client.put(f"/api/scenario-rules/{rule_id}", json={"prompt": "x" * 2000})
+        assert resp.status_code == 413
+        await update_admin_settings({"max_rule_size_kb": 25})
+
 
 class TestScenarioSummarizerLogic:
     def test_find_first_system_index(self):

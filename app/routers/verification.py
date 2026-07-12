@@ -11,6 +11,8 @@ from app.dependencies import get_current_user
 from app.models.endpoint import Endpoint
 from app.models.user import User
 from app.models.verification import VerificationLog, VerificationRule
+from app.services.admin import get_admin_settings
+from app.services.content_guard import check_size, sanitize_and_log
 from app.services.verification import (
     check_response,
 )
@@ -213,6 +215,10 @@ async def create_rule(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    admin_settings = await get_admin_settings()
+    check_size(req.prompt, admin_settings.max_rule_size_kb * 1024, "Verification rule prompt")
+    req.prompt = await sanitize_and_log(db, current_user.id, req.prompt, "verification_rule")
+
     rule = VerificationRule(
         user_id=current_user.id,
         name=req.name,
@@ -252,7 +258,13 @@ async def update_rule(
         if not await _check_tag_unique(db, current_user.id, "verify", req.tag, rule_id):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tag already in use")
 
-    for key, value in req.model_dump(exclude_unset=True).items():
+    update_data = req.model_dump(exclude_unset=True)
+    if update_data.get("prompt") is not None:
+        admin_settings = await get_admin_settings()
+        check_size(update_data["prompt"], admin_settings.max_rule_size_kb * 1024, "Verification rule prompt")
+        update_data["prompt"] = await sanitize_and_log(db, current_user.id, update_data["prompt"], "verification_rule", rule_id)
+
+    for key, value in update_data.items():
         setattr(rule, key, value)
 
     await db.commit()

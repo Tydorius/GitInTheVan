@@ -56,6 +56,16 @@ async def lifespan(app: FastAPI):
             "Run: pip install litellm==1.89.4"
         )
 
+    if settings.cors_origins == "*" and (settings.behind_proxy or not settings.generate_certs):
+        logger.warning(
+            "CORS is set to allow all origins (GITV_CORS_ORIGINS=*) while running in a "
+            "non-local deployment mode (GITV_BEHIND_PROXY=%s, GITV_GENERATE_CERTS=%s). "
+            "This is fine for local/LAN use but if this instance is reachable from the "
+            "public internet, set GITV_CORS_ORIGINS to your actual client origin(s).",
+            settings.behind_proxy,
+            settings.generate_certs,
+        )
+
     from app.services.firewall_check import check_firewall
     check_firewall(settings.port)
     await init_db()
@@ -66,7 +76,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="GitInTheVan",
     description="Self-hostable MITM LLM router/proxy for roleplay services",
-    version="0.14.5",
+    version="0.16.1",
     lifespan=lifespan,
 )
 

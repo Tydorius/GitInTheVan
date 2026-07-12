@@ -2,6 +2,40 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.16.1] - 2026-07-12
+
+### Fixed
+
+- **`deploy-windows.bat` line endings**: the file was stored with LF-only line endings, which certain non-interactive `cmd.exe` invocations parse incorrectly, corrupting execution from line 1 onward (`SETLOCAL`, `cd /d`, etc. misread as broken commands). Converted to CRLF, matching the standard format for Windows batch files. This was the actual root cause of a reported "Python not detected" failure — the Python-detection code itself was not the problem
+- **Blocking prompts in all three `deploy-*` scripts**: the Python-install-offer prompt (`set /p` / `read -p`) and the Node.js install-method menu had no timeout, so a script run with no attached console/TTY hung indefinitely. `deploy-windows.bat` now uses `choice /t 20 /d N`; `deploy-linux.sh`/`deploy-macos.sh` now use `read -t 20`; both default to declining on timeout. The Node.js menu is now fully automatic (portable download, then package manager, then existing build) with no prompt
+- **Unterminated quotes in `deploy-linux.sh`/`deploy-macos.sh` startup banners**: three consecutive `echo` lines were missing closing quotes, causing the following lines to be swallowed as literal text into one string instead of executing as separate commands
+
+### Changed
+
+- All three `deploy-*` scripts now check for an existing `.venv` first before running system-wide Python discovery, matching the simpler pattern already used by the `update-*` scripts — skips the more failure-prone discovery path entirely on any machine that's already been set up once
+
+## [0.16.0] - 2026-07-12
+
+### Added
+
+- **Content write-path hardening (Phase 19)**: admin-configurable size limits for memory (`max_memory_size_mb`), cantrip code (`max_script_size_kb`), rules/skills (`max_rule_size_kb`), and lorebooks (`max_lorebook_size_kb`, enforced as aggregate content per lorebook); new `app/services/sanitization.py` (control-character stripping, zero-width-character/blocklisted-URL/prompt-injection-marker flagging on write and again immediately before LLM injection); new `app/services/content_guard.py` shared helper wiring size checks, sanitization, and audit logging into lorebook, cantrip, verification rule, memory, scenario rule, skill, memory rule, and forbidden-word write endpoints
+- **Safety scanner coverage extension**: `app/services/safety_scanner.py` gains obfuscation/smuggling pattern detection (`atob()`, chained hex/unicode escapes, chained `String.fromCharCode()`, long base64-like blobs, prototype-pollution patterns, `new Worker()`/`serviceWorker` sandbox-escape attempts) and is now wired into direct cantrip/lorebook create/update endpoints, not just content-pack installs
+- **Deno sandbox explicit deny flags**: cantrip execution now passes `--deny-net --deny-read --deny-write --deny-run --deny-env --deny-ffi --deny-sys --deny-import` explicitly instead of relying on the absence of `--allow-*` flags — behaviorally unchanged, auditability improvement
+- **CORS deployment-mode warning**: startup log warning when `GITV_CORS_ORIGINS=*` is combined with `GITV_BEHIND_PROXY=true` or `GITV_GENERATE_CERTS=false`
+- **Admin > Security URL blocklist**: `admin_settings.url_blocklist` (comma-separated domains) used by the sanitization checks above
+- New `Planning/security-control-document.md` — living record of every security control, why it exists, and what alternatives were rejected
+
+### Changed
+
+- Dependency version pinning policy: every dependency in `pyproject.toml`/`frontend/package.json` pinned to an exact version; Deno binary version pinned (`v2.8.3`) in `Dockerfile` and all deploy scripts instead of tracking `releases/latest`
+- Dependency audit remediation (`pip-audit`): bumped `starlette` (transitive, DoS + host-header issues), `cryptography` (transitive, bundled OpenSSL CVE), `pydantic-settings` (symlink traversal, feature not in use here) to patched versions. `ecdsa`'s known timing-attack CVE has no upstream fix and is accepted as a risk — this app signs JWTs with HS256, never exercising the vulnerable code path
+- Migrations 036 (`add_content_size_limits`) and 037 (`add_url_blocklist`) added to `admin_settings`
+- Deleted `Planning/Dependency Supply Chain Security Review.md` — contained fabricated CVE citations and irrelevant sources, replaced by the real `pip-audit`/`npm audit` results above
+
+### Fixed
+
+- **Test isolation gap**: `tests/conftest.py` was missing `app.services.scenario_summarizer` from its list of modules patched to use the isolated in-memory test database — the only one of 15 service modules with this gap. Tests exercising scenario summarization were silently querying whatever database `DATABASE_URL`/`.env` pointed at instead of the test database
+
 ## [0.15.42] - 2026-07-09
 
 ### Added

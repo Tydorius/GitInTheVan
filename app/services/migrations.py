@@ -563,6 +563,21 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
         CREATE INDEX IF NOT EXISTS ix_tag_group_members_group_id ON tag_group_members (group_id);
         """,
     ),
+    (
+        "036_add_content_size_limits",
+        """
+        ALTER TABLE admin_settings ADD COLUMN max_memory_size_mb INTEGER DEFAULT 50 NOT NULL;
+        ALTER TABLE admin_settings ADD COLUMN max_script_size_kb INTEGER DEFAULT 50 NOT NULL;
+        ALTER TABLE admin_settings ADD COLUMN max_rule_size_kb INTEGER DEFAULT 25 NOT NULL;
+        ALTER TABLE admin_settings ADD COLUMN max_lorebook_size_kb INTEGER DEFAULT 500 NOT NULL;
+        """,
+    ),
+    (
+        "037_add_url_blocklist",
+        """
+        ALTER TABLE admin_settings ADD COLUMN url_blocklist TEXT DEFAULT '' NOT NULL;
+        """,
+    ),
 ]
 
 

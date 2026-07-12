@@ -22,6 +22,30 @@ FORWARD_HEADERS = {"content-type", "accept"}
 SKIP_HEADERS = {"host", "authorization", "content-length", "transfer-encoding"}
 
 
+async def _flag_injection_content(user_id: str, text: str, source: str) -> None:
+    """Check DB-sourced content immediately before it's concatenated into an
+    outbound LLM request (memory/lorebook/skills/samples/driver-callable
+    injection points). Flag-only, never alters text — see
+    app.services.sanitization.sanitize_for_injection and
+    Planning/security-control-document.md for why. Opens its own short-lived
+    session only when there's something to log, matching the pattern used by
+    app.services.conversation.save_memories_for_chat.
+    """
+    if not text or not user_id:
+        return
+    from app.services.admin import get_url_blocklist
+    from app.services.sanitization import sanitize_for_injection
+
+    blocklist = await get_url_blocklist()
+    result = sanitize_for_injection(text, blocklist)
+    if result.flagged:
+        from app.services.audit import log_action
+        details = "; ".join(f"{f.kind}: {f.detail}" for f in result.findings)
+        async with async_session() as db:
+            await log_action(db, user_id, "content_injection_flag", source, "", details, "")
+            await db.commit()
+
+
 def _build_forward_headers(request: Request, api_key: str) -> dict[str, str]:
     headers: dict[str, str] = {}
     for key, value in request.headers.items():
@@ -221,6 +245,7 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
         if memories:
             memory_block = _build_mem_block(memories)
             if memory_block:
+                await _flag_injection_content(user_id, memory_block, "memory_injection")
                 msgs = body_json["messages"]
                 system_idx = None
                 for i, msg in enumerate(msgs):
@@ -269,6 +294,7 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
                     endpoint_id, user_id, skills_db
                 )
             if skill_contents:
+                await _flag_injection_content(user_id, "\n".join(skill_contents), "skills_injection")
                 body_json["messages"] = inject_skills(body_json["messages"], skill_contents)
             if sample_contents:
                 body_json["_gitv_sample_contents"] = sample_contents
@@ -350,6 +376,7 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
         sample_contents = body_json.pop("_gitv_sample_contents", None)
         if sample_contents:
             from app.services.skills import inject_samples
+            await _flag_injection_content(user_id, "\n".join(sample_contents), "writing_samples")
             body_json["messages"] = inject_samples(body_json["messages"], sample_contents)
             if debug_on:
                 debug_capture(body_json, "writing_samples", "Writing Samples Injection",
@@ -379,6 +406,7 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
             dc_config.turns = min(dc_config.turns, caps["max_driver_callable_turns"])
             notification = build_tool_notification(dc_config.tools, dc_config.turns)
             if notification:
+                await _flag_injection_content(user_id, notification, "driver_callable")
                 body_json["_gitv_driver_callable"] = True
                 body_json["_gitv_driver_callable_turns"] = dc_config.turns
                 body_json["_gitv_driver_callable_tools"] = [
@@ -622,6 +650,9 @@ async def _apply_lorebook_injection(
             messages = body_json.get("messages", [])
             matched = match_entries(messages, all_entries)
             if matched:
+                await _flag_injection_content(
+                    user_id, "\n".join(e.content for e in matched), "lorebook_injection"
+                )
                 body_json["messages"] = inject_entries(messages, matched)
                 logger.info(
                     "Lorebook injection: %d entries matched for user %s", len(matched), user_id
@@ -674,6 +705,15 @@ async def _extract_response_memories(
         response_data["choices"][0]["message"]["content"] = cleaned
 
     if chat_id and memories:
+        # LLM-output-derived write path, not a router — same control-char stripping
+        # as sanitize_input() applied at router write paths, since this content gets
+        # re-injected into future requests via load_memories_for_chat. See
+        # Planning/security-control-document.md.
+        from app.services.sanitization import detect_zero_width, strip_control_chars
+        memories = {k: strip_control_chars(v) for k, v in memories.items()}
+        for k, v in memories.items():
+            if detect_zero_width(v):
+                logger.warning("Zero-width characters detected in extracted memory '%s' for chat %s", k, chat_id[:12])
         await save_memories_for_chat(chat_id, user_id, memories)
         logger.info("Memory extraction: %d keys saved for chat %s", len(memories), chat_id[:12])
 

@@ -10,6 +10,8 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.memory_rule import MemoryRule
 from app.models.user import User
+from app.services.admin import get_admin_settings
+from app.services.content_guard import check_size, sanitize_and_log
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +149,11 @@ async def create_rule(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     await _check_tag_unique(db, req.tag, current_user.id)
+
+    admin_settings = await get_admin_settings()
+    check_size(req.prompt, admin_settings.max_rule_size_kb * 1024, "Memory rule prompt")
+    req.prompt = await sanitize_and_log(db, current_user.id, req.prompt, "memory_rule")
+
     rule = MemoryRule(
         user_id=current_user.id,
         name=req.name,
@@ -193,7 +200,9 @@ async def update_rule(
     if req.keep_recent is not None:
         rule.keep_recent = req.keep_recent
     if req.prompt is not None:
-        rule.prompt = req.prompt
+        admin_settings = await get_admin_settings()
+        check_size(req.prompt, admin_settings.max_rule_size_kb * 1024, "Memory rule prompt")
+        rule.prompt = await sanitize_and_log(db, current_user.id, req.prompt, "memory_rule", rule_id)
     if req.execution_order is not None:
         rule.execution_order = req.execution_order
     if req.is_active is not None:

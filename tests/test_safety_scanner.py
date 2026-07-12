@@ -76,6 +76,59 @@ class TestScanCantrip:
 
 
 # ============================================================================
+# Obfuscation / Smuggling Pattern Scanning
+# ============================================================================
+
+class TestScanObfuscation:
+    def test_worker_critical(self):
+        result = scan_cantrip("const w = new Worker('data:text/javascript,...');")
+        assert not result.safe
+        assert any("Worker" in f.description for f in result.findings)
+
+    def test_service_worker_critical(self):
+        result = scan_cantrip("navigator.serviceWorker.register('/sw.js');")
+        assert not result.safe
+
+    def test_atob_warning(self):
+        result = scan_cantrip("const decoded = atob('aGVsbG8=');")
+        assert result.safe
+        assert any("atob" in f.description for f in result.findings)
+
+    def test_chained_hex_escapes_warning(self):
+        result = scan_cantrip('const s = "\\x65\\x76\\x69\\x6c\\x63\\x6f\\x64\\x65";')
+        assert result.safe
+        assert any("hex" in f.description for f in result.findings)
+
+    def test_chained_unicode_escapes_warning(self):
+        result = scan_cantrip('const s = "\\u0065\\u0076\\u0069\\u006c\\u0063\\u006f";')
+        assert result.safe
+        assert any("unicode" in f.description for f in result.findings)
+
+    def test_fromcharcode_chain_warning(self):
+        result = scan_cantrip(
+            "eval(String.fromCharCode(97,108,101,114,116) + String.fromCharCode(40,41) "
+            "+ String.fromCharCode(59))"
+        )
+        assert any("fromCharCode" in f.description for f in result.findings)
+
+    def test_long_base64_blob_warning(self):
+        blob = "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ejAxMjM0NTY3ODk="
+        result = scan_cantrip(f"const payload = '{blob}';")
+        assert result.safe
+        assert any("base64" in f.description for f in result.findings)
+
+    def test_prototype_pollution_warning(self):
+        result = scan_cantrip("obj.__proto__.polluted = true;")
+        assert result.safe
+        assert any("prototype pollution" in f.description for f in result.findings)
+
+    def test_clean_code_no_obfuscation_findings(self):
+        result = scan_cantrip("context.character.scenario += ' A calm evening in the tavern.';")
+        assert result.safe
+        assert result.max_severity == "clean"
+
+
+# ============================================================================
 # Lorebook Scanning
 # ============================================================================
 

@@ -3,13 +3,15 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.memory import Memory
 from app.models.user import User
+from app.services.admin import get_admin_settings
+from app.services.content_guard import sanitize_and_log
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +76,22 @@ async def update_memory(
     if memory is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found")
 
-    memory.value = req.value
+    admin_settings = await get_admin_settings()
+    total_result = await db.execute(
+        select(func.sum(func.length(Memory.value))).where(
+            Memory.user_id == current_user.id, Memory.id != memory_id
+        )
+    )
+    existing_total = total_result.scalar() or 0
+    new_total = existing_total + len(req.value)
+    max_bytes = admin_settings.max_memory_size_mb * 1024 * 1024
+    if new_total > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Total memory size exceeds limit ({new_total} chars, max {max_bytes})",
+        )
+
+    memory.value = await sanitize_and_log(db, current_user.id, req.value, "memory", memory_id)
     await db.commit()
     await db.refresh(memory)
     return MemoryResponse(

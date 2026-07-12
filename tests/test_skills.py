@@ -80,6 +80,22 @@ class TestSkillCRUD:
         resp = await auth_client.get(f"/api/skills/{skill_id}")
         assert resp.status_code == 404
 
+    async def test_create_exceeds_content_size_limit(self, auth_client):
+        from app.services.admin import update_admin_settings
+        await update_admin_settings({"max_rule_size_kb": 1})
+        resp = await auth_client.post("/api/skills", json={
+            "name": "TooBig", "content": "x" * 2000, "type": "skill",
+        })
+        assert resp.status_code == 413
+        await update_admin_settings({"max_rule_size_kb": 25})
+
+    async def test_create_strips_control_chars_in_content(self, auth_client):
+        resp = await auth_client.post("/api/skills", json={
+            "name": "Clean", "content": "hello\x00world", "type": "skill",
+        })
+        assert resp.status_code == 201
+        assert resp.json()["content"] == "helloworld"
+
 
 @pytest.mark.asyncio
 class TestSkillAttachment:

@@ -357,6 +357,26 @@ class TestRuleCRUD:
         resp = await client.get("/api/verification/rules/nonexistent")
         assert resp.status_code == 404
 
+    @pytest.mark.asyncio
+    async def test_create_exceeds_prompt_size_limit(self, admin_client):
+        from app.services.admin import update_admin_settings
+        client, _, _ = admin_client
+        await update_admin_settings({"max_rule_size_kb": 1})
+        resp = await client.post("/api/verification/rules", json={
+            "name": "TooBig", "prompt": "x" * 2000,
+        })
+        assert resp.status_code == 413
+        await update_admin_settings({"max_rule_size_kb": 25})
+
+    @pytest.mark.asyncio
+    async def test_create_strips_control_chars_in_prompt(self, admin_client):
+        client, _, _ = admin_client
+        resp = await client.post("/api/verification/rules", json={
+            "name": "Clean", "prompt": "check\x00this",
+        })
+        assert resp.status_code == 201
+        assert resp.json()["prompt"] == "checkthis"
+
 
 # ============================================================================
 # API: Verification Settings

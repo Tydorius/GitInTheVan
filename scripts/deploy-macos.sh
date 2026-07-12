@@ -8,9 +8,9 @@ LOG_FILE="$(dirname "$0")/installer.log"
 exec > >(tee "$LOG_FILE") 2>&1
 
 echo "============================================"
-echo "  GitInTheVan - macOS Deploy
-echo "  Date: $(date)
-echo "  Installer log: $LOG_FILE
+echo "  GitInTheVan - macOS Deploy"
+echo "  Date: $(date)"
+echo "  Installer log: $LOG_FILE"
 echo "============================================"
 echo
 
@@ -24,7 +24,15 @@ echo
 echo "[1/6] Checking Python..."
 PYTHON_CMD=""
 
-if command -v python3 &> /dev/null; then
+# Fast path: reuse an existing venv (matches update-macos.sh's approach).
+# Common case on any machine that's already been set up once, and skips
+# the system-wide discovery below entirely.
+if [ -f "$GITV_ROOT/.venv/bin/python" ]; then
+    PYTHON_CMD="$GITV_ROOT/.venv/bin/python"
+    echo "Using existing virtual environment."
+fi
+
+if [ -z "$PYTHON_CMD" ] && command -v python3 &> /dev/null; then
     python3 --version
     if python3 -c "import sys; exit(0 if sys.version_info >= (3, 12) else 1)" 2>/dev/null; then
         PYTHON_CMD="python3"
@@ -60,7 +68,9 @@ if [ -z "$PYTHON_CMD" ]; then
     if [ -z "$PYTHON_CMD" ]; then
         echo "Python 3.12+ not found."
         if command -v brew &> /dev/null; then
-            read -p "Would you like to install Python 3.12 via Homebrew? [y/n]: " INSTALL_PY
+            # -t 20: bounded prompt, defaults to empty (declined) on timeout so a
+            # script with no controlling terminal never hangs indefinitely.
+            read -t 20 -p "Would you like to install Python 3.12 via Homebrew? [y/n, defaults to n in 20s]: " INSTALL_PY || true
             if [[ "$INSTALL_PY" =~ ^[Yy]$ ]]; then
                 echo "Installing Python 3.12..."
                 brew install python@3.12
@@ -118,6 +128,8 @@ else
 fi
 DENO_DIR="$GITV_ROOT/.deno"
 DENO_BIN="$DENO_DIR/deno"
+# Pinned, not "latest" - see Planning/security-control-document.md. Bump deliberately.
+DENO_VERSION="v2.8.3"
 
 if [ -f "$DENO_BIN" ]; then
     echo "Deno found at $DENO_BIN"
@@ -126,7 +138,7 @@ elif command -v deno &> /dev/null; then
 else
     echo "Deno not found. Downloading..."
     mkdir -p "$DENO_DIR"
-    curl -fsSL "https://github.com/denoland/deno/releases/latest/download/deno-${DENO_ARCH}.zip" -o "$DENO_DIR/deno.zip"
+    curl -fsSL "https://github.com/denoland/deno/releases/download/${DENO_VERSION}/deno-${DENO_ARCH}.zip" -o "$DENO_DIR/deno.zip"
     if [ $? -ne 0 ]; then
         echo "WARNING: Could not download Deno automatically."
         echo "Cantrips will not work. Please install Deno manually from https://deno.land"
@@ -191,7 +203,10 @@ if [ -z "$NODE_CMD" ]; then
     fi
 fi
 
-# If still no Node, offer local download
+# If still no Node, try a portable download automatically (no admin/sudo
+# required, no interactive prompt -- see Planning/security-control-document.md
+# for why this script no longer blocks on read -p), then Homebrew if
+# available, then fall back to an existing frontend build if one is present.
 if [ -z "$NODE_CMD" ]; then
     echo "Node.js not found on system."
     if [ -f "$GITV_ROOT/static/index.html" ]; then
@@ -201,48 +216,40 @@ if [ -z "$NODE_CMD" ]; then
     else
         echo ""
         echo "Node.js 24+ is required to build the web UI."
-        echo ""
-        echo "Options:"
-        echo "  1. Download portable Node.js to .node/ folder (no admin/sudo required)"
-        if command -v brew &> /dev/null; then
-            echo "  2. Install via Homebrew: brew install node"
-        fi
-        echo "  3. Skip (use existing frontend if available)"
-        echo ""
-        read -p "Choose option [1/2/3]: " NODE_CHOICE
+        echo "Attempting automatic portable Node.js download to .node/ (no admin/sudo required)..."
 
-        if [ "$NODE_CHOICE" = "1" ]; then
-            echo "Downloading portable Node.js..."
-            ARCH=$(uname -m)
-            if [ "$ARCH" = "arm64" ]; then
-                NODE_TARBALL="node-v24.17.0-darwin-arm64.tar.gz"
+        ARCH=$(uname -m)
+        if [ "$ARCH" = "arm64" ]; then
+            NODE_TARBALL="node-v24.17.0-darwin-arm64.tar.gz"
+        else
+            NODE_TARBALL="node-v24.17.0-darwin-x64.tar.gz"
+        fi
+        mkdir -p "$NODE_LOCAL_DIR"
+        curl -fsSL "https://nodejs.org/dist/v24.17.0/$NODE_TARBALL" -o "/tmp/gitv-node.tar.gz"
+        if [ $? -ne 0 ]; then
+            echo "WARNING: Portable Node.js download failed."
+            rm -f "/tmp/gitv-node.tar.gz"
+        else
+            tar -xzf "/tmp/gitv-node.tar.gz" -C "$NODE_LOCAL_DIR" --strip-components=1
+            rm -f "/tmp/gitv-node.tar.gz"
+            if [ -x "$NODE_LOCAL_DIR/bin/node" ]; then
+                NODE_CMD="$NODE_LOCAL_DIR/bin/node"
+                echo "Portable Node.js installed to $NODE_CMD"
             else
-                NODE_TARBALL="node-v24.17.0-darwin-x64.tar.gz"
+                echo "WARNING: Portable Node extraction failed."
+                ls -la "$NODE_LOCAL_DIR/bin/" 2>/dev/null
             fi
-            mkdir -p "$NODE_LOCAL_DIR"
-            curl -fsSL "https://nodejs.org/dist/v24.17.0/$NODE_TARBALL" -o "/tmp/gitv-node.tar.gz"
-            if [ $? -ne 0 ]; then
-                echo "ERROR: Failed to download Node.js."
-                rm -f "/tmp/gitv-node.tar.gz"
-            else
-                tar -xzf "/tmp/gitv-node.tar.gz" -C "$NODE_LOCAL_DIR" --strip-components=1
-                rm -f "/tmp/gitv-node.tar.gz"
-                if [ -x "$NODE_LOCAL_DIR/bin/node" ]; then
-                    NODE_CMD="$NODE_LOCAL_DIR/bin/node"
-                    echo "Portable Node.js installed to $NODE_CMD"
-                else
-                    echo "ERROR: Portable Node extraction failed."
-                    ls -la "$NODE_LOCAL_DIR/bin/" 2>/dev/null
-                fi
-            fi
-        elif [ "$NODE_CHOICE" = "2" ] && command -v brew &> /dev/null; then
-            echo "Installing Node.js via Homebrew..."
+        fi
+
+        if [ -z "$NODE_CMD" ] && command -v brew &> /dev/null; then
+            echo "Trying Homebrew instead..."
             brew install node
             hash -r 2>/dev/null
             if command -v node &> /dev/null; then
                 NODE_CMD="$(command -v node)"
             fi
         fi
+
         if [ -z "$NODE_CMD" ] && [ ! -f "$GITV_ROOT/static/index.html" ]; then
             echo ""
             echo "============================================"

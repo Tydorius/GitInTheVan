@@ -15,6 +15,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     mariadb-client \
     && rm -rf /var/lib/apt/lists/*
 
+# Pinned, not "latest" — see Planning/security-control-document.md. Bump deliberately,
+# not automatically, so a sandbox behavior change is always a reviewed decision.
+ARG DENO_VERSION=v2.8.3
 ARG TARGETARCH
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
         DENO_ARCH="x86_64-unknown-linux-gnu"; \
@@ -23,7 +26,7 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
     else \
         DENO_ARCH="x86_64-unknown-linux-gnu"; \
     fi && \
-    curl -fsSL "https://github.com/denoland/deno/releases/latest/download/deno-${DENO_ARCH}.zip" -o /tmp/deno.zip && \
+    curl -fsSL "https://github.com/denoland/deno/releases/download/${DENO_VERSION}/deno-${DENO_ARCH}.zip" -o /tmp/deno.zip && \
     unzip -o /tmp/deno.zip -d /opt/deno && \
     chmod +x /opt/deno/deno && \
     rm /tmp/deno.zip
