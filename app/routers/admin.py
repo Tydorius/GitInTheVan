@@ -27,6 +27,10 @@ class AdminSettingsResponse(BaseModel):
     max_map_stages: int
     rate_limit_proxy_per_min: int
     rate_limit_api_per_min: int
+    max_memory_size_mb: int
+    max_script_size_kb: int
+    max_rule_size_kb: int
+    max_lorebook_size_kb: int
     runtime_log_level: str
     effective_log_level: str
 
@@ -37,6 +41,10 @@ class AdminSettingsUpdate(BaseModel):
     max_map_stages: int | None = None
     rate_limit_proxy_per_min: int | None = None
     rate_limit_api_per_min: int | None = None
+    max_memory_size_mb: int | None = None
+    max_script_size_kb: int | None = None
+    max_rule_size_kb: int | None = None
+    max_lorebook_size_kb: int | None = None
     runtime_log_level: str | None = None
 
 
@@ -74,6 +82,10 @@ async def get_settings(
         max_map_stages=s.max_map_stages,
         rate_limit_proxy_per_min=s.rate_limit_proxy_per_min,
         rate_limit_api_per_min=s.rate_limit_api_per_min,
+        max_memory_size_mb=s.max_memory_size_mb,
+        max_script_size_kb=s.max_script_size_kb,
+        max_rule_size_kb=s.max_rule_size_kb,
+        max_lorebook_size_kb=s.max_lorebook_size_kb,
         runtime_log_level=s.runtime_log_level,
         effective_log_level=effective,
     )
@@ -96,6 +108,14 @@ async def update_settings(
         updates["rate_limit_proxy_per_min"] = max(0, req.rate_limit_proxy_per_min)
     if req.rate_limit_api_per_min is not None:
         updates["rate_limit_api_per_min"] = max(0, req.rate_limit_api_per_min)
+    if req.max_memory_size_mb is not None:
+        updates["max_memory_size_mb"] = max(1, req.max_memory_size_mb)
+    if req.max_script_size_kb is not None:
+        updates["max_script_size_kb"] = max(1, req.max_script_size_kb)
+    if req.max_rule_size_kb is not None:
+        updates["max_rule_size_kb"] = max(1, req.max_rule_size_kb)
+    if req.max_lorebook_size_kb is not None:
+        updates["max_lorebook_size_kb"] = max(1, req.max_lorebook_size_kb)
     if req.runtime_log_level is not None:
         level = req.runtime_log_level.strip().upper()
         if level and level not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
@@ -113,6 +133,10 @@ async def update_settings(
         max_map_stages=s.max_map_stages,
         rate_limit_proxy_per_min=s.rate_limit_proxy_per_min,
         rate_limit_api_per_min=s.rate_limit_api_per_min,
+        max_memory_size_mb=s.max_memory_size_mb,
+        max_script_size_kb=s.max_script_size_kb,
+        max_rule_size_kb=s.max_rule_size_kb,
+        max_lorebook_size_kb=s.max_lorebook_size_kb,
         runtime_log_level=s.runtime_log_level,
         effective_log_level=effective,
     )

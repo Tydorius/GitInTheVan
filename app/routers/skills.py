@@ -11,6 +11,8 @@ from app.dependencies import get_current_user
 from app.models.endpoint import Endpoint
 from app.models.skill import EndpointSkill, Skill
 from app.models.user import User
+from app.services.admin import get_admin_settings
+from app.services.content_guard import check_size, sanitize_and_log
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +97,10 @@ async def create_skill(
     if req.type not in ("skill", "sample"):
         raise HTTPException(status_code=400, detail="Type must be 'skill' or 'sample'")
 
+    admin_settings = await get_admin_settings()
+    check_size(req.content, admin_settings.max_rule_size_kb * 1024, "Skill content")
+    req.content = await sanitize_and_log(db, current_user.id, req.content, "skill")
+
     skill = Skill(
         user_id=current_user.id,
         name=req.name,
@@ -145,7 +151,9 @@ async def update_skill(
     if req.description is not None:
         skill.description = req.description
     if req.content is not None:
-        skill.content = req.content
+        admin_settings = await get_admin_settings()
+        check_size(req.content, admin_settings.max_rule_size_kb * 1024, "Skill content")
+        skill.content = await sanitize_and_log(db, current_user.id, req.content, "skill", skill_id)
     if req.type is not None:
         if req.type not in ("skill", "sample"):
             raise HTTPException(status_code=400, detail="Type must be 'skill' or 'sample'")

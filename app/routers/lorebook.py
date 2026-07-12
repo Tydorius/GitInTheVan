@@ -13,10 +13,37 @@ from app.dependencies import get_current_user
 from app.models.lorebook import Lorebook
 from app.models.lorebook_entry import LorebookEntry
 from app.models.user import User
+from app.services.admin import get_admin_settings
+from app.services.content_guard import log_scan_findings, sanitize_and_log
+from app.services.safety_scanner import scan_lorebook
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/lorebooks", tags=["lorebooks"])
+
+
+async def _enforce_lorebook_size(
+    db: AsyncSession, lorebook_id: str, added_chars: int, exclude_entry_id: str | None = None
+) -> None:
+    """Enforce max_lorebook_size_kb against the total content across all entries
+    in a lorebook (matches the original Phase 19b design: "total lorebook entry
+    content per lorebook", not a per-entry cap).
+    """
+    admin_settings = await get_admin_settings()
+    max_bytes = admin_settings.max_lorebook_size_kb * 1024
+
+    q = select(LorebookEntry.content).where(LorebookEntry.lorebook_id == lorebook_id)
+    if exclude_entry_id:
+        q = q.where(LorebookEntry.id != exclude_entry_id)
+    result = await db.execute(q)
+    existing_total = sum(len(c or "") for c in result.scalars().all())
+
+    total = existing_total + added_chars
+    if total > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Lorebook content exceeds size limit ({total} chars, max {max_bytes})",
+        )
 
 
 class EntryInput(BaseModel):
@@ -395,6 +422,12 @@ async def add_entry(
     if lorebook is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lorebook not found")
 
+    req.content = await sanitize_and_log(db, current_user.id, req.content, "lorebook_entry", lorebook_id)
+    await _enforce_lorebook_size(db, lorebook_id, len(req.content))
+
+    scan = scan_lorebook([{"name": req.name, "content": req.content}])
+    await log_scan_findings(db, current_user.id, scan, "lorebook_entry", lorebook_id)
+
     entry = LorebookEntry(lorebook_id=lorebook_id, **_entry_input_to_dict(req))
     db.add(entry)
     await db.commit()
@@ -422,6 +455,12 @@ async def update_entry(
     entry = result.scalar_one_or_none()
     if entry is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entry not found")
+
+    req.content = await sanitize_and_log(db, current_user.id, req.content, "lorebook_entry", entry_id)
+    await _enforce_lorebook_size(db, lorebook_id, len(req.content), exclude_entry_id=entry_id)
+
+    scan = scan_lorebook([{"name": req.name, "content": req.content}])
+    await log_scan_findings(db, current_user.id, scan, "lorebook_entry", entry_id)
 
     for key, value in _entry_input_to_dict(req).items():
         setattr(entry, key, value)
@@ -547,6 +586,23 @@ async def import_lorebook(
         raw_entries = []
 
     normalized = [_normalize_entry(e) for e in raw_entries if isinstance(e, dict)]
+
+    for entry_dict in normalized:
+        entry_dict["content"] = await sanitize_and_log(
+            db, current_user.id, entry_dict["content"], "lorebook_import"
+        )
+
+    admin_settings = await get_admin_settings()
+    total_chars = sum(len(e["content"]) for e in normalized)
+    if total_chars > admin_settings.max_lorebook_size_kb * 1024:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Imported lorebook content exceeds size limit "
+                   f"({total_chars} chars, max {admin_settings.max_lorebook_size_kb * 1024})",
+        )
+
+    scan = scan_lorebook([{"name": e["name"], "content": e["content"]} for e in normalized])
+    await log_scan_findings(db, current_user.id, scan, "lorebook_import")
 
     lorebook = Lorebook(
         user_id=current_user.id,

@@ -11,6 +11,8 @@ from app.dependencies import get_current_user
 from app.models.forbidden_word import ForbiddenWord
 from app.models.user import User
 from app.models.user_settings import UserSettings
+from app.services.admin import get_admin_settings
+from app.services.content_guard import check_size, sanitize_and_log
 from app.services.forbidden_words import _scan
 
 logger = logging.getLogger(__name__)
@@ -125,6 +127,11 @@ async def create_word(
     phrase = req.phrase.strip()
     if not phrase:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Phrase cannot be empty")
+
+    admin_settings = await get_admin_settings()
+    check_size(phrase, admin_settings.max_rule_size_kb * 1024, "Forbidden word/phrase")
+    phrase = await sanitize_and_log(db, current_user.id, phrase, "forbidden_word")
+
     word = ForbiddenWord(
         user_id=current_user.id,
         phrase=phrase,

@@ -14,6 +14,7 @@ import app.services.forbidden_words as _forbidden_words_module
 import app.services.map_pipeline as _map_pipeline_module
 import app.services.memory as _memory_module
 import app.services.proxy as _proxy_module
+import app.services.scenario_summarizer as _scenario_summarizer_module
 import app.services.summarization as _summarization_module
 import app.services.verification as _verification_module
 from app.config import settings as app_settings
@@ -38,6 +39,7 @@ _original_budget_session = _budget_module.async_session
 _original_debug_session = _debug_module.async_session
 _original_admin_session = _admin_module.async_session
 _original_map_pipeline_session = _map_pipeline_module.async_session
+_original_scenario_summarizer_session = _scenario_summarizer_module.async_session
 
 
 async def override_get_db():
@@ -66,6 +68,7 @@ async def setup_database():
     _debug_module.async_session = TestSessionLocal
     _admin_module.async_session = TestSessionLocal
     _map_pipeline_module.async_session = TestSessionLocal
+    _scenario_summarizer_module.async_session = TestSessionLocal
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
@@ -83,6 +86,7 @@ async def setup_database():
     _debug_module.async_session = _original_debug_session
     _admin_module.async_session = _original_admin_session
     _map_pipeline_module.async_session = _original_map_pipeline_session
+    _scenario_summarizer_module.async_session = _original_scenario_summarizer_session
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
 

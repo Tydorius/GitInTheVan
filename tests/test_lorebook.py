@@ -344,6 +344,51 @@ class TestEntryCRUD:
         assert len(get_resp.json()["entries"]) == 0
 
     @pytest.mark.asyncio
+    async def test_add_entry_exceeds_lorebook_size_limit(self, admin_client):
+        from app.services.admin import update_admin_settings
+        client, _, _ = admin_client
+        lb = await client.post("/api/lorebooks", json={"name": "LB"})
+        lb_id = lb.json()["id"]
+        await update_admin_settings({"max_lorebook_size_kb": 1})
+        resp = await client.post(
+            f"/api/lorebooks/{lb_id}/entries",
+            json={"name": "Big", "content": "x" * 2000},
+        )
+        assert resp.status_code == 413
+        await update_admin_settings({"max_lorebook_size_kb": 500})
+
+    @pytest.mark.asyncio
+    async def test_add_entry_size_limit_is_aggregate_across_entries(self, admin_client):
+        from app.services.admin import update_admin_settings
+        client, _, _ = admin_client
+        lb = await client.post("/api/lorebooks", json={"name": "LB"})
+        lb_id = lb.json()["id"]
+        await update_admin_settings({"max_lorebook_size_kb": 1})
+        first = await client.post(
+            f"/api/lorebooks/{lb_id}/entries",
+            json={"name": "First", "content": "x" * 600},
+        )
+        assert first.status_code == 201
+        second = await client.post(
+            f"/api/lorebooks/{lb_id}/entries",
+            json={"name": "Second", "content": "x" * 600},
+        )
+        assert second.status_code == 413
+        await update_admin_settings({"max_lorebook_size_kb": 500})
+
+    @pytest.mark.asyncio
+    async def test_add_entry_strips_control_chars(self, admin_client):
+        client, _, _ = admin_client
+        lb = await client.post("/api/lorebooks", json={"name": "LB"})
+        lb_id = lb.json()["id"]
+        resp = await client.post(
+            f"/api/lorebooks/{lb_id}/entries",
+            json={"name": "Clean", "content": "hello\x00world"},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["content"] == "helloworld"
+
+    @pytest.mark.asyncio
     async def test_entries_appear_in_lorebook(self, admin_client):
         client, _, _ = admin_client
         lb = await client.post("/api/lorebooks", json={"name": "LB"})

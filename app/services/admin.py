@@ -37,6 +37,12 @@ async def get_caps() -> dict[str, int]:
     }
 
 
+async def get_url_blocklist() -> list[str]:
+    """Get the admin-configured URL blocklist as a list of domains."""
+    s = await get_admin_settings()
+    return [d.strip() for d in s.url_blocklist.split(",") if d.strip()]
+
+
 async def update_admin_settings(updates: dict[str, Any]) -> AdminSettings:
     """Update admin settings fields."""
     async with async_session() as db:

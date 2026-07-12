@@ -154,10 +154,26 @@ async def run_cantrip(
             pass
 
 
+# Cantrips get no permissions. Deno denies everything by default when no --allow-*
+# flags are passed, so this list is behaviorally a no-op — it exists so the sandbox's
+# posture is explicit and auditable in code rather than implied by the absence of flags.
+# See Planning/security-control-document.md for rationale.
+_DENO_DENY_FLAGS = [
+    "--deny-net",
+    "--deny-read",
+    "--deny-write",
+    "--deny-run",
+    "--deny-env",
+    "--deny-ffi",
+    "--deny-sys",
+    "--deny-import",
+]
+
+
 def _run_deno_sync(script_path: str, timeout_ms: int) -> tuple[bytes, int, bytes]:
     try:
         result = subprocess.run(
-            [DENO_PATH, "run", "--quiet", script_path],
+            [DENO_PATH, "run", "--quiet", *_DENO_DENY_FLAGS, script_path],
             capture_output=True,
             timeout=timeout_ms / 1000,
         )

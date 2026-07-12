@@ -21,6 +21,8 @@ CRITICAL_PATTERNS = [
     (r"\bDeno\.run\b", "Process execution: Deno.run"),
     (r"\bDeno\.Command\b", "Process execution: Deno.Command"),
     (r"\bimport\s*\(", "Dynamic import"),
+    (r"\bnew\s+Worker\s*\(", "Sandbox-escape attempt: new Worker()"),
+    (r"\bnavigator\.serviceWorker\b", "Sandbox-escape attempt: serviceWorker"),
 ]
 
 WARNING_PATTERNS = [
@@ -29,6 +31,13 @@ WARNING_PATTERNS = [
     (r"https?://[^\s\"')]+", "External URL reference"),
     (r"\bwhile\s*\(\s*true\s*\)", "Potential infinite loop: while(true)"),
     (r"\bfor\s*\(\s*;\s*;\s*\)", "Potential infinite loop: for(;;)"),
+    (r"\batob\s*\(", "Base64 decoding: atob() — verify decoded content isn't obfuscated logic"),
+    (r"(?:\\x[0-9a-fA-F]{2}){6,}", "Possible obfuscated payload: chained \\x hex escapes"),
+    (r"(?:\\u[0-9a-fA-F]{4}){6,}", "Possible obfuscated payload: chained \\u unicode escapes"),
+    (r"(?:String\.fromCharCode\s*\([^)]*\)\s*[+,]\s*){2,}String\.fromCharCode",
+     "Possible obfuscated payload: chained String.fromCharCode()"),
+    (r"[A-Za-z0-9+/]{80,}={0,2}(?!\w)", "Possible encoded/obfuscated payload: long base64-like blob"),
+    (r"__proto__|\.prototype\s*\[|constructor\s*\.\s*prototype", "Possible prototype pollution pattern"),
 ]
 
 MAX_CONTENT_SIZE = 50000

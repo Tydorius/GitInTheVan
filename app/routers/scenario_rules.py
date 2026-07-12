@@ -10,6 +10,8 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.scenario_rule import ScenarioRule
 from app.models.user import User
+from app.services.admin import get_admin_settings
+from app.services.content_guard import check_size, sanitize_and_log
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +109,10 @@ async def create_rule(
     if req.fire_position not in ("pre", "post"):
         raise HTTPException(status_code=400, detail="fire_position must be 'pre' or 'post'")
 
+    admin_settings = await get_admin_settings()
+    check_size(req.prompt, admin_settings.max_rule_size_kb * 1024, "Scenario rule prompt")
+    req.prompt = await sanitize_and_log(db, current_user.id, req.prompt, "scenario_rule")
+
     rule = ScenarioRule(
         user_id=current_user.id,
         name=req.name,
@@ -166,7 +172,9 @@ async def update_rule(
     if req.model is not None:
         rule.model = req.model
     if req.prompt is not None:
-        rule.prompt = req.prompt
+        admin_settings = await get_admin_settings()
+        check_size(req.prompt, admin_settings.max_rule_size_kb * 1024, "Scenario rule prompt")
+        rule.prompt = await sanitize_and_log(db, current_user.id, req.prompt, "scenario_rule", rule_id)
     if req.is_active is not None:
         rule.is_active = req.is_active
 

@@ -46,10 +46,18 @@ REM ============================================================
 echo [1/6] Checking Python...
 echo [1/6] Checking Python... >> "%LOG_FILE%"
 set "PYTHON_CMD="
-set PYOK=0
+
+REM Fast path: reuse an existing venv (matches update-windows.bat's approach).
+REM This is the common case on any machine that's already been set up once,
+REM and skips the fragile system-wide discovery below entirely.
+if exist "%GITV_ROOT%\.venv\Scripts\python.exe" (
+    set "PYTHON_CMD=%GITV_ROOT%\.venv\Scripts\python.exe"
+    echo Using existing virtual environment. >> "%LOG_FILE%"
+    goto :python_done
+)
 
 python --version >nul 2>&1
-if errorlevel 1 goto :python_not_found
+if errorlevel 1 goto :python_search
 
 python --version >> "%LOG_FILE%" 2>&1
 for /f "tokens=2" %%v in ('python --version 2^>^&1') do set PYVER=%%v
@@ -59,13 +67,22 @@ for /f "tokens=1,2 delims=." %%a in ("!PYVER!") do (
 )
 echo DEBUG: PYVER=!PYVER! PYMAJOR=!PYMAJOR! PYMINOR=!PYMINOR! >> "%LOG_FILE%"
 
-if !PYMAJOR! GTR 3 goto :python_found_default
-if !PYMAJOR! EQU 3 if !PYMINOR! GEQ 12 goto :python_found_default
+if !PYMAJOR! GTR 3 (
+    set "PYTHON_CMD=python"
+    goto :python_done
+)
+if !PYMAJOR! EQU 3 if !PYMINOR! GEQ 12 (
+    set "PYTHON_CMD=python"
+    goto :python_done
+)
 
 echo.
 echo Python !PYMAJOR!.!PYMINOR! found but 3.12+ required.
 echo Python !PYMAJOR!.!PYMINOR! found but 3.12+ required. >> "%LOG_FILE%"
-echo Searching for newer Python installations...
+
+:python_search
+echo Searching for a compatible Python installation...
+echo Searching for a compatible Python installation... >> "%LOG_FILE%"
 
 py -3.12 --version >nul 2>&1
 if not errorlevel 1 (
@@ -86,9 +103,6 @@ for %%P in (312 313 314) do (
         echo Found Python at !PYTHON_CMD! >> "%LOG_FILE%"
         goto :python_done
     )
-)
-
-for %%P in (312 313 314) do (
     if exist "C:\Program Files\Python%%P\python.exe" (
         set "PYTHON_CMD=C:\Program Files\Python%%P\python.exe"
         echo Found Python at !PYTHON_CMD! >> "%LOG_FILE%"
@@ -101,29 +115,27 @@ for %%P in (312 313 314) do (
     )
 )
 
-goto :python_offer_install
-
-:python_not_found
-echo Python not found in PATH. >> "%LOG_FILE%"
-
-:python_offer_install
 echo.
+echo Python 3.12+ was not found on this system. >> "%LOG_FILE%"
+echo Python 3.12+ was not found on this system.
 where winget >nul 2>&1
 if errorlevel 1 (
-    echo ERROR: Python 3.12+ is required but winget is not available. >> "%LOG_FILE%"
-    echo Please install Python 3.12+ from https://python.org
+    echo ERROR: winget is not available either. >> "%LOG_FILE%"
+    echo Please install Python 3.12+ from https://python.org and re-run this script.
     echo.
     echo Installer log: %LOG_FILE%
     pause
     exit /b 1
 )
 
-echo Python 3.12+ is required.
-set "INSTALL_PY="
-set /p INSTALL_PY="Would you like to install Python 3.12 via winget? [y/n]: "
-if /i not "!INSTALL_PY!"=="y" (
-    echo Python install declined. >> "%LOG_FILE%"
-    echo Please install Python 3.12+ from https://python.org
+echo.
+REM Bounded prompt (20s, defaults to No) instead of a blocking set /p - a
+REM script with no console attached (e.g. run non-interactively) must not
+REM hang here indefinitely. See Planning/security-control-document.md.
+choice /c YN /n /t 20 /d N /m "Install Python 3.12 via winget now? [Y/N, defaults to N in 20s]"
+if errorlevel 2 (
+    echo Python install declined or prompt timed out. >> "%LOG_FILE%"
+    echo Please install Python 3.12+ from https://python.org and re-run this script.
     echo.
     echo Installer log: %LOG_FILE%
     pause
@@ -167,10 +179,6 @@ echo.
 echo Installer log: %LOG_FILE%
 pause
 exit /b 1
-
-:python_found_default
-set "PYTHON_CMD=python"
-echo DEBUG: Using default python from PATH >> "%LOG_FILE%"
 
 :python_done
 echo DEBUG: PYTHON_CMD=[!PYTHON_CMD!] >> "%LOG_FILE%"
@@ -227,6 +235,8 @@ echo [3/6] Checking Deno runtime...
 echo [3/6] Checking Deno runtime... >> "%LOG_FILE%"
 set "DENO_DIR=%GITV_ROOT%\.deno"
 set "DENO_EXE=%DENO_DIR%\deno.exe"
+REM Pinned, not "latest" - see Planning/security-control-document.md. Bump deliberately.
+set "DENO_VERSION=v2.8.3"
 
 if exist "%DENO_EXE%" (
     echo Deno found at %DENO_EXE% >> "%LOG_FILE%"
@@ -238,7 +248,7 @@ if exist "%DENO_EXE%" (
         echo Deno not found. Downloading... >> "%LOG_FILE%"
         if not exist "%DENO_DIR%" mkdir "%DENO_DIR%"
         set "DENO_ZIP=%DENO_DIR%\deno.zip"
-        "!PS_CMD!" -Command "Invoke-WebRequest -Uri 'https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip' -OutFile '!DENO_ZIP!'" >> "%LOG_FILE%" 2>&1
+        "!PS_CMD!" -Command "Invoke-WebRequest -Uri 'https://github.com/denoland/deno/releases/download/%DENO_VERSION%/deno-x86_64-pc-windows-msvc.zip' -OutFile '!DENO_ZIP!'" >> "%LOG_FILE%" 2>&1
         if errorlevel 1 (
             echo WARNING: Could not download Deno. >> "%LOG_FILE%"
         ) else (
@@ -325,23 +335,14 @@ if exist "%LOCALAPPDATA%\fnm_multishells" (
     )
 )
 
-REM No system Node found — offer local portable download
+REM No system Node found. Try a portable download automatically (no admin
+REM required, no interactive prompt - see Planning/security-control-document.md
+REM for why this script no longer blocks on set /p), then winget, then fall
+REM back to an existing frontend build if one is present.
 echo Node.js not found on system. >> "%LOG_FILE%"
 echo.
 echo Node.js 24+ is required to build the web UI.
-echo You can install it system-wide via winget, or download a portable
-echo copy locally to the GitInTheVan folder ^(no admin required^).
-echo.
-echo   1. Download portable Node.js to .node\ folder ^(recommended^)
-echo   2. Install Node.js system-wide via winget
-echo   3. Skip ^(use existing frontend if available^)
-echo.
-set "NODE_CHOICE="
-set /p NODE_CHOICE="Choose option [1/2/3]: "
-
-if "!NODE_CHOICE!"=="1" goto :node_download_local
-if "!NODE_CHOICE!"=="2" goto :node_install_winget
-goto :node_check_existing
+echo Attempting automatic portable Node.js download to .node\ ^(no admin required^)...
 
 :node_download_local
 echo.
@@ -351,10 +352,9 @@ if not exist "%NODE_LOCAL_DIR%" mkdir "%NODE_LOCAL_DIR%"
 set "NODE_ZIP=%NODE_LOCAL_DIR%\node.zip"
 "!PS_CMD!" -Command "$ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -Uri 'https://nodejs.org/dist/v24.17.0/node-v24.17.0-win-x64.zip' -OutFile '%NODE_ZIP%'" >> "%LOG_FILE%" 2>&1
 if errorlevel 1 (
-    echo ERROR: Failed to download Node.js. >> "%LOG_FILE%"
-    echo ERROR: Failed to download Node.js.
+    echo WARNING: Portable Node.js download failed, trying winget instead. >> "%LOG_FILE%"
     del "%NODE_ZIP%" 2>nul
-    goto :node_check_existing
+    goto :node_install_winget
 )
 echo Extracting...
 "!PS_CMD!" -Command "$ProgressPreference = 'SilentlyContinue'; Expand-Archive -Path '%NODE_ZIP%' -DestinationPath '%NODE_LOCAL_DIR%' -Force" >> "%LOG_FILE%" 2>&1
@@ -376,10 +376,10 @@ if exist "%NODE_LOCAL_DIR%\node.exe" (
     echo Portable Node.js installed.
     goto :node_verify
 ) else (
-    echo ERROR: Portable Node extraction failed. >> "%LOG_FILE%"
+    echo WARNING: Portable Node extraction failed, trying winget instead. >> "%LOG_FILE%"
     echo Contents of !NODE_LOCAL_DIR!: >> "%LOG_FILE%"
     dir "%NODE_LOCAL_DIR%" /b >> "%LOG_FILE%" 2>&1
-    goto :node_check_existing
+    goto :node_install_winget
 )
 
 :node_install_winget

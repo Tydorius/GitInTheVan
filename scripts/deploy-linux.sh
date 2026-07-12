@@ -8,9 +8,9 @@ LOG_FILE="$(dirname "$0")/installer.log"
 exec > >(tee "$LOG_FILE") 2>&1
 
 echo "============================================"
-echo "  GitInTheVan - Linux Deploy
-echo "  Date: $(date)
-echo "  Installer log: $LOG_FILE
+echo "  GitInTheVan - Linux Deploy"
+echo "  Date: $(date)"
+echo "  Installer log: $LOG_FILE"
 echo "============================================"
 echo
 
@@ -24,7 +24,15 @@ echo
 echo "[1/6] Checking Python..."
 PYTHON_CMD=""
 
-if command -v python3 &> /dev/null; then
+# Fast path: reuse an existing venv (matches update-linux.sh's approach).
+# Common case on any machine that's already been set up once, and skips
+# the system-wide discovery below entirely.
+if [ -f "$GITV_ROOT/.venv/bin/python" ]; then
+    PYTHON_CMD="$GITV_ROOT/.venv/bin/python"
+    echo "Using existing virtual environment."
+fi
+
+if [ -z "$PYTHON_CMD" ] && command -v python3 &> /dev/null; then
     python3 --version
     if python3 -c "import sys; exit(0 if sys.version_info >= (3, 12) else 1)" 2>/dev/null; then
         PYTHON_CMD="python3"
@@ -72,7 +80,9 @@ if [ -z "$PYTHON_CMD" ]; then
         fi
 
         if [ -n "$PKG_MGR" ]; then
-            read -p "Would you like to install Python 3.12 via $PKG_MGR? [y/n]: " INSTALL_PY
+            # -t 20: bounded prompt, defaults to empty (declined) on timeout so a
+            # script with no controlling terminal never hangs indefinitely.
+            read -t 20 -p "Would you like to install Python 3.12 via $PKG_MGR? [y/n, defaults to n in 20s]: " INSTALL_PY || true
             if [[ "$INSTALL_PY" =~ ^[Yy]$ ]]; then
                 echo "Installing Python 3.12..."
                 if ! eval "$INSTALL_CMD"; then
@@ -131,6 +141,8 @@ else
 fi
 DENO_DIR="$GITV_ROOT/.deno"
 DENO_BIN="$DENO_DIR/deno"
+# Pinned, not "latest" - see Planning/security-control-document.md. Bump deliberately.
+DENO_VERSION="v2.8.3"
 
 if [ -f "$DENO_BIN" ]; then
     echo "Deno found at $DENO_BIN"
@@ -139,7 +151,7 @@ elif command -v deno &> /dev/null; then
 else
     echo "Deno not found. Downloading..."
     mkdir -p "$DENO_DIR"
-    curl -fsSL "https://github.com/denoland/deno/releases/latest/download/deno-${DENO_ARCH}.zip" -o "$DENO_DIR/deno.zip"
+    curl -fsSL "https://github.com/denoland/deno/releases/download/${DENO_VERSION}/deno-${DENO_ARCH}.zip" -o "$DENO_DIR/deno.zip"
     if [ $? -ne 0 ]; then
         echo "WARNING: Could not download Deno automatically."
         echo "Cantrips will not work. Please install Deno manually from https://deno.land"
@@ -204,7 +216,10 @@ if [ -z "$NODE_CMD" ]; then
     fi
 fi
 
-# If still no Node, offer local download
+# If still no Node, try a portable download automatically (no sudo required,
+# no interactive prompt -- see Planning/security-control-document.md for why
+# this script no longer blocks on read -p), then the system package manager,
+# then fall back to an existing frontend build if one is present.
 if [ -z "$NODE_CMD" ]; then
     echo "Node.js not found on system."
     if [ -f "$GITV_ROOT/static/index.html" ]; then
@@ -214,39 +229,36 @@ if [ -z "$NODE_CMD" ]; then
     else
         echo ""
         echo "Node.js 24+ is required to build the web UI."
-        echo ""
-        echo "Options:"
-        echo "  1. Download portable Node.js to .node/ folder (no sudo required)"
-        echo "  2. Install via your package manager (e.g. apt, dnf, pacman)"
-        echo "  3. Skip (use existing frontend if available)"
-        echo ""
-        read -p "Choose option [1/2/3]: " NODE_CHOICE
+        echo "Attempting automatic portable Node.js download to .node/ (no sudo required)..."
 
-        if [ "$NODE_CHOICE" = "1" ]; then
-            echo "Downloading portable Node.js..."
-            ARCH=$(uname -m)
-            if [ "$ARCH" = "aarch64" ]; then
-                NODE_TARBALL="node-v24.17.0-linux-arm64.tar.xz"
+        ARCH=$(uname -m)
+        if [ "$ARCH" = "aarch64" ]; then
+            NODE_TARBALL="node-v24.17.0-linux-arm64.tar.xz"
+        else
+            NODE_TARBALL="node-v24.17.0-linux-x64.tar.xz"
+        fi
+        mkdir -p "$NODE_LOCAL_DIR"
+        curl -fsSL "https://nodejs.org/dist/v24.17.0/$NODE_TARBALL" -o "/tmp/gitv-node.tar.xz"
+        if [ $? -ne 0 ]; then
+            echo "WARNING: Portable Node.js download failed."
+            rm -f "/tmp/gitv-node.tar.xz"
+        else
+            tar -xJf "/tmp/gitv-node.tar.xz" -C "$NODE_LOCAL_DIR" --strip-components=1
+            rm -f "/tmp/gitv-node.tar.xz"
+            if [ -x "$NODE_LOCAL_DIR/bin/node" ]; then
+                NODE_CMD="$NODE_LOCAL_DIR/bin/node"
+                echo "Portable Node.js installed to $NODE_CMD"
             else
-                NODE_TARBALL="node-v24.17.0-linux-x64.tar.xz"
-            fi
-            mkdir -p "$NODE_LOCAL_DIR"
-            curl -fsSL "https://nodejs.org/dist/v24.17.0/$NODE_TARBALL" -o "/tmp/gitv-node.tar.xz"
-            if [ $? -ne 0 ]; then
-                echo "ERROR: Failed to download Node.js."
-                rm -f "/tmp/gitv-node.tar.xz"
-            else
-                tar -xJf "/tmp/gitv-node.tar.xz" -C "$NODE_LOCAL_DIR" --strip-components=1
-                rm -f "/tmp/gitv-node.tar.xz"
-                if [ -x "$NODE_LOCAL_DIR/bin/node" ]; then
-                    NODE_CMD="$NODE_LOCAL_DIR/bin/node"
-                    echo "Portable Node.js installed to $NODE_CMD"
-                else
-                    echo "ERROR: Portable Node extraction failed."
-                    ls -la "$NODE_LOCAL_DIR/bin/" 2>/dev/null
-                fi
+                echo "WARNING: Portable Node extraction failed."
+                ls -la "$NODE_LOCAL_DIR/bin/" 2>/dev/null
             fi
         fi
+
+        if [ -z "$NODE_CMD" ]; then
+            echo "Portable download unavailable. Please install Node.js 24+ via your"
+            echo "package manager (e.g. apt, dnf, pacman) and re-run this script."
+        fi
+
         if [ -z "$NODE_CMD" ] && [ ! -f "$GITV_ROOT/static/index.html" ]; then
             echo ""
             echo "============================================"
