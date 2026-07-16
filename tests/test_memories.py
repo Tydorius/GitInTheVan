@@ -1,24 +1,21 @@
 import pytest
-from httpx import ASGITransport, AsyncClient
 
-from app.main import app
 from app.models.memory import Memory
 from app.services.admin import update_admin_settings
 from tests.conftest import TestSessionLocal
 
 
 @pytest.fixture
-async def auth_client():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        try:
-            await client.post("/api/auth/setup", json={"username": "testadmin", "password": "TestPass123!"})
-        except Exception:
-            pass
-        resp = await client.post("/api/auth/login", json={"username": "testadmin", "password": "TestPass123!"})
-        token = resp.json()["access_token"]
-        client.headers["Authorization"] = f"Bearer {token}"
-        yield client
+async def auth_client(client):
+    setup_resp = await client.post(
+        "/api/auth/setup",
+        json={"username": "admin", "password": "adminpass123"},
+    )
+    assert setup_resp.status_code == 201
+    token = setup_resp.json()["access_token"]
+    client.headers["Authorization"] = f"Bearer {token}"
+    yield client
+    client.headers.pop("Authorization", None)
 
 
 async def _current_user_id(client) -> str:
@@ -69,11 +66,13 @@ class TestMemoryUpdate:
     async def test_update_exceeds_total_size_limit(self, auth_client):
         user_id = await _current_user_id(auth_client)
         memory_id = await _seed_memory(user_id)
-        await update_admin_settings({"max_memory_size_mb": 1})
-        oversized = "x" * (2 * 1024 * 1024)
-        resp = await auth_client.put(f"/api/memories/{memory_id}", json={"value": oversized})
-        assert resp.status_code == 413
-        await update_admin_settings({"max_memory_size_mb": 50})
+        try:
+            await update_admin_settings({"max_memory_size_mb": 1})
+            oversized = "x" * (2 * 1024 * 1024)
+            resp = await auth_client.put(f"/api/memories/{memory_id}", json={"value": oversized})
+            assert resp.status_code == 413
+        finally:
+            await update_admin_settings({"max_memory_size_mb": 50})
 
     async def test_delete_memory(self, auth_client):
         user_id = await _current_user_id(auth_client)

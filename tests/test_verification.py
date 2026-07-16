@@ -361,12 +361,14 @@ class TestRuleCRUD:
     async def test_create_exceeds_prompt_size_limit(self, admin_client):
         from app.services.admin import update_admin_settings
         client, _, _ = admin_client
-        await update_admin_settings({"max_rule_size_kb": 1})
-        resp = await client.post("/api/verification/rules", json={
-            "name": "TooBig", "prompt": "x" * 2000,
-        })
-        assert resp.status_code == 413
-        await update_admin_settings({"max_rule_size_kb": 25})
+        try:
+            await update_admin_settings({"max_rule_size_kb": 1})
+            resp = await client.post("/api/verification/rules", json={
+                "name": "TooBig", "prompt": "x" * 2000,
+            })
+            assert resp.status_code == 413
+        finally:
+            await update_admin_settings({"max_rule_size_kb": 25})
 
     @pytest.mark.asyncio
     async def test_create_strips_control_chars_in_prompt(self, admin_client):
@@ -693,3 +695,203 @@ class TestProxyVerificationIntegration:
         assert resp.status_code == 200
         content = resp.json()["choices"][0]["message"]["content"]
         assert "Bad response 2" in content
+
+    @pytest.mark.asyncio
+    async def test_verification_loop_runs_real_path(self, admin_client, httpx_mock):
+        """Exercise the real parse -> strategy -> retry path by mocking ONLY the
+        upstream HTTP layer (not check_response). A violation verdict from the
+        verifier must trigger one driver retry, after which a clean verdict is
+        approved and returned. If _parse_judgment, _build_verification_messages,
+        or _apply_resubmission_strategy regresses, this fails."""
+        client, _, api_key = admin_client
+
+        # Distinct URLs so httpx_mock routes driver and verifier calls unambiguously.
+        driver_url = "http://driver-backend:9999"
+        verify_url = "http://verify-backend:8888"
+
+        driver_ep = await client.post("/api/endpoints", json={
+            "name": "Main", "base_url": driver_url, "api_key": "sk-test",
+        })
+        await client.put("/api/settings", json={"default_endpoint_id": driver_ep.json()["id"]})
+
+        verify_ep = await client.post("/api/endpoints", json={
+            "name": "Verifier", "base_url": verify_url, "api_key": "sk-verify", "api_base_path": "/v1",
+        })
+
+        await client.post("/api/verification/rules", json={
+            "name": "Char Check",
+            "prompt": "Response must stay in character.",
+            "max_retries": 2,
+        })
+        await client.put("/api/verification/settings", json={
+            "verification_enabled": True,
+            "verification_endpoint_id": verify_ep.json()["id"],
+            "verification_model": "test-model",
+        })
+
+        # Driver: violating response first, clean response on retry.
+        httpx_mock.add_response(
+            url=f"{driver_url}/v1/chat/completions",
+            json=_mock_llm_response("I am an AI language model."),
+            status_code=200,
+        )
+        httpx_mock.add_response(
+            url=f"{driver_url}/v1/chat/completions",
+            json=_mock_llm_response("Greetings! I am Aria the traveler."),
+            status_code=200,
+        )
+        # Verifier: flag first as violation, then approve.
+        httpx_mock.add_response(
+            url=f"{verify_url}/v1/chat/completions",
+            json=_mock_verification_response(violation=True, reason="Broke character", severity="high"),
+            status_code=200,
+        )
+        httpx_mock.add_response(
+            url=f"{verify_url}/v1/chat/completions",
+            json=_mock_verification_response(violation=False),
+            status_code=200,
+        )
+
+        resp = await client.post("/v1/chat/completions", json={
+            "model": "test",
+            "messages": [{"role": "user", "content": "Hi"}],
+        }, headers={"Authorization": f"Bearer {api_key}"})
+
+        assert resp.status_code == 200
+        content = resp.json()["choices"][0]["message"]["content"]
+        # The clean (retried) response is returned, proving parse+strategy+retry ran.
+        assert "Aria" in content
+
+
+# ============================================================================
+# Tag activation: a rule with is_active=False + tag fires only when its
+# <#verify-tag#> activation tag is present in the prompt.
+# ============================================================================
+
+
+class TestVerificationTagActivation:
+    @pytest.fixture
+    async def client(self):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
+
+    @pytest.fixture
+    async def admin_client(self, client):
+        setup_resp = await client.post(
+            "/api/auth/setup",
+            json={"username": "admin", "password": "adminpass123"},
+        )
+        assert setup_resp.status_code == 201
+        token = setup_resp.json()["access_token"]
+        api_key = setup_resp.json()["api_key"]
+        client.headers["Authorization"] = f"Bearer {token}"
+        yield client, token, api_key
+
+    DRIVER_URL = "http://mock-backend:9999"
+    VERIFY_URL = "http://verify-backend:8888"
+
+    @pytest.fixture(autouse=True)
+    def set_endpoint(self, monkeypatch):
+        from app.config import Settings
+        test_settings = Settings(
+            default_endpoint_url=self.DRIVER_URL,
+            default_endpoint_api_key="sk-test-key",
+            default_endpoint_model="test-model",
+        )
+        monkeypatch.setattr("app.services.proxy.settings", test_settings)
+
+    async def _setup_tagged_rule(self, client):
+        """Create a driver endpoint (default) + a distinct verification endpoint,
+        enable verification, and create one rule that is inactive but tag-gated."""
+        driver_ep = await client.post("/api/endpoints", json={
+            "name": "Driver", "base_url": self.DRIVER_URL, "api_key": "sk-driver",
+        })
+        await client.put("/api/settings", json={"default_endpoint_id": driver_ep.json()["id"]})
+
+        verify_ep = await client.post("/api/endpoints", json={
+            "name": "Verifier", "base_url": self.VERIFY_URL, "api_key": "sk-verify",
+            "api_base_path": "/v1",
+        })
+
+        await client.post("/api/verification/rules", json={
+            "name": "Char Mode Check",
+            "prompt": "Response must stay in character.",
+            "max_retries": 2,
+            "is_active": False,
+            "tag": "charmode",
+        })
+
+        await client.put("/api/verification/settings", json={
+            "verification_enabled": True,
+            "verification_endpoint_id": verify_ep.json()["id"],
+            "verification_model": "verify-model",
+        })
+
+    @pytest.mark.asyncio
+    async def test_tag_absent_rule_does_not_fire(self, admin_client, httpx_mock):
+        """Inactive rule with a tag must NOT run verification when the tag is absent."""
+        client, _, api_key = admin_client
+        await self._setup_tagged_rule(client)
+
+        httpx_mock.add_response(
+            url=f"{self.DRIVER_URL}/v1/chat/completions",
+            json=_mock_llm_response("Plain driver response, no verification."),
+            status_code=200,
+        )
+
+        resp = await client.post("/v1/chat/completions", json={
+            "model": "test",
+            "messages": [{"role": "user", "content": "Hi, no activation tag here."}],
+        }, headers={"Authorization": f"Bearer {api_key}"})
+
+        assert resp.status_code == 200
+        assert resp.json()["choices"][0]["message"]["content"] == "Plain driver response, no verification."
+        # Verification endpoint must NOT have been hit: the only recorded request
+        # is the single driver call.
+        assert len(httpx_mock.get_requests()) == 1
+        assert self.VERIFY_URL not in str(httpx_mock.get_requests()[-1].url)
+
+    @pytest.mark.asyncio
+    async def test_tag_present_rule_fires(self, admin_client, httpx_mock):
+        """Same inactive+tagged rule, but the prompt carries <#verify-charmode#>:
+        the rule activates, verification runs, and a violation triggers a retry."""
+        client, _, api_key = admin_client
+        await self._setup_tagged_rule(client)
+
+        # Driver: first a violating response, then a clean one on retry.
+        httpx_mock.add_response(
+            url=f"{self.DRIVER_URL}/v1/chat/completions",
+            json=_mock_llm_response("I am an AI assistant, not a character."),
+            status_code=200,
+        )
+        httpx_mock.add_response(
+            url=f"{self.DRIVER_URL}/v1/chat/completions",
+            json=_mock_llm_response("Greetings, traveler! I am Aria the smith."),
+            status_code=200,
+        )
+        # Verifier: flag the first response as a violation, then approve.
+        httpx_mock.add_response(
+            url=f"{self.VERIFY_URL}/v1/chat/completions",
+            json=_mock_verification_response(violation=True, reason="Broke character", severity="high"),
+            status_code=200,
+        )
+        httpx_mock.add_response(
+            url=f"{self.VERIFY_URL}/v1/chat/completions",
+            json=_mock_verification_response(violation=False),
+            status_code=200,
+        )
+
+        resp = await client.post("/v1/chat/completions", json={
+            "model": "test",
+            "messages": [{"role": "user", "content": "Hello. <#verify-charmode#>"}],
+        }, headers={"Authorization": f"Bearer {api_key}"})
+
+        assert resp.status_code == 200
+        content = resp.json()["choices"][0]["message"]["content"]
+        # The retried (clean) response is what the user sees.
+        assert "Aria" in content
+        # Both endpoints were exercised: driver (twice) + verifier (twice).
+        all_urls = [str(r.url) for r in httpx_mock.get_requests()]
+        assert any(self.VERIFY_URL in u for u in all_urls), "Verification endpoint was never hit"
+        assert any(self.DRIVER_URL in u for u in all_urls), "Driver endpoint was never hit"

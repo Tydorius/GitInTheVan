@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { isAuthenticated, currentRoute, logout, isAdmin, initializeAuth } from './stores'
+  import { isAuthenticated, currentRoute, logout, isAdmin, initializeAuth, siteBanner, loadSiteBanner } from './stores'
   import { onMount } from 'svelte'
   import { api } from './api'
   import Login from './pages/Login.svelte'
@@ -44,8 +44,15 @@
     } catch {}
   }
 
+  const bannerColors: Record<string, string> = {
+    info: '#2563eb',
+    warning: '#d97706',
+    danger: '#dc2626',
+  }
+
   onMount(() => {
     initializeAuth()
+    loadSiteBanner()
     setTimeout(checkForUpdates, 3000)
     setInterval(checkForUpdates, 300000)
   })
@@ -65,6 +72,11 @@
   $: page = route.split('?')[0]
 </script>
 
+{#if $siteBanner}
+  <div class="site-banner" style="background: {bannerColors[$siteBanner.level] || bannerColors.info};">
+    {$siteBanner.banner}
+  </div>
+{/if}
 {#if !$isAuthenticated}
   <Login />
 {:else if $isAuthenticated && (page === '/login' || page === '')}

@@ -1,0 +1,10 @@
+# Windows batch files require CRLF line endings -- cmd.exe misparses LF-only
+# .bat files under some non-interactive invocations (confirmed 2026-07-12,
+# see Planning/security-control-document.md and Planning/installation-guide.md).
+# This has regressed at least twice from editors/tools normalizing to LF on
+# save. Force CRLF here so it can't happen again regardless of local git
+# config or editor settings.
+*.bat text eol=crlf
+
+# Shell scripts must stay LF regardless of platform.
+*.sh text eol=lf

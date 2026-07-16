@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -69,7 +70,17 @@ async def lifespan(app: FastAPI):
     from app.services.firewall_check import check_firewall
     check_firewall(settings.port)
     await init_db()
+
+    from app.services.backup import backup_scheduler_loop
+    backup_task = asyncio.create_task(backup_scheduler_loop())
+
     yield
+
+    backup_task.cancel()
+    try:
+        await backup_task
+    except asyncio.CancelledError:
+        pass
     logger.info("GitInTheVan shutting down")
 
 
@@ -146,6 +157,14 @@ app.include_router(admin_router)
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
+
+
+@app.get("/api/site-banner")
+async def get_site_banner():
+    from app.services.admin import get_admin_settings
+
+    s = await get_admin_settings()
+    return {"banner": s.site_banner, "level": s.site_banner_level}
 
 
 _static_dir = Path(__file__).resolve().parent.parent / "static"

@@ -17,10 +17,12 @@ _TEMPLATE_PATH = Path(__file__).parent / "deno_template.mjs"
 
 
 def _find_deno() -> str | None:
-    env_path = os.environ.get("GITV_DENO_PATH", "")
-    if env_path and Path(env_path).exists():
-        return env_path
+    # Explicit config value (populated from GITV_DENO_PATH in .env by Settings).
+    from app.config import settings
+    if settings.deno_path and Path(settings.deno_path).exists():
+        return settings.deno_path
 
+    # Local pinned install laid down by the deploy scripts (.deno/deno[.exe]).
     local = Path(__file__).resolve().parent.parent.parent / ".deno" / "deno.exe"
     if local.exists():
         return str(local)

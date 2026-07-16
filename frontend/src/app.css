@@ -61,6 +61,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 textarea { font-family: var(--mono); resize: vertical; min-height: 80px; }
 label { display: block; margin-bottom: 4px; color: var(--text-dim); font-size: 12px; }
 
+.site-banner { position: sticky; top: 0; z-index: 100; padding: 10px 16px; text-align: center; color: #fff; font-size: 13px; font-weight: 500; }
+
 .app-layout { display: flex; min-height: 100vh; }
 .sidebar { width: 220px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
 .sidebar-header { padding: 20px; border-bottom: 1px solid var(--border); }

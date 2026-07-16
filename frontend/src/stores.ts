@@ -5,6 +5,16 @@ import { api } from './api';
 export const isAuthenticated = writable(!!getToken());
 export const currentRoute = writable(window.location.hash.slice(1) || '/');
 export const isAdmin = writable(false);
+export const siteBanner = writable<{ banner: string; level: string } | null>(null);
+
+export async function loadSiteBanner() {
+  try {
+    const result = await api.getSiteBanner();
+    siteBanner.set(result.banner ? result : null);
+  } catch {
+    siteBanner.set(null);
+  }
+}
 
 export function logout() {
   clearToken();

@@ -3,6 +3,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.services.admin as _admin_module
+import app.services.backup as _backup_module
 import app.services.budget as _budget_module
 import app.services.bypass as _bypass_module
 import app.services.cantrip as _cantrip_module
@@ -38,6 +39,7 @@ _original_bypass_session = _bypass_module.async_session
 _original_budget_session = _budget_module.async_session
 _original_debug_session = _debug_module.async_session
 _original_admin_session = _admin_module.async_session
+_original_backup_session = _backup_module.async_session
 _original_map_pipeline_session = _map_pipeline_module.async_session
 _original_scenario_summarizer_session = _scenario_summarizer_module.async_session
 
@@ -67,6 +69,7 @@ async def setup_database():
     _budget_module.async_session = TestSessionLocal
     _debug_module.async_session = TestSessionLocal
     _admin_module.async_session = TestSessionLocal
+    _backup_module.async_session = TestSessionLocal
     _map_pipeline_module.async_session = TestSessionLocal
     _scenario_summarizer_module.async_session = TestSessionLocal
     async with test_engine.begin() as conn:
@@ -85,6 +88,7 @@ async def setup_database():
     _budget_module.async_session = _original_budget_session
     _debug_module.async_session = _original_debug_session
     _admin_module.async_session = _original_admin_session
+    _backup_module.async_session = _original_backup_session
     _map_pipeline_module.async_session = _original_map_pipeline_session
     _scenario_summarizer_module.async_session = _original_scenario_summarizer_session
     async with test_engine.begin() as conn:
