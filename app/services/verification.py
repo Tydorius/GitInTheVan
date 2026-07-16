@@ -291,7 +291,7 @@ async def _create_log_entry(
 
 
 async def load_verification_config(
-    db: AsyncSession, user_id: str
+    db: AsyncSession, user_id: str, tags: list | None = None
 ) -> tuple[list[VerificationRule], Endpoint | None, str, int]:
     settings_result = await db.execute(
         select(UserSettings).where(UserSettings.user_id == user_id)
@@ -303,13 +303,16 @@ async def load_verification_config(
 
     rules_result = await db.execute(
         select(VerificationRule)
-        .where(
-            VerificationRule.user_id == user_id,
-            VerificationRule.is_active.is_(True),
-        )
+        .where(VerificationRule.user_id == user_id)
         .order_by(VerificationRule.execution_order, VerificationRule.created_at)
     )
-    rules = list(rules_result.scalars().all())
+    candidate_rules = list(rules_result.scalars().all())
+
+    from app.services.tagging import should_activate_resource
+    rules = [
+        r for r in candidate_rules
+        if should_activate_resource(r.tag, "verify", r.is_active, False, r.user_id, user_id, tags or [])
+    ]
 
     if not rules:
         return [], None, "", 0
@@ -336,9 +339,9 @@ async def load_verification_config(
     return rules, endpoint, user_settings.verification_model, max_retries
 
 
-async def is_verification_enabled(user_id: str) -> bool:
+async def is_verification_enabled(user_id: str, tags: list | None = None) -> bool:
     async with async_session() as db:
-        rules, endpoint, _, _ = await load_verification_config(db, user_id)
+        rules, endpoint, _, _ = await load_verification_config(db, user_id, tags)
         return len(rules) > 0 and endpoint is not None
 
 
@@ -351,10 +354,11 @@ async def run_verification_loop(
     timeout: httpx.Timeout,
     user_id: str,
     conversation_id: str = "",
+    tags: list | None = None,
 ) -> tuple[dict[str, Any], VerificationLoopResult | None]:
     async with async_session() as db:
         rules, v_endpoint, v_model, max_retries = await load_verification_config(
-            db, user_id
+            db, user_id, tags
         )
 
         rule_endpoints: dict[str, tuple[Endpoint, str]] = {}

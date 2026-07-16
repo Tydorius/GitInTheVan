@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     default_endpoint_api_base_path: str = ""
     request_timeout: int = 300
 
+    deno_path: str = ""
+
     cors_origins: str = "*"
     rate_limit_enabled: bool = True
     rate_limit_proxy_per_min: int = 60

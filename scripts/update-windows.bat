@@ -40,6 +40,38 @@ echo Done.
 echo.
 
 REM ============================================================
+REM Start maintenance page (served until the real server restarts)
+REM ============================================================
+set "MAINT_SCRIPT=%GITV_ROOT%\data\_maintenance_server.py"
+if not exist "%GITV_ROOT%\.venv\Scripts\python.exe" goto :skip_maintenance_page
+
+REM Delayed expansion (enabled at the top of this script) mangles "!" in
+REM literal text (e.g. "<!doctype html>"), so it is disabled for this block.
+REM Outside of an if/for block, parens don't need ^ escaping - only the
+REM always-special redirection characters < and > do.
+setlocal disabledelayedexpansion
+> "%MAINT_SCRIPT%" echo import http.server as hs
+>> "%MAINT_SCRIPT%" echo import socketserver as ss
+>> "%MAINT_SCRIPT%" echo PAGE = b'^<!doctype html^>^<html^>^<head^>^<meta charset="utf-8"^>^<meta http-equiv="refresh" content="10"^>^<title^>GitInTheVan - Updating^</title^>^<style^>body{font-family:sans-serif;text-align:center;padding-top:15vh;background:#111;color:#eee}^</style^>^</head^>^<body^>^<h1^>GitInTheVan is updating^</h1^>^<p^>This page will refresh automatically.^</p^>^</body^>^</html^>'
+>> "%MAINT_SCRIPT%" echo Handler = type('Handler', (hs.BaseHTTPRequestHandler,), {})
+>> "%MAINT_SCRIPT%" echo def _do_get(self): self.send_response(200); self.send_header('Content-Type', 'text/html'); self.send_header('Content-Length', str(len(PAGE))); self.end_headers(); self.wfile.write(PAGE)
+>> "%MAINT_SCRIPT%" echo Handler.do_GET = _do_get
+>> "%MAINT_SCRIPT%" echo Handler.log_message = lambda self, *a: None
+>> "%MAINT_SCRIPT%" echo Server = type('Server', (ss.TCPServer,), {'allow_reuse_address': True})
+>> "%MAINT_SCRIPT%" echo httpd = Server(('0.0.0.0', 8000), Handler)
+>> "%MAINT_SCRIPT%" echo httpd.serve_forever()
+endlocal
+
+if exist "%MAINT_SCRIPT%" (
+    start "" /b "%GITV_ROOT%\.venv\Scripts\python.exe" "%MAINT_SCRIPT%"
+    echo Maintenance page serving on port 8000 during update. >> "%LOG_FILE%"
+) else (
+    echo WARNING: Failed to write maintenance page script. >> "%LOG_FILE%"
+)
+:skip_maintenance_page
+echo.
+
+REM ============================================================
 REM Backup database
 REM ============================================================
 echo [2/6] Backing up database...
@@ -208,6 +240,12 @@ echo ============================================
 echo.
 
 cd /d "%GITV_ROOT%"
+
+REM Stop the maintenance page so the real server can bind port 8000
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8000.*LISTENING"') do (
+    taskkill /PID %%a /F >nul 2>&1
+)
+del "%MAINT_SCRIPT%" >nul 2>&1
 
 REM Start server in a new process, then clean up this script
 start "" "%GITV_ROOT%\.venv\Scripts\python" -m app.main

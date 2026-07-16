@@ -578,6 +578,67 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
         ALTER TABLE admin_settings ADD COLUMN url_blocklist TEXT DEFAULT '' NOT NULL;
         """,
     ),
+    (
+        "038_add_site_banner",
+        """
+        ALTER TABLE admin_settings ADD COLUMN site_banner TEXT DEFAULT '' NOT NULL;
+        ALTER TABLE admin_settings ADD COLUMN site_banner_level VARCHAR(16) DEFAULT 'info' NOT NULL;
+        """,
+    ),
+    (
+        "039_add_backup_settings",
+        """
+        ALTER TABLE admin_settings ADD COLUMN backup_schedule_enabled BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE admin_settings ADD COLUMN backup_schedule_days VARCHAR(32) DEFAULT '' NOT NULL;
+        ALTER TABLE admin_settings ADD COLUMN backup_schedule_time VARCHAR(8) DEFAULT '03:00' NOT NULL;
+        ALTER TABLE admin_settings ADD COLUMN backup_retention_count INTEGER DEFAULT 7 NOT NULL;
+        ALTER TABLE admin_settings ADD COLUMN backup_dir VARCHAR(512) DEFAULT '' NOT NULL;
+        """,
+    ),
+    (
+        "040_create_backup_runs_table",
+        {
+            "sqlite": """
+                CREATE TABLE IF NOT EXISTS backup_runs (
+                    id VARCHAR(36) PRIMARY KEY,
+                    triggered_by VARCHAR(16) NOT NULL,
+                    status VARCHAR(16) NOT NULL,
+                    file_path TEXT DEFAULT '' NOT NULL,
+                    size_bytes INTEGER DEFAULT 0 NOT NULL,
+                    error_message TEXT DEFAULT '' NOT NULL,
+                    started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS ix_backup_runs_started_at ON backup_runs (started_at);
+            """,
+            "postgresql": """
+                CREATE TABLE IF NOT EXISTS backup_runs (
+                    id VARCHAR(36) PRIMARY KEY,
+                    triggered_by VARCHAR(16) NOT NULL,
+                    status VARCHAR(16) NOT NULL,
+                    file_path TEXT DEFAULT '' NOT NULL,
+                    size_bytes INTEGER DEFAULT 0 NOT NULL,
+                    error_message TEXT DEFAULT '' NOT NULL,
+                    started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS ix_backup_runs_started_at ON backup_runs (started_at);
+            """,
+            "mysql": """
+                CREATE TABLE IF NOT EXISTS backup_runs (
+                    id VARCHAR(36) PRIMARY KEY,
+                    triggered_by VARCHAR(16) NOT NULL,
+                    status VARCHAR(16) NOT NULL,
+                    file_path TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL DEFAULT 0,
+                    error_message TEXT NOT NULL,
+                    started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TIMESTAMP NULL
+                );
+                CREATE INDEX ix_backup_runs_started_at ON backup_runs (started_at);
+            """,
+        },
+    ),
 ]
 
 

@@ -40,6 +40,48 @@ fi
 echo
 
 # ============================================================
+# Start maintenance page (served until the real server restarts)
+# ============================================================
+MAINT_SCRIPT="$GITV_ROOT/data/_maintenance_server.py"
+if [ -f "$GITV_ROOT/.venv/bin/python" ]; then
+    cat > "$MAINT_SCRIPT" << 'PYEOF'
+import http.server
+import socketserver
+
+PAGE = b"""<!doctype html><html><head><meta charset="utf-8">
+<meta http-equiv="refresh" content="10">
+<title>GitInTheVan - Updating</title>
+<style>body{font-family:sans-serif;text-align:center;padding-top:15%;background:#111;color:#eee}</style>
+</head><body><h1>GitInTheVan is updating</h1>
+<p>This page will refresh automatically.</p></body></html>"""
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("Content-Length", str(len(PAGE)))
+        self.end_headers()
+        self.wfile.write(PAGE)
+
+    def log_message(self, *args):
+        pass
+
+
+class ReusableTCPServer(socketserver.TCPServer):
+    allow_reuse_address = True
+
+
+with ReusableTCPServer(("0.0.0.0", 8000), Handler) as httpd:
+    httpd.serve_forever()
+PYEOF
+    nohup "$GITV_ROOT/.venv/bin/python" "$MAINT_SCRIPT" > /dev/null 2>&1 &
+    disown
+    echo "Maintenance page serving on port 8000 during update."
+fi
+echo
+
+# ============================================================
 # Backup database
 # ============================================================
 echo "[2/6] Backing up database..."
@@ -66,8 +108,12 @@ if [ -f "$ZIP_FILE" ]; then
 
     if command -v unzip &> /dev/null; then
         unzip -o -q "$ZIP_FILE" -d "$EXTRACT_TEMP"
+    elif [ -f "$GITV_ROOT/.venv/bin/python" ]; then
+        # unzip is not installed by default on some minimal distros; fall
+        # back to the venv's Python zipfile module (see deploy-linux.sh).
+        "$GITV_ROOT/.venv/bin/python" -c "import zipfile; zipfile.ZipFile('$ZIP_FILE').extractall('$EXTRACT_TEMP')"
     else
-        echo "ERROR: unzip command not found. Cannot extract zip."
+        echo "ERROR: unzip command not found and no Python venv available to fall back on. Cannot extract zip."
         exit 1
     fi
 
@@ -124,8 +170,12 @@ if [ -z "$NODE_CMD" ]; then
 else
     echo "Using Node: $NODE_CMD"
     cd "$GITV_ROOT/frontend"
-    "$NPM_CMD" install -q
-    "$NPM_CMD" run build || echo "WARNING: Frontend build failed. Using existing build."
+    # npm's own bin/npm script (and anything it spawns, e.g. vite's
+    # `env node` shebang) needs `node` resolvable via PATH, not just the
+    # absolute $NODE_CMD path - required when using the portable .node/
+    # install with no system-wide Node.js on PATH.
+    PATH="$(dirname "$NODE_CMD"):$PATH" "$NPM_CMD" install -q
+    PATH="$(dirname "$NODE_CMD"):$PATH" "$NPM_CMD" run build || echo "WARNING: Frontend build failed. Using existing build."
     cd "$GITV_ROOT"
     echo "Frontend rebuilt."
 fi
@@ -142,6 +192,13 @@ echo "============================================"
 echo
 
 cd "$GITV_ROOT"
+
+# Stop the maintenance page so the real server can bind port 8000
+if lsof -ti:8000 > /dev/null 2>&1; then
+    kill "$(lsof -ti:8000)" 2>/dev/null || true
+    sleep 1
+fi
+rm -f "$MAINT_SCRIPT" 2>/dev/null || true
 
 # Clean up auto-update script
 rm -f "$GITV_ROOT/data/auto-update.sh" 2>/dev/null || true

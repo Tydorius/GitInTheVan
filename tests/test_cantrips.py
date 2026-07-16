@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -8,7 +9,13 @@ from app.main import app
 from app.services.cantrip_context import apply_cantrip_result_to_messages, build_context
 from app.services.deno_runner import DENO_PATH, run_cantrip
 
-JANITOR_SCRIPTS_DIR = Path(r"E:\github\JanitorScripts\JanitorAI_Scripts")
+# Repo-relative fixture cantrips (no external paths).
+FIXTURES_DIR = Path(__file__).parent / "fixtures" / "cantrips"
+
+# Optional: real JanitorAI scripts for backward-compat coverage. Opt-in via env
+# var so tests never depend on a path outside this repository by default.
+_janitor_env = os.environ.get("GITV_JANITOR_SCRIPTS_DIR", "").strip()
+JANITOR_SCRIPTS_DIR = Path(_janitor_env) if _janitor_env else None
 
 SKIP_DENO = not DENO_PATH
 
@@ -19,8 +26,8 @@ pytestmark = pytest.mark.skipif(SKIP_DENO, reason="Deno not available")
 # Helpers
 # ============================================================================
 
-def _load_script(name: str) -> str:
-    return (JANITOR_SCRIPTS_DIR / name).read_text(encoding="utf-8")
+def _load_fixture(name: str) -> str:
+    return (FIXTURES_DIR / name).read_text(encoding="utf-8")
 
 
 def _make_context(
@@ -667,12 +674,14 @@ class TestCantripCRUD:
     async def test_create_exceeds_size_limit(self, admin_client):
         from app.services.admin import update_admin_settings
         client, _, _ = admin_client
-        await update_admin_settings({"max_script_size_kb": 1})
-        resp = await client.post("/api/cantrips", json={
-            "name": "TooBig", "code": "x = 1;" * 500,
-        })
-        assert resp.status_code == 413
-        await update_admin_settings({"max_script_size_kb": 50})
+        try:
+            await update_admin_settings({"max_script_size_kb": 1})
+            resp = await client.post("/api/cantrips", json={
+                "name": "TooBig", "code": "x = 1;" * 500,
+            })
+            assert resp.status_code == 413
+        finally:
+            await update_admin_settings({"max_script_size_kb": 50})
 
     @pytest.mark.asyncio
     async def test_update_exceeds_size_limit(self, admin_client):
@@ -680,10 +689,12 @@ class TestCantripCRUD:
         client, _, _ = admin_client
         create = await client.post("/api/cantrips", json={"name": "Small", "code": "const x = 1;"})
         cantrip_id = create.json()["id"]
-        await update_admin_settings({"max_script_size_kb": 1})
-        resp = await client.put(f"/api/cantrips/{cantrip_id}", json={"code": "x = 1;" * 500})
-        assert resp.status_code == 413
-        await update_admin_settings({"max_script_size_kb": 50})
+        try:
+            await update_admin_settings({"max_script_size_kb": 1})
+            resp = await client.put(f"/api/cantrips/{cantrip_id}", json={"code": "x = 1;" * 500})
+            assert resp.status_code == 413
+        finally:
+            await update_admin_settings({"max_script_size_kb": 50})
 
     @pytest.mark.asyncio
     async def test_create_with_suspicious_pattern_is_not_blocked(self, admin_client):
@@ -812,41 +823,23 @@ class TestCantripTestEndpoint:
 
 
 # ============================================================================
-# Real JanitorAI Script Templates
+# Fixture Cantrip Templates (repo-relative, no external paths)
 # ============================================================================
 
-class TestRealJanitorAICantrips:
-    @pytest.mark.asyncio
-    async def test_complex_lorebook_template(self):
-        if not JANITOR_SCRIPTS_DIR.exists():
-            pytest.skip("JanitorAI scripts directory not found")
-        code = _load_script("Complex_Lorebook_Template.js")
-        ctx = build_context(
-            messages=[
-                {"role": "system", "content": "You are a fantasy character."},
-                {"role": "user", "content": "Tell me about the kingdom of example and its politics"},
-            ],
-            conversation_id="fantasy-1",
-            character_name="Aria",
-            character_description="A wise sage",
-        )
-        result = await run_cantrip(code, ctx, timeout_ms=10000)
-        assert result.error is None
-        assert "Example Kingdom" in result.scenario or "Example" in result.scenario
+class TestFixtureCantrips:
+    """Exercises realistic JanitorAI-style script patterns using self-contained
+    fixture cantrips under tests/fixtures/cantrips/. These replace the former
+    hard-coded external JanitorScripts path so the suite runs from a clean
+    checkout."""
 
     @pytest.mark.asyncio
-    async def test_complex_lorebook_keyword_match(self):
-        if not JANITOR_SCRIPTS_DIR.exists():
-            pytest.skip("JanitorAI scripts directory not found")
-        code = _load_script("Complex_Lorebook_Template.js")
+    async def test_keyword_lorebook_match(self):
+        code = _load_fixture("keyword_lorebook.js")
         ctx = build_context(
             messages=[
-                {"role": "system", "content": "You are a fantasy character."},
-                {"role": "user", "content": "I want to explore the crystal tower"},
-                {"role": "assistant", "content": "**Day:** 3"},
                 {"role": "user", "content": "Tell me about the crystal tower"},
             ],
-            conversation_id="fantasy-2",
+            conversation_id="fantasy-1",
             character_name="Aria",
         )
         result = await run_cantrip(code, ctx, timeout_ms=10000)
@@ -854,10 +847,23 @@ class TestRealJanitorAICantrips:
         assert "Crystal Tower" in result.scenario
 
     @pytest.mark.asyncio
-    async def test_complex_lorebook_no_match(self):
-        if not JANITOR_SCRIPTS_DIR.exists():
-            pytest.skip("JanitorAI scripts directory not found")
-        code = _load_script("Complex_Lorebook_Template.js")
+    async def test_keyword_lorebook_multi_match(self):
+        code = _load_fixture("keyword_lorebook.js")
+        ctx = build_context(
+            messages=[
+                {"role": "user", "content": "Tell me about the example kingdom and its politics"},
+            ],
+            conversation_id="fantasy-2",
+            character_name="Aria",
+            character_description="A wise sage",
+        )
+        result = await run_cantrip(code, ctx, timeout_ms=10000)
+        assert result.error is None
+        assert "Example Kingdom" in result.scenario
+
+    @pytest.mark.asyncio
+    async def test_keyword_lorebook_no_match(self):
+        code = _load_fixture("keyword_lorebook.js")
         ctx = build_context(
             messages=[
                 {"role": "user", "content": "Hello, nice weather today"},
@@ -869,42 +875,21 @@ class TestRealJanitorAICantrips:
         assert "Example Kingdom" not in result.scenario
 
     @pytest.mark.asyncio
-    async def test_multiple_character_template(self):
-        if not JANITOR_SCRIPTS_DIR.exists():
-            pytest.skip("JanitorAI scripts directory not found")
-        code = _load_script("Multiple_Character_Template.js")
+    async def test_dice_command_no_roll(self):
+        code = _load_fixture("keyword_lorebook.js")
         ctx = build_context(
-            messages=[
-                {"role": "user", "content": "I see Character A approaching"},
-            ],
-            conversation_id="multi-1",
-        )
-        result = await run_cantrip(code, ctx, timeout_ms=10000)
-        assert result.error is None
-
-    @pytest.mark.asyncio
-    async def test_dice_controller_no_roll(self):
-        if not JANITOR_SCRIPTS_DIR.exists():
-            pytest.skip("JanitorAI scripts directory not found")
-        code = _load_script("Dice_Controller.js")
-        ctx = build_context(
-            messages=[
-                {"role": "user", "content": "Hello there"},
-            ],
+            messages=[{"role": "user", "content": "Hello there"}],
             conversation_id="dice-1",
         )
         result = await run_cantrip(code, ctx, timeout_ms=10000)
         assert result.error is None
+        assert "DICE SYSTEM" not in result.scenario
 
     @pytest.mark.asyncio
-    async def test_dice_controller_user_roll(self):
-        if not JANITOR_SCRIPTS_DIR.exists():
-            pytest.skip("JanitorAI scripts directory not found")
-        code = _load_script("Dice_Controller.js")
+    async def test_dice_command_user_roll(self):
+        code = _load_fixture("keyword_lorebook.js")
         ctx = build_context(
-            messages=[
-                {"role": "user", "content": "/roll 2d6+3"},
-            ],
+            messages=[{"role": "user", "content": "/roll 2d6+3"}],
             conversation_id="dice-2",
         )
         result = await run_cantrip(code, ctx, timeout_ms=10000)
@@ -912,38 +897,8 @@ class TestRealJanitorAICantrips:
         assert "DICE SYSTEM" in result.scenario
 
     @pytest.mark.asyncio
-    async def test_context_control_template(self):
-        if not JANITOR_SCRIPTS_DIR.exists():
-            pytest.skip("JanitorAI scripts directory not found")
-        code = _load_script("Context_Control_Template.js")
-        ctx = build_context(
-            messages=[
-                {"role": "user", "content": "Hello"},
-            ],
-            conversation_id="ctx-1",
-        )
-        result = await run_cantrip(code, ctx, timeout_ms=10000)
-        assert result.error is None
-
-    @pytest.mark.asyncio
-    async def test_adaptive_lorebook_template(self):
-        if not JANITOR_SCRIPTS_DIR.exists():
-            pytest.skip("JanitorAI scripts directory not found")
-        code = _load_script("Adaptive_Lorebook_Template.js")
-        ctx = build_context(
-            messages=[
-                {"role": "user", "content": "Tell me about the dragons"},
-            ],
-            conversation_id="adapt-1",
-        )
-        result = await run_cantrip(code, ctx, timeout_ms=10000)
-        assert result.error is None
-
-    @pytest.mark.asyncio
-    async def test_property_exploration_debug(self):
-        if not JANITOR_SCRIPTS_DIR.exists():
-            pytest.skip("JanitorAI scripts directory not found")
-        code = _load_script("PropertyExploration.js")
+    async def test_debug_logs_emitted(self):
+        code = _load_fixture("keyword_lorebook.js")
         ctx = build_context(
             messages=[{"role": "user", "content": "Hello"}],
             character_name="TestChar",
@@ -953,18 +908,60 @@ class TestRealJanitorAICantrips:
         assert len(result.debug_logs) > 0
 
     @pytest.mark.asyncio
-    async def test_hidden_persistent_memory_template(self):
-        if not JANITOR_SCRIPTS_DIR.exists():
-            pytest.skip("JanitorAI scripts directory not found")
-        code = _load_script("Hidden_Persistent_Memory_Template.js")
+    async def test_persistent_state_increments_across_calls(self):
+        """cantrip_data persists across invocations (Hidden_Persistent_Memory pattern)."""
+        code = _load_fixture("persistent_state.js")
         ctx = build_context(
-            messages=[
-                {"role": "user", "content": "I walk outside into the rain"},
-            ],
+            messages=[{"role": "user", "content": "First visit"}],
             conversation_id="mem-1",
+        )
+        result1 = await run_cantrip(code, ctx, timeout_ms=10000, cantrip_data={"visit_count": 0})
+        assert result1.error is None
+        # Second call carries forward the state from the first.
+        result2 = await run_cantrip(code, ctx, timeout_ms=10000, cantrip_data=result1.cantrip_data)
+        assert result2.error is None
+        assert result2.cantrip_data.get("visit_count") == 2
+
+    @pytest.mark.asyncio
+    async def test_multi_character_handling(self):
+        """Per-entity branching (Multiple_Character pattern)."""
+        code = _load_fixture("persistent_state.js")
+        ctx = build_context(
+            messages=[{"role": "user", "content": "I see Character A approaching"}],
+            conversation_id="multi-1",
         )
         result = await run_cantrip(code, ctx, timeout_ms=10000)
         assert result.error is None
+        assert "Character A" in result.scenario
+
+
+# ============================================================================
+# Backward-compat: real JanitorAI scripts (opt-in via GITV_JANITOR_SCRIPTS_DIR)
+# ============================================================================
+
+class TestJanitorAIBackwardCompat:
+    """Optional coverage against real JanitorAI script templates. Skipped unless
+    GITV_JANITOR_SCRIPTS_DIR points at a checkout of JanitorAI_Scripts. This
+    keeps backward-compat verification available without making the suite
+    depend on any path outside this repository."""
+
+    @pytest.mark.asyncio
+    async def test_real_scripts_load_and_run(self):
+        if not JANITOR_SCRIPTS_DIR or not JANITOR_SCRIPTS_DIR.exists():
+            pytest.skip("GITV_JANITOR_SCRIPTS_DIR not set or path missing")
+        scripts = [
+            "Complex_Lorebook_Template.js",
+            "Dice_Controller.js",
+            "Multiple_Character_Template.js",
+        ]
+        for name in scripts:
+            code = (JANITOR_SCRIPTS_DIR / name).read_text(encoding="utf-8")
+            ctx = build_context(
+                messages=[{"role": "user", "content": "Hello"}],
+                conversation_id=f"compat-{name}",
+            )
+            result = await run_cantrip(code, ctx, timeout_ms=10000)
+            assert result.error is None, f"{name} failed: {result.error}"
 
 
 # ============================================================================

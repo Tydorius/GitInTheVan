@@ -270,6 +270,18 @@ export const api = {
     request<any>('/api/admin/settings', { method: 'PUT', body: JSON.stringify(data) }),
   getAdminAuditLogs: (limit = 100, offset = 0) =>
     request<{ logs: any[]; total: number }>(`/api/admin/audit?limit=${limit}&offset=${offset}`),
+  getSiteBanner: () =>
+    request<{ banner: string; level: string }>('/api/site-banner'),
+  runBackupNow: () =>
+    request<any>('/api/admin/backup/run', { method: 'POST' }),
+  listBackups: () =>
+    request<any[]>('/api/admin/backup/list'),
+  deleteBackup: (id: string) =>
+    request<void>(`/api/admin/backup/${id}`, { method: 'DELETE' }),
+  requestBackupRestore: (id: string) =>
+    request<{ token: string }>(`/api/admin/backup/restore/${id}/request`, { method: 'POST' }),
+  confirmBackupRestore: (id: string, token: string) =>
+    request<any>(`/api/admin/backup/restore/${id}/confirm`, { method: 'POST', body: JSON.stringify({ token }) }),
   getServerLogs: (lines = 200) =>
     request<{ lines: string[]; total: number }>(`/api/admin/logs?lines=${lines}`),
   getSSLStatus: () =>

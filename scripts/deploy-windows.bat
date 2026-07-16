@@ -41,11 +41,17 @@ if not errorlevel 1 (
 echo DEBUG: PS_CMD=[!PS_CMD!] >> "%LOG_FILE%"
 
 REM ============================================================
-REM Check Python version (3.12+ required)
+REM Check Python version (3.12 or 3.13 required; 3.14+ unsupported by litellm)
 REM ============================================================
 echo [1/6] Checking Python...
 echo [1/6] Checking Python... >> "%LOG_FILE%"
 set "PYTHON_CMD="
+REM Pinned python-build-standalone release - not "latest", see
+REM Planning/security-control-document.md. Bump PYBUILD_RELEASE/PYBUILD_VERSION
+REM deliberately together (they must match an actual published release asset).
+set "PYBUILD_RELEASE=20260623"
+set "PYBUILD_VERSION=3.12.13"
+set "PYTHON_DIR=%GITV_ROOT%\.python"
 
 REM Fast path: reuse an existing venv (matches update-windows.bat's approach).
 REM This is the common case on any machine that's already been set up once,
@@ -53,6 +59,11 @@ REM and skips the fragile system-wide discovery below entirely.
 if exist "%GITV_ROOT%\.venv\Scripts\python.exe" (
     set "PYTHON_CMD=%GITV_ROOT%\.venv\Scripts\python.exe"
     echo Using existing virtual environment. >> "%LOG_FILE%"
+    goto :python_done
+)
+if exist "%PYTHON_DIR%\python.exe" (
+    set "PYTHON_CMD=%PYTHON_DIR%\python.exe"
+    echo Using previously downloaded portable Python at %PYTHON_DIR%. >> "%LOG_FILE%"
     goto :python_done
 )
 
@@ -67,18 +78,21 @@ for /f "tokens=1,2 delims=." %%a in ("!PYVER!") do (
 )
 echo DEBUG: PYVER=!PYVER! PYMAJOR=!PYMAJOR! PYMINOR=!PYMINOR! >> "%LOG_FILE%"
 
-if !PYMAJOR! GTR 3 (
-    set "PYTHON_CMD=python"
-    goto :python_done
-)
-if !PYMAJOR! EQU 3 if !PYMINOR! GEQ 12 (
+REM litellm (pinned dependency) has no release supporting Python 3.14+ as of
+REM this writing, so an upper bound is required, not just a floor check.
+if !PYMAJOR! EQU 3 if !PYMINOR! GEQ 12 if !PYMINOR! LSS 14 (
     set "PYTHON_CMD=python"
     goto :python_done
 )
 
 echo.
-echo Python !PYMAJOR!.!PYMINOR! found but 3.12+ required.
-echo Python !PYMAJOR!.!PYMINOR! found but 3.12+ required. >> "%LOG_FILE%"
+if !PYMAJOR! EQU 3 if !PYMINOR! GEQ 14 (
+    echo Python !PYMAJOR!.!PYMINOR! found, but the litellm dependency does not yet support 3.14+.
+    echo Python !PYMAJOR!.!PYMINOR! found, but litellm does not yet support 3.14+. >> "%LOG_FILE%"
+) else (
+    echo Python !PYMAJOR!.!PYMINOR! found but 3.12 or 3.13 required.
+    echo Python !PYMAJOR!.!PYMINOR! found but 3.12 or 3.13 required. >> "%LOG_FILE%"
+)
 
 :python_search
 echo Searching for a compatible Python installation...
@@ -97,7 +111,7 @@ if not errorlevel 1 (
     goto :python_done
 )
 
-for %%P in (312 313 314) do (
+for %%P in (312 313) do (
     if exist "%LOCALAPPDATA%\Programs\Python\Python%%P\python.exe" (
         set "PYTHON_CMD=%LOCALAPPDATA%\Programs\Python\Python%%P\python.exe"
         echo Found Python at !PYTHON_CMD! >> "%LOG_FILE%"
@@ -116,12 +130,36 @@ for %%P in (312 313 314) do (
 )
 
 echo.
-echo Python 3.12+ was not found on this system. >> "%LOG_FILE%"
-echo Python 3.12+ was not found on this system.
+echo Python 3.12/3.13 not found. Attempting portable download to .python\ (no admin required)...
+echo Python 3.12/3.13 not found. Attempting portable download to .python\... >> "%LOG_FILE%"
+where tar >nul 2>&1
+if not errorlevel 1 (
+    set "PYBUILD_URL=https://github.com/astral-sh/python-build-standalone/releases/download/%PYBUILD_RELEASE%/cpython-%PYBUILD_VERSION%+%PYBUILD_RELEASE%-x86_64-pc-windows-msvc-install_only.tar.gz"
+    set "PYBUILD_TARBALL=%GITV_ROOT%\.python_download.tar.gz"
+    powershell -Command "$ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -Uri '!PYBUILD_URL!' -OutFile '!PYBUILD_TARBALL!'" >> "%LOG_FILE%" 2>&1
+    if exist "!PYBUILD_TARBALL!" (
+        if exist "%PYTHON_DIR%" rmdir /s /q "%PYTHON_DIR%"
+        tar -xzf "!PYBUILD_TARBALL!" -C "%GITV_ROOT%" >> "%LOG_FILE%" 2>&1
+        move /y "%GITV_ROOT%\python" "%PYTHON_DIR%" >nul 2>&1
+        del "!PYBUILD_TARBALL!" >nul 2>&1
+        if exist "%PYTHON_DIR%\python.exe" (
+            set "PYTHON_CMD=%PYTHON_DIR%\python.exe"
+            echo Portable Python installed to %PYTHON_DIR% >> "%LOG_FILE%"
+            goto :python_done
+        )
+    )
+    echo Portable Python download failed - network issue or asset unavailable. >> "%LOG_FILE%"
+) else (
+    echo tar.exe not available - requires Windows 10 1803+. Skipping portable download. >> "%LOG_FILE%"
+)
+
+echo.
+echo Python 3.12 or 3.13 was not found on this system (3.14+ is not yet supported, see litellm). >> "%LOG_FILE%"
+echo Python 3.12 or 3.13 was not found on this system (3.14+ is not yet supported, see litellm).
 where winget >nul 2>&1
 if errorlevel 1 (
     echo ERROR: winget is not available either. >> "%LOG_FILE%"
-    echo Please install Python 3.12+ from https://python.org and re-run this script.
+    echo Please install Python 3.12 or 3.13 from https://python.org and re-run this script.
     echo.
     echo Installer log: %LOG_FILE%
     pause
@@ -135,7 +173,7 @@ REM hang here indefinitely. See Planning/security-control-document.md.
 choice /c YN /n /t 20 /d N /m "Install Python 3.12 via winget now? [Y/N, defaults to N in 20s]"
 if errorlevel 2 (
     echo Python install declined or prompt timed out. >> "%LOG_FILE%"
-    echo Please install Python 3.12+ from https://python.org and re-run this script.
+    echo Please install Python 3.12 or 3.13 from https://python.org and re-run this script.
     echo.
     echo Installer log: %LOG_FILE%
     pause
@@ -148,7 +186,7 @@ echo Installing Python via winget... >> "%LOG_FILE%"
 winget install Python.Python.3.12 --accept-package-agreements --accept-source-agreements >> "%LOG_FILE%" 2>&1
 if errorlevel 1 (
     echo ERROR: winget installation failed. >> "%LOG_FILE%"
-    echo Please install Python 3.12+ manually from https://python.org
+    echo Please install Python 3.12 or 3.13 manually from https://python.org
     echo.
     echo Installer log: %LOG_FILE%
     pause
@@ -262,6 +300,11 @@ if exist "%DENO_EXE%" (
             )
         )
     )
+)
+
+REM Record the resolved Deno path in .env so the app reads it via Settings.
+if exist "%DENO_EXE%" (
+    "%GITV_ROOT%\.venv\Scripts\python.exe" -m app.services.env_sync --set "GITV_DENO_PATH=%DENO_EXE%" >> "%LOG_FILE%" 2>&1
 )
 echo.
 

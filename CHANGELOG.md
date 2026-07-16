@@ -2,6 +2,45 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.17.1] - 2026-07-15
+
+### Fixed
+
+- **Verification rules could not be activated by in-prompt `<#verify-name#>` tags**: `VerificationRule.tag` existed and the activation-tag parser supported the `verify` type, but `load_verification_config` filtered `is_active=True` at the DB level and never consulted message tags — so a tag-gated rule (`is_active=False` + tag) never loaded, and an untagged rule fired regardless of the prompt. The loader now follows the same pattern as lorebooks/cantrips: load all candidate rules, then filter via `should_activate_resource`. Tags are threaded from `proxy.py` (`body_json["_gitv_tags"]`) through `is_verification_enabled` and `run_verification_loop`
+- **`GITV_DENO_PATH` in `.env` was inert**: pydantic-settings populates `Settings` fields only (it does not inject into `os.environ`), and there was no `deno_path` field to receive the value — so `_find_deno`'s `os.environ.get` always returned empty. Added a `deno_path` field to `Settings` (`config.py`) and `_find_deno` now consults `settings.deno_path` first, keeping the local `.deno/` fallback
+
+### Added
+
+- **Deploy scripts record the resolved Deno path in `.env`**: `deploy-windows.bat`, `deploy-linux.sh`, `deploy-macos.sh` now write `GITV_DENO_PATH=<resolved path>` to `.env` after installing Deno, via a new `set_env_value` helper in `app/services/env_sync.py` (also exposed as `python -m app.services.env_sync --set KEY=VALUE`). Both the running service and `pytest` now resolve Deno via this field
+- **Fixture cantrips for portable testing**: `tests/fixtures/cantrips/keyword_lorebook.js` and `persistent_state.js` (repo-relative) replace the former hard-coded external `JanitorScripts` path. Real JanitorAI backward-compat is now opt-in via `GITV_JANITOR_SCRIPTS_DIR`
+- **Real verification-loop integration test**: `test_verification_loop_runs_real_path` mocks only upstream HTTP (not `check_response`), so the real parse → strategy → retry path executes. Tag-activation is covered by `TestVerificationTagActivation` (tag-present fires, tag-absent does not)
+
+### Changed
+
+- **Test hygiene**: removed `try/except: pass` swallowed-setup fixtures across 6 test files (now reuse the shared `client` fixture with an asserted setup). All `update_admin_settings` size-limit tests now restore via `try/finally` so a failing assertion cannot leave global caps mutated
+
+## [0.17.0] - 2026-07-12
+
+### Added
+
+- **Database Backup & Restore (Phase 21)**: Admin-initiated and scheduled database backups. Dialect-aware — SQLite uses the online backup API (`sqlite3.Connection.backup()`), PostgreSQL uses `pg_dump`, MariaDB/MySQL uses `mariadb-dump`/`mysqldump`. New Admin > Backup tab: configurable schedule (days, time, retention count), backup list with download/restore/delete, "Run Backup Now" button. Restore requires a two-step confirmation (short-lived token) and a manual server restart afterward — this is a best-effort convenience feature, not a production backup strategy for PostgreSQL/MariaDB deployments. New `backup_runs` table and `admin_settings` schedule columns (migrations 039-040). New `app/services/backup.py`; scheduler runs as a background `asyncio` task started in `lifespan()`
+- **Admin Sitewide Banner**: `admin_settings.site_banner`/`site_banner_level` (info/warning/danger), new public `GET /api/site-banner` endpoint (no auth required — needed on the login page), new Admin > Global Caps > Site Banner card. Banner renders above all pages including Login via a new `siteBanner` Svelte store (migration 038)
+- **Maintenance page during updates**: `update-windows.bat`/`update-linux.sh`/`update-macos.sh` now serve a minimal auto-refreshing "Update in progress" HTML page on port 8000 (via Python's `http.server`) between stopping the old server and starting the new one, so users see a clear status page instead of a connection error mid-update
+- **Portable Python for deploy scripts**: all three `deploy-*` scripts now attempt a no-admin-required portable Python download (via [python-build-standalone](https://github.com/astral-sh/python-build-standalone), pinned release `20260623`/`3.12.13`) to `.python/` before falling back to a system package-manager install — mirrors the existing `.deno`/`.node` pattern. Verified end-to-end on real Windows and Ubuntu 26.04. If this download itself fails (e.g. no network access to GitHub), Ubuntu/Debian users may still need the deadsnakes PPA to get a working `python3.12` package, since it's no longer in Ubuntu 26.04+'s default repos — see `Planning/installation-guide.md` for the exact commands
+
+### Fixed
+
+- **Python 3.14+ silently accepted, then failing deep in pip's resolver**: all three deploy scripts previously accepted any `python3 >= 3.12` with no upper bound. `litellm` (pinned dependency) has no PyPI release supporting Python 3.14+, so a system defaulting to 3.14+ (confirmed: fresh Ubuntu 26.04) would pass detection and then fail with a confusing multi-hundred-line pip error. Scripts now check `3.12 <= version < 3.14` and print a clear message pointing at the real cause
+- **`$INSTALLER_LOG` undefined variable** (`deploy-linux.sh`/`deploy-macos.sh`): env-sync and SSL-cert-generation output was redirected to a variable that was never set (the real log variable is `$LOG_FILE`); fixed at all 8 call sites
+- **`unzip` not present on minimal Linux installs**: Deno download extraction and `update-linux.sh`'s zip extraction now fall back to the venv's Python `zipfile` module when `unzip` is unavailable (confirmed: fresh Ubuntu 26.04 does not ship `unzip` by default)
+- **npm/vite child processes couldn't find `node`** when using the portable `.node/` install with no system-wide Node.js: all four scripts (`deploy-linux.sh`, `deploy-macos.sh`, `update-linux.sh`, `update-macos.sh`) now prepend the portable Node's `bin/` directory to `PATH` before invoking npm, instead of relying on the absolute path used to launch npm itself (which isn't inherited by npm's own child processes, e.g. vite's `env node` shebang). Removed a silent fallback-to-bare-`npm` in the deploy scripts that could mask this error or pick up an unrelated npm (e.g. a Windows install visible through WSL interop)
+- **`create_log` → `log_action`**: a pre-existing bug in `app/routers/admin.py`'s `/ssl/generate` endpoint called a function (`create_log`) that doesn't exist in `app/services/audit.py` (the real function is `log_action`) — found while adding audit logging to the new backup endpoints, which had copied the same mistake. Fixed at all 4 call sites
+
+### Verified this session
+
+- `deploy-linux.sh` and `update-linux.sh` executed end-to-end (not just syntax-checked) for the first time, against a scratch copy in a real Ubuntu 26.04 environment — full cycle from Python detection through server startup and `/health` confirmed working
+- Site banner and backup/restore UI exercised end-to-end in a real browser session against a scratch database
+
 ## [0.16.1] - 2026-07-12
 
 ### Fixed

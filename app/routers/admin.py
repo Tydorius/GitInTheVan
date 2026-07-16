@@ -33,6 +33,13 @@ class AdminSettingsResponse(BaseModel):
     max_lorebook_size_kb: int
     runtime_log_level: str
     effective_log_level: str
+    site_banner: str
+    site_banner_level: str
+    backup_schedule_enabled: bool
+    backup_schedule_days: str
+    backup_schedule_time: str
+    backup_retention_count: int
+    backup_dir: str
 
 
 class AdminSettingsUpdate(BaseModel):
@@ -46,6 +53,13 @@ class AdminSettingsUpdate(BaseModel):
     max_rule_size_kb: int | None = None
     max_lorebook_size_kb: int | None = None
     runtime_log_level: str | None = None
+    site_banner: str | None = None
+    site_banner_level: str | None = None
+    backup_schedule_enabled: bool | None = None
+    backup_schedule_days: str | None = None
+    backup_schedule_time: str | None = None
+    backup_retention_count: int | None = None
+    backup_dir: str | None = None
 
 
 class AuditLogItem(BaseModel):
@@ -88,6 +102,13 @@ async def get_settings(
         max_lorebook_size_kb=s.max_lorebook_size_kb,
         runtime_log_level=s.runtime_log_level,
         effective_log_level=effective,
+        site_banner=s.site_banner,
+        site_banner_level=s.site_banner_level,
+        backup_schedule_enabled=s.backup_schedule_enabled,
+        backup_schedule_days=s.backup_schedule_days,
+        backup_schedule_time=s.backup_schedule_time,
+        backup_retention_count=s.backup_retention_count,
+        backup_dir=s.backup_dir,
     )
 
 
@@ -123,6 +144,23 @@ async def update_settings(
         updates["runtime_log_level"] = level
         if level:
             apply_runtime_log_level(level)
+    if req.site_banner is not None:
+        updates["site_banner"] = req.site_banner
+    if req.site_banner_level is not None:
+        level_name = req.site_banner_level.strip().lower()
+        if level_name not in ("info", "warning", "danger"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid banner level")
+        updates["site_banner_level"] = level_name
+    if req.backup_schedule_enabled is not None:
+        updates["backup_schedule_enabled"] = req.backup_schedule_enabled
+    if req.backup_schedule_days is not None:
+        updates["backup_schedule_days"] = req.backup_schedule_days
+    if req.backup_schedule_time is not None:
+        updates["backup_schedule_time"] = req.backup_schedule_time
+    if req.backup_retention_count is not None:
+        updates["backup_retention_count"] = max(0, req.backup_retention_count)
+    if req.backup_dir is not None:
+        updates["backup_dir"] = req.backup_dir
 
     s = await update_admin_settings(updates)
     from app.services.admin import get_effective_log_level
@@ -139,6 +177,13 @@ async def update_settings(
         max_lorebook_size_kb=s.max_lorebook_size_kb,
         runtime_log_level=s.runtime_log_level,
         effective_log_level=effective,
+        site_banner=s.site_banner,
+        site_banner_level=s.site_banner_level,
+        backup_schedule_enabled=s.backup_schedule_enabled,
+        backup_schedule_days=s.backup_schedule_days,
+        backup_schedule_time=s.backup_schedule_time,
+        backup_retention_count=s.backup_retention_count,
+        backup_dir=s.backup_dir,
     )
 
 
@@ -199,7 +244,7 @@ async def generate_ssl_cert(
     admin: Annotated[User, Depends(require_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    from app.services.audit import create_log
+    from app.services.audit import log_action
     from app.services.ssl_manager import (
         LEAF_CERT_PATH,
         LEAF_KEY_PATH,
@@ -215,7 +260,7 @@ async def generate_ssl_cert(
     env_path = Path(__file__).resolve().parent.parent.parent / ".env"
     _update_env_ssl(env_path, str(LEAF_CERT_PATH), str(LEAF_KEY_PATH))
 
-    await create_log(
+    await log_action(
         db, admin.id, "ssl.generate", "ssl", "ca-and-leaf",
         "Generated local CA and leaf SSL certificate",
     )
@@ -330,3 +375,125 @@ async def execute_update(
     from app.services.updater import execute_update
     result = await execute_update()
     return UpdateExecuteResponse(**result)
+
+
+class BackupRunResponse(BaseModel):
+    id: str
+    triggered_by: str
+    status: str
+    file_path: str
+    size_bytes: int
+    error_message: str
+    started_at: str
+    completed_at: str | None
+
+
+class RestoreRequestResponse(BaseModel):
+    token: str
+
+
+class RestoreConfirmRequest(BaseModel):
+    token: str
+
+
+def _backup_run_to_response(run) -> "BackupRunResponse":
+    return BackupRunResponse(
+        id=run.id,
+        triggered_by=run.triggered_by,
+        status=run.status,
+        file_path=run.file_path,
+        size_bytes=run.size_bytes,
+        error_message=run.error_message,
+        started_at=run.started_at.isoformat(),
+        completed_at=run.completed_at.isoformat() if run.completed_at else None,
+    )
+
+
+@router.post("/backup/run", response_model=BackupRunResponse)
+async def run_backup_now(
+    admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    from app.services.audit import log_action
+    from app.services.backup import create_backup
+
+    run = await create_backup(triggered_by="manual")
+    await log_action(db, admin.id, "backup_run", "backup", run.id, f"status={run.status}")
+    return _backup_run_to_response(run)
+
+
+@router.get("/backup/list", response_model=list[BackupRunResponse])
+async def list_backups_endpoint(
+    admin: Annotated[User, Depends(require_admin)],
+):
+    from app.services.backup import list_backups
+
+    runs = await list_backups()
+    return [_backup_run_to_response(run) for run in runs]
+
+
+@router.get("/backup/download/{backup_id}")
+async def download_backup(
+    backup_id: str,
+    admin: Annotated[User, Depends(require_admin)],
+):
+    from fastapi.responses import FileResponse
+
+    from app.services.backup import list_backups
+
+    runs = await list_backups()
+    run = next((r for r in runs if r.id == backup_id), None)
+    if run is None or run.status != "success":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup not found")
+    file_path = Path(run.file_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup file no longer exists on disk")
+    return FileResponse(file_path, filename=file_path.name)
+
+
+@router.delete("/backup/{backup_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_backup_endpoint(
+    backup_id: str,
+    admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    from app.services.audit import log_action
+    from app.services.backup import delete_backup
+
+    deleted = await delete_backup(backup_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup not found")
+    await log_action(db, admin.id, "backup_delete", "backup", backup_id, "")
+
+
+@router.post("/backup/restore/{backup_id}/request", response_model=RestoreRequestResponse)
+async def request_backup_restore(
+    backup_id: str,
+    admin: Annotated[User, Depends(require_admin)],
+):
+    from app.services.backup import request_restore
+
+    token = request_restore(backup_id)
+    return RestoreRequestResponse(token=token)
+
+
+@router.post("/backup/restore/{backup_id}/confirm", response_model=UpdateExecuteResponse)
+async def confirm_backup_restore(
+    backup_id: str,
+    req: RestoreConfirmRequest,
+    admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    from app.services.audit import log_action
+    from app.services.backup import confirm_restore
+
+    try:
+        await confirm_restore(backup_id, req.token)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    await log_action(db, admin.id, "backup_restore", "backup", backup_id, "")
+    return UpdateExecuteResponse(
+        success=True,
+        message="Database restored. Restart the server for the restored data to take effect.",
+    )

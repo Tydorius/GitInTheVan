@@ -468,7 +468,7 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
     if stream and user_id:
         from app.services.verification import is_verification_enabled
         try:
-            verification_on = await is_verification_enabled(user_id)
+            verification_on = await is_verification_enabled(user_id, body_json.get("_gitv_tags"))
         except Exception:
             verification_on = False
 
@@ -883,7 +883,7 @@ async def _forward_non_streaming_verified(
                     try:
                         response_data, vresult = await run_verification_loop(
                             response_data, body_json, method, url, headers, timeout,
-                            user_id, conversation_id,
+                            user_id, conversation_id, body_json.get("_gitv_tags"),
                         )
                         if vresult:
                             logger.info(
@@ -934,7 +934,7 @@ async def _forward_non_streaming_verified(
         try:
             response_data, vresult = await run_verification_loop(
                 response_data, body_json, method, url, headers, timeout,
-                user_id, conversation_id,
+                user_id, conversation_id, body_json.get("_gitv_tags"),
             )
             if vresult:
                 logger.info(

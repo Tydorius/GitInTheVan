@@ -349,13 +349,15 @@ class TestEntryCRUD:
         client, _, _ = admin_client
         lb = await client.post("/api/lorebooks", json={"name": "LB"})
         lb_id = lb.json()["id"]
-        await update_admin_settings({"max_lorebook_size_kb": 1})
-        resp = await client.post(
-            f"/api/lorebooks/{lb_id}/entries",
-            json={"name": "Big", "content": "x" * 2000},
-        )
-        assert resp.status_code == 413
-        await update_admin_settings({"max_lorebook_size_kb": 500})
+        try:
+            await update_admin_settings({"max_lorebook_size_kb": 1})
+            resp = await client.post(
+                f"/api/lorebooks/{lb_id}/entries",
+                json={"name": "Big", "content": "x" * 2000},
+            )
+            assert resp.status_code == 413
+        finally:
+            await update_admin_settings({"max_lorebook_size_kb": 500})
 
     @pytest.mark.asyncio
     async def test_add_entry_size_limit_is_aggregate_across_entries(self, admin_client):
@@ -363,18 +365,20 @@ class TestEntryCRUD:
         client, _, _ = admin_client
         lb = await client.post("/api/lorebooks", json={"name": "LB"})
         lb_id = lb.json()["id"]
-        await update_admin_settings({"max_lorebook_size_kb": 1})
-        first = await client.post(
-            f"/api/lorebooks/{lb_id}/entries",
-            json={"name": "First", "content": "x" * 600},
-        )
-        assert first.status_code == 201
-        second = await client.post(
-            f"/api/lorebooks/{lb_id}/entries",
-            json={"name": "Second", "content": "x" * 600},
-        )
-        assert second.status_code == 413
-        await update_admin_settings({"max_lorebook_size_kb": 500})
+        try:
+            await update_admin_settings({"max_lorebook_size_kb": 1})
+            first = await client.post(
+                f"/api/lorebooks/{lb_id}/entries",
+                json={"name": "First", "content": "x" * 600},
+            )
+            assert first.status_code == 201
+            second = await client.post(
+                f"/api/lorebooks/{lb_id}/entries",
+                json={"name": "Second", "content": "x" * 600},
+            )
+            assert second.status_code == 413
+        finally:
+            await update_admin_settings({"max_lorebook_size_kb": 500})
 
     @pytest.mark.asyncio
     async def test_add_entry_strips_control_chars(self, admin_client):

@@ -1,21 +1,17 @@
 import pytest
-from httpx import ASGITransport, AsyncClient
-
-from app.main import app
 
 
 @pytest.fixture
-async def auth_client():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        try:
-            await client.post("/api/auth/setup", json={"username": "testadmin", "password": "TestPass123!"})
-        except Exception:
-            pass
-        resp = await client.post("/api/auth/login", json={"username": "testadmin", "password": "TestPass123!"})
-        token = resp.json()["access_token"]
-        client.headers["Authorization"] = f"Bearer {token}"
-        yield client
+async def auth_client(client):
+    setup_resp = await client.post(
+        "/api/auth/setup",
+        json={"username": "admin", "password": "adminpass123"},
+    )
+    assert setup_resp.status_code == 201
+    token = setup_resp.json()["access_token"]
+    client.headers["Authorization"] = f"Bearer {token}"
+    yield client
+    client.headers.pop("Authorization", None)
 
 
 @pytest.mark.asyncio
@@ -82,12 +78,14 @@ class TestSkillCRUD:
 
     async def test_create_exceeds_content_size_limit(self, auth_client):
         from app.services.admin import update_admin_settings
-        await update_admin_settings({"max_rule_size_kb": 1})
-        resp = await auth_client.post("/api/skills", json={
-            "name": "TooBig", "content": "x" * 2000, "type": "skill",
-        })
-        assert resp.status_code == 413
-        await update_admin_settings({"max_rule_size_kb": 25})
+        try:
+            await update_admin_settings({"max_rule_size_kb": 1})
+            resp = await auth_client.post("/api/skills", json={
+                "name": "TooBig", "content": "x" * 2000, "type": "skill",
+            })
+            assert resp.status_code == 413
+        finally:
+            await update_admin_settings({"max_rule_size_kb": 25})
 
     async def test_create_strips_control_chars_in_content(self, auth_client):
         resp = await auth_client.post("/api/skills", json={

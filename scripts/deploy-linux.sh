@@ -23,6 +23,12 @@ echo
 # ============================================================
 echo "[1/6] Checking Python..."
 PYTHON_CMD=""
+# Pinned python-build-standalone release - not "latest", see Planning/security-control-document.md.
+# Bump PYBUILD_RELEASE/PYBUILD_VERSION deliberately together (they must match
+# an actual published release asset).
+PYBUILD_RELEASE="20260623"
+PYBUILD_VERSION="3.12.13"
+PYTHON_DIR="$GITV_ROOT/.python"
 
 # Fast path: reuse an existing venv (matches update-linux.sh's approach).
 # Common case on any machine that's already been set up once, and skips
@@ -30,19 +36,27 @@ PYTHON_CMD=""
 if [ -f "$GITV_ROOT/.venv/bin/python" ]; then
     PYTHON_CMD="$GITV_ROOT/.venv/bin/python"
     echo "Using existing virtual environment."
+elif [ -f "$PYTHON_DIR/bin/python3" ]; then
+    PYTHON_CMD="$PYTHON_DIR/bin/python3"
+    echo "Using previously downloaded portable Python at $PYTHON_DIR."
 fi
 
 if [ -z "$PYTHON_CMD" ] && command -v python3 &> /dev/null; then
     python3 --version
-    if python3 -c "import sys; exit(0 if sys.version_info >= (3, 12) else 1)" 2>/dev/null; then
+    # litellm (pinned dependency) has no release supporting Python 3.14+ as of
+    # this writing, so the upper bound is required, not just a floor check.
+    if python3 -c "import sys; exit(0 if (3, 12) <= sys.version_info < (3, 14) else 1)" 2>/dev/null; then
         PYTHON_CMD="python3"
+    elif python3 -c "import sys; exit(0 if sys.version_info >= (3, 14) else 1)" 2>/dev/null; then
+        echo "Found Python 3.14+, but the litellm dependency does not yet support 3.14+."
+        echo "Searching for a compatible 3.12/3.13 installation instead..."
     fi
 fi
 
 if [ -z "$PYTHON_CMD" ]; then
-    echo "Python 3.12+ is required. Searching for newer Python installations..."
+    echo "Python 3.12 or 3.13 is required (3.14+ is not yet supported, see litellm). Searching for a compatible installation..."
 
-    for PY_CAND in python3.14 python3.13 python3.12; do
+    for PY_CAND in python3.13 python3.12; do
         if command -v "$PY_CAND" &> /dev/null; then
             echo "Found $PY_CAND"
             PYTHON_CMD="$PY_CAND"
@@ -52,8 +66,8 @@ if [ -z "$PYTHON_CMD" ]; then
 
     if [ -z "$PYTHON_CMD" ]; then
         for PY_PATH in \
-            /usr/bin/python3.12 /usr/bin/python3.13 /usr/bin/python3.14 \
-            /usr/local/bin/python3.12 /usr/local/bin/python3.13 /usr/local/bin/python3.14 \
+            /usr/bin/python3.12 /usr/bin/python3.13 \
+            /usr/local/bin/python3.12 /usr/local/bin/python3.13 \
             /opt/python3.12/bin/python3 /opt/python3.13/bin/python3; do
             if [ -x "$PY_PATH" ]; then
                 echo "Found Python at $PY_PATH"
@@ -64,7 +78,32 @@ if [ -z "$PYTHON_CMD" ]; then
     fi
 
     if [ -z "$PYTHON_CMD" ]; then
-        echo "Python 3.12+ not found."
+        echo "Python 3.12/3.13 not found on this system. Attempting portable download to .python/ (no admin required)..."
+        ARCH=$(uname -m)
+        if [ "$ARCH" = "aarch64" ]; then
+            PYBUILD_TRIPLE="aarch64-unknown-linux-gnu"
+        else
+            PYBUILD_TRIPLE="x86_64-unknown-linux-gnu"
+        fi
+        PYBUILD_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PYBUILD_RELEASE}/cpython-${PYBUILD_VERSION}+${PYBUILD_RELEASE}-${PYBUILD_TRIPLE}-install_only.tar.gz"
+        PYBUILD_TARBALL="$GITV_ROOT/.python_download.tar.gz"
+        if curl -fsSL "$PYBUILD_URL" -o "$PYBUILD_TARBALL"; then
+            rm -rf "$PYTHON_DIR"
+            tar -xzf "$PYBUILD_TARBALL" -C "$GITV_ROOT"
+            mv "$GITV_ROOT/python" "$PYTHON_DIR"
+            rm -f "$PYBUILD_TARBALL"
+            if [ -f "$PYTHON_DIR/bin/python3" ]; then
+                PYTHON_CMD="$PYTHON_DIR/bin/python3"
+                echo "Portable Python installed to $PYTHON_DIR"
+            fi
+        else
+            echo "Portable Python download failed (network issue or asset unavailable)."
+            rm -f "$PYBUILD_TARBALL"
+        fi
+    fi
+
+    if [ -z "$PYTHON_CMD" ]; then
+        echo "Python 3.12/3.13 not found."
 
         PKG_MGR=""
         INSTALL_CMD=""
@@ -86,27 +125,31 @@ if [ -z "$PYTHON_CMD" ]; then
             if [[ "$INSTALL_PY" =~ ^[Yy]$ ]]; then
                 echo "Installing Python 3.12..."
                 if ! eval "$INSTALL_CMD"; then
-                    echo "Installation failed. Python 3.12 may not be available in your distribution's"
-                    echo "default repositories. Please install it manually."
+                    echo "Installation failed. Python 3.12 is not available in your distribution's"
+                    echo "default repositories (this is expected on newer distros that default to 3.14+)."
+                    echo "On Ubuntu/Debian, try the deadsnakes PPA:"
+                    echo "  sudo add-apt-repository ppa:deadsnakes/ppa"
+                    echo "  sudo apt-get update && sudo apt-get install -y python3.12 python3.12-venv"
+                    echo "Then re-run this script. Otherwise, install Python 3.12/3.13 manually."
                     exit 1
                 fi
                 hash -r 2>/dev/null
                 if command -v python3.12 &> /dev/null; then
                     PYTHON_CMD="python3.12"
-                elif command -v python3 &> /dev/null && python3 -c "import sys; exit(0 if sys.version_info >= (3, 12) else 1)" 2>/dev/null; then
+                elif command -v python3 &> /dev/null && python3 -c "import sys; exit(0 if (3, 12) <= sys.version_info < (3, 14) else 1)" 2>/dev/null; then
                     PYTHON_CMD="python3"
                 else
-                    echo "Installation completed but Python 3.12+ not found."
+                    echo "Installation completed but Python 3.12/3.13 not found."
                     echo "Please open a new terminal and re-run this script."
                     exit 1
                 fi
             else
-                echo "Please install Python 3.12+ via your package manager."
+                echo "Please install Python 3.12 or 3.13 via your package manager."
                 exit 1
             fi
         else
             echo "Could not detect a supported package manager (apt/dnf/pacman)."
-            echo "Please install Python 3.12+ manually."
+            echo "Please install Python 3.12 or 3.13 manually."
             exit 1
         fi
     fi
@@ -157,7 +200,9 @@ else
         echo "Cantrips will not work. Please install Deno manually from https://deno.land"
         rm -f "$DENO_DIR/deno.zip"
     else
-        cd "$DENO_DIR" && unzip -o deno.zip && cd "$GITV_ROOT"
+        # Use the venv's Python zipfile module instead of shelling out to
+        # unzip, which is not installed by default on minimal distros.
+        "$GITV_ROOT/.venv/bin/python" -c "import zipfile; zipfile.ZipFile('$DENO_DIR/deno.zip').extractall('$DENO_DIR')"
         rm -f "$DENO_DIR/deno.zip"
         chmod +x "$DENO_BIN"
         if [ -f "$DENO_BIN" ]; then
@@ -169,6 +214,11 @@ else
             echo "Please install Deno manually from https://deno.land"
         fi
     fi
+fi
+
+# Record the resolved Deno path in .env so the app reads it via Settings.
+if [ -f "$DENO_BIN" ]; then
+    "$GITV_ROOT/.venv/bin/python" -m app.services.env_sync --set "GITV_DENO_PATH=$DENO_BIN" >> "$LOG_FILE" 2>&1
 fi
 echo
 
@@ -287,15 +337,24 @@ if [ -n "$NODE_CMD" ]; then
     else
         echo "Building frontend..."
         cd "$GITV_ROOT/frontend"
+        NODE_BIN_DIR="$(dirname "$NODE_CMD")"
+        NPM_CLI="$NODE_BIN_DIR/../lib/node_modules/npm/bin/npm-cli.js"
+        # npm-spawned binaries (e.g. vite's `env node` shebang) need `node` to
+        # be resolvable via PATH in the child process, not just the absolute
+        # $NODE_CMD path used to launch npm itself - prepend the portable
+        # Node's bin dir so this works even when no system Node.js is
+        # installed. Do NOT fall back to a bare `npm`/`node` on failure: an
+        # unrelated npm elsewhere on PATH (e.g. a Windows install visible
+        # through WSL interop) can silently shadow the intended one.
         if [ ! -d "node_modules" ]; then
             echo "Installing frontend dependencies..."
-            "$NODE_CMD" "$(dirname "$NODE_CMD")/../lib/node_modules/npm/bin/npm-cli.js" install -q 2>/dev/null || npm install -q
+            PATH="$NODE_BIN_DIR:$PATH" "$NODE_CMD" "$NPM_CLI" install -q
         else
             echo "Updating frontend dependencies..."
-            "$NODE_CMD" "$(dirname "$NODE_CMD")/../lib/node_modules/npm/bin/npm-cli.js" install -q 2>/dev/null || npm install -q
+            PATH="$NODE_BIN_DIR:$PATH" "$NODE_CMD" "$NPM_CLI" install -q
         fi
         echo "Building frontend..."
-        "$NODE_CMD" "$(dirname "$NODE_CMD")/../lib/node_modules/npm/bin/npm-cli.js" run build 2>/dev/null || npm run build
+        PATH="$NODE_BIN_DIR:$PATH" "$NODE_CMD" "$NPM_CLI" run build
         cd "$GITV_ROOT"
         echo "Frontend built successfully."
     fi
@@ -312,7 +371,7 @@ if [ ! -f "$GITV_ROOT/.env" ]; then
     echo "Created .env - edit it to configure your endpoint and secret key."
 fi
 echo "Syncing .env with defaults..."
-"$GITV_ROOT/.venv/bin/python" -m app.services.env_sync >> "$INSTALLER_LOG" 2>&1
+"$GITV_ROOT/.venv/bin/python" -m app.services.env_sync >> "$LOG_FILE" 2>&1
 echo
 
 # Create data directory
@@ -340,7 +399,7 @@ fi
 if [ -f "$GITV_ROOT/data/ssl/cert.pem" ]; then
     if [ ! -f "$GITV_ROOT/data/ssl/ca.pem" ]; then
         echo "WARNING: cert.pem exists but ca.pem is missing, regenerating with CA chain."
-        "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert()" >> "$INSTALLER_LOG" 2>&1
+        "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert()" >> "$LOG_FILE" 2>&1
     fi
     if [ ! -f "$GITV_ROOT/data/ssl/key.pem" ]; then
         echo "ERROR: SSL key.pem not found."
@@ -416,9 +475,9 @@ else
         fi
         echo "Generating self-signed certificate..."
         if [ -n "$LAN_IP" ]; then
-            "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert(extra_ips=['${LAN_IP}'])" >> "$INSTALLER_LOG" 2>&1
+            "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert(extra_ips=['${LAN_IP}'])" >> "$LOG_FILE" 2>&1
         else
-            "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert()" >> "$INSTALLER_LOG" 2>&1
+            "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert()" >> "$LOG_FILE" 2>&1
         fi
         if [ $? -eq 0 ]; then
             if ! grep -q "^GITV_SSL_CERTFILE=" "$GITV_ROOT/.env" 2>/dev/null; then
