@@ -13,7 +13,7 @@ from app.database import async_session
 from app.models.lorebook import Lorebook
 from app.services.cantrip import process_cantrips
 from app.services.lorebook import inject_entries, match_entries
-from app.services.routing import resolve_routing
+from app.services.routing import FailoverEndpoint, resolve_routing
 from app.services.verification import run_verification_loop
 
 logger = logging.getLogger(__name__)
@@ -88,7 +88,9 @@ def _log_response(status_code: int, elapsed: float, response_body: str = "") -> 
         logger.debug("proxy error response body: %.500s", response_body[:500])
 
 
-async def _resolve_target(request: Request) -> tuple[str, str, str | None, str, str, str, str, str] | None:
+async def _resolve_target(
+    request: Request,
+) -> tuple[str, str, str | None, str, str, str, str, str, list] | None:
     auth_header = request.headers.get("authorization", "")
     if auth_header.lower().startswith("bearer "):
         token = auth_header[7:]
@@ -96,7 +98,11 @@ async def _resolve_target(request: Request) -> tuple[str, str, str | None, str, 
             async with async_session() as db:
                 result = await resolve_routing(token, db)
                 if result:
-                    return result.base_url, result.api_key, result.user_id, result.api_base_path, result.bypass_method, result.provider, result.model, result.endpoint_id
+                    return (
+                        result.base_url, result.api_key, result.user_id,
+                        result.api_base_path, result.bypass_method, result.provider,
+                        result.model, result.endpoint_id, result.failover_chain,
+                    )
                 return None
             return None
 
@@ -104,7 +110,7 @@ async def _resolve_target(request: Request) -> tuple[str, str, str | None, str, 
     api_key = settings.default_endpoint_api_key
     api_base_path = settings.default_endpoint_api_base_path
     if base_url:
-        return base_url, api_key, None, api_base_path, "none", "", "", ""
+        return base_url, api_key, None, api_base_path, "none", "", "", "", []
     return None
 
 
@@ -138,7 +144,7 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
             },
         )
 
-    base_url, api_key, user_id, api_base_path, endpoint_bypass, provider, endpoint_model, endpoint_id = target
+    base_url, api_key, user_id, api_base_path, endpoint_bypass, provider, endpoint_model, endpoint_id, failover_chain = target
 
     body = await request.body()
     path = request.url.path
@@ -170,6 +176,7 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
     body_json["_gitv_provider"] = provider
     body_json["_gitv_base_url"] = base_url
     body_json["_gitv_api_key"] = api_key
+    body_json["_gitv_failover_chain"] = failover_chain
 
     _log_request(request.method, upstream_url, model, stream)
 
@@ -493,7 +500,7 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
                 logger.info("Verification enabled: converting streaming request to non-streaming for verification")
             response = await _forward_non_streaming_verified(
                 request.method, upstream_url, headers, body_verified, body_json,
-                timeout, user_id, request_headers,
+                timeout, user_id, request_headers, path,
             )
             if response.status_code == 200 and stream:
                 response = _convert_to_sse(
@@ -506,11 +513,11 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
 
     if stream:
         return await _forward_streaming(
-            request.method, upstream_url, headers, body, timeout, user_id, body_json
+            request.method, upstream_url, headers, body, timeout, user_id, body_json, path
         )
 
     return await _forward_non_streaming_verified(
-        request.method, upstream_url, headers, body, body_json, timeout, user_id, request_headers
+        request.method, upstream_url, headers, body, body_json, timeout, user_id, request_headers, path
     )
 
 
@@ -864,6 +871,7 @@ async def _forward_non_streaming_verified(
     timeout: httpx.Timeout,
     user_id: str | None,
     request_headers: dict[str, str],
+    path: str = "",
 ) -> JSONResponse:
     if body_json.get("_gitv_driver_callable") and user_id:
         try:
@@ -919,11 +927,17 @@ async def _forward_non_streaming_verified(
         except Exception:
             logger.exception("Driver-callable loop failed, falling through to normal forward")
 
-    response_data, status_code = await _do_forward(method, url, headers, body, timeout,
-        provider=body_json.get("_gitv_provider", ""),
-        base_url=body_json.get("_gitv_base_url", ""),
-        api_key=body_json.get("_gitv_api_key", ""),
-    )
+    failover_chain = body_json.get("_gitv_failover_chain") or []
+    if failover_chain and path:
+        response_data, status_code = await _forward_with_failover(
+            body_json, failover_chain, method, path, headers, timeout, body,
+        )
+    else:
+        response_data, status_code = await _do_forward(method, url, headers, body, timeout,
+            provider=body_json.get("_gitv_provider", ""),
+            base_url=body_json.get("_gitv_base_url", ""),
+            api_key=body_json.get("_gitv_api_key", ""),
+        )
 
     if status_code == 200 and user_id:
         response_data = await _apply_post_driver_processing(
@@ -1144,6 +1158,91 @@ async def _apply_post_navigator_processing(
     return response_data
 
 
+async def _forward_with_failover(
+    body_json: dict[str, Any],
+    chain: list[FailoverEndpoint],
+    method: str,
+    path: str,
+    headers: dict[str, str],
+    timeout: httpx.Timeout,
+    body_bytes: bytes,
+) -> tuple[dict[str, Any], int]:
+    """Forward a request through the failover chain.
+
+    Iterates candidates in priority order. Any failure (any HTTP status != 200
+    or any exception) advances to the next candidate — there is no
+    retryable/non-retryable distinction, because different endpoints may carry
+    different models, API keys, or providers (e.g. a free OpenRouter key
+    failing over to a paid endpoint). Only total exhaustion returns an error.
+
+    The `path` is the request path (e.g. '/v1/chat/completions'); each
+    candidate's base_url + api_base_path produce a distinct upstream URL."""
+    if not chain:
+        return (
+            {"error": {"message": "No endpoint configured for this request", "type": "proxy_error"}},
+            503,
+        )
+
+    failover_notes: list[str] = []
+
+    for idx, candidate in enumerate(chain):
+        upstream_url = _build_upstream_url(candidate.base_url, path, candidate.api_base_path)
+
+        # Re-stash per-candidate fields so _do_forward picks them up.
+        body_json["_gitv_provider"] = candidate.provider
+        body_json["_gitv_base_url"] = candidate.base_url
+        body_json["_gitv_api_key"] = candidate.api_key
+
+        # If this candidate has a model and it differs from the body's, rebuild.
+        forward_body = body_bytes
+        if candidate.model and body_json.get("model") != candidate.model:
+            trial_body = dict(body_json)
+            trial_body["model"] = candidate.model
+            forward_body = json.dumps(
+                {k: v for k, v in trial_body.items() if not k.startswith("_gitv")}
+            ).encode()
+
+        try:
+            response_data, status_code = await _do_forward(
+                method, upstream_url, headers, forward_body, timeout,
+                provider=candidate.provider,
+                base_url=candidate.base_url,
+                api_key=candidate.api_key,
+            )
+        except Exception:
+            logger.exception(
+                "Failover: endpoint '%s' (%s) raised an exception, trying next",
+                candidate.endpoint_name, upstream_url,
+            )
+            failover_notes.append(f"'{candidate.endpoint_name}' failed with an exception")
+            continue
+
+        if status_code == 200:
+            if failover_notes:
+                logger.info(
+                    "Failover: succeeded on candidate %d/%d '%s' after %d failure(s)",
+                    idx + 1, len(chain), candidate.endpoint_name, len(failover_notes),
+                )
+            return response_data, 200
+
+        logger.info(
+            "Failover: endpoint '%s' (%s) returned %d, trying next",
+            candidate.endpoint_name, upstream_url, status_code,
+        )
+        failover_notes.append(f"'{candidate.endpoint_name}' returned HTTP {status_code}")
+
+    logger.warning("Failover: all %d endpoint(s) exhausted", len(chain))
+    return (
+        {
+            "error": {
+                "message": f"All endpoints failed: {'; '.join(failover_notes)}",
+                "type": "proxy_error",
+            }
+        },
+        503,
+    )
+
+
 async def _do_forward(
     method: str, url: str, headers: dict[str, str], body: bytes, timeout: httpx.Timeout,
     provider: str = "", base_url: str = "", api_key: str = "",
@@ -1315,6 +1414,7 @@ async def _forward_streaming(
     timeout: httpx.Timeout,
     user_id: str | None = None,
     body_json: dict[str, Any] | None = None,
+    path: str = "",
 ) -> StreamingResponse:
     has_memory_processing = (
         user_id is not None
@@ -1326,7 +1426,7 @@ async def _forward_streaming(
         return await _forward_streaming_raw(method, url, headers, body, timeout)
 
     return await _forward_streaming_with_memory(
-        method, url, headers, body, timeout, user_id, body_json
+        method, url, headers, body, timeout, user_id, body_json, path
     )
 
 
@@ -1375,15 +1475,22 @@ async def _forward_streaming_with_memory(
     timeout: httpx.Timeout,
     user_id: str,
     body_json: dict[str, Any],
+    path: str = "",
 ) -> StreamingResponse:
     """Buffer a streaming response, extract and strip <memstore> tags,
     record the post-hash, then re-emit as SSE. Memory tags span content
     chunks so they can't be reliably extracted from individual chunks."""
-    response_data, status_code = await _do_forward(method, url, headers, body, timeout,
-        provider=body_json.get("_gitv_provider", "") if body_json else "",
-        base_url=body_json.get("_gitv_base_url", "") if body_json else "",
-        api_key=body_json.get("_gitv_api_key", "") if body_json else "",
-    )
+    failover_chain = body_json.get("_gitv_failover_chain") if body_json else None
+    if failover_chain and path:
+        response_data, status_code = await _forward_with_failover(
+            body_json, failover_chain, method, path, headers, timeout, body,
+        )
+    else:
+        response_data, status_code = await _do_forward(method, url, headers, body, timeout,
+            provider=body_json.get("_gitv_provider", "") if body_json else "",
+            base_url=body_json.get("_gitv_base_url", "") if body_json else "",
+            api_key=body_json.get("_gitv_api_key", "") if body_json else "",
+        )
 
     if status_code == 200:
         response_data = await _extract_response_memories(response_data, user_id, body_json)

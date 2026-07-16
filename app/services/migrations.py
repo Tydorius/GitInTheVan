@@ -639,6 +639,15 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             """,
         },
     ),
+    (
+        "041_endpoint_tagging_failover",
+        """
+        ALTER TABLE endpoints ADD COLUMN role_tag VARCHAR(32) DEFAULT 'default' NOT NULL;
+        ALTER TABLE endpoints ADD COLUMN priority INTEGER DEFAULT 1 NOT NULL;
+        ALTER TABLE endpoints ADD COLUMN custom_tag VARCHAR(64) DEFAULT '' NOT NULL;
+        ALTER TABLE map_stages ADD COLUMN endpoint_tag VARCHAR(32) DEFAULT '' NOT NULL;
+        """,
+    ),
 ]
 
 

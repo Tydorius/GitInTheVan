@@ -25,6 +25,9 @@ class EndpointCreate(BaseModel):
     default_model: str = ""
     bypass_method: str = "none"
     enabled: bool = True
+    role_tag: str = "default"
+    priority: int = 1
+    custom_tag: str = ""
 
     @field_validator("base_url")
     @classmethod
@@ -41,6 +44,9 @@ class EndpointUpdate(BaseModel):
     default_model: str | None = None
     bypass_method: str | None = None
     enabled: bool | None = None
+    role_tag: str | None = None
+    priority: int | None = None
+    custom_tag: str | None = None
 
     @field_validator("base_url")
     @classmethod
@@ -58,6 +64,9 @@ class EndpointResponse(BaseModel):
     default_model: str
     bypass_method: str
     enabled: bool
+    role_tag: str
+    priority: int
+    custom_tag: str
 
 
 class EndpointListResponse(BaseModel):
@@ -79,6 +88,7 @@ async def list_endpoints(
                 id=e.id, name=e.name, base_url=e.base_url, api_key=e.api_key,
                 api_base_path=e.api_base_path, provider=e.provider,
                 default_model=e.default_model, bypass_method=e.bypass_method, enabled=e.enabled,
+                role_tag=e.role_tag, priority=e.priority, custom_tag=e.custom_tag,
             )
             for e in endpoints
         ]
@@ -101,6 +111,9 @@ async def create_endpoint(
         default_model=req.default_model,
         bypass_method=req.bypass_method,
         enabled=req.enabled,
+        role_tag=req.role_tag,
+        priority=req.priority,
+        custom_tag=req.custom_tag,
     )
     db.add(endpoint)
     await db.commit()
@@ -116,6 +129,9 @@ async def create_endpoint(
         default_model=endpoint.default_model,
         bypass_method=endpoint.bypass_method,
         enabled=endpoint.enabled,
+        role_tag=endpoint.role_tag,
+        priority=endpoint.priority,
+        custom_tag=endpoint.custom_tag,
     )
 
 
@@ -149,6 +165,12 @@ async def update_endpoint(
         endpoint.bypass_method = req.bypass_method
     if req.enabled is not None:
         endpoint.enabled = req.enabled
+    if req.role_tag is not None:
+        endpoint.role_tag = req.role_tag
+    if req.priority is not None:
+        endpoint.priority = req.priority
+    if req.custom_tag is not None:
+        endpoint.custom_tag = req.custom_tag
 
     await db.commit()
     await db.refresh(endpoint)
@@ -162,6 +184,9 @@ async def update_endpoint(
         default_model=endpoint.default_model,
         bypass_method=endpoint.bypass_method,
         enabled=endpoint.enabled,
+        role_tag=endpoint.role_tag,
+        priority=endpoint.priority,
+        custom_tag=endpoint.custom_tag,
     )
 
 

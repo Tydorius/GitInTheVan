@@ -122,12 +122,13 @@ def compute_budget(
 
 async def load_weighted_resources(
     user_id: str, tags: list | None = None
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Load active cantrips and lorebooks with their budget weights.
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Load active cantrips, lorebooks, and skills with their budget weights.
 
-    Returns (cantrips, lorebooks) where each entry is a dict with
+    Returns (cantrips, lorebooks, skills) where each entry is a dict with
     id, name, weight, and position info.
     """
+    from app.models.skill import Skill
     from app.services.tagging import should_activate_resource
 
     async with async_session() as db:
@@ -165,6 +166,11 @@ async def load_weighted_resources(
             else:
                 active_cantrips.append(c)
 
+        skill_result = await db.execute(
+            select(Skill).where(Skill.user_id == user_id)
+        )
+        all_skills = skill_result.scalars().all()
+
         lorebook_info = [
             {"id": lb.id, "name": lb.name, "weight": lb.budget_weight}
             for lb in active_lorebooks
@@ -173,20 +179,25 @@ async def load_weighted_resources(
             {"id": c.id, "name": c.name, "weight": c.budget_weight}
             for c in active_cantrips
         ]
+        skill_info = [
+            {"id": s.id, "name": s.name, "weight": s.budget_weight}
+            for s in all_skills
+        ]
 
-    return cantrip_info, lorebook_info
+    return cantrip_info, lorebook_info, skill_info
 
 
 def allocate_budget(
     injection_budget: int,
     cantrip_info: list[dict[str, Any]],
     lorebook_info: list[dict[str, Any]],
+    skill_info: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Allocate the injection budget across active resources by weight.
 
     Returns a dict with per-resource token shares and detail levels.
     """
-    all_resources = cantrip_info + lorebook_info
+    all_resources = cantrip_info + lorebook_info + (skill_info or [])
     total_weight = sum(r["weight"] for r in all_resources)
 
     if total_weight <= 0:
@@ -275,16 +286,16 @@ async def prepare_budget(
     if injection_budget <= 0:
         return None
 
-    cantrip_info, lorebook_info = await load_weighted_resources(user_id, tags)
-    allocations = allocate_budget(injection_budget, cantrip_info, lorebook_info)
+    cantrip_info, lorebook_info, skill_info = await load_weighted_resources(user_id, tags)
+    allocations = allocate_budget(injection_budget, cantrip_info, lorebook_info, skill_info)
 
     body_json["_gitv_budget_allocations"] = allocations
 
     logger.info(
         "Context budget: window=%d, injection=%d tokens, "
-        "%d cantrips + %d lorebooks allocated",
+        "%d cantrips + %d lorebooks + %d skills allocated",
         context_window, injection_budget,
-        len(cantrip_info), len(lorebook_info),
+        len(cantrip_info), len(lorebook_info), len(skill_info),
     )
 
     return allocations

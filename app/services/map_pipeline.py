@@ -63,9 +63,24 @@ async def resolve_map(user_id: str, tags: list | None) -> Map | None:
 
 async def _resolve_stage_endpoint(
     db, stage: MapStage, user_id: str
-) -> tuple[Endpoint | None, str]:
-    """Resolve the endpoint and model for a map stage."""
-    endpoint = None
+) -> tuple[list[Endpoint], str]:
+    """Resolve endpoint candidates and model for a map stage.
+
+    Returns an ordered list of endpoints (for failover) plus the model. Tag
+    resolution takes priority (stage.endpoint_tag), then the specific
+    endpoint_id pin, then the user default, then the first enabled endpoint.
+    Each resolution level returns as soon as it finds at least one match."""
+    from app.services.routing import resolve_endpoints_by_tag
+
+    model = stage.model_override or ""
+
+    # 1. Tag-based resolution (Phase 16): endpoints matching stage.endpoint_tag.
+    if stage.endpoint_tag:
+        tagged = await resolve_endpoints_by_tag(db, user_id, stage.endpoint_tag)
+        if tagged:
+            return tagged, model
+
+    # 2. Specific endpoint pin.
     if stage.endpoint_id:
         ep_result = await db.execute(
             select(Endpoint).where(
@@ -75,34 +90,39 @@ async def _resolve_stage_endpoint(
             )
         )
         endpoint = ep_result.scalar_one_or_none()
+        if endpoint:
+            return [endpoint], model
 
-    if endpoint is None:
-        from app.models.user_settings import UserSettings
-        us_result = await db.execute(
-            select(UserSettings).where(UserSettings.user_id == user_id)
-        )
-        us = us_result.scalar_one_or_none()
-        if us and us.default_endpoint_id:
-            ep_result = await db.execute(
-                select(Endpoint).where(
-                    Endpoint.id == us.default_endpoint_id,
-                    Endpoint.user_id == user_id,
-                    Endpoint.enabled.is_(True),
-                )
-            )
-            endpoint = ep_result.scalar_one_or_none()
-
-    if endpoint is None:
+    # 3. User default endpoint.
+    from app.models.user_settings import UserSettings
+    us_result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == user_id)
+    )
+    us = us_result.scalar_one_or_none()
+    if us and us.default_endpoint_id:
         ep_result = await db.execute(
-            select(Endpoint)
-            .where(Endpoint.user_id == user_id, Endpoint.enabled.is_(True))
-            .order_by(Endpoint.created_at)
-            .limit(1)
+            select(Endpoint).where(
+                Endpoint.id == us.default_endpoint_id,
+                Endpoint.user_id == user_id,
+                Endpoint.enabled.is_(True),
+            )
         )
         endpoint = ep_result.scalar_one_or_none()
+        if endpoint:
+            return [endpoint], model
 
-    model = stage.model_override or ""
-    return endpoint, model
+    # 4. First enabled endpoint (lowest priority, then earliest).
+    ep_result = await db.execute(
+        select(Endpoint)
+        .where(Endpoint.user_id == user_id, Endpoint.enabled.is_(True))
+        .order_by(Endpoint.priority, Endpoint.created_at)
+        .limit(1)
+    )
+    endpoint = ep_result.scalar_one_or_none()
+    if endpoint:
+        return [endpoint], model
+
+    return [], model
 
 
 async def _resolve_verification_endpoint(
@@ -237,6 +257,51 @@ async def _inject_stage_lorebooks(
     return body_json
 
 
+async def _inject_stage_skills(
+    body_json: dict[str, Any], stage: MapStage, user_id: str
+) -> dict[str, Any]:
+    """Inject skills and samples attached to this stage."""
+
+    stage_skill_ids = [
+        r.resource_id for r in stage.resources
+        if r.resource_type in ("skill", "sample") and r.position == "pre_driver"
+    ]
+
+    if not stage_skill_ids:
+        return body_json
+
+    async with async_session() as db:
+        from app.models.skill import Skill
+        result = await db.execute(
+            select(Skill)
+            .where(Skill.id.in_(stage_skill_ids), Skill.user_id == user_id)
+        )
+        skills = result.scalars().all()
+
+        if not skills:
+            return body_json
+
+        from app.services.skills import inject_samples, inject_skills
+
+        skill_contents = [s.content for s in skills if s.type == "skill" and s.content]
+        sample_contents = [s.content for s in skills if s.type == "sample" and s.content]
+
+        messages = body_json.get("messages", [])
+        if skill_contents:
+            messages = inject_skills(messages, skill_contents)
+        if sample_contents:
+            messages = inject_samples(messages, sample_contents)
+
+        body_json["messages"] = messages
+        if skill_contents or sample_contents:
+            logger.info(
+                "Map stage '%s': %d skills + %d samples injected",
+                stage.name, len(skill_contents), len(sample_contents),
+            )
+
+    return body_json
+
+
 async def _build_stage_verification_body(
     content: str, stage: MapStage
 ) -> list[dict[str, str]]:
@@ -362,40 +427,63 @@ async def _verify_stage(
 
 async def _forward_stage_llm(
     body_json: dict[str, Any],
-    endpoint: Endpoint,
+    endpoints: list[Endpoint],
     model: str,
     timeout: httpx.Timeout,
 ) -> tuple[dict[str, Any], int]:
-    """Forward a request to the stage's LLM endpoint."""
+    """Forward a request to the stage's LLM endpoint(s) with failover.
+
+    Iterates the candidate list in order. Any failure (status != 200 or
+    exception) advances to the next endpoint. Only total exhaustion yields an
+    error status."""
+    if not endpoints:
+        return ({"error": {"message": "No endpoint configured for this stage"}}, 503)
+
     forward_body = {k: v for k, v in body_json.items() if not k.startswith("_gitv_")}
     forward_body["stream"] = False
 
     if model:
         forward_body["model"] = model
 
-    api_base_path = endpoint.api_base_path or ""
-    if api_base_path.endswith("/chat/completions"):
-        url = f"{endpoint.base_url}{api_base_path}"
-    else:
-        path_prefix = api_base_path or "/v1"
-        url = f"{endpoint.base_url}{path_prefix}/chat/completions"
+    for idx, endpoint in enumerate(endpoints):
+        api_base_path = endpoint.api_base_path or ""
+        if api_base_path.endswith("/chat/completions"):
+            url = f"{endpoint.base_url}{api_base_path}"
+        else:
+            path_prefix = api_base_path or "/v1"
+            url = f"{endpoint.base_url}{path_prefix}/chat/completions"
 
-    headers = {
-        "Authorization": f"Bearer {endpoint.api_key}",
-        "Content-Type": "application/json",
-    }
+        headers = {
+            "Authorization": f"Bearer {endpoint.api_key}",
+            "Content-Type": "application/json",
+        }
 
-    body_bytes = json.dumps(forward_body).encode()
+        body_bytes = json.dumps(forward_body).encode()
 
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(url, content=body_bytes, headers=headers)
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(url, content=body_bytes, headers=headers)
 
-    try:
-        response_data = resp.json()
-    except Exception:
-        response_data = {"error": {"message": resp.text[:500]}}
+            try:
+                response_data = resp.json()
+            except Exception:
+                response_data = {"error": {"message": resp.text[:500]}}
 
-    return response_data, resp.status_code
+            if resp.status_code == 200:
+                return response_data, 200
+
+            logger.info(
+                "Map stage failover: endpoint '%s' returned %d, trying next",
+                endpoint.name, resp.status_code,
+            )
+        except Exception:
+            logger.exception(
+                "Map stage failover: endpoint '%s' raised an exception, trying next",
+                endpoint.name,
+            )
+
+    logger.warning("Map stage failover: all %d endpoint(s) exhausted", len(endpoints))
+    return ({"error": {"message": "All stage endpoints failed"}}, 503)
 
 
 async def run_map_pipeline(
@@ -435,9 +523,9 @@ async def run_map_pipeline(
         logger.info("Map stage %d/%d: '%s'", stage_idx + 1, len(stages), stage.name)
 
         async with async_session() as db:
-            endpoint, model = await _resolve_stage_endpoint(db, stage, user_id)
+            endpoints, model = await _resolve_stage_endpoint(db, stage, user_id)
 
-        if not endpoint:
+        if not endpoints:
             logger.error("Map stage '%s': no endpoint available", stage.name)
             return {
                 "choices": [{"message": {"role": "assistant", "content": ""}}],
@@ -446,6 +534,7 @@ async def run_map_pipeline(
 
         body_json = await _inject_stage_instructions(body_json, stage, map_obj)
         body_json = await _inject_stage_lorebooks(body_json, stage, user_id)
+        body_json = await _inject_stage_skills(body_json, stage, user_id)
 
         for ctx in sticky_context:
             messages = body_json.get("messages", [])
@@ -466,7 +555,7 @@ async def run_map_pipeline(
                 stage.driver_callable_turns, caps["max_driver_callable_turns"]
             )
 
-        response_data, status_code = await _forward_stage_llm(body_json, endpoint, model, timeout)
+        response_data, status_code = await _forward_stage_llm(body_json, endpoints, model, timeout)
 
         if status_code != 200:
             logger.warning("Map stage '%s': LLM returned %d", stage.name, status_code)
@@ -496,6 +585,16 @@ async def run_map_pipeline(
             body_json = _strip_stage_injections(body_json, stage)
 
         logger.info("Map stage '%s' completed: %d chars output", stage.name, len(content))
+
+    # Scenario summarization POST: applies to the stage-augmented system message
+    # after all stages complete, mirroring how the non-map pipeline runs POST
+    # (proxy.py ~line 365). PRE already ran at proxy.py:276 before the map branch.
+    if body_json.get("_gitv_command_overrides", {}).get("summary") is not False:
+        from app.services.scenario_summarizer import maybe_summarize_scenario
+        try:
+            body_json = await maybe_summarize_scenario(body_json, user_id, "post")
+        except Exception:
+            logger.exception("Scenario summarization (POST, map) failed")
 
     return response_data
 

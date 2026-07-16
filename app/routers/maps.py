@@ -24,6 +24,16 @@ class ResourceInput(BaseModel):
     position: str = "pre_driver"
     sticky: bool = False
 
+    from pydantic import field_validator
+
+    @field_validator("resource_type")
+    @classmethod
+    def validate_resource_type(cls, v: str) -> str:
+        allowed = {"lorebook", "cantrip", "skill", "sample"}
+        if v not in allowed:
+            raise ValueError(f"resource_type must be one of {allowed}")
+        return v
+
 
 class StageInput(BaseModel):
     name: str
@@ -432,6 +442,21 @@ async def export_map(
                         "code": c.code,
                     }
 
+            elif res.resource_type in ("skill", "sample"):
+                from app.models.skill import Skill
+                s_result = await db.execute(
+                    select(Skill).where(Skill.id == res.resource_id)
+                )
+                s = s_result.scalar_one_or_none()
+                if s:
+                    res_data["resource_name"] = s.name
+                    res_data["resource_content"] = {
+                        "name": s.name,
+                        "description": s.description,
+                        "content": s.content,
+                        "type": s.type,
+                    }
+
             stage_data["resources"].append(res_data)
 
         export_data["stages"].append(stage_data)
@@ -473,6 +498,13 @@ async def import_map(
         from app.models.cantrip import Cantrip
         result = await db.execute(
             select(Cantrip).where(Cantrip.user_id == user_id, Cantrip.name == name)
+        )
+        return result.scalar_one_or_none()
+
+    async def _find_existing_skill(name: str, user_id: str):
+        from app.models.skill import Skill
+        result = await db.execute(
+            select(Skill).where(Skill.user_id == user_id, Skill.name == name)
         )
         return result.scalar_one_or_none()
 
@@ -604,6 +636,35 @@ async def import_map(
                     db.add(c)
                     await db.flush()
                     resource_id = c.id
+
+            elif res_type in ("skill", "sample") and content:
+                from app.models.skill import Skill
+                s_name = content.get("name", "Imported Skill")
+
+                resource_id = None
+                if mode != "keep_both":
+                    existing_s = await _find_existing_skill(s_name, current_user.id)
+                    if existing_s:
+                        if mode == "reuse":
+                            resource_id = existing_s.id
+                        elif mode == "overwrite":
+                            existing_s.description = content.get("description", "")
+                            existing_s.content = content.get("content", "")
+                            existing_s.type = content.get("type", res_type)
+                            await db.flush()
+                            resource_id = existing_s.id
+
+                if not resource_id:
+                    s = Skill(
+                        user_id=current_user.id,
+                        name=s_name,
+                        description=content.get("description", ""),
+                        content=content.get("content", ""),
+                        type=content.get("type", res_type),
+                    )
+                    db.add(s)
+                    await db.flush()
+                    resource_id = s.id
 
             else:
                 resource_id = ""

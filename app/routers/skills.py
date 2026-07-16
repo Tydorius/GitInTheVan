@@ -24,6 +24,7 @@ class SkillCreate(BaseModel):
     description: str = ""
     content: str = ""
     type: str = "skill"
+    budget_weight: float = 1.0
 
 
 class SkillUpdate(BaseModel):
@@ -31,6 +32,7 @@ class SkillUpdate(BaseModel):
     description: str | None = None
     content: str | None = None
     type: str | None = None
+    budget_weight: float | None = None
 
 
 class SkillResponse(BaseModel):
@@ -39,6 +41,7 @@ class SkillResponse(BaseModel):
     description: str
     content: str
     type: str
+    budget_weight: float
     endpoints: list[str]
     created_at: str
 
@@ -58,6 +61,7 @@ def _skill_to_response(skill: Skill, endpoint_ids: list[str] | None = None) -> S
         description=skill.description,
         content=skill.content,
         type=skill.type,
+        budget_weight=skill.budget_weight,
         endpoints=endpoint_ids or [],
         created_at=skill.created_at.isoformat() if skill.created_at else "",
     )
@@ -107,6 +111,7 @@ async def create_skill(
         description=req.description,
         content=req.content,
         type=req.type,
+        budget_weight=req.budget_weight,
     )
     db.add(skill)
     await db.commit()
@@ -158,6 +163,8 @@ async def update_skill(
         if req.type not in ("skill", "sample"):
             raise HTTPException(status_code=400, detail="Type must be 'skill' or 'sample'")
         skill.type = req.type
+    if req.budget_weight is not None:
+        skill.budget_weight = req.budget_weight
 
     await db.commit()
     await db.refresh(skill)

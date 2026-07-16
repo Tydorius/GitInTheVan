@@ -57,6 +57,9 @@ class MapStage(Base):
     endpoint_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("endpoints.id", ondelete="SET NULL"), nullable=True
     )
+    endpoint_tag: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="", server_default=""
+    )
     model_override: Mapped[str] = mapped_column(String(128), nullable=False, default="")
 
     driver_callable_turns: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -88,7 +91,7 @@ class MapStageResource(Base):
     map_stage_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("map_stages.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    resource_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    resource_type: Mapped[str] = mapped_column(String(32), nullable=False)
     resource_id: Mapped[str] = mapped_column(String(36), nullable=False)
     position: Mapped[str] = mapped_column(String(32), nullable=False, default="pre_driver")
     sticky: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
