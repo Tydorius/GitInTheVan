@@ -2,6 +2,32 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.18.0] - 2026-07-15
+
+### Added — Phase 16: Endpoint Tagging & Failover
+
+- **Role tags and priority on endpoints**: each endpoint now carries a `role_tag` (`default`/`driver`/`navigator`/`writing`/`validation`/`rules`/`tool_use`/`custom`), a `priority` integer (1 = tried first), and an optional `custom_tag`. Endpoints sharing a tag form a failover chain
+- **Automatic failover**: when an upstream endpoint fails — any HTTP status ≠ 200 (including 401, 404, 429, 500) or any exception (timeout, connection error) — the next endpoint in priority order is tried silently. Only total chain exhaustion returns a 503. Each candidate carries its own model, API key, provider, and bypass method, so a free OpenRouter key can fall through to a paid endpoint with a different model. The failover chain is eager-loaded (one DB query, session released before any upstream call) to protect the connection pool across long (up to 300s) upstream calls
+- **Map tag-based endpoint resolution**: map stages can reference endpoints by `endpoint_tag` instead of a fixed `endpoint_id`. When a map is shared/imported, stages resolve to the importing user's endpoints matching the tag — no manual endpoint reassignment needed. Specific `endpoint_id` pin still honored for power users
+- **Map stage failover**: `_forward_stage_llm` now has exception handling (ConnectError/Timeout) and iterates the candidate list with the same any-failure→next failover logic
+
+### Added — Quick Wins
+
+- **Skills/samples in Maps**: `MapStageResource.resource_type` now accepts `"skill"` and `"sample"`. Skills and samples attached to a map stage are injected per-stage via the existing `inject_skills`/`inject_samples` engine. Validator tightened to `Literal["lorebook","cantrip","skill","sample"]`; export/import branches added
+- **Skills in context budget**: `Skill` model gains `budget_weight` (Float, default 1.0, matching cantrip/lorebook). `load_weighted_resources` returns a third list; `allocate_budget` accounts for skills in the weighted allocation. Skill router exposes `budget_weight` in create/update/response
+- **Scenario summarization POST in Maps**: `run_map_pipeline` now calls `maybe_summarize_scenario(body_json, user_id, "post")` after the stage loop completes, matching the non-map pipeline. Maps previously skipped POST entirely (proxy early-returned); PRE already ran correctly
+
+### Changed
+
+- `RoutingResult` converted to a `@dataclass` with a `failover_chain: list[FailoverEndpoint]` field; the scalar fields (base_url, api_key, etc.) remain as the first candidate's values for backward compatibility
+- `_resolve_default_endpoint` now orders by `priority ASC, created_at ASC` (was `created_at` only)
+- `_apply_resubmission_strategy` strips `_gitv_*` keys before deep-copying (the failover chain holds non-serializable `FailoverEndpoint` objects)
+- 11 new tests in `tests/test_failover.py` covering dataclass behavior, proxy failover (500→next, 401→next, all-exhausted→503, success-first→no-extra-calls, single-endpoint backward-compat), and endpoint tag/priority CRUD
+
+### Migration
+
+- `041_endpoint_tagging_failover`: adds `role_tag`, `priority`, `custom_tag` to `endpoints`; adds `endpoint_tag` to `map_stages`. Additive-only, cross-dialect `ADD COLUMN ... DEFAULT`
+
 ## [0.17.1] - 2026-07-15
 
 ### Fixed

@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Float, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -24,6 +24,7 @@ class Skill(Base):
     description: Mapped[str] = mapped_column(String(512), nullable=False, default="", server_default="")
     content: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     type: Mapped[str] = mapped_column(String(16), nullable=False, default="skill", server_default="skill")
+    budget_weight: Mapped[float] = mapped_column(Float, default=1.0, server_default="1.0", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

@@ -225,7 +225,12 @@ def _apply_resubmission_strategy(
     violations: list[VerificationJudgment],
     strategy: str,
 ) -> dict[str, Any]:
-    result = json.loads(json.dumps(body_json))
+    # Deep-copy only the upstream-facing keys; _gitv_* internals (including the
+    # failover chain, which holds non-serializable FailoverEndpoint objects) are
+    # excluded so the retry body is clean JSON.
+    result = json.loads(json.dumps(
+        {k: v for k, v in body_json.items() if not k.startswith("_gitv")}
+    ))
     combined_reason = "; ".join(v.reason for v in violations if v.reason)
 
     if strategy == "rewrite":

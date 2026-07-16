@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -28,6 +28,13 @@ class Endpoint(Base):
     default_model: Mapped[str] = mapped_column(String(128), nullable=False, default="", server_default="")
     bypass_method: Mapped[str] = mapped_column(String(32), nullable=False, default="none")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    role_tag: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="default", server_default="default"
+    )
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    custom_tag: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", server_default=""
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

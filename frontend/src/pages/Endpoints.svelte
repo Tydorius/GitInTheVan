@@ -49,7 +49,7 @@
   let showForm = false
   let editingId: string | null = null
 
-  let form = { name: '', base_url: '', api_key: '', api_base_path: '', provider: '', default_model: '', bypass_method: 'none', enabled: true }
+  let form = { name: '', base_url: '', api_key: '', api_base_path: '', provider: '', default_model: '', bypass_method: 'none', enabled: true, role_tag: 'default', priority: 1, custom_tag: '' }
   let showApiKey = false
   let visibleKeys: Record<string, boolean> = {}
   let copiedKeyId: string | null = null
@@ -100,13 +100,13 @@
   }
 
   function resetForm() {
-    form = { name: '', base_url: '', api_key: '', api_base_path: '', provider: '', default_model: '', bypass_method: 'none', enabled: true }
+    form = { name: '', base_url: '', api_key: '', api_base_path: '', provider: '', default_model: '', bypass_method: 'none', enabled: true, role_tag: 'default', priority: 1, custom_tag: '' }
     editingId = null
   }
 
   function startEdit(ep: any) {
     editingId = ep.id
-    form = { name: ep.name, base_url: ep.base_url, api_key: ep.api_key, api_base_path: ep.api_base_path || '', provider: ep.provider || '', default_model: ep.default_model || '', bypass_method: ep.bypass_method || 'none', enabled: ep.enabled }
+    form = { name: ep.name, base_url: ep.base_url, api_key: ep.api_key, api_base_path: ep.api_base_path || '', provider: ep.provider || '', default_model: ep.default_model || '', bypass_method: ep.bypass_method || 'none', enabled: ep.enabled, role_tag: ep.role_tag || 'default', priority: ep.priority || 1, custom_tag: ep.custom_tag || '' }
     showForm = true
   }
 
@@ -212,6 +212,7 @@
           <div>Provider Key: {ep.api_key ? ep.api_key.slice(0, 8) + '...' : 'none'}</div>
           <div>Provider: {ep.provider ? providers.find(p => p.value === ep.provider)?.label || ep.provider : 'Custom (passthrough)'}</div>
           <div>Bypass: {ep.bypass_method || 'none'}</div>
+          <div>Role: {ep.role_tag || 'default'}{ep.role_tag === 'custom' && ep.custom_tag ? ` (${ep.custom_tag})` : ''} · Priority: {ep.priority || 1}</div>
         </div>
 
         <div style="border-top: 1px solid var(--border); padding-top: 12px;">
@@ -345,6 +346,32 @@
             Used when the client doesn't specify a model and for connectivity tests.
           </p>
         </div>
+        <div class="form-group">
+          <label for="ep-roletag">Role Tag</label>
+          <select id="ep-roletag" bind:value={form.role_tag}>
+            <option value="default">default</option>
+            <option value="driver">driver</option>
+            <option value="navigator">navigator</option>
+            <option value="writing">writing</option>
+            <option value="validation">validation</option>
+            <option value="rules">rules</option>
+            <option value="tool_use">tool_use</option>
+            <option value="custom">custom</option>
+          </select>
+          <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+            Endpoints sharing a tag form a failover chain. On any failure the next endpoint in priority order is tried.
+          </p>
+        </div>
+        <div class="form-group">
+          <label for="ep-priority">Priority <span style="color: var(--text-dim);">(1 = tried first, 2 = second, etc.)</span></label>
+          <input id="ep-priority" type="number" min="1" bind:value={form.priority} style="width: 80px;" />
+        </div>
+        {#if form.role_tag === 'custom'}
+          <div class="form-group">
+            <label for="ep-customtag">Custom Tag Name</label>
+            <input id="ep-customtag" autocomplete="off" spellcheck="false" bind:value={form.custom_tag} placeholder="e.g. free-tier" />
+          </div>
+        {/if}
         <div class="form-group">
           <label for="ep-enabled">
             <input id="ep-enabled" type="checkbox" bind:checked={form.enabled} style="width: auto;"> Enabled
