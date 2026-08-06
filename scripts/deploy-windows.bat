@@ -250,8 +250,9 @@ if not exist "%GITV_ROOT%\.venv\Scripts\python.exe" (
 ) else (
     echo DEBUG: .venv already exists >> "%LOG_FILE%"
 )
-echo Upgrading pip...
-"%GITV_ROOT%\.venv\Scripts\python" -m pip install --upgrade pip -q >> "%LOG_FILE%" 2>&1
+echo Installing pip...
+REM Pinned like every other dependency (exact pins only, never ranges).
+"%GITV_ROOT%\.venv\Scripts\python" -m pip install "pip==26.2" -q >> "%LOG_FILE%" 2>&1
 echo Installing dependencies...
 echo Installing Python dependencies... >> "%LOG_FILE%"
 "%GITV_ROOT%\.venv\Scripts\pip" install -e "%GITV_ROOT%[dev]" -q >> "%LOG_FILE%" 2>&1
@@ -508,13 +509,11 @@ if "!NODE_OK!"=="0" (
 
 echo Building frontend... >> "%LOG_FILE%"
 cd /d "%GITV_ROOT%\frontend"
-if not exist "node_modules" (
-    echo Installing frontend dependencies...
-    call "!NPM_CMD!" install -q >> "%LOG_FILE%" 2>&1
-) else (
-    echo Updating frontend dependencies...
-    call "!NPM_CMD!" install -q >> "%LOG_FILE%" 2>&1
-)
+REM `npm ci` installs strictly from package-lock.json. `npm install` would
+REM re-resolve against the live registry and rewrite the lockfile, which
+REM defeats the exact pinning required by the dependency pinning policy.
+echo Installing frontend dependencies...
+call "!NPM_CMD!" ci -q >> "%LOG_FILE%" 2>&1
 echo Building frontend...
 call "!NPM_CMD!" run build >> "%LOG_FILE%" 2>&1
 if errorlevel 1 (

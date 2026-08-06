@@ -1,10 +1,8 @@
 import json
 
 import pytest
-from httpx import ASGITransport, AsyncClient
 
 from app.config import Settings
-from app.main import app
 
 MOCK_ENDPOINT_URL = "http://mock-backend:9999"
 
@@ -18,13 +16,6 @@ def set_endpoint(monkeypatch):
         default_endpoint_api_base_path="",
     )
     monkeypatch.setattr("app.services.proxy.settings", test_settings)
-
-
-@pytest.fixture
-async def client():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
 
 
 def _make_request(**overrides):

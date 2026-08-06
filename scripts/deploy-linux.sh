@@ -165,8 +165,9 @@ if [ ! -f "$GITV_ROOT/.venv/bin/python" ]; then
     echo "Creating virtual environment..."
     "$PYTHON_CMD" -m venv "$GITV_ROOT/.venv"
 fi
-echo "Upgrading pip..."
-"$GITV_ROOT/.venv/bin/python" -m pip install --upgrade pip -q
+echo "Installing pip..."
+# Pinned like every other dependency (exact pins only, never ranges).
+"$GITV_ROOT/.venv/bin/python" -m pip install "pip==26.2" -q
 echo "Installing dependencies..."
 "$GITV_ROOT/.venv/bin/pip" install -e "$GITV_ROOT[dev]" -q
 echo "Done."
@@ -346,13 +347,11 @@ if [ -n "$NODE_CMD" ]; then
         # installed. Do NOT fall back to a bare `npm`/`node` on failure: an
         # unrelated npm elsewhere on PATH (e.g. a Windows install visible
         # through WSL interop) can silently shadow the intended one.
-        if [ ! -d "node_modules" ]; then
-            echo "Installing frontend dependencies..."
-            PATH="$NODE_BIN_DIR:$PATH" "$NODE_CMD" "$NPM_CLI" install -q
-        else
-            echo "Updating frontend dependencies..."
-            PATH="$NODE_BIN_DIR:$PATH" "$NODE_CMD" "$NPM_CLI" install -q
-        fi
+        # `npm ci` installs strictly from package-lock.json. `npm install` would
+        # re-resolve against the live registry and rewrite the lockfile, which
+        # defeats the exact pinning required by the dependency pinning policy.
+        echo "Installing frontend dependencies..."
+        PATH="$NODE_BIN_DIR:$PATH" "$NODE_CMD" "$NPM_CLI" ci -q
         echo "Building frontend..."
         PATH="$NODE_BIN_DIR:$PATH" "$NODE_CMD" "$NPM_CLI" run build
         cd "$GITV_ROOT"

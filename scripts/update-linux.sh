@@ -4,13 +4,43 @@ set -e
 GITV_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOG_FILE="$GITV_ROOT/data/updater.log"
 ZIP_FILE="$GITV_ROOT/data/gitinthevan.zip"
+CHAIN_LOG="$GITV_ROOT/data/update-chain.log"
+
+# Arguments are optional and order-independent so that a NEW app version can
+# drive an OLD copy of this script (which happens on the first hop of every
+# upgrade) without the extra arguments breaking anything.
+#   --auto        unattended; never wait for a keypress
+#   <port>        port the server listens on (default 8000)
+GITV_PORT=8000
+GITV_AUTO=0
+for arg in "$@"; do
+    case "$arg" in
+        --auto) GITV_AUTO=1 ;;
+        [0-9]*) GITV_PORT="$arg" ;;
+    esac
+done
+
+# Rotate the previous run's log instead of truncating it. A chained upgrade runs
+# this script once per hop, and without rotation each hop destroys the evidence
+# needed to diagnose the one before it.
+mkdir -p "$GITV_ROOT/data/update-logs"
+if [ -f "$LOG_FILE" ]; then
+    mv "$LOG_FILE" "$GITV_ROOT/data/update-logs/updater-$(date +%Y%m%d_%H%M%S).log" 2>/dev/null || true
+    ls -1t "$GITV_ROOT"/data/update-logs/updater-*.log 2>/dev/null | tail -n +11 | xargs -r rm -f
+fi
 
 exec > >(tee "$LOG_FILE") 2>&1
+
+# `set -e` otherwise aborts silently mid-update -- after the new files are
+# extracted but before any server is started -- leaving the maintenance page
+# serving "updating" forever, indistinguishable from progress.
+trap 'echo "UPDATE FAILED at line $LINENO (exit $?)" | tee -a "$CHAIN_LOG"' ERR
 
 echo "============================================"
 echo "  GitInTheVan - Auto-Update"
 echo "  Date: $(date)"
 echo "  Script: $(dirname "$0")"
+echo "  Port: $GITV_PORT"
 echo "============================================"
 echo
 
@@ -23,19 +53,19 @@ cd "$GITV_ROOT"
 # Stop running server
 # ============================================================
 echo "[1/6] Stopping server if running..."
-if lsof -ti:8000 > /dev/null 2>&1; then
-    PID=$(lsof -ti:8000)
-    echo "Server running on port 8000 (PID $PID). Stopping..."
+if lsof -ti:"$GITV_PORT" > /dev/null 2>&1; then
+    PID=$(lsof -ti:"$GITV_PORT")
+    echo "Server running on port $GITV_PORT (PID $PID). Stopping..."
     kill "$PID" 2>/dev/null || true
     sleep 2
-    if lsof -ti:8000 > /dev/null 2>&1; then
+    if lsof -ti:"$GITV_PORT" > /dev/null 2>&1; then
         echo "Force killing..."
         kill -9 "$PID" 2>/dev/null || true
         sleep 1
     fi
     echo "Server stopped."
 else
-    echo "No server detected on port 8000."
+    echo "No server detected on port $GITV_PORT."
 fi
 echo
 
@@ -46,6 +76,7 @@ MAINT_SCRIPT="$GITV_ROOT/data/_maintenance_server.py"
 if [ -f "$GITV_ROOT/.venv/bin/python" ]; then
     cat > "$MAINT_SCRIPT" << 'PYEOF'
 import http.server
+import os
 import socketserver
 
 PAGE = b"""<!doctype html><html><head><meta charset="utf-8">
@@ -72,23 +103,28 @@ class ReusableTCPServer(socketserver.TCPServer):
     allow_reuse_address = True
 
 
-with ReusableTCPServer(("0.0.0.0", 8000), Handler) as httpd:
+with ReusableTCPServer(("0.0.0.0", int(os.environ.get("GITV_MAINT_PORT", "8000"))), Handler) as httpd:
     httpd.serve_forever()
 PYEOF
-    nohup "$GITV_ROOT/.venv/bin/python" "$MAINT_SCRIPT" > /dev/null 2>&1 &
+    GITV_MAINT_PORT="$GITV_PORT" nohup "$GITV_ROOT/.venv/bin/python" "$MAINT_SCRIPT" > /dev/null 2>&1 &
     disown
-    echo "Maintenance page serving on port 8000 during update."
+    echo "Maintenance page serving on port $GITV_PORT during update."
 fi
 echo
 
 # ============================================================
 # Backup database
 # ============================================================
+# Per hop, not once per chain: each hop's migrations are what can corrupt, so a
+# per-hop rollback point is the right granularity.
 echo "[2/6] Backing up database..."
 if [ -f "$GITV_ROOT/data/gitinthevan.db" ]; then
     BACKUP_NAME="data/gitinthevan_backup_$(date +%Y%m%d_%H%M%S).db"
     cp "$GITV_ROOT/data/gitinthevan.db" "$GITV_ROOT/$BACKUP_NAME"
     echo "Database backed up to $BACKUP_NAME"
+    # Prune to the newest 10. maxdepth 1 only: data/backups/ uses the same
+    # filename prefix for scheduled backups, and those are managed elsewhere.
+    ls -1t "$GITV_ROOT"/data/gitinthevan_backup_*.db 2>/dev/null | tail -n +11 | xargs -r rm -f
 else
     echo "No database found at data/gitinthevan.db, skipping backup."
 fi
@@ -141,7 +177,9 @@ echo
 # ============================================================
 echo "[4/6] Reinstalling Python dependencies..."
 if [ -f "$GITV_ROOT/.venv/bin/python" ]; then
-    "$GITV_ROOT/.venv/bin/python" -m pip install --upgrade pip -q
+    # Pinned like every other dependency (exact pins only, never ranges) - an unpinned
+    # `--upgrade pip` is an unreviewed network fetch on every single update.
+    "$GITV_ROOT/.venv/bin/python" -m pip install "pip==26.2" -q
     "$GITV_ROOT/.venv/bin/pip" install -e "$GITV_ROOT[dev]" -q
     echo "Dependencies installed."
 else
@@ -174,8 +212,19 @@ else
     # `env node` shebang) needs `node` resolvable via PATH, not just the
     # absolute $NODE_CMD path - required when using the portable .node/
     # install with no system-wide Node.js on PATH.
-    PATH="$(dirname "$NODE_CMD"):$PATH" "$NPM_CMD" install -q
-    PATH="$(dirname "$NODE_CMD"):$PATH" "$NPM_CMD" run build || echo "WARNING: Frontend build failed. Using existing build."
+    # `npm ci` installs strictly from package-lock.json. `npm install` would
+    # re-resolve against the live registry and rewrite the lockfile, which
+    # defeats the exact pinning required by the dependency pinning policy.
+    #
+    # Guarded with `if`: under `set -e` an unguarded failure would abort the
+    # update after the new files are already extracted but before the server is
+    # restarted. Falling back to the existing static/ build is recoverable; a
+    # half-finished update is not. Never fall back to `npm install`.
+    if PATH="$(dirname "$NODE_CMD"):$PATH" "$NPM_CMD" ci -q; then
+        PATH="$(dirname "$NODE_CMD"):$PATH" "$NPM_CMD" run build || echo "WARNING: Frontend build failed. Using existing build."
+    else
+        echo "WARNING: npm ci failed (package.json/package-lock.json may disagree). Using existing frontend build."
+    fi
     cd "$GITV_ROOT"
     echo "Frontend rebuilt."
 fi
@@ -193,14 +242,24 @@ echo
 
 cd "$GITV_ROOT"
 
-# Stop the maintenance page so the real server can bind port 8000
-if lsof -ti:8000 > /dev/null 2>&1; then
-    kill "$(lsof -ti:8000)" 2>/dev/null || true
+# Stop the maintenance page so the real server can bind the port
+if lsof -ti:"$GITV_PORT" > /dev/null 2>&1; then
+    kill "$(lsof -ti:"$GITV_PORT")" 2>/dev/null || true
     sleep 1
 fi
 rm -f "$MAINT_SCRIPT" 2>/dev/null || true
 
-# Clean up auto-update script
+# Clean up auto-update script.
+#
+# Do NOT remove data/update-chain.json here. It carries the frozen multi-release
+# upgrade plan across restarts, and the newly started server reads it to decide
+# whether another hop is due. data/ is gitignored and absent from the release
+# zip, which is exactly why chain state lives there and survives extraction.
 rm -f "$GITV_ROOT/data/auto-update.sh" 2>/dev/null || true
 
-"$GITV_ROOT/.venv/bin/python" -m app.main
+# Redirect rather than inheriting the tee above: this call blocks for the
+# server's entire lifetime, so without this every line the server ever prints
+# lands in updater.log. Python logging is already captured by
+# setup_file_logging() in data/logs/gitinthevan.log.
+mkdir -p "$GITV_ROOT/data/logs"
+"$GITV_ROOT/.venv/bin/python" -m app.main >> "$GITV_ROOT/data/logs/server-stdout.log" 2>&1

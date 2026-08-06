@@ -175,7 +175,6 @@ class TestClient:
                 fail_test(f"Could not create test user: {create.status_code} {create.text[:200]}")
                 return False
             self.test_api_key = create.json()["api_key"]
-            test_user_id = create.json()["id"]
             test_username = create.json()["username"]
         else:
             create = self.client.post(
@@ -188,7 +187,6 @@ class TestClient:
                 fail_test(f"Could not create test user: {create.status_code} {create.text[:200]}")
                 return False
             self.test_api_key = create.json()["api_key"]
-            test_user_id = create.json()["id"]
             test_username = TEST_USER
 
         pass_test(f"Test user: {test_username} (API key: {self.test_api_key[:12]}...)")

@@ -324,6 +324,9 @@ class UpdateCheckResponse(BaseModel):
     release_notes: str = ""
     zip_url: str = ""
     error: str = ""
+    # Releases that must be installed in sequence to reach latest. Each release
+    # only guarantees it can migrate from the one before it.
+    step_count: int = 0
 
 
 @router.get("/update/check", response_model=UpdateCheckResponse)
@@ -375,6 +378,95 @@ async def execute_update(
     from app.services.updater import execute_update
     result = await execute_update()
     return UpdateExecuteResponse(**result)
+
+
+class UpdateChainStep(BaseModel):
+    version: str
+    tag: str = ""
+    status: str = "pending"
+    attempts: int = 0
+    error: str = ""
+    release_url: str = ""
+
+
+class UpdateChainResponse(BaseModel):
+    active: bool
+    status: str = ""
+    from_version: str = ""
+    target_version: str = ""
+    current_step: int = 0
+    total_steps: int = 0
+    error: str = ""
+    steps: list[UpdateChainStep] = []
+    log_tail: list[str] = []
+
+
+@router.get("/update/chain", response_model=UpdateChainResponse)
+async def get_update_chain(
+    admin: Annotated[User, Depends(require_admin)],
+):
+    """Progress of a multi-release upgrade, including a log tail for failures."""
+    from app.services.updater import chain_status
+    return UpdateChainResponse(**chain_status())
+
+
+@router.delete("/update/chain", response_model=UpdateExecuteResponse)
+async def abort_update_chain(
+    admin: Annotated[User, Depends(require_admin)],
+):
+    """Discard a stuck chain so a fresh update can be planned."""
+    from app.services.updater import abort_chain
+    return UpdateExecuteResponse(**abort_chain())
+
+
+@router.post("/update/chain/resume", response_model=UpdateExecuteResponse)
+async def resume_update_chain(
+    admin: Annotated[User, Depends(require_admin)],
+):
+    """Retry the outstanding step of a failed, stalled or expired chain.
+
+    Reuses the frozen plan, so a retry still lands on the approved version.
+    """
+    from app.services.updater import resume_chain_now
+    return UpdateExecuteResponse(**await resume_chain_now())
+
+
+class SchemaRepairResponse(BaseModel):
+    ran: bool = False
+    marker_set: bool = False
+    backup_file: str = ""
+    applied: list[str] = []
+    reported: list[str] = []
+    remaining: list[str] = []
+    error: str = ""
+
+
+@router.get("/schema-repair", response_model=SchemaRepairResponse)
+async def get_schema_repair_status(
+    admin: Annotated[User, Depends(require_admin)],
+):
+    """Report outstanding schema drift without repairing it.
+
+    The repair itself runs once on startup; this is a read-only view so an admin
+    can see why it did or did not complete.
+    """
+    from sqlalchemy import text as _text
+
+    from app.database import engine
+    from app.services.schema_repair import REPAIR_MARKER, _diff_schema
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            _text("SELECT 1 FROM _migrations WHERE name = :n;"), {"n": REPAIR_MARKER}
+        )
+        marker = result.first() is not None
+
+    drifts = await _diff_schema(engine)
+    return SchemaRepairResponse(
+        marker_set=marker,
+        remaining=[f"{d.table}.{d.column}" for d in drifts if d.kind == "missing_column"],
+        reported=[f"{d.table}.{d.column or '*'}: {d.detail}" for d in drifts if d.kind != "missing_column"],
+    )
 
 
 class BackupRunResponse(BaseModel):

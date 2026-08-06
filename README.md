@@ -12,6 +12,7 @@ Licensed under Mozilla Public License 2.0.
 [Features](#Features)  
 [Upcoming Features](#Upcoming-Features)  
 [Quick Start](#Quick-Start)  
+[Updating](#Updating)  
 [Configuration](#Configuration)  
 [Database Support](#Database-Support)  
 [Using with JanitorAI](#Using-with-JanitorAI)  
@@ -257,6 +258,31 @@ Open `http://localhost:8000` in your browser to access the management UI.
 5. Go to **Endpoints** and add your LLM endpoint
 6. Go to **Settings** and set your default endpoint
 7. Point your client (JanitorAI, etc.) at your proxy URL using your `gitv_` API key
+
+### Updating
+
+Use **Admin → Update** in the web UI. Click *Check for Updates*, then *Update Now*. The server backs up its database, installs the new version, and restarts on its own.
+
+**If you are several releases behind**, the upgrade runs as a chain of single-release steps rather than one jump — 0.15.42 → 0.16.1 → 0.18.0, restarting after each one. This is deliberate: a release only guarantees it can migrate the database from the release immediately before it, so skipping releases can leave the database missing columns that newer code expects. The plan is fixed the moment you confirm it, so a release published while your upgrade is running cannot pull you somewhere you did not approve.
+
+The Update tab shows which step is running. On Windows each step opens its own console window; that is expected. If a step fails, the tab shows the log and offers *Retry this step* or *Discard plan*.
+
+#### Upgrading from 0.15.x – 0.18.0
+
+Automatic chaining arrived in 0.19.0, so an install older than that cannot chain itself — its updater is a snapshot from before the feature existed. Upgrade those installs with the standalone script, which needs nothing but Python 3.12:
+
+```bash
+curl -O https://raw.githubusercontent.com/Tydorius/GitInTheVan/main/scripts/chain-update.py
+python chain-update.py --root /path/to/GitInTheVan --dry-run
+```
+
+Drop `--dry-run` to run it. Stop the server first. It backs up the database before each step, downloads each release in order, applies that release's migrations, and verifies the version advanced before continuing.
+
+If you already jumped straight from 0.15.x/0.16.1 to 0.18.0 and now see `no such column: skills.budget_weight`, upgrading to 0.19.0 fixes it: 0.18.0 added that column to the model without a migration, so it was missing on every upgraded database. 0.19.0 adds the migration and, on first start, checks the whole schema against the models and repairs anything else additively (after taking a backup).
+
+#### Docker
+
+Docker installs are outside the auto-updater. Pull the new image and recreate the container; your mounted `data/` volume is preserved. The same one-release-at-a-time rule applies — do not skip several releases in one pull.
 
 ### HTTPS and LAN Access
 

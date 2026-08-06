@@ -32,6 +32,7 @@ from app.routers.summarization import router as summarization_router
 from app.routers.tag_groups import router as tag_groups_router
 from app.routers.users import router as users_router
 from app.routers.verification import router as verification_router
+from app.services.updater import get_current_version
 
 logger = logging.getLogger(__name__)
 
@@ -71,11 +72,31 @@ async def lifespan(app: FastAPI):
     check_firewall(settings.port)
     await init_db()
 
+    # Runs after init_db() so this release's migrations are already applied, and
+    # before the chain resumes so the next hop only starts from a sound schema.
+    try:
+        from app.database import engine
+        from app.services.schema_repair import run_schema_repair
+        await run_schema_repair(engine)
+    except Exception:
+        logger.exception("Schema repair failed; continuing startup")
+
     from app.services.backup import backup_scheduler_loop
     backup_task = asyncio.create_task(backup_scheduler_loop())
 
+    # Continues a multi-release upgrade frozen by a previous version. Returns
+    # None unless data/update-chain.json has an outstanding step.
+    from app.services.updater import start_chain_resume
+    chain_task = start_chain_resume()
+
     yield
 
+    if chain_task:
+        chain_task.cancel()
+        try:
+            await chain_task
+        except asyncio.CancelledError:
+            pass
     backup_task.cancel()
     try:
         await backup_task
@@ -87,7 +108,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="GitInTheVan",
     description="Self-hostable MITM LLM router/proxy for roleplay services",
-    version="0.16.1",
+    # Read from CHANGELOG.md rather than hardcoded -- this is published on
+    # /openapi.json and had drifted three releases behind pyproject.toml.
+    version=get_current_version(),
     lifespan=lifespan,
 )
 

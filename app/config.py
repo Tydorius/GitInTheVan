@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     generate_certs: bool = True
     behind_proxy: bool = False
 
+    # Set false to stop a chained update from resuming on startup. Useful under
+    # `uvicorn --reload`, where a stray data/update-chain.json would otherwise
+    # relaunch the update script on every reload.
+    auto_update_chain_enabled: bool = True
+
     @field_validator("default_endpoint_url")
     @classmethod
     def strip_trailing_slash(cls, v: str) -> str:

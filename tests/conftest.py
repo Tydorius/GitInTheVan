@@ -95,6 +95,25 @@ async def setup_database():
         await conn.run_sync(Base.metadata.drop_all)
 
 
+@pytest.fixture(autouse=True)
+def reset_updater_caches():
+    """Clear the updater's process-lifetime caches between tests.
+
+    The release list and detected version are cached for the life of the
+    process (each update hop is a fresh process, so that is correct in
+    production). Left alone in a test run they leak across tests, and
+    httpx_mock asserts every registered response was consumed -- a cached
+    release list silently swallows one.
+    """
+    from app.services.updater import _clear_releases_cache, _clear_version_cache
+
+    _clear_releases_cache()
+    _clear_version_cache()
+    yield
+    _clear_releases_cache()
+    _clear_version_cache()
+
+
 @pytest.fixture
 async def client():
     transport = ASGITransport(app=app)

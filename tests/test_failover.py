@@ -5,9 +5,7 @@ exception) on one endpoint advances to the next candidate. Only total exhaustion
 returns an error (503). Each candidate can carry a different model/api_key.
 """
 import pytest
-from httpx import ASGITransport, AsyncClient
 
-from app.main import app
 from app.services.routing import FailoverEndpoint, RoutingResult
 
 # ============================================================================
@@ -46,25 +44,6 @@ def test_routing_result_with_chain():
 
 
 class TestProxyFailover:
-    @pytest.fixture
-    async def client(self):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            yield ac
-
-    @pytest.fixture
-    async def admin_client(self, client):
-        setup_resp = await client.post(
-            "/api/auth/setup",
-            json={"username": "admin", "password": "adminpass123"},
-        )
-        assert setup_resp.status_code == 201
-        token = setup_resp.json()["access_token"]
-        api_key = setup_resp.json()["api_key"]
-        client.headers["Authorization"] = f"Bearer {token}"
-        yield client, token, api_key
-        client.headers.pop("Authorization", None)
-
     @pytest.fixture(autouse=True)
     def set_endpoint(self, monkeypatch):
         from app.config import Settings
@@ -239,12 +218,6 @@ class TestProxyFailover:
 
 class TestEndpointTagFields:
     @pytest.fixture
-    async def client(self):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            yield ac
-
-    @pytest.fixture
     async def admin_client(self, client):
         setup_resp = await client.post(
             "/api/auth/setup",
@@ -292,3 +265,135 @@ class TestEndpointTagFields:
         assert resp.status_code == 200
         assert resp.json()["role_tag"] == "navigator"
         assert resp.json()["priority"] == 2
+
+
+# ============================================================================
+# Unit: _build_failover_chain selection rules
+# ============================================================================
+
+class TestFailoverChainConstruction:
+    """Cover the chain query directly.
+
+    TestProxyFailover exercises retry behaviour through the HTTP API, but every
+    one of its scenarios uses endpoints that all belong to one user, are all
+    enabled, and all share a role_tag -- so the query's filters never actually
+    have to do anything. Mutation testing confirmed the gap: dropping the
+    user_id, enabled and role_tag predicates, and reversing the ordering, all
+    left the suite green. A cross-user leak here would route one user's traffic
+    through another user's paid endpoint.
+    """
+
+    @staticmethod
+    async def _chain(primary, user_id):
+        from app.services.routing import _build_failover_chain
+        from tests.conftest import TestSessionLocal
+
+        async with TestSessionLocal() as db:
+            return await _build_failover_chain(db, primary, user_id)
+
+    @staticmethod
+    async def _make_user(username: str) -> str:
+        from app.models.user import User
+        from tests.conftest import TestSessionLocal
+
+        async with TestSessionLocal() as db:
+            user = User(username=username, password_hash="x", gitv_api_key=f"k-{username}")
+            db.add(user)
+            await db.commit()
+            return user.id
+
+    @staticmethod
+    async def _make_endpoint(user_id: str, name: str, **kwargs):
+        from app.models.endpoint import Endpoint
+        from tests.conftest import TestSessionLocal
+
+        async with TestSessionLocal() as db:
+            ep = Endpoint(
+                user_id=user_id, name=name,
+                base_url=kwargs.pop("base_url", f"https://{name}.test"),
+                **kwargs,
+            )
+            db.add(ep)
+            await db.commit()
+            return ep
+
+    async def test_primary_is_always_first(self):
+        user_id = await self._make_user("chain_primary")
+        primary = await self._make_endpoint(user_id, "primary", role_tag="driver")
+        await self._make_endpoint(user_id, "mate", role_tag="driver")
+
+        chain = await self._chain(primary, user_id)
+        assert chain[0].endpoint_name == "primary"
+
+    async def test_only_tag_mates_are_included(self):
+        user_id = await self._make_user("chain_tags")
+        primary = await self._make_endpoint(user_id, "driver-a", role_tag="driver")
+        await self._make_endpoint(user_id, "driver-b", role_tag="driver")
+        await self._make_endpoint(user_id, "verifier-a", role_tag="verifier")
+
+        names = [c.endpoint_name for c in await self._chain(primary, user_id)]
+        assert names == ["driver-a", "driver-b"]
+        assert "verifier-a" not in names, "endpoint with a different role_tag entered the chain"
+
+    async def test_disabled_endpoints_are_excluded(self):
+        user_id = await self._make_user("chain_disabled")
+        primary = await self._make_endpoint(user_id, "live", role_tag="driver")
+        await self._make_endpoint(user_id, "switched-off", role_tag="driver", enabled=False)
+
+        names = [c.endpoint_name for c in await self._chain(primary, user_id)]
+        assert names == ["live"], "a disabled endpoint was offered as a failover target"
+
+    async def test_other_users_endpoints_never_enter_the_chain(self):
+        mine = await self._make_user("chain_mine")
+        theirs = await self._make_user("chain_theirs")
+        primary = await self._make_endpoint(mine, "mine-a", role_tag="driver")
+        await self._make_endpoint(theirs, "theirs-a", role_tag="driver")
+
+        names = [c.endpoint_name for c in await self._chain(primary, mine)]
+        assert names == ["mine-a"], "another user's endpoint leaked into the failover chain"
+
+    async def test_mates_are_ordered_by_priority(self):
+        """Creation order is deliberately different from priority order.
+
+        With only two mates, "oldest first" and "newest first" can accidentally
+        agree with priority order and the assertion proves nothing. These three
+        are seeded so that priority-ascending, created_at-ascending and
+        created_at-descending all give different answers, leaving priority as
+        the only ordering that produces the expected result.
+        """
+        from datetime import UTC, datetime
+
+        user_id = await self._make_user("chain_priority")
+        base = datetime(2026, 1, 1, tzinfo=UTC)
+        primary = await self._make_endpoint(
+            user_id, "p", role_tag="driver", priority=0, created_at=base
+        )
+        # created: alpha, beta, gamma   priority: beta(1), gamma(2), alpha(3)
+        await self._make_endpoint(
+            user_id, "alpha", role_tag="driver", priority=3, created_at=base.replace(day=2)
+        )
+        await self._make_endpoint(
+            user_id, "beta", role_tag="driver", priority=1, created_at=base.replace(day=3)
+        )
+        await self._make_endpoint(
+            user_id, "gamma", role_tag="driver", priority=2, created_at=base.replace(day=4)
+        )
+
+        names = [c.endpoint_name for c in await self._chain(primary, user_id)]
+        assert names == ["p", "beta", "gamma", "alpha"], "failover order ignored priority"
+
+    async def test_primary_is_not_duplicated_by_its_own_tag_query(self):
+        user_id = await self._make_user("chain_dupe")
+        primary = await self._make_endpoint(user_id, "solo", role_tag="driver")
+
+        names = [c.endpoint_name for c in await self._chain(primary, user_id)]
+        assert names == ["solo"]
+
+    async def test_untagged_primary_uses_the_default_tag(self):
+        user_id = await self._make_user("chain_default")
+        primary = await self._make_endpoint(user_id, "plain")
+        await self._make_endpoint(user_id, "also-plain")
+        await self._make_endpoint(user_id, "tagged", role_tag="verifier")
+
+        names = [c.endpoint_name for c in await self._chain(primary, user_id)]
+        assert names == ["plain", "also-plain"]

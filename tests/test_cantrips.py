@@ -3,9 +3,7 @@ import os
 from pathlib import Path
 
 import pytest
-from httpx import ASGITransport, AsyncClient
 
-from app.main import app
 from app.services.cantrip_context import apply_cantrip_result_to_messages, build_context
 from app.services.deno_runner import DENO_PATH, run_cantrip
 
@@ -586,24 +584,6 @@ class TestContextBuilder:
 # ============================================================================
 
 class TestCantripCRUD:
-    @pytest.fixture
-    async def client(self):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            yield ac
-
-    @pytest.fixture
-    async def admin_client(self, client):
-        setup_resp = await client.post(
-            "/api/auth/setup",
-            json={"username": "admin", "password": "adminpass123"},
-        )
-        assert setup_resp.status_code == 201
-        token = setup_resp.json()["access_token"]
-        api_key = setup_resp.json()["api_key"]
-        client.headers["Authorization"] = f"Bearer {token}"
-        yield client, token, api_key
-
     @pytest.mark.asyncio
     async def test_create_script(self, admin_client):
         client, _, _ = admin_client
@@ -722,24 +702,6 @@ class TestCantripCRUD:
 # ============================================================================
 
 class TestCantripTestEndpoint:
-    @pytest.fixture
-    async def client(self):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            yield ac
-
-    @pytest.fixture
-    async def admin_client(self, client):
-        setup_resp = await client.post(
-            "/api/auth/setup",
-            json={"username": "admin", "password": "adminpass123"},
-        )
-        assert setup_resp.status_code == 201
-        token = setup_resp.json()["access_token"]
-        api_key = setup_resp.json()["api_key"]
-        client.headers["Authorization"] = f"Bearer {token}"
-        yield client, token, api_key
-
     @pytest.mark.asyncio
     async def test_test_endpoint_basic(self, admin_client):
         client, _, _ = admin_client
@@ -969,24 +931,6 @@ class TestJanitorAIBackwardCompat:
 # ============================================================================
 
 class TestProxyIntegration:
-    @pytest.fixture
-    async def client(self):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            yield ac
-
-    @pytest.fixture
-    async def admin_client(self, client):
-        setup_resp = await client.post(
-            "/api/auth/setup",
-            json={"username": "admin", "password": "adminpass123"},
-        )
-        assert setup_resp.status_code == 201
-        token = setup_resp.json()["access_token"]
-        api_key = setup_resp.json()["api_key"]
-        client.headers["Authorization"] = f"Bearer {token}"
-        yield client, token, api_key
-
     MOCK_ENDPOINT_URL = "http://mock-backend:9999"
 
     @pytest.fixture(autouse=True)

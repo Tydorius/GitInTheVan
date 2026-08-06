@@ -5,6 +5,35 @@ cd /d "%~dp0\.."
 set "GITV_ROOT=%CD%"
 set "LOG_FILE=%GITV_ROOT%\data\updater.log"
 set "ZIP_FILE=%GITV_ROOT%\data\gitinthevan.zip"
+set "CHAIN_LOG=%GITV_ROOT%\data\update-chain.log"
+
+REM Arguments are optional and order-independent so that a NEW app version can
+REM drive an OLD copy of this script (which happens on the first hop of every
+REM upgrade) without the extra arguments breaking anything.
+REM   --auto        unattended; never wait for a keypress
+REM   <port>        port the server listens on (default 8000)
+set "GITV_PORT=8000"
+set "GITV_AUTO=0"
+for %%a in (%*) do (
+    if /I "%%a"=="--auto" (
+        set "GITV_AUTO=1"
+    ) else (
+        echo %%a| findstr /R "^[0-9][0-9]*$" >nul && set "GITV_PORT=%%a"
+    )
+)
+
+REM Rotate the previous run's log instead of truncating it. A chained upgrade
+REM runs this script once per hop, and without rotation each hop destroys the
+REM evidence needed to diagnose the one before it.
+if not exist "%GITV_ROOT%\data\update-logs" mkdir "%GITV_ROOT%\data\update-logs"
+if exist "%LOG_FILE%" (
+    set "ROT=%date:~-4,4%%date:~-10,2%%date:~-7,2%_%time:~0,2%%time:~3,2%%time:~6,2%"
+    set "ROT=!ROT: =0!"
+    move /Y "%LOG_FILE%" "%GITV_ROOT%\data\update-logs\updater-!ROT!.log" >nul 2>&1
+    for /f "skip=10 delims=" %%f in ('dir /b /o-d "%GITV_ROOT%\data\update-logs\updater-*.log" 2^>nul') do (
+        del "%GITV_ROOT%\data\update-logs\%%f" >nul 2>&1
+    )
+)
 
 echo ============================================ > "%LOG_FILE%"
 echo   GitInTheVan Auto-Update Log >> "%LOG_FILE%"
@@ -25,16 +54,16 @@ REM Stop running server
 REM ============================================================
 echo [1/6] Stopping server if running...
 echo [1/6] Stopping server... >> "%LOG_FILE%"
-"%GITV_ROOT%\.venv\Scripts\python" -c "import socket; s=socket.socket(); s.settimeout(1); r=s.connect_ex(('127.0.0.1',8000)); s.close(); exit(0 if r==0 else 1)" >nul 2>&1
+"%GITV_ROOT%\.venv\Scripts\python" -c "import socket,sys; s=socket.socket(); s.settimeout(1); r=s.connect_ex(('127.0.0.1',int(sys.argv[1]))); s.close(); exit(0 if r==0 else 1)" !GITV_PORT! >nul 2>&1
 if not errorlevel 1 (
-    echo Server is running on port 8000. Stopping... >> "%LOG_FILE%"
-    for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8000.*LISTENING"') do (
+    echo Server is running on port !GITV_PORT!. Stopping... >> "%LOG_FILE%"
+    for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":!GITV_PORT!.*LISTENING"') do (
         taskkill /PID %%a /F >nul 2>&1
         echo Killed PID %%a >> "%LOG_FILE%"
     )
     timeout /t 2 /nobreak >nul
 ) else (
-    echo No server detected on port 8000. >> "%LOG_FILE%"
+    echo No server detected on port !GITV_PORT!. >> "%LOG_FILE%"
 )
 echo Done.
 echo.
@@ -58,13 +87,15 @@ setlocal disabledelayedexpansion
 >> "%MAINT_SCRIPT%" echo Handler.do_GET = _do_get
 >> "%MAINT_SCRIPT%" echo Handler.log_message = lambda self, *a: None
 >> "%MAINT_SCRIPT%" echo Server = type('Server', (ss.TCPServer,), {'allow_reuse_address': True})
->> "%MAINT_SCRIPT%" echo httpd = Server(('0.0.0.0', 8000), Handler)
+>> "%MAINT_SCRIPT%" echo import os
+>> "%MAINT_SCRIPT%" echo httpd = Server(('0.0.0.0', int(os.environ.get('GITV_MAINT_PORT', '8000'))), Handler)
 >> "%MAINT_SCRIPT%" echo httpd.serve_forever()
 endlocal
 
 if exist "%MAINT_SCRIPT%" (
+    set "GITV_MAINT_PORT=!GITV_PORT!"
     start "" /b "%GITV_ROOT%\.venv\Scripts\python.exe" "%MAINT_SCRIPT%"
-    echo Maintenance page serving on port 8000 during update. >> "%LOG_FILE%"
+    echo Maintenance page serving on port !GITV_PORT! during update. >> "%LOG_FILE%"
 ) else (
     echo WARNING: Failed to write maintenance page script. >> "%LOG_FILE%"
 )
@@ -77,11 +108,19 @@ REM ============================================================
 echo [2/6] Backing up database...
 echo [2/6] Backing up database... >> "%LOG_FILE%"
 if exist "%GITV_ROOT%\data\gitinthevan.db" (
-    set "BACKUP_NAME=data\gitinthevan_backup_%date:~-4,4%%date:~-10,2%%date:~-7,2%_%time:~0,2%%time:~3,2%.db"
+    REM Seconds included: two hops of a chain can land in the same minute, and
+    REM /Y because an unattended `copy` onto an existing target prompts, which
+    REM hangs forever with stdin detached.
+    set "BACKUP_NAME=data\gitinthevan_backup_%date:~-4,4%%date:~-10,2%%date:~-7,2%_%time:~0,2%%time:~3,2%%time:~6,2%.db"
     set "BACKUP_NAME=!BACKUP_NAME: =0!"
-    copy "%GITV_ROOT%\data\gitinthevan.db" "%GITV_ROOT%\!BACKUP_NAME!" >nul
+    copy /Y "%GITV_ROOT%\data\gitinthevan.db" "%GITV_ROOT%\!BACKUP_NAME!" >nul
     echo Database backed up to !BACKUP_NAME! >> "%LOG_FILE%"
     echo Database backed up to !BACKUP_NAME!
+    REM Prune to the newest 10. Top level of data\ only: data\backups\ uses the
+    REM same filename prefix for scheduled backups, managed elsewhere.
+    for /f "skip=10 delims=" %%f in ('dir /b /o-d "%GITV_ROOT%\data\gitinthevan_backup_*.db" 2^>nul') do (
+        del "%GITV_ROOT%\data\%%f" >nul 2>&1
+    )
 ) else (
     echo No database found at data\gitinthevan.db >> "%LOG_FILE%"
     echo No database found, skipping backup.
@@ -108,8 +147,9 @@ if exist "%ZIP_FILE%" (
 
     if not defined PS_CMD (
         echo ERROR: PowerShell not found for zip extraction. >> "%LOG_FILE%"
+        echo ERROR: PowerShell not found for zip extraction. >> "%CHAIN_LOG%"
         echo ERROR: PowerShell not found. Cannot extract zip.
-        pause
+        if "!GITV_AUTO!"=="0" pause
         exit /b 1
     )
 
@@ -122,8 +162,9 @@ if exist "%ZIP_FILE%" (
     "!PS_CMD!" -Command "$ProgressPreference = 'SilentlyContinue'; Expand-Archive -Path '%ZIP_FILE%' -DestinationPath '!EXTRACT_TEMP!' -Force" >> "%LOG_FILE%" 2>&1
     if errorlevel 1 (
         echo ERROR: Zip extraction failed. >> "%LOG_FILE%"
+        echo ERROR: Zip extraction failed. >> "%CHAIN_LOG%"
         echo ERROR: Failed to extract zip.
-        pause
+        if "!GITV_AUTO!"=="0" pause
         exit /b 1
     )
 
@@ -162,7 +203,9 @@ REM ============================================================
 echo [4/6] Reinstalling Python dependencies...
 echo [4/6] Reinstalling Python dependencies... >> "%LOG_FILE%"
 if exist "%GITV_ROOT%\.venv\Scripts\python.exe" (
-    "%GITV_ROOT%\.venv\Scripts\python" -m pip install --upgrade pip -q >> "%LOG_FILE%" 2>&1
+    REM Pinned like every other dependency (exact pins only, never ranges) - an unpinned
+    REM `--upgrade pip` is an unreviewed network fetch on every single update.
+    "%GITV_ROOT%\.venv\Scripts\python" -m pip install "pip==26.2" -q >> "%LOG_FILE%" 2>&1
     "%GITV_ROOT%\.venv\Scripts\pip" install -e "%GITV_ROOT%[dev]" -q >> "%LOG_FILE%" 2>&1
     if errorlevel 1 (
         echo WARNING: Some dependencies may not have installed correctly. >> "%LOG_FILE%"
@@ -172,8 +215,11 @@ if exist "%GITV_ROOT%\.venv\Scripts\python.exe" (
     )
 ) else (
     echo ERROR: Python venv not found. Run the full deploy script first. >> "%LOG_FILE%"
+    echo ERROR: Python venv not found. Run the full deploy script first. >> "%CHAIN_LOG%"
     echo ERROR: Python venv not found. Run deploy-windows.bat first.
-    pause
+    REM `pause` under CREATE_NEW_CONSOLE with stdin detached blocks forever, with
+    REM the maintenance page already dead. Only wait when a human is watching.
+    if "!GITV_AUTO!"=="0" pause
     exit /b 1
 )
 echo Done.
@@ -215,7 +261,16 @@ if not defined NODE_CMD (
 
 echo Using Node: !NODE_CMD! >> "%LOG_FILE%"
 cd /d "%GITV_ROOT%\frontend"
-call "!NPM_CMD!" install -q >> "%LOG_FILE%" 2>&1
+REM `npm ci` installs strictly from package-lock.json. `npm install` would
+REM re-resolve against the live registry and rewrite the lockfile, which
+REM defeats the exact pinning required by the dependency pinning policy. On failure keep
+REM the existing static\ build rather than falling back to `npm install`.
+call "!NPM_CMD!" ci -q >> "%LOG_FILE%" 2>&1
+if errorlevel 1 (
+    echo WARNING: npm ci failed ^(package.json/package-lock.json may disagree^). Using existing frontend build. >> "%LOG_FILE%"
+    echo WARNING: npm ci failed. Using existing frontend build.
+    goto :frontend_done
+)
 call "!NPM_CMD!" run build >> "%LOG_FILE%" 2>&1
 if errorlevel 1 (
     echo WARNING: Frontend build failed. Using existing build. >> "%LOG_FILE%"
@@ -223,6 +278,8 @@ if errorlevel 1 (
 ) else (
     echo Frontend built successfully. >> "%LOG_FILE%"
 )
+
+:frontend_done
 cd /d "%GITV_ROOT%"
 echo Done.
 echo.
@@ -241,13 +298,19 @@ echo.
 
 cd /d "%GITV_ROOT%"
 
-REM Stop the maintenance page so the real server can bind port 8000
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8000.*LISTENING"') do (
+REM Stop the maintenance page so the real server can bind the port
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":!GITV_PORT!.*LISTENING"') do (
     taskkill /PID %%a /F >nul 2>&1
 )
 del "%MAINT_SCRIPT%" >nul 2>&1
 
-REM Start server in a new process, then clean up this script
+REM Start server in a new process, then clean up this script.
+REM
+REM Do NOT delete data\update-chain.json here. It carries the frozen
+REM multi-release upgrade plan across restarts, and the newly started server
+REM reads it to decide whether another hop is due. data\ is gitignored and
+REM absent from the release zip, which is why chain state lives there and
+REM survives extraction.
 start "" "%GITV_ROOT%\.venv\Scripts\python" -m app.main
 del "%GITV_ROOT%\data\auto-update.bat" >nul 2>&1
 exit

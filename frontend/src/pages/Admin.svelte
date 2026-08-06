@@ -14,6 +14,9 @@
   let updateError = ''
   let updating = false
   let updateLaunched = false
+  let updateChain: any = null
+  let chainInterval: ReturnType<typeof setInterval> | null = null
+  let chainBusy = false
 
   let adminSettings: any = null
   let auditLogs: any[] = []
@@ -325,13 +328,34 @@
     finally { updateChecking = false }
   }
 
+  async function loadChain() {
+    try {
+      updateChain = await api.getUpdateChain()
+      // Only poll while something is actually moving, so an idle Admin tab is quiet.
+      if (updateChain?.active && !chainInterval) {
+        chainInterval = setInterval(loadChain, 5000)
+      } else if (!updateChain?.active && chainInterval) {
+        clearInterval(chainInterval)
+        chainInterval = null
+      }
+    } catch { /* chain state is advisory; a failure here must not break the tab */ }
+  }
+
   async function launchUpdate() {
-    if (!confirm('This will download the update, stop the server, and restart it automatically. The page will lose connection temporarily. Continue?')) return
+    // Each release only guarantees it can migrate from the one before it, so a
+    // multi-release upgrade installs one release at a time. Say so up front -- on
+    // Windows every hop opens its own console window.
+    const steps = updateInfo?.step_count || 1
+    const plan = steps > 1
+      ? `This will install ${steps} updates in sequence, ending at ${updateInfo.latest_version}, restarting the server after each one.`
+      : `This will install ${updateInfo?.latest_version || 'the update'} and restart the server.`
+    if (!confirm(`${plan}\n\nThe page will lose connection temporarily. Continue?`)) return
     updating = true
     try {
       const result = await api.executeUpdate()
       if (result.success) {
         updateLaunched = true
+        loadChain()
       } else {
         updateError = result.error || 'Update failed'
       }
@@ -339,9 +363,31 @@
     finally { updating = false }
   }
 
+  async function resumeChain() {
+    chainBusy = true; updateError = ''
+    try {
+      const result = await api.resumeUpdateChain()
+      if (!result.success) updateError = result.error || 'Could not resume update'
+      await loadChain()
+    } catch (e: any) { updateError = e.message }
+    finally { chainBusy = false }
+  }
+
+  async function abortChain() {
+    if (!confirm('Discard the pending update plan? The version already installed is kept.')) return
+    chainBusy = true; updateError = ''
+    try {
+      await api.abortUpdateChain()
+      await loadChain()
+      await checkUpdate()
+    } catch (e: any) { updateError = e.message }
+    finally { chainBusy = false }
+  }
+
   onDestroy(() => {
     if (auditInterval) clearInterval(auditInterval)
     if (serverLogInterval) clearInterval(serverLogInterval)
+    if (chainInterval) clearInterval(chainInterval)
   })
 
   onMount(() => {
@@ -351,6 +397,7 @@
     loadUsers()
     loadSSL()
     checkUpdate()
+    loadChain()
     loadBackups()
   })
 </script>
@@ -365,7 +412,7 @@
     {/if}
     <button onclick={() => tab = 'caps'} class={tab === 'caps' ? 'primary' : ''}>Global Caps</button>
     <button onclick={() => tab = 'users'} class={tab === 'users' ? 'primary' : ''}>Users</button>
-    <button onclick={() => tab = 'update'} class={tab === 'update' ? 'primary' : ''}>Update{#if updateInfo?.update_available}<span style="color: #ef4444; margin-left: 4px; font-weight: bold;">⓵</span>{/if}</button>
+    <button onclick={() => tab = 'update'} class={tab === 'update' ? 'primary' : ''}>Update{#if updateChain?.active}<span style="color: #3b82f6; margin-left: 4px; font-weight: bold;">⟳</span>{:else if updateChain?.status && ['failed', 'stalled', 'version_mismatch', 'expired'].includes(updateChain.status)}<span style="color: #ef4444; margin-left: 4px; font-weight: bold;">×</span>{:else if updateInfo?.update_available}<span style="color: #ef4444; margin-left: 4px; font-weight: bold;">⓵</span>{/if}</button>
     <button onclick={() => tab = 'audit'} class={tab === 'audit' ? 'primary' : ''}>Audit Logs</button>
     <button onclick={() => tab = 'logs'} class={tab === 'logs' ? 'primary' : ''}>Server Logs</button>
     <button onclick={() => tab = 'network'} class={tab === 'network' ? 'primary' : ''}>Network</button>
@@ -625,20 +672,79 @@
     {:else if updateError && !updateInfo}
       <div class="error-msg">{updateError}</div>
       <button onclick={checkUpdate} style="margin-top: 8px;">Retry</button>
-    {:else if updateLaunched}
+    {:else if updateChain?.active || updateLaunched}
         <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid #3b82f6; border-radius: 4px; padding: 16px; margin-bottom: 16px;">
           <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
             <span style="font-size: 18px;">⟳</span>
-            <strong style="font-size: 14px; color: #3b82f6;">Update in Progress</strong>
+            <strong style="font-size: 14px; color: #3b82f6;">
+              {#if updateChain?.total_steps > 1}
+                Update in Progress &mdash; step {updateChain.current_step} of {updateChain.total_steps}
+              {:else}
+                Update in Progress
+              {/if}
+            </strong>
           </div>
+          {#if updateChain?.total_steps > 1}
+            <div style="font-size: 13px; margin-bottom: 8px;">
+              Upgrading <code>{updateChain.from_version}</code> &rarr; <code>{updateChain.target_version}</code>
+              one release at a time. Each release can only migrate the database from the one
+              immediately before it, so the server restarts after every step.
+            </div>
+            <ol style="font-size: 12px; line-height: 1.9; padding-left: 20px; margin: 8px 0;">
+              {#each updateChain.steps as step}
+                <li>
+                  <code>{step.version}</code>
+                  {#if step.status === 'installed'}<span style="color: #22c55e;">&nbsp;&check; installed</span>
+                  {:else if step.status === 'launched'}<span style="color: #3b82f6;">&nbsp;&hellip; installing</span>
+                  {:else if step.status === 'failed'}<span style="color: #ef4444;">&nbsp;&times; failed</span>
+                  {:else}<span style="color: var(--text-dim);">&nbsp;pending</span>{/if}
+                </li>
+              {/each}
+            </ol>
+          {/if}
           <div style="font-size: 13px; line-height: 1.8;">
-            The update script is running. The server will:<br>
-            1. Stop<br>
-            2. Back up the database<br>
-            3. Extract the new version<br>
-            4. Reinstall dependencies and rebuild the frontend<br>
-            5. Restart<br><br>
-            <strong>The page will lose connection shortly.</strong> Wait about 1-2 minutes, then refresh.
+            The update script stops the server, backs up the database, extracts the new
+            version, reinstalls dependencies, rebuilds the frontend, and restarts.<br>
+            <strong>The page will lose connection shortly.</strong> Wait about 1-2 minutes per
+            step, then refresh.
+            {#if updateChain?.total_steps > 1}
+              <br><span style="color: var(--text-dim); font-size: 12px;">
+                On Windows each step opens its own console window. That is expected.
+              </span>
+            {/if}
+          </div>
+        </div>
+    {:else if updateChain && updateChain.status && !updateChain.active && ['failed', 'stalled', 'version_mismatch', 'expired'].includes(updateChain.status)}
+        <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; border-radius: 4px; padding: 16px; margin-bottom: 16px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+            <span style="font-size: 18px;">&times;</span>
+            <strong style="font-size: 14px; color: #ef4444;">Update did not finish</strong>
+          </div>
+          <div style="font-size: 13px; margin-bottom: 8px;">
+            Upgrading <code>{updateChain.from_version}</code> &rarr; <code>{updateChain.target_version}</code>
+            stopped at step {updateChain.current_step + 1} of {updateChain.total_steps}.
+          </div>
+          {#if updateChain.error}
+            <div class="error-msg" style="margin-bottom: 8px;">{updateChain.error}</div>
+          {/if}
+          {#if updateChain.log_tail?.length}
+            <details style="margin-bottom: 8px;">
+              <summary style="font-size: 12px; cursor: pointer; color: var(--text-dim);">Update log</summary>
+              <pre style="font-size: 11px; white-space: pre-wrap; margin-top: 8px; max-height: 240px; overflow-y: auto; background: var(--bg-elevated); padding: 12px; border-radius: 4px;">{updateChain.log_tail.join('\n')}</pre>
+            </details>
+          {/if}
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button class="primary" onclick={resumeChain} disabled={chainBusy} style="font-size: 13px; padding: 6px 16px;">
+              {chainBusy ? 'Working...' : 'Retry this step'}
+            </button>
+            <button onclick={abortChain} disabled={chainBusy} style="font-size: 13px; padding: 6px 16px;">
+              Discard plan
+            </button>
+          </div>
+          <div style="margin-top: 12px; font-size: 11px; color: var(--text-dim);">
+            If the server will not start at all, delete <code>data/update-chain.json</code> and
+            re-run the deploy script for your platform. Each step's database backup is in
+            <code>data/</code>.
           </div>
         </div>
     {:else if updateInfo?.update_available}
@@ -651,6 +757,13 @@
             Current version: <code>{updateInfo.current_version}</code>
             &rarr; Latest version: <code>{updateInfo.latest_version}</code>
           </div>
+          {#if updateInfo.step_count > 1}
+            <div style="font-size: 12px; color: var(--text-dim); margin-bottom: 8px;">
+              You are {updateInfo.step_count} releases behind. The update will install them in
+              sequence, restarting after each one, because a release can only migrate the
+              database from the release immediately before it.
+            </div>
+          {/if}
           {#if updateInfo.release_notes}
             <details style="margin-top: 8px;">
               <summary style="font-size: 12px; cursor: pointer; color: var(--text-dim);">Release Notes</summary>
@@ -696,6 +809,14 @@
               </li>
               <li>The script will reinstall dependencies, rebuild the frontend, and start the server</li>
             </ol>
+            <p style="font-size: 12px; line-height: 1.7; color: var(--text-dim); margin-top: 8px;">
+              <strong>If you are more than one release behind</strong>, update one release at a
+              time. A release only guarantees it can migrate the database from the release
+              immediately before it, so skipping releases can leave the database missing columns.
+              Versions from 0.19.0 onward do this automatically; for older installs, run
+              <code>scripts/chain-update.py</code> from the repository, which performs the whole
+              sequence for you.
+            </p>
           </details>
         </div>
 

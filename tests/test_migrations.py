@@ -9,6 +9,8 @@ These tests verify:
 - Advisory lock no-op for SQLite
 """
 
+import re
+
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -206,6 +208,70 @@ class TestFullMigrationRun:
             assert result.scalar() == 1
 
 
+class TestMigrationCoverage:
+    """Guard against the 0.18.0 skills.budget_weight class of bug.
+
+    A column added to a model without a matching migration is invisible on any
+    existing install: create_all only creates missing *tables*, it never alters
+    an existing one.  For tables that a migration CREATEs, the migration set is
+    the sole source of truth on an upgrade, so every model column must appear in
+    that CREATE TABLE or in a later ADD COLUMN.
+
+    Tables predating the migration system (users, endpoints, cantrips, ...) are
+    exempt: they were only ever created by create_all, and migrations merely add
+    to them.
+    """
+
+    @staticmethod
+    def _migration_schema() -> dict[str, set[str]]:
+        """Columns each table gets from the migration set, keyed by table name."""
+        create_re = re.compile(
+            r"CREATE TABLE (?:IF NOT EXISTS )?(\w+)\s*\((.*?)\n\s*\);", re.S
+        )
+        alter_re = re.compile(r"ALTER TABLE (\w+) ADD COLUMN (\w+)")
+        skip_prefixes = ("PRIMARY KEY", "FOREIGN KEY", "UNIQUE", "CONSTRAINT", "CHECK")
+
+        schema: dict[str, set[str]] = {}
+        for _name, sql_def in MIGRATIONS:
+            # Any dialect describes the same logical columns; sqlite is representative.
+            sql = _resolve_sql(sql_def, "sqlite")
+            for table, body in create_re.findall(sql):
+                if table in schema:
+                    continue
+                cols = set()
+                for line in body.splitlines():
+                    line = line.strip().rstrip(",")
+                    if not line or line.upper().startswith(skip_prefixes):
+                        continue
+                    cols.add(line.split()[0])
+                schema[table] = cols
+            for table, column in alter_re.findall(sql):
+                schema.setdefault(table, set()).add(column)
+        return schema
+
+    def test_migration_created_tables_cover_every_model_column(self):
+        schema = self._migration_schema()
+        create_re = re.compile(r"CREATE TABLE (?:IF NOT EXISTS )?(\w+)", re.S)
+        migration_owned = {
+            table
+            for _name, sql_def in MIGRATIONS
+            for table in create_re.findall(_resolve_sql(sql_def, "sqlite"))
+        }
+
+        missing: list[str] = []
+        for table_name, table in Base.metadata.tables.items():
+            if table_name not in migration_owned:
+                continue
+            for column in table.columns:
+                if column.name not in schema.get(table_name, set()):
+                    missing.append(f"{table_name}.{column.name}")
+
+        assert not missing, (
+            "Model columns with no migration -- these are missing on every existing "
+            f"install: {sorted(missing)}"
+        )
+
+
 class TestAdvisoryLock:
     async def test_sqlite_lock_is_noop(self, fresh_sqlite_engine):
         """SQLite should not acquire or release any advisory lock."""
@@ -214,7 +280,7 @@ class TestAdvisoryLock:
 
     async def test_migration_count(self):
         """Sanity check: verify we have the expected number of migrations."""
-        assert len(MIGRATIONS) == 41
+        assert len(MIGRATIONS) == 42
 
     async def test_all_migrations_have_unique_names(self):
         names = [name for name, _ in MIGRATIONS]

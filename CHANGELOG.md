@@ -2,6 +2,66 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.19.0] - 2026-08-06
+
+### Fixed
+
+- **`no such column: skills.budget_weight` on any database upgraded from before 0.18.0.** 0.18.0 added `budget_weight` to `app/models/skill.py` without a migration. `Base.metadata.create_all` only creates *missing tables* and never alters an existing one, and the `skills` table is created by migration `032` (shipped in 0.15.x), so the column existed on fresh installs and was absent on every upgrade — failing on the proxy hot path via `load_skills_for_endpoint`. Migration `042_add_skill_budget_weight` adds it. This was initially misdiagnosed as a multi-version-jump problem; it was not, it broke a single-hop 0.16.1 → 0.18.0 upgrade too.
+
+### Added — Chained upgrades
+
+- **Multi-release upgrades install one release at a time.** Each release only guarantees it can migrate the database from the release immediately before it, so `POST /api/admin/update/execute` now freezes an ordered plan of single-release hops and works through it, restarting after each. 0.15.42 → 0.18.0 becomes 0.16.1 then 0.18.0.
+- **The plan is frozen at confirmation time and never re-resolved.** An admin who approves an upgrade to 0.18.0 is not carried to 0.19.0 because it was published mid-chain. Stored in `data/update-chain.json`, which survives extraction because `data/` is gitignored and absent from the release zip.
+- **Resume is driven by the newest installed code**, from the app lifespan after `init_db()`. Hop 1 uses the previously installed version's script; every later hop is launched by the version that just booted, so a bug in the chaining logic is fixable rather than frozen into every affected user's install.
+- Readiness is detected by self-polling `/health` and requiring a JSON `{"status": "ok"}` twice. A listening port proves nothing — the update script's maintenance page binds the same port and serves HTML for every path.
+- Safety rails: one attempt counter per hop persisted *before* launch (a hop that kills the process still burns an attempt), halt on a version that did not advance, 7-day idle expiry, refusal to start a second chain, and refusal to interpret a chain file written by a newer schema version.
+- New endpoints `GET`/`DELETE /api/admin/update/chain` and `POST /api/admin/update/chain/resume`; the Admin → Update tab shows live step progress and, on failure, the log tail with *Retry this step* / *Discard plan*.
+- `GITV_AUTO_UPDATE_CHAIN_ENABLED=false` disables automatic resume (useful under `uvicorn --reload`).
+
+### Added — Schema repair and recovery
+
+- **`app/services/schema_repair.py`** runs once per database on startup, reflecting the live schema against `Base.metadata` and additively repairing missing columns, so drift we have not found is caught too. It takes a backup first and aborts if the backup fails, verifies before recording completion, and records its marker in the `_migrations` table rather than a file — making the flag database-scoped, so restoring a pre-0.18.0 backup correctly re-triggers it. Read-only status at `GET /api/admin/schema-repair`.
+- **`scripts/chain-update.py`** — a stdlib-only, single-file upgrader for installs on 0.15.x–0.18.0, whose frozen updater cannot chain itself. Backs up, downloads each pinned release in order, applies its migrations, and verifies the version advanced. Also the repair path for a stalled in-app chain.
+
+### Changed
+
+- `get_current_version()` reads `CHANGELOG.md` (with `importlib.metadata` as a required fallback — the Docker image does not ship the changelog). The changelog reflects the code actually on disk; editable-install metadata is stale until `pip install -e` re-runs.
+- The updater lists releases via `/releases?per_page=100` with `Link`-header pagination and a 15-minute cache, replacing `/releases/latest`. Drafts and prereleases are excluded.
+- `FastAPI(version=...)` is derived from the changelog; it had been hardcoded at `0.16.1` and published on `/openapi.json` three releases out of date.
+- Update scripts: `--auto` flag (suppresses the Windows `pause` calls, which block forever under `CREATE_NEW_CONSOLE` with stdin detached), a port argument replacing hardcoded `8000` (chaining was broken on any non-8000 install), an `ERR` trap so a `set -e` abort is recorded instead of leaving the maintenance page up forever, `updater.log` rotation into `data/update-logs/` so each hop keeps the previous hop's evidence, per-hop database backups pruned to the newest 10, and `copy /Y` plus seconds in the Windows backup filename. New arguments have defaults so a new app version driving an old script — which happens on hop 1 of every upgrade — still works.
+- The server's stdout no longer inherits the update script's `tee`, so `updater.log` stops collecting every line the server prints for its entire lifetime.
+
+### Changed — Supply chain (exact pins only, never ranges)
+
+- **`frontend/package.json` pinned exactly.** All eight dependencies used `^`/`~` ranges. Versions are unchanged — every range already resolved to its floor.
+- **All deploy and update scripts use `npm ci`, not `npm install`.** `npm install` re-resolves ranges against the live registry and rewrites the lockfile, so the committed lock gave no protection on the path that runs unattended on every user's machine. `npm ci` failures fall back to the existing build rather than to `npm install`.
+- `postcss` pinned to `8.5.26` via `overrides` (GHSA-r28c-9q8g-f849, GHSA-fxqj-rqcc-2cmp; was 8.5.15 transitively via vite). `npm audit` now reports 0 vulnerabilities.
+- The `pip install --upgrade pip` in all six scripts is pinned to an exact version.
+- `tests/test_dependency_pinning.py` enforces all of the above, including that no script uses `npm install` and that Deno is never fetched from `releases/latest`.
+
+### Added — Tests
+
+- `tests/test_migrations.py::TestMigrationCoverage` statically asserts that every model column on a migration-created table has a migration. Verified to fail on exactly `skills.budget_weight` with `042` removed.
+- `tests/test_skills.py::TestSkillQueryOnUpgradedDatabase` and `tests/test_schema_repair.py` build the schema the way an *upgrade* produces it (migration DDL as shipped) rather than via `create_all`, then run the real failing query. Both include a vacuity check asserting the fixture still reproduces the broken state — the existing `create_all`-based fixtures structurally could not catch this bug.
+- `tests/test_updater.py` covers chain planning (including the reported 0.15.42 case), state-file handling, `execute_update()`'s previously untested happy path, startup reconciliation, readiness detection, and plain-text guard rails over the shell scripts.
+
+### Fixed — Test suite gaps found by mutation testing
+
+Twenty-two behaviours were deliberately broken to check the suite noticed. Nine did not, and are now covered:
+
+- **Failover chain selection had no direct coverage.** `_build_failover_chain` could be stripped of its `user_id`, `enabled` and `role_tag` predicates, and have its ordering reversed, with the suite still green — the existing tests only ever used endpoints that were all enabled, all one user's, and all one tag. The `user_id` gap meant a cross-user endpoint leak would not have been caught. `tests/test_failover.py::TestFailoverChainConstruction` covers all four.
+- **`require_admin` had no coverage.** Admin-route tests used an unauthenticated client, which `get_current_user` rejects with 401 before the admin check runs, so removing the `is_admin` gate entirely broke nothing. `tests/test_auth.py::TestAdminAuthorization` now drives a logged-in non-admin against nine admin routes.
+- **Forbidden-word scanning had no coverage.** `test_forbidden_words.py` tested only CRUD; `_scan` — case folding, regex handling, occurrence counts, invalid-pattern tolerance — was entirely untested. Twelve tests added.
+- **Skill endpoint scoping was untested.** `test_attach_and_detach` asserted `len(skills) == 1` against a single endpoint, so it passed with the `endpoint_id` filter removed. Now covered with two endpoints, two users, and at the service layer as well as the route.
+- **Schema repair could mark itself complete over unrepaired drift** without any test objecting, which would have permanently stranded a database. Now covered, including that a withheld marker lets the next boot retry and succeed.
+
+Also: 22 local `client`/`admin_client` fixtures that merely duplicated `tests/conftest.py` were removed (project testing standards); six that genuinely yield a different shape were left. Test-suite runs no longer write into the real `data/` directory — `schema_repair.py`'s log path is module-relative and was appending to the developer's live install.
+
+### Migration
+
+- `042_add_skill_budget_weight`: `ALTER TABLE skills ADD COLUMN budget_weight REAL DEFAULT 1.0 NOT NULL`. Additive, cross-dialect. Chain state is a file, not a table, so nothing else is added.
+- Manual verification matrix (not automatable in CI): restore a real 0.15.42 install with a populated database on Windows and Linux and run `scripts/chain-update.py`; drive a 3-hop chain from 0.19.0 and confirm each hop fires and each hop's log is preserved; kill the machine mid-hop and confirm the chain reconciles rather than loops; hand-corrupt `data/update-chain.json` and confirm the server still boots; run with `GITV_PORT=8443` to exercise the port argument.
+
 ## [0.18.0] - 2026-07-15
 
 ### Added — Phase 16: Endpoint Tagging & Failover

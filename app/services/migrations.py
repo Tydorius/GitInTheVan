@@ -648,6 +648,17 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
         ALTER TABLE map_stages ADD COLUMN endpoint_tag VARCHAR(32) DEFAULT '' NOT NULL;
         """,
     ),
+    (
+        # skills.budget_weight was added to app/models/skill.py in 0.18.0 without a
+        # migration.  The skills table is created by 032, which shipped in 0.15.x, so
+        # create_all skips it and every pre-0.18.0 database is missing the column --
+        # breaking every skills query with "no such column: skills.budget_weight".
+        # Matches the REAL/1.0 shape used for cantrips and lorebooks in 017.
+        "042_add_skill_budget_weight",
+        """
+        ALTER TABLE skills ADD COLUMN budget_weight REAL DEFAULT 1.0 NOT NULL;
+        """,
+    ),
 ]
 
 
