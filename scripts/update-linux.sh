@@ -20,6 +20,40 @@ for arg in "$@"; do
     esac
 done
 
+# Kill whatever is LISTENING on the port given as $1.
+#
+# Only ever a fallback, for when the PID files below are missing or stale. lsof
+# is absent on many minimal distros, so ss and fuser are tried too rather than
+# letting one missing tool be fatal: the Windows script shipped a bare `netstat`
+# as its single point of failure and stranded 0.18.0 installs permanently when
+# it could not be resolved.
+#
+# Every PID, not PID=$(...): a server listening on both IPv4 and IPv6 produces
+# two lines, and `kill "$PID"` on "123\n124" fails outright, killing neither.
+kill_port_holders() {
+    port="$1"
+    pids=""
+    if command -v lsof > /dev/null 2>&1; then
+        pids=$(lsof -ti:"$port" 2>/dev/null || true)
+    elif command -v ss > /dev/null 2>&1; then
+        pids=$(ss -ltnp 2>/dev/null | grep -E "[:.]$port[[:space:]]" \
+            | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u || true)
+    elif command -v fuser > /dev/null 2>&1; then
+        pids=$(fuser -n tcp "$port" 2>/dev/null || true)
+    fi
+    [ -n "$pids" ] || return 0
+    for pid in $pids; do
+        kill "$pid" 2>/dev/null || true
+    done
+    sleep 2
+    for pid in $pids; do
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null || true
+        fi
+    done
+    return 0
+}
+
 # Rotate the previous run's log instead of truncating it. A chained upgrade runs
 # this script once per hop, and without rotation each hop destroys the evidence
 # needed to diagnose the one before it.
@@ -53,20 +87,27 @@ cd "$GITV_ROOT"
 # Stop running server
 # ============================================================
 echo "[1/6] Stopping server if running..."
-if lsof -ti:"$GITV_PORT" > /dev/null 2>&1; then
-    PID=$(lsof -ti:"$GITV_PORT")
-    echo "Server running on port $GITV_PORT (PID $PID). Stopping..."
-    kill "$PID" 2>/dev/null || true
-    sleep 2
-    if lsof -ti:"$GITV_PORT" > /dev/null 2>&1; then
-        echo "Force killing..."
-        kill -9 "$PID" 2>/dev/null || true
-        sleep 1
+# app/main.py writes data/gitv.pid at startup, so prefer it over a port scan.
+# It can outlive the process -- a -9 skips the atexit cleanup that would have
+# removed it -- so the port is swept afterwards rather than trusting the PID to
+# have been the real holder.
+if [ -f "$GITV_ROOT/data/gitv.pid" ]; then
+    SERVER_PID=$(cat "$GITV_ROOT/data/gitv.pid" 2>/dev/null || true)
+    if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
+        echo "Server running on port $GITV_PORT (PID $SERVER_PID). Stopping..."
+        kill "$SERVER_PID" 2>/dev/null || true
+        sleep 2
+        if kill -0 "$SERVER_PID" 2>/dev/null; then
+            echo "Force killing..."
+            kill -9 "$SERVER_PID" 2>/dev/null || true
+            sleep 1
+        fi
     fi
-    echo "Server stopped."
-else
-    echo "No server detected on port $GITV_PORT."
+    rm -f "$GITV_ROOT/data/gitv.pid" 2>/dev/null || true
 fi
+# Anything still on the port never wrote a PID file (a manual uvicorn run, say).
+kill_port_holders "$GITV_PORT"
+echo "Server stopped."
 echo
 
 # ============================================================
@@ -107,6 +148,8 @@ with ReusableTCPServer(("0.0.0.0", int(os.environ.get("GITV_MAINT_PORT", "8000")
     httpd.serve_forever()
 PYEOF
     GITV_MAINT_PORT="$GITV_PORT" nohup "$GITV_ROOT/.venv/bin/python" "$MAINT_SCRIPT" > /dev/null 2>&1 &
+    # Record the PID so the teardown below does not have to find it by scanning.
+    echo $! > "$GITV_ROOT/data/_maintenance.pid"
     disown
     echo "Maintenance page serving on port $GITV_PORT during update."
 fi
@@ -242,11 +285,26 @@ echo
 
 cd "$GITV_ROOT"
 
-# Stop the maintenance page so the real server can bind the port
-if lsof -ti:"$GITV_PORT" > /dev/null 2>&1; then
-    kill "$(lsof -ti:"$GITV_PORT")" 2>/dev/null || true
-    sleep 1
+# Stop the maintenance page so the real server can bind the port.
+#
+# The most load-bearing step in this script. The maintenance page holds the port
+# for the whole update and nothing else in the product ever releases it, so if
+# this fails the install can never serve again -- not on this run and not on any
+# later one. Kill by recorded PID first and treat scanning as the fallback;
+# 0.18.0 had scanning alone, and on Windows a missing netstat made that fatal.
+if [ -f "$GITV_ROOT/data/_maintenance.pid" ]; then
+    MAINT_PID=$(cat "$GITV_ROOT/data/_maintenance.pid" 2>/dev/null || true)
+    if [ -n "$MAINT_PID" ]; then
+        kill "$MAINT_PID" 2>/dev/null || true
+        sleep 1
+        if kill -0 "$MAINT_PID" 2>/dev/null; then
+            kill -9 "$MAINT_PID" 2>/dev/null || true
+        fi
+        echo "Stopped maintenance page PID $MAINT_PID"
+    fi
+    rm -f "$GITV_ROOT/data/_maintenance.pid" 2>/dev/null || true
 fi
+kill_port_holders "$GITV_PORT"
 rm -f "$MAINT_SCRIPT" 2>/dev/null || true
 
 # Clean up auto-update script.

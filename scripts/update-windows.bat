@@ -7,6 +7,17 @@ set "LOG_FILE=%GITV_ROOT%\data\updater.log"
 set "ZIP_FILE=%GITV_ROOT%\data\gitinthevan.zip"
 set "CHAIN_LOG=%GITV_ROOT%\data\update-chain.log"
 
+REM Every non-builtin used below - findstr, ping, timeout, taskkill, where,
+REM powershell, netstat - lives in System32. updater.py launches this script via
+REM subprocess, so it inherits the server's PATH, and a user whose PATH had lost
+REM System32 got "'netstat' is not recognized" at [6/6]: the maintenance page
+REM kept the port and the server could never rebind. This is the cmd.exe process
+REM environment block only - it is not setx, it touches no registry key, and it
+REM dies with this script. Prepended rather than appended so a stray netstat.exe
+REM earlier in PATH cannot shadow the real one.
+if not defined SystemRoot set "SystemRoot=C:\Windows"
+set "PATH=%SystemRoot%\System32;%SystemRoot%;%SystemRoot%\System32\Wbem;%SystemRoot%\System32\WindowsPowerShell\v1.0;%PATH%"
+
 REM Arguments are optional and order-independent so that a NEW app version can
 REM drive an OLD copy of this script (which happens on the first hop of every
 REM upgrade) without the extra arguments breaking anything.
@@ -55,16 +66,37 @@ REM ============================================================
 echo [1/6] Stopping server if running...
 echo [1/6] Stopping server... >> "%LOG_FILE%"
 "%GITV_ROOT%\.venv\Scripts\python" -c "import socket,sys; s=socket.socket(); s.settimeout(1); r=s.connect_ex(('127.0.0.1',int(sys.argv[1]))); s.close(); exit(0 if r==0 else 1)" !GITV_PORT! >nul 2>&1
-if not errorlevel 1 (
-    echo Server is running on port !GITV_PORT!. Stopping... >> "%LOG_FILE%"
-    for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":!GITV_PORT!.*LISTENING"') do (
-        taskkill /PID %%a /F >nul 2>&1
-        echo Killed PID %%a >> "%LOG_FILE%"
+if not errorlevel 1 goto :stop_running_server
+echo No server detected on port !GITV_PORT!. >> "%LOG_FILE%"
+goto :server_stopped
+
+REM Branching by label rather than nesting `if errorlevel` inside a parenthesised
+REM block: under delayed expansion cmd evaluates the whole block up front, and
+REM the nested form silently tests a stale errorlevel.
+:stop_running_server
+echo Server is running on port !GITV_PORT!. Stopping... >> "%LOG_FILE%"
+
+REM app/main.py writes data\gitv.pid at startup, so prefer it over scanning the
+REM port table. It can outlive the process - the /F kill below skips the atexit
+REM cleanup that would have removed it - so the port is re-probed afterwards
+REM instead of trusting the PID to have been the real holder.
+if exist "%GITV_ROOT%\data\gitv.pid" (
+    for /f "usebackq delims=" %%p in ("%GITV_ROOT%\data\gitv.pid") do (
+        "%SystemRoot%\System32\taskkill.exe" /PID %%p /F >nul 2>&1
+        echo Killed server PID %%p from gitv.pid >> "%LOG_FILE%"
     )
-    timeout /t 2 /nobreak >nul
-) else (
-    echo No server detected on port !GITV_PORT!. >> "%LOG_FILE%"
+    del "%GITV_ROOT%\data\gitv.pid" >nul 2>&1
 )
+timeout /t 2 /nobreak >nul
+
+REM Still held: whatever owns the port never wrote a PID file (a manual uvicorn
+REM run, say), so fall back to scanning for it.
+"%GITV_ROOT%\.venv\Scripts\python" -c "import socket,sys; s=socket.socket(); s.settimeout(1); r=s.connect_ex(('127.0.0.1',int(sys.argv[1]))); s.close(); exit(0 if r==0 else 1)" !GITV_PORT! >nul 2>&1
+if errorlevel 1 goto :server_stopped
+call :kill_port_holders !GITV_PORT!
+timeout /t 2 /nobreak >nul
+
+:server_stopped
 echo Done.
 echo.
 
@@ -89,6 +121,11 @@ setlocal disabledelayedexpansion
 >> "%MAINT_SCRIPT%" echo Server = type('Server', (ss.TCPServer,), {'allow_reuse_address': True})
 >> "%MAINT_SCRIPT%" echo import os
 >> "%MAINT_SCRIPT%" echo httpd = Server(('0.0.0.0', int(os.environ.get('GITV_MAINT_PORT', '8000'))), Handler)
+REM `start /b` hands the caller no PID, so the maintenance page has to record its
+REM own. Written after the bind above, never before: a PID file that describes a
+REM process which failed to take the port would send the teardown at [6/6] off
+REM killing the wrong thing.
+>> "%MAINT_SCRIPT%" echo open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '_maintenance.pid'), 'w').write(str(os.getpid()))
 >> "%MAINT_SCRIPT%" echo httpd.serve_forever()
 endlocal
 
@@ -298,10 +335,38 @@ echo.
 
 cd /d "%GITV_ROOT%"
 
-REM Stop the maintenance page so the real server can bind the port
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":!GITV_PORT!.*LISTENING"') do (
-    taskkill /PID %%a /F >nul 2>&1
+REM Stop the maintenance page so the real server can bind the port.
+REM
+REM This is the single most load-bearing step in the script. The maintenance
+REM page holds the port for the whole update, and nothing else in the product
+REM ever releases it - so if this step fails the install can never serve again,
+REM not on this run and not on any later one. 0.18.0 shipped it as a bare
+REM `netstat` call, which is exactly what happened to users whose PATH had lost
+REM System32. Kill by recorded PID first and treat port scanning as the fallback.
+if exist "%GITV_ROOT%\data\_maintenance.pid" (
+    for /f "usebackq delims=" %%p in ("%GITV_ROOT%\data\_maintenance.pid") do (
+        "%SystemRoot%\System32\taskkill.exe" /PID %%p /F >nul 2>&1
+        echo Stopped maintenance page PID %%p >> "%LOG_FILE%"
+    )
+    del "%GITV_ROOT%\data\_maintenance.pid" >nul 2>&1
 )
+
+"%GITV_ROOT%\.venv\Scripts\python" -c "import socket,sys; s=socket.socket(); s.settimeout(1); r=s.connect_ex(('127.0.0.1',int(sys.argv[1]))); s.close(); exit(0 if r==0 else 1)" !GITV_PORT! >nul 2>&1
+if errorlevel 1 goto :port_released
+
+echo WARNING: port !GITV_PORT! still held after the PID kill; scanning. >> "%LOG_FILE%"
+echo WARNING: port !GITV_PORT! still held after the PID kill; scanning. >> "%CHAIN_LOG%"
+call :kill_port_holders !GITV_PORT!
+
+"%GITV_ROOT%\.venv\Scripts\python" -c "import socket,sys; s=socket.socket(); s.settimeout(1); r=s.connect_ex(('127.0.0.1',int(sys.argv[1]))); s.close(); exit(0 if r==0 else 1)" !GITV_PORT! >nul 2>&1
+if errorlevel 1 goto :port_released
+REM Logged to CHAIN_LOG as well as LOG_FILE because _chain_log_tail() surfaces it
+REM in Admin -> Update. The server is started below regardless: it will fail to
+REM bind and say so, which beats exiting silently with no server and no reason.
+echo ERROR: could not free port !GITV_PORT!. The server will fail to bind. >> "%LOG_FILE%"
+echo ERROR: could not free port !GITV_PORT!. The server will fail to bind. >> "%CHAIN_LOG%"
+
+:port_released
 del "%MAINT_SCRIPT%" >nul 2>&1
 
 REM Start server in a new process, then clean up this script.
@@ -314,3 +379,30 @@ REM survives extraction.
 start "" "%GITV_ROOT%\.venv\Scripts\python" -m app.main
 del "%GITV_ROOT%\data\auto-update.bat" >nul 2>&1
 exit
+
+REM ============================================================
+REM Subroutines (unreachable by fallthrough - `exit` above ends the script)
+REM ============================================================
+
+REM Kill whatever is LISTENING on the port passed as %1.
+REM
+REM Only ever a fallback, for when the PID files are missing or stale. Every
+REM tool is called by absolute path because this is the last thing standing
+REM between a failed tool lookup and an install that can never rebind its port,
+REM so it does not lean on the PATH hardening at the top of this script.
+REM
+REM The executable paths are deliberately unquoted: quoting them makes `for /f`
+REM fail with "The filename, directory name, or volume label syntax is
+REM incorrect", both in the plain form and under usebackq (measured, not
+REM assumed). %SystemRoot% has no spaces, so unquoted is safe here.
+REM
+REM `/R /C:` keeps the pattern one regex - plain `findstr "a b"` would read the
+REM space as a separator between two search terms. The space after the port
+REM anchors the match to the local-address column: without it, port 800 also
+REM matches a listener on 8001.
+:kill_port_holders
+for /f "tokens=5" %%a in ('%SystemRoot%\System32\NETSTAT.EXE -ano ^| %SystemRoot%\System32\findstr.exe /R /C:":%~1 .*LISTENING"') do (
+    "%SystemRoot%\System32\taskkill.exe" /PID %%a /F >nul 2>&1
+    echo Killed PID %%a holding port %~1 >> "%LOG_FILE%"
+)
+goto :eof

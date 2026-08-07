@@ -2,6 +2,28 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.19.1] - 2026-08-07
+
+### Fixed
+
+- **`'netstat' is not recognized` left the server unable to restart after an update (Windows).** The maintenance page added in 0.17.0 binds the server's port for the whole update, and the only code that ever released it was a bare `netstat` call in the final step. `netstat` lives in `C:\Windows\System32`, and on a machine whose `PATH` no longer contains that directory the lookup fails, the maintenance page keeps the port, and the real server can never bind it again — on that run or any later one. The same failure silently skipped the "stop the old server" step, so extraction ran against a live install. 0.16.1 was unaffected only because it had no maintenance page. The update and deploy scripts now prepend the Windows system directories to their **own process** `PATH` (this is the `cmd.exe` environment block — not `setx`, no registry key, and nothing outside the running script), the maintenance page records its PID and is stopped by PID rather than by scanning, and the port scan that remains as a fallback calls `netstat`, `findstr`, and `taskkill` by absolute path. GitInTheVan has never modified the system `PATH`; if `C:\Windows\System32` is missing from yours, that predates this app and is worth repairing separately.
+- **The same single point of failure on macOS and Linux.** The maintenance page was torn down with `lsof`, which is not installed on many minimal distributions. Teardown is now PID-based, and the fallback scan tries `lsof`, `ss`, then `fuser` instead of treating one missing tool as fatal.
+- **A port scan could kill an unrelated process.** `findstr ":8000.*LISTENING"` is a substring match, so with `GITV_PORT=800` a listener on `8001` also matched and was killed. The pattern is now anchored to the local-address column.
+- **`kill` failed outright when a server listened on both IPv4 and IPv6.** `PID=$(lsof -ti:...)` returns two PIDs in that case and `kill "$PID"` rejects the multi-line argument, killing neither. The Unix scripts now iterate over every PID returned.
+
+### Recovering an install already stranded by this bug
+
+The updater always runs the *currently installed* version's script, so an install sitting on 0.18.0 will run 0.18.0's broken script on its next update. Those installs need one manual pass. Both a stale server and the maintenance page may be holding the port:
+
+1. Stop them. `netstat` is unavailable on these machines, so use CIM by absolute path:
+   ```
+   C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -Command "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.CommandLine -like '*_maintenance_server.py*' -or $_.CommandLine -like '*app.main*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+   ```
+   Task Manager → Details → enable the *Command line* column works too.
+2. Delete `data\_maintenance_server.py`, `data\auto-update.bat`, and any stale `data\gitv.pid`. **Do not delete `data\update-chain.json`** — it holds the frozen upgrade plan.
+3. Check whether the update actually landed: the top `## [x.y.z]` header of `CHANGELOG.md`, and the tail of `data\updater.log`. Files are extracted before the step that fails, so the new version is usually already on disk.
+4. Start the server (`.venv\Scripts\python -m app.main`). A pending hop resumes on its own, or use Admin → Update → *Retry this step*.
+
 ## [0.19.0] - 2026-08-06
 
 ### Fixed

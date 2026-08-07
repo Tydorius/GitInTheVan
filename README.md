@@ -280,6 +280,18 @@ Drop `--dry-run` to run it. Stop the server first. It backs up the database befo
 
 If you already jumped straight from 0.15.x/0.16.1 to 0.18.0 and now see `no such column: skills.budget_weight`, upgrading to 0.19.0 fixes it: 0.18.0 added that column to the model without a migration, so it was missing on every upgraded database. 0.19.0 adds the migration and, on first start, checks the whole schema against the models and repairs anything else additively (after taking a backup).
 
+#### `'netstat' is not recognized` and the server never comes back (Windows)
+
+If an update ended with that message and the browser now shows "GitInTheVan is updating" forever, the update's maintenance page is still holding the port. This is fixed in 0.19.1, but because the updater runs the *currently installed* version's script, an install on 0.18.0 needs one manual pass first:
+
+```
+C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -Command "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.CommandLine -like '*_maintenance_server.py*' -or $_.CommandLine -like '*app.main*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+```
+
+Then delete `data\_maintenance_server.py`, `data\auto-update.bat`, and any stale `data\gitv.pid` — but **not** `data\update-chain.json` — and start the server again with `.venv\Scripts\python -m app.main`. The new version is usually already extracted; check the top of `CHANGELOG.md` to confirm.
+
+The underlying cause is `C:\Windows\System32` missing from your `PATH`. GitInTheVan does not modify your `PATH` and never has, so this predates the app and will be breaking other software too — worth repairing in System Properties → Environment Variables.
+
 #### Docker
 
 Docker installs are outside the auto-updater. Pull the new image and recreate the container; your mounted `data/` volume is preserved. The same one-release-at-a-time rule applies — do not skip several releases in one pull.

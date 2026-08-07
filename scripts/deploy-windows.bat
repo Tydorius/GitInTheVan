@@ -6,6 +6,15 @@ cd /d "%~dp0\.."
 set "GITV_ROOT=%CD%"
 set "LOG_FILE=%~dp0installer.log"
 
+REM Every non-builtin used below - where, tar, findstr, powershell - lives in
+REM System32, and some machines hand us a PATH without it (see the PowerShell
+REM fallback below, which exists for exactly that reason). This is the cmd.exe
+REM process environment block only - not setx, no registry key, gone when this
+REM script exits. Prepended rather than appended so a stray tool earlier in PATH
+REM cannot shadow the real one.
+if not defined SystemRoot set "SystemRoot=C:\Windows"
+set "PATH=%SystemRoot%\System32;%SystemRoot%;%SystemRoot%\System32\Wbem;%SystemRoot%\System32\WindowsPowerShell\v1.0;%PATH%"
+
 REM Initialize log file
 echo ============================================ > "%LOG_FILE%"
 echo   GitInTheVan Deploy Log >> "%LOG_FILE%"

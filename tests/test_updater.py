@@ -981,3 +981,104 @@ class TestUpdateScriptGuardRails:
             "update-macos.sh has drifted from update-linux.sh; mirror changes into both:\n"
             + "\n".join(differing)
         )
+
+    # The maintenance page binds the server's port for the whole update, and the
+    # teardown below is the only code in the product that ever releases it. If
+    # that teardown fails the install can never serve again -- not on this run
+    # and not on any later one, because every later run stages its script from
+    # the install that is already broken. 0.18.0 freed the port with a bare
+    # `netstat`; on a machine whose PATH had lost System32 that lookup failed and
+    # stranded the install permanently. The next three tests keep the two
+    # properties that turned that into a brick from coming back.
+
+    def test_windows_never_calls_netstat_bare(self):
+        """netstat must be absolute-path: PATH is inherited and may be broken."""
+        for lineno, line in enumerate(self._text("update-windows.bat").splitlines(), 1):
+            code = line.strip()
+            if not code or code.upper().startswith("REM"):
+                continue
+            for match in re.finditer(r"(?i)netstat", code):
+                before = code[: match.start()].lower()
+                assert before.endswith("system32\\"), (
+                    f"update-windows.bat:{lineno} invokes netstat without an absolute "
+                    f"path, so a broken PATH can strand the port: {code!r}"
+                )
+
+    @pytest.mark.parametrize("name", ["update-linux.sh", "update-macos.sh"])
+    def test_unix_port_scanning_is_isolated_and_guarded(self, name):
+        """Every port scan lives in kill_port_holders, which tolerates a missing tool."""
+        lines = self._text(name).splitlines()
+        start = next(i for i, l in enumerate(lines) if l.startswith("kill_port_holders() {"))
+        end = next(i for i, l in enumerate(lines) if i > start and l == "}")
+        body = "\n".join(lines[start : end + 1])
+        assert "command -v lsof" in body, (
+            f"{name}: kill_port_holders calls lsof without checking it exists; lsof is "
+            "not installed on many minimal distros"
+        )
+
+        stray = [
+            (i + 1, l.strip())
+            for i, l in enumerate(lines)
+            if not (start <= i <= end)
+            and not l.strip().startswith("#")
+            and re.search(r"(?<![\w-])(lsof|fuser|ss)\b", l)
+        ]
+        assert not stray, (
+            f"{name} scans for port holders outside the guarded helper, so a missing "
+            f"tool becomes fatal again: {stray}"
+        )
+
+    @pytest.mark.parametrize("name", SCRIPTS)
+    def test_maintenance_page_teardown_is_pid_based(self, name):
+        """Scanning is the fallback; the recorded PID is the primary path."""
+        text = self._text(name)
+        assert "_maintenance.pid" in text, (
+            f"{name} does not record the maintenance page PID, leaving a port scan as "
+            "the only way to free the port"
+        )
+        remover = "del " if name.endswith(".bat") else "rm -f "
+        assert any(
+            remover in line and "_maintenance.pid" in line for line in text.splitlines()
+        ), (
+            f"{name} never removes _maintenance.pid; a stale file would misdirect the "
+            "next teardown into killing an unrelated recycled PID"
+        )
+
+    @pytest.mark.parametrize("name", ["update-windows.bat", "deploy-windows.bat"])
+    def test_windows_scripts_prepend_system32_to_path(self, name):
+        """Prepended, and before the first tool that needs it."""
+        lines = self._text(name).splitlines()
+        hardened = next(
+            (
+                i
+                for i, l in enumerate(lines)
+                if l.strip().lower().startswith('set "path=') and "system32" in l.lower()
+            ),
+            None,
+        )
+        assert hardened is not None, (
+            f"{name} does not put System32 on PATH; updater.py launches it via subprocess "
+            "so it inherits whatever PATH the server had"
+        )
+        value = lines[hardened].split("=", 1)[1].lower()
+        assert value.startswith("%systemroot%\\system32"), (
+            f"{name} appends System32 rather than prepending it, so a stray netstat.exe "
+            f"earlier in PATH would win: {lines[hardened]!r}"
+        )
+
+        needs_path = re.compile(
+            r"(?i)(?<![\\/\w])(findstr|where|ping|timeout|taskkill|powershell|tar)\b"
+        )
+        first_use = next(
+            (
+                i
+                for i, l in enumerate(lines)
+                if not l.strip().upper().startswith("REM") and needs_path.search(l)
+            ),
+            None,
+        )
+        if first_use is not None:
+            assert hardened < first_use, (
+                f"{name}:{first_use + 1} uses a System32 tool before PATH is hardened at "
+                f"line {hardened + 1}: {lines[first_use]!r}"
+            )

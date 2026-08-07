@@ -31,6 +31,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -143,6 +144,86 @@ def build_chain(current: str, releases: list[dict], target: str | None) -> list[
 # ---------------------------------------------------------------------------
 # Hop execution
 # ---------------------------------------------------------------------------
+
+def clear_stranded_maintenance_page(root: Path) -> None:
+    """Kill a maintenance page left holding the port by an interrupted update.
+
+    Up to 0.18.0 the update scripts freed the port with a bare `netstat` (or
+    `lsof`). When that tool could not be resolved the maintenance page survived,
+    kept the port, and the install could never serve again -- and because the
+    updater always runs the *installed* version's script, those installs cannot
+    fix themselves. This script is the only vehicle that reaches them.
+
+    Deliberately narrow: it acts only when data/_maintenance_server.py is
+    present, which is the specific marker of an interrupted update, and matches
+    processes on that file's *full path*, never its name. Matching the bare
+    filename would kill the maintenance page of a second GitInTheVan install on
+    the same machine. Both update scripts launch the page by absolute path, so
+    the full path is what appears in the command line.
+    """
+    marker = root / "data" / "_maintenance_server.py"
+    if not marker.exists():
+        return
+
+    log("An interrupted update left a maintenance page behind; clearing it.")
+    pids: set[int] = set()
+
+    pid_file = root / "data" / "_maintenance.pid"
+    if pid_file.exists():
+        try:
+            pids.add(int(pid_file.read_text().strip()))
+        except (ValueError, OSError):
+            pass
+
+    # 0.18.0 and earlier never wrote a PID file, so also match on command line.
+    needle = str(marker.resolve())
+    if sys.platform == "win32":
+        needle = needle.lower()
+    try:
+        if sys.platform == "win32":
+            out = subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine } | "
+                 "ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }"],
+                capture_output=True, text=True, timeout=30,
+            ).stdout
+        else:
+            out = subprocess.run(
+                ["ps", "-eo", "pid=,args="], capture_output=True, text=True, timeout=30
+            ).stdout
+        for line in out.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            pid_text, _, cmdline = line.partition("\t" if sys.platform == "win32" else " ")
+            if sys.platform == "win32":
+                cmdline = cmdline.lower()
+            if needle in cmdline and pid_text.strip().isdigit():
+                pids.add(int(pid_text.strip()))
+    except (OSError, subprocess.SubprocessError) as e:
+        log(f"  Could not enumerate processes ({e}); relying on the PID file alone.")
+
+    for pid in sorted(pids):
+        if pid == os.getpid():
+            continue
+        try:
+            if sys.platform == "win32":
+                subprocess.run(
+                    [os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                                  "System32", "taskkill.exe"), "/PID", str(pid), "/F"],
+                    capture_output=True, timeout=30,
+                )
+            else:
+                os.kill(pid, signal.SIGKILL)
+            log(f"  Stopped maintenance page PID {pid}.")
+        except (OSError, subprocess.SubprocessError) as e:
+            log(f"  Could not stop PID {pid}: {e}")
+
+    if not pids:
+        log("  No running maintenance page found; removing the leftover script only.")
+    marker.unlink(missing_ok=True)
+    pid_file.unlink(missing_ok=True)
+
 
 def venv_python(root: Path) -> Path:
     candidate = root / ".venv" / ("Scripts" if os.name == "nt" else "bin") / (
@@ -338,6 +419,8 @@ def main() -> int:
         if answer not in ("y", "yes"):
             log("Aborted.")
             return 1
+
+    clear_stranded_maintenance_page(root)
 
     for i, step in enumerate(chain, 1):
         log("")
