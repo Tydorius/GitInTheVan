@@ -3,6 +3,7 @@ import hashlib
 import ipaddress
 import logging
 import socket
+import threading
 import time
 from pathlib import Path
 
@@ -275,13 +276,46 @@ def get_local_ips() -> list[str]:
     except OSError:
         pass
 
-    try:
-        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-            ips.add(info[4][0])
-    except OSError:
-        pass
+    ips |= _hostname_ips()
 
     return sorted(ip for ip in ips if _is_lan_ip(ip))
+
+
+def _hostname_ips(timeout: float = 2.0) -> set[str]:
+    """Addresses from the hostname lookup, abandoned if it takes too long.
+
+    `getaddrinfo` accepts no timeout and `socket.setdefaulttimeout` does not
+    apply to it, so the only way to bound it is to stop waiting. That is not
+    defensive programming: a Mac's default hostname is an mDNS `.local` name,
+    and under a Homebrew Python this call spends **35 seconds** before failing
+    with EAI_NONAME, because that interpreter does not resolve `.local`
+    through the system resolver. Apple's own python3 answers the identical
+    call instantly, so whether it blocks depends on which interpreter the
+    deploy script happened to find.
+
+    35s exceeds this status's own 30s cache TTL, so every poll from the admin
+    UI re-entered the block -- the cache could never get ahead of it.
+
+    Losing this source is survivable: it only adds interfaces that are not on
+    the default route (a second NIC, or Wi-Fi alongside Ethernet), and the UDP
+    probe in the caller already returns the primary address.
+    """
+    found: set[str] = set()
+
+    def lookup() -> None:
+        try:
+            for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+                found.add(info[4][0])
+        except OSError:
+            pass
+
+    # Daemon: a lookup still stuck in the resolver must not hold up shutdown.
+    worker = threading.Thread(target=lookup, daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
+        logger.debug("hostname lookup exceeded %.1fs; using default-route address only", timeout)
+    return set(found)
 
 
 def get_cert_ip_sans(cert_path: Path | str) -> list[str]:

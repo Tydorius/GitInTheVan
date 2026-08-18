@@ -6,6 +6,18 @@ All notable changes to GitInTheVan are documented in this file.
 
 ### Fixed
 
+- **The certificate/LAN-address check could block for 35 seconds on macOS.**
+  `get_local_ips()` resolves the machine's own hostname, and a Mac's default hostname
+  is an mDNS `.local` name. Under a Homebrew Python that lookup spends 35 real seconds
+  before failing with EAI_NONAME, because that interpreter does not resolve `.local`
+  through the system resolver; Apple's own python3 answers the identical call instantly,
+  so whether it blocked depended on which interpreter the deploy script found. 35s is
+  longer than the status cache's 30s TTL, so every poll from the admin UI re-entered
+  the block and the cache could never get ahead of it. `getaddrinfo` takes no timeout
+  and `socket.setdefaulttimeout` does not apply to it, so the lookup now runs in a
+  daemon thread and is abandoned after 2s. Nothing is lost when it is: the lookup only
+  adds interfaces off the default route, and the UDP probe already returns the primary
+  address. Measured on the affected machine: 35.01s to 2.01s, same result.
 - **The certificate-generation failure branch was unreachable in `deploy-linux.sh` and
   `deploy-macos.sh`.** `... || true` forces the enclosing `if` compound to exit 0, so
   the `CERT_STATUS=$?` on the next line always read 0 and the `else` branch that

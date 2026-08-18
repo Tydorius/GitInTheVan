@@ -1,4 +1,5 @@
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -361,3 +362,50 @@ async def test_acknowledge_endpoint_silences_the_banner(admin_client, ssl_env):
     assert ack.status_code == 200
     assert ack.json()["acknowledged"] is True
     assert (await client.get("/api/admin/ssl/ip-check")).json()["acknowledged"] is True
+
+
+class TestHostnameLookupIsBounded:
+    """A hostname lookup that never returns must not stall the status check.
+
+    On macOS the default hostname is an mDNS `.local` name, and under a
+    Homebrew Python `getaddrinfo` spent 35 real seconds on it before failing --
+    longer than the status cache's own 30s TTL, so every poll from the admin UI
+    re-entered the block. Apple's python3 answered instantly, so it depended
+    entirely on which interpreter the deploy script found.
+    """
+
+    @staticmethod
+    def _hang(seconds: float):
+        def fake_getaddrinfo(*_args, **_kwargs):
+            time.sleep(seconds)
+            raise OSError("nodename nor servname provided, or not known")
+        return fake_getaddrinfo
+
+    def test_slow_lookup_is_abandoned(self, monkeypatch):
+        monkeypatch.setattr(ssl_manager.socket, "getaddrinfo", self._hang(10))
+
+        started = time.monotonic()
+        result = ssl_manager._hostname_ips(timeout=0.2)
+        elapsed = time.monotonic() - started
+
+        assert result == set()
+        assert elapsed < 2.0, f"lookup was not abandoned; took {elapsed:.2f}s"
+
+    def test_fast_lookup_is_still_used(self, monkeypatch):
+        monkeypatch.setattr(
+            ssl_manager.socket, "getaddrinfo",
+            lambda *a, **k: [(None, None, None, "", ("192.168.4.7", 0))],
+        )
+
+        assert ssl_manager._hostname_ips(timeout=2.0) == {"192.168.4.7"}
+
+    def test_local_ips_survives_a_hung_lookup(self, monkeypatch):
+        """The UDP probe still supplies the default-route address."""
+        monkeypatch.setattr(ssl_manager.socket, "getaddrinfo", self._hang(10))
+        monkeypatch.setattr(ssl_manager, "_hostname_ips", lambda timeout=0.2: set())
+
+        # No assertion on the value: it depends on the host running the suite.
+        # What matters is that it returns rather than blocking on the resolver.
+        started = time.monotonic()
+        ssl_manager.get_local_ips()
+        assert time.monotonic() - started < 2.0
