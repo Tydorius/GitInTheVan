@@ -3,11 +3,11 @@ services:
     build: .
     image: gitinthevan/server:latest
     ports:
-      - "8000:8000"
+      - "${GITV_PORT:-8000}:8000"
     volumes:
       - ./data:/app/data
       - ./.deno:/app/.deno
     environment:
-      - GITV_SECRET_KEY=${GITV_SECRET_KEY:-change-me-in-production}
+      - GITV_SECRET_KEY=${GITV_SECRET_KEY:-}
       - GITV_DATABASE_URL=sqlite+aiosqlite:///./data/gitinthevan.db
     restart: unless-stopped

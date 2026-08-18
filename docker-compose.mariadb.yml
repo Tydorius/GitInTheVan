@@ -3,12 +3,12 @@ services:
     build: .
     image: gitinthevan/server:latest
     ports:
-      - "8000:8000"
+      - "${GITV_PORT:-8000}:8000"
     volumes:
       - ./data:/app/data
       - ./.deno:/app/.deno
     environment:
-      - GITV_SECRET_KEY=${GITV_SECRET_KEY:-change-me-in-production}
+      - GITV_SECRET_KEY=${GITV_SECRET_KEY:-}
       - GITV_DATABASE_URL=mysql+aiomysql://gitv:${GITV_DB_PASSWORD:-gitv_password}@mariadb:3306/gitinthevan
       - GITV_DB_POOL_SIZE=10
       - GITV_DB_MAX_OVERFLOW=20
