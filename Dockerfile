@@ -36,11 +36,18 @@ ENV GITV_DENO_PATH=/opt/deno/deno
 WORKDIR /app
 
 COPY pyproject.toml README.md ./
+COPY requirements/ ./requirements/
 COPY app/ ./app/
 
 COPY --from=frontend-builder /static/ ./static/
 
-RUN pip install --no-cache-dir -e ".[postgres,mysql]"
+# Third-party deps install from a hash-pinned lockfile: pip verifies every
+# artifact against requirements/docker.txt and refuses anything whose hash does
+# not match, so a substituted or compromised package cannot land in the image.
+# The app installs separately because --require-hashes cannot be combined with
+# an editable install; --no-deps stops pip re-resolving the verified tree.
+RUN pip install --no-cache-dir --require-hashes -r requirements/docker.txt && \
+    pip install --no-cache-dir -e . --no-deps
 
 RUN mkdir -p data/logs data/backups .deno
 

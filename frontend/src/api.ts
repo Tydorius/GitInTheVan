@@ -72,6 +72,15 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return data as T;
 }
 
+export interface CertIPCheck {
+  mismatch: boolean;
+  reason: string;
+  cert_ips: string[];
+  local_ips: string[];
+  fingerprint: string;
+  acknowledged: boolean;
+}
+
 export const api = {
   // Auth
   setup: (username: string, password: string) =>
@@ -288,6 +297,10 @@ export const api = {
     request<{ cert_configured: boolean; cert_exists: boolean; cert_path: string | null; key_path: string | null; cert_info: any | null; is_active: boolean }>('/api/admin/ssl/status'),
   generateSSLCert: (extra_ips?: string[], extra_dns?: string[]) =>
     request<any>('/api/admin/ssl/generate', { method: 'POST', body: JSON.stringify({ extra_ips: extra_ips || null, extra_dns: extra_dns || null }) }),
+  getCertIPCheck: () =>
+    request<CertIPCheck>('/api/admin/ssl/ip-check'),
+  acknowledgeCertIPCheck: (fingerprint: string) =>
+    request<CertIPCheck>('/api/admin/ssl/ip-check/acknowledge', { method: 'POST', body: JSON.stringify({ fingerprint }) }),
 
   // Update management
   checkUpdate: () =>

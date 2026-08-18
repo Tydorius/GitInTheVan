@@ -855,6 +855,8 @@ GitInTheVan/
   frontend/
     src/          Svelte 5 source
   tests/          pytest test suite
+  testing/        Cross-platform test harness (see testing/README.md)
+  requirements/   Hash-pinned dependency lockfiles
   static/         Built frontend (generated)
 ```
 
@@ -874,6 +876,47 @@ This outputs to `../static/`. Restart the Python server to pick up changes.
 ```bash
 .venv\Scripts\python -m pytest tests\ -v
 ```
+
+Contributors need the development dependencies, which the deploy scripts install
+only when asked:
+
+```bash
+scripts\deploy-windows.bat --dev
+```
+
+Without `--dev` you get `requirements/main.txt` — the end-user tree, which has no
+pytest, ruff or pip-audit. Nothing in `app/` imports them, so a plain install is
+complete for running the server.
+
+### Dependency Lockfiles
+
+Direct dependencies are pinned in `pyproject.toml`, but that does not constrain
+what they pull in. `requirements/` holds hash-pinned lockfiles covering the whole
+transitive tree, installed with `--require-hashes` so pip refuses any artifact
+whose hash does not match:
+
+| File | Used by |
+|------|---------|
+| `main.txt` | deploy/update scripts (end users) |
+| `dev.txt` | deploy/update scripts with `--dev` (contributors) |
+| `docker.txt` | `Dockerfile` |
+
+Regenerate all three after changing `pyproject.toml` dependencies — see
+`the project docs` rule 17 for the exact commands. `tests/test_dependency_pinning.py`
+fails if a lockfile and `pyproject.toml` disagree.
+
+### Cross-Platform Testing
+
+`testing/` holds a harness that provisions a throwaway install on a remote
+machine, runs the test suite against it, archives the logs, and deletes itself:
+
+```bash
+remote-test.bat -env .	esting\harness.env -target linux -branch main all
+```
+
+Targets are `macos`, `linux`, `docker`, and `windows`. It runs the real deploy
+scripts rather than reimplementing them, so it verifies the actual end-user
+install path. See [testing/README.md](./testing/README.md).
 
 ### Linting
 

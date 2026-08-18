@@ -2,6 +2,62 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.20.0] - 2026-08-18
+
+### Added
+
+- **Admin banner when the HTTPS certificate no longer covers this machine's LAN address.** A certificate is pinned to the IP addresses it was issued for, so a router reboot that reissues DHCP leases silently breaks every client — the server still starts normally, and nothing reported the cause. On startup and every 5 minutes thereafter, GitInTheVan compares the IP SANs of the certificate uvicorn is actually serving against the host's current private IPv4 addresses, and shows admins a banner when they no longer intersect. Also logged as a startup `WARNING`, alongside the existing firewall check.
+- The banner leads with the remedy that **preserves existing trust**: putting the machine back on its old address via a static IP or DHCP reservation makes the current certificate valid again. Regenerating is presented as the fallback it is, with the cost stated — every client device has to trust the new certificate again. Nothing about this feature generates, rotates, or modifies a certificate.
+- **One-time acknowledgement.** A checkbox gates an *Acknowledge* button; dismissing hides the banner for the life of the process. The acknowledgement is deliberately in-memory rather than persisted, so a restart that still finds the problem raises it again. It is also scoped to one specific mismatch by fingerprint — if the address changes *again* after being dismissed, the banner returns rather than staying silenced.
+- New endpoints `GET /api/admin/ssl/ip-check` and `POST /api/admin/ssl/ip-check/acknowledge` (admin-only; the acknowledgement is audit-logged).
+
+### Added — Cross-platform test harness
+
+- **`testing/` provisions a throwaway install on any target, tests it, archives the logs, and deletes itself.** `deploy-macos.sh` and `deploy-linux.sh` had never actually been executed — syntax-checked only, an open item since July — and the Dockerfile's hash-verified build had never been run either. Verifying a branch was a manual afternoon per platform, on machines holding real work. It is now one command per target:
+
+  ```
+  remote-test.bat -env .	esting\harness.env -target linux -branch main all
+  ```
+
+- Targets are `macos`, `linux`, `docker` (image build + compose, run directly on a Docker host — nothing nested), and `windows` (where `TARGET_WINDOWS=localhost` skips SSH entirely). Configuration lives in a gitignored `testing/harness.env`; `testing/harness.env.example` is committed.
+- **One orchestrator with chained subcommands**, not a pile of scripts: `up`, `test`, `hold`, `logs`, `down`, and `all`. `up test hold` leaves the instance running so it can be exercised by hand from anywhere on the network; `logs down` finishes the job, from a later session if need be — run state is persisted to `testing/runs/`.
+- **The real deploy scripts are called, unmodified.** The end-user install path is what is under test, so the harness backgrounds them and decides readiness by polling `/health` until it answers twice, rather than adding a CI-only flag that would test a different code path. Two responses, not one: the updater's maintenance page binds the same port and answers every path. The deploy exit code is not trusted alone either — it exits `0` when the port is already in use.
+- **A mock upstream is the default.** `testing/remote/mock_upstream.py` is a stdlib-only OpenAI-compatible stub (streaming and non-streaming) started on the target. `Endpoint.api_key` is plaintext at rest, so replicating real endpoints would copy live billable credentials onto throwaway machines; `-replicate` remains available when a real provider is genuinely needed, and archived logs are scrubbed of credential-shaped strings either way.
+- **Teardown is gated four ways**, because it deletes directories on machines holding real repositories. A run directory is always `<FOLDER>/_gitv-testruns/<run-id>/`, and `down` refuses unless the path contains that marker directory, contains its own run id, is not the configured parent/drive root/`/`/`~`, and carries a `.gitv-testrun` file **on the target** whose contents match the run id — verified immediately before removal, so a stale local state file cannot aim a delete at the wrong directory. Archived logs are never touched.
+- 29 tests in `tests/test_harness.py` covering config parsing, every teardown refusal path, log redaction and scanning, and run-state round-tripping. Also asserts that the example config's `ADMIN_PASSWORD` satisfies the app's own password rules, and that shipped scripts keep their line endings.
+
+### Fixed
+
+- **`scripts/flow_test.py` reported success no matter how many test groups failed.** `main()` printed a summary and returned, never calling `sys.exit`, so the exit code was always `0`. Any automation reading that code — including the new harness — would have treated a total failure as a pass.
+- **Two corrupted paths in the Windows deploy and update scripts.** `"%GITV_ROOT%equirements\dev.txt"` had been written as `"%GITV_ROOT%equirements\dev.txt"`: the `` was consumed as a carriage-return escape while the file was being edited, silently eating the `r`. Both scripts would have failed their dependency install. `tests/test_harness.py` now asserts no shipped script contains a stray CR — the usual checks did not catch this, because the file still reported CRLF endings and had no bare LF lines.
+
+### Changed
+
+- **End users no longer receive the development dependency tree.** The deploy and update scripts install `requirements/main.txt` (71 packages); `--dev` selects `requirements/dev.txt` (97) for contributors. Verified safe: nothing in `app/` imports `pytest`, `ruff` or `pip-audit`, the admin-facing Diagnostics endpoint is pure Python and database queries, and the only subprocess the app spawns is the Deno cantrip sandbox. `scripts/flow_test.py` needs only `httpx` plus the standard library, so the harness can exercise the full pipeline against a genuine end-user install.
+
+### Added — Supply chain: hash-pinned dependency lockfiles
+
+- **The transitive dependency tree is now locked and hash-verified.** Direct dependencies were pinned with `==`, but that constrains nothing below them: `pip install -e .` re-resolved the whole tree against PyPI on every deploy and every update, on every user's machine. `litellm` alone pulls in ~90 packages. That is precisely the surface a compromised or typo-squatted transitive package relies on, and it was the one place this project's otherwise strict pinning did not reach. The frontend never had the problem — `package-lock.json` carries integrity hashes and every script uses `npm ci`.
+- `requirements/dev.txt` (97 packages, used by all six deploy/update scripts) and `requirements/docker.txt` (74 packages, used by the `Dockerfile`) pin every package in the tree to an exact version and sha256. Installs use `--require-hashes`, which fails closed on any artifact whose hash does not match. Generated with `uv pip compile --universal`, so one lockfile carries environment markers valid on Windows, macOS and Linux — without `--universal`, a lock generated on Windows silently drops `uvloop` and every Linux/macOS install loses it.
+- Because `--require-hashes` cannot be combined with an editable install, the app installs in a second step as `-e . --no-deps`, which also stops pip re-resolving the tree it just verified. The Dockerfile drops `-e ".[postgres,mysql]"` for the same two-step pattern, so dev tooling (pytest, ruff, pip-audit) no longer ships in the image.
+- Scripts now invoke pip as `python -m pip` rather than the `pip` executable. `pip-audit` pulls `pip` itself into the dev lock, and on Windows a running `pip.exe` cannot overwrite itself — the lockfile install failed with `To modify pip, please run...` on every Windows deploy and update. The bootstrap pin was also raised to `pip==26.2.1` to match the lock so no self-modification is attempted at all.
+- Verified by building a throwaway virtualenv, installing entirely through `--require-hashes`, and running the full suite against it: 748 passed. Both lockfiles are byte-for-byte reproducible from the commands documented in the dependency pinning policy.
+- 9 new tests in `tests/test_dependency_pinning.py`: locks exist and are populated, every entry carries a sha256, lock and `pyproject.toml` agree (so a stale lock cannot silently reinstate a version we patched), no script installs extras editably, editable installs use `--no-deps`, the bootstrap pip pin equals the locked pip, and no script calls the pip executable directly. The bootstrap-pip test was confirmed to fail when the bug is reintroduced.
+
+### Security
+
+- **The JWT signing key defaulted to a value published in this repository.** `GITV_SECRET_KEY` fell back to the literal `change-me-in-production`, and `.env.example` shipped that same value, so any install that followed the documented setup without editing it signed session tokens with a key anyone can read off GitHub. Not an instant takeover — `require_admin` re-checks the database rather than trusting the token's `is_admin` claim, and user ids are UUID4 — but anyone who learned a single user id could then mint tokens for that user, with an expiry of their choosing, surviving password changes. The server now generates a random key on first start and persists it to `data/secret_key` (inside the Docker volume, excluded from release zips); an explicitly set `GITV_SECRET_KEY` always takes precedence and is never overridden. **Existing sessions are invalidated once on upgrade — everyone must log in again.** `.env.example` now ships blank.
+- **Dependency audit (`pip-audit`, `npm audit`) — 10 Python and 1 npm advisory resolved.** `cryptography` 48.0.1 → 50.0.0, `aiohttp` 3.14.1 → 3.14.3 (newly pinned; reachable as an HTTP client against upstream endpoints), `pyasn1` 0.6.3 → 0.6.4 (newly pinned), and `nanoid` pinned to 3.3.18 via `overrides`, matching the existing `postcss` treatment rather than `npm audit fix`, which would re-resolve ranges. `ecdsa` PYSEC-2026-1325 remains: upstream has no planned fix, and no ECDSA path is reachable because JWTs are HS256 with an explicit algorithm allowlist — documented as accepted risk in `Planning/security-control-document.md`.
+
+### Fixed
+
+- **`generate_self_signed_cert()` overwrote the live CA and its private key regardless of the path it was asked to write to.** The leaf honoured the `cert_path` argument but the CA was written to the module-level `data/ssl/ca.pem` and `ca-key.pem` unconditionally — so any call with an explicit path, which is every call the test suite makes, replaced the real CA. Because clients trust the *CA*, this silently invalidated every device that had already been provisioned, and left `data/ssl/` holding a CA that had not signed the leaf being served, so the `ca.pem` offered for download no longer validated the connection. The CA is now written beside the leaf it signed; in production `cert_path` defaults to `data/ssl/cert.pem`, so the destination is unchanged. `tests/test_ssl.py` asserts the live CA files are byte-identical after a generate call targeting a temp directory.
+
+### Notes
+
+- Detection only fires when the certificate *has* IP SANs and none of them is an address the host currently holds. A hostname-only certificate is never flagged (LAN IP coverage was never requested), and a certificate listing addresses the host no longer has is fine as long as one still matches — this keeps virtual adapters (Hyper-V, WSL, Docker) from producing false alarms.
+- The certificate's SANs are snapshotted once per process, because uvicorn holds the certificate it started with. Regenerating therefore does *not* clear the banner until the server is restarted onto the new certificate — which is correct, since the old one is still being served until then.
+
 ## [0.19.1] - 2026-08-07
 
 ### Fixed

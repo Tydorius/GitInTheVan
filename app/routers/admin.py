@@ -298,6 +298,57 @@ def _update_env_ssl(env_path: Path, cert_val: str, key_val: str):
     env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+class CertIPCheckResponse(BaseModel):
+    mismatch: bool
+    reason: str
+    cert_ips: list[str]
+    local_ips: list[str]
+    fingerprint: str
+    acknowledged: bool
+
+
+class CertIPAcknowledgeRequest(BaseModel):
+    fingerprint: str
+
+
+@router.get("/ssl/ip-check", response_model=CertIPCheckResponse)
+async def get_cert_ip_check(
+    admin: Annotated[User, Depends(require_admin)],
+):
+    """Whether the running certificate still covers a live LAN address."""
+    import asyncio
+
+    from app.services.ssl_manager import check_cert_ip_mismatch
+
+    # Offloaded: get_local_ips() does a blocking hostname lookup.
+    return CertIPCheckResponse(**await asyncio.to_thread(check_cert_ip_mismatch))
+
+
+@router.post("/ssl/ip-check/acknowledge", response_model=CertIPCheckResponse)
+async def acknowledge_cert_ip_check(
+    req: CertIPAcknowledgeRequest,
+    admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Dismiss the mismatch banner until the server restarts."""
+    import asyncio
+
+    from app.services.audit import log_action
+    from app.services.ssl_manager import acknowledge_cert_ip_mismatch
+
+    status_dict = await asyncio.to_thread(acknowledge_cert_ip_mismatch, req.fingerprint)
+
+    if status_dict["acknowledged"]:
+        await log_action(
+            db, admin.id, "ssl.ip_mismatch_acknowledge", "ssl", req.fingerprint,
+            "Acknowledged certificate/LAN address mismatch "
+            f"(certificate: {', '.join(status_dict['cert_ips']) or 'none'}; "
+            f"current: {', '.join(status_dict['local_ips']) or 'none'})",
+        )
+
+    return CertIPCheckResponse(**status_dict)
+
+
 @router.get("/ssl/ca-cert")
 async def download_ca_cert(
     admin: Annotated[User, Depends(require_admin)],

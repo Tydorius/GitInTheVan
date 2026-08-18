@@ -150,7 +150,13 @@ iOS requires installing the root CA certificate:
 - View certificate status and validity period
 - Regenerate the certificate with additional IP addresses
 - Check whether HTTPS is active</p>
-<p>The deploy scripts automatically detect your LAN IP and include it in the certificate. If your IP changes, regenerate the certificate from the Admin panel and restart the server.</p>
+<p>The deploy scripts automatically detect your LAN IP and include it in the certificate.</p>
+<h3 id="when-your-ip-address-changes">When Your IP Address Changes</h3>
+<p>A certificate is tied to the IP addresses it was issued for. If your machine&rsquo;s address changes &mdash; most often after a power cut or router reboot hands out new DHCP leases &mdash; the certificate no longer matches, and every device that connects over HTTPS will fail certificate validation. The server itself still starts normally, which is what makes this confusing to diagnose.</p>
+<p>Admins now see a red banner at the top of every page when this happens, naming both the address the certificate was issued for and the address the machine currently has.</p>
+<p><strong>The easiest fix is usually to put the machine back on its old address</strong>, using a static IP or a DHCP reservation in your router. The existing certificate then matches again and every device that already trusts it keeps working &mdash; nothing needs to be re-trusted.</p>
+<p>Regenerating from <strong>Admin</strong> &rarr; <strong>Network</strong> also works, but it costs you more: every device that connects over HTTPS has to accept the new certificate again, one at a time. Regenerating does not clear the banner until you restart the server, because the old certificate is still the one being served until then.</p>
+<p>If you cannot deal with it immediately, tick the acknowledgement checkbox in the banner and press <strong>Acknowledge</strong> to hide it. It stays hidden until the server restarts &mdash; so if the problem is still there next time you start up, you get reminded again rather than forgetting about it. If the address changes a second time, the banner returns even if you dismissed the first one.</p>
 <hr />
 <h2 id="3-dashboard">3. Dashboard</h2>
 <p><img alt="Dashboard" src="media/gitv-dashboard.png" /></p>

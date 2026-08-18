@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { isAuthenticated, currentRoute, logout, isAdmin, initializeAuth, siteBanner, loadSiteBanner } from './stores'
+  import { isAuthenticated, currentRoute, logout, isAdmin, initializeAuth, siteBanner, loadSiteBanner,
+           certIpWarning, loadCertIpWarning, acknowledgeCertIpWarning } from './stores'
   import { onMount } from 'svelte'
   import { api } from './api'
   import Login from './pages/Login.svelte'
@@ -34,6 +35,8 @@
   let sidebarCollapsed = true
   let updateAvailable = false
   let latestVersion = ''
+  let certAckChecked = false
+  let certAckBusy = false
 
   async function checkForUpdates() {
     if (!$isAdmin) return
@@ -42,6 +45,16 @@
       updateAvailable = data.update_available
       latestVersion = data.latest_version
     } catch {}
+  }
+
+  async function acknowledgeCertWarning() {
+    if (!certAckChecked || !$certIpWarning) return
+    certAckBusy = true
+    try {
+      await acknowledgeCertIpWarning($certIpWarning.fingerprint)
+      certAckChecked = false
+    } catch {}
+    finally { certAckBusy = false }
   }
 
   const bannerColors: Record<string, string> = {
@@ -55,6 +68,7 @@
     loadSiteBanner()
     setTimeout(checkForUpdates, 3000)
     setInterval(checkForUpdates, 300000)
+    setInterval(loadCertIpWarning, 300000)
   })
   function handleLogout() {
     logout()
@@ -75,6 +89,34 @@
 {#if $siteBanner}
   <div class="site-banner" style="background: {bannerColors[$siteBanner.level] || bannerColors.info};">
     {$siteBanner.banner}
+  </div>
+{/if}
+{#if $isAuthenticated && $isAdmin && $certIpWarning}
+  <div class="cert-warning-banner">
+    <div class="cert-warning-body">
+      <strong>HTTPS certificate no longer matches this machine's network address.</strong>
+      <div class="cert-warning-detail">
+        Certificate was issued for <code>{$certIpWarning.cert_ips.join(', ') || 'no IP address'}</code>,
+        but this machine is now on <code>{$certIpWarning.local_ips.join(', ') || 'no LAN address'}</code>.
+        Devices connecting over HTTPS will fail certificate validation until this is resolved.
+      </div>
+      <div class="cert-warning-detail">
+        If the address changed by accident &mdash; a router reboot reissuing DHCP leases, for example &mdash;
+        putting this machine back on <code>{$certIpWarning.cert_ips.join(', ')}</code> with a static IP or a
+        DHCP reservation fixes it and keeps the certificate your devices already trust.
+        Regenerating from <strong>Admin &rarr; Network</strong> also works, but every device has to
+        accept the new certificate again.
+      </div>
+    </div>
+    <div class="cert-warning-ack">
+      <label>
+        <input type="checkbox" bind:checked={certAckChecked} />
+        I understand &mdash; hide this until the server restarts
+      </label>
+      <button onclick={acknowledgeCertWarning} disabled={!certAckChecked || certAckBusy}>
+        {certAckBusy ? 'Dismissing...' : 'Acknowledge'}
+      </button>
+    </div>
   </div>
 {/if}
 {#if !$isAuthenticated}

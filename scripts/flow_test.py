@@ -1159,6 +1159,11 @@ def main() -> None:
     else:
         print("\n  Some tests failed. Check output above.")
 
+    # Exit code matters: the cross-platform test harness (testing/harness.py)
+    # decides pass/fail from this. A bare return reported success on every
+    # run no matter how many groups failed.
+    sys.exit(0 if passed == total else 1)
+
 
 if __name__ == "__main__":
     main()

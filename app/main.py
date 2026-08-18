@@ -68,8 +68,32 @@ async def lifespan(app: FastAPI):
             settings.generate_certs,
         )
 
+    # Must run before anything can mint a token: replaces the placeholder JWT
+    # signing key (public in the repo) with a generated, persisted one.
+    from app.services.secret_key import ensure_secret_key
+    ensure_secret_key()
+
     from app.services.firewall_check import check_firewall
     check_firewall(settings.port)
+
+    # Runs before init_db() so it also snapshots the certificate uvicorn is
+    # actually serving, while nothing has had a chance to rewrite it.
+    from app.services.ssl_manager import check_cert_ip_mismatch
+    _cert_ip_status = check_cert_ip_mismatch(force=True)
+    if _cert_ip_status["mismatch"]:
+        logger.warning(
+            "HTTPS certificate covers none of this machine's current LAN addresses "
+            "(certificate: %s; current: %s). Clients reaching this server at its "
+            "current address will fail certificate validation. If the address "
+            "changed unintentionally (for example a router reboot reissuing DHCP "
+            "leases), restoring it -- via a static IP or a DHCP reservation -- "
+            "fixes this without reissuing the certificate. Regenerating from "
+            "Admin > Network also works, but every client device has to trust the "
+            "new certificate again.",
+            ", ".join(_cert_ip_status["cert_ips"]) or "none",
+            ", ".join(_cert_ip_status["local_ips"]) or "none",
+        )
+
     await init_db()
 
     # Runs after init_db() so this release's migrations are already applied, and

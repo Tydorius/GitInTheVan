@@ -1,6 +1,6 @@
 [project]
 name = "gitinthevan"
-version = "0.19.1"
+version = "0.20.0"
 description = "Self-hostable MITM LLM router/proxy for roleplay services"
 readme = "README.md"
 license = "MPL-2.0"
@@ -17,12 +17,20 @@ dependencies = [
     "bcrypt==5.0.0",
     "dulwich==1.2.6",
     "litellm==1.89.4",
-    # Transitive deps pinned explicitly to patched versions per pip-audit findings 2026-07-11
-    # (see Planning/security-control-document.md) — remove the explicit pin once the
-    # direct dependency that pulls these in (fastapi -> starlette, python-jose -> cryptography)
+    # Transitive deps pinned explicitly to patched versions per pip-audit findings
+    # (2026-07-11, re-audited 2026-08-17 — see Planning/security-control-document.md).
+    # Remove an explicit pin once the direct dependency that pulls it in
+    # (fastapi -> starlette, python-jose -> cryptography/pyasn1, litellm -> aiohttp)
     # bumps its own floor past these versions.
+    #
+    # ecdsa is deliberately absent: python-jose requires it, but this app signs JWTs
+    # with HS256 only (app/services/auth.py) so no ECDSA code path is reachable, and
+    # upstream considers the Minerva timing attack (PYSEC-2026-1325) out of scope with
+    # no planned fix. Revisit if JWT_ALGORITHM ever changes to an EC algorithm.
     "starlette==1.3.1",
-    "cryptography==48.0.1",
+    "cryptography==50.0.0",  # PYSEC-2026-3552/-3553/-3554
+    "aiohttp==3.14.3",       # PYSEC-2026-3545/-3546/-3547
+    "pyasn1==0.6.4",         # PYSEC-2026-3455/-3456/-3457
 ]
 
 [project.optional-dependencies]

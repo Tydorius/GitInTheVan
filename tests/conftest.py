@@ -114,6 +114,21 @@ def reset_updater_caches():
     _clear_version_cache()
 
 
+@pytest.fixture(autouse=True)
+def reset_cert_ip_check():
+    """Clear the cert/LAN-address check's process-lifetime state between tests.
+
+    The acknowledgement and the served-certificate snapshot are deliberately
+    process-scoped in production (a restart re-raises the warning), so left
+    alone they leak across tests.
+    """
+    from app.services.ssl_manager import reset_cert_ip_check_state
+
+    reset_cert_ip_check_state()
+    yield
+    reset_cert_ip_check_state()
+
+
 @pytest.fixture
 async def client():
     transport = ASGITransport(app=app)

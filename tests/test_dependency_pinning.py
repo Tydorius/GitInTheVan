@@ -123,3 +123,127 @@ class TestInstallCommandsRespectPins:
             assert re.search(r"DENO_VERSION\s*=\s*\"?v\d+\.\d+\.\d+", text), (
                 f"{path.name} does not pin DENO_VERSION to an exact version"
             )
+
+
+class TestHashPinnedLockfiles:
+    """Direct pins in pyproject do not constrain the transitive tree.
+
+    `pip install -e .` re-resolved everything below the direct dependencies
+    against PyPI on every deploy and every update, on every user's machine --
+    which is the exposure a compromised transitive package relies on. The
+    lockfiles close that; these tests keep them honest.
+    """
+
+    LOCKS = ("requirements/dev.txt", "requirements/docker.txt")
+
+    # `name==version` at the start of a line, ignoring markers and continuations.
+    _PIN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s;]+)", re.MULTILINE)
+
+    def _lock_text(self, rel: str) -> str:
+        return (ROOT / rel).read_text(encoding="utf-8")
+
+    def _pins(self, rel: str) -> dict[str, str]:
+        return {m.group(1).lower().replace("_", "-"): m.group(2)
+                for m in self._PIN.finditer(self._lock_text(rel))}
+
+    def test_lockfiles_exist_and_are_populated(self):
+        for rel in self.LOCKS:
+            path = ROOT / rel
+            assert path.exists(), f"{rel} is missing; regenerate with uv pip compile"
+            assert len(self._pins(rel)) > 40, f"{rel} looks truncated"
+
+    def test_every_locked_package_carries_a_hash(self):
+        """--require-hashes fails closed, but only if the hashes are actually there."""
+        for rel in self.LOCKS:
+            text = self._lock_text(rel)
+            blocks = re.split(r"\n(?=[A-Za-z0-9])", text)
+            missing = [
+                b.split("\n")[0].strip()
+                for b in blocks
+                if self._PIN.match(b) and "--hash=sha256:" not in b
+            ]
+            assert not missing, f"{rel}: entries without a sha256 hash: {missing}"
+
+    def test_locks_agree_with_pyproject_direct_pins(self):
+        """A stale lock would silently reinstate a version we deliberately patched."""
+        data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        direct = {}
+        for spec in data["project"].get("dependencies", []):
+            m = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]+\])?==(.+)$", spec.strip())
+            if m:
+                direct[m.group(1).lower().replace("_", "-")] = m.group(2)
+
+        for rel in self.LOCKS:
+            pins = self._pins(rel)
+            for name, version in direct.items():
+                assert name in pins, f"{rel} is missing {name}; regenerate the lock"
+                assert pins[name] == version, (
+                    f"{rel} pins {name}=={pins[name]} but pyproject pins {version}. "
+                    "Regenerate the lockfiles after changing pyproject."
+                )
+
+    def test_scripts_install_with_require_hashes(self):
+        for name, text in TestInstallCommandsRespectPins._script_text().items():
+            if "requirements" not in text:
+                continue
+            assert "--require-hashes" in text, (
+                f"{name} installs from a requirements file without --require-hashes"
+            )
+
+    def test_no_script_installs_the_dependency_tree_unverified(self):
+        """`pip install -e .[dev]` would re-resolve the whole tree, unhashed."""
+        offenders = [
+            name
+            for name, text in TestInstallCommandsRespectPins._script_text().items()
+            if re.search(r"install\s+-e\s+\S*\[", text)
+        ]
+        assert not offenders, (
+            f"Scripts installing the app with extras (re-resolves transitives): {offenders}. "
+            "Install deps from the lockfile, then `-e . --no-deps`."
+        )
+
+    def test_editable_install_uses_no_deps(self):
+        for name, text in TestInstallCommandsRespectPins._script_text().items():
+            for line in text.splitlines():
+                if re.search(r"install\s+-e\s", line):
+                    assert "--no-deps" in line, (
+                        f"{name}: editable install without --no-deps re-resolves "
+                        f"the verified tree -- {line.strip()}"
+                    )
+
+    def test_bootstrap_pip_matches_the_locked_pip(self):
+        """pip cannot replace its own running executable on Windows.
+
+        pip-audit pulls pip into the dev lock, so if the bootstrap pin and the
+        locked pin disagree, the lockfile install tries to upgrade pip and every
+        deploy/update script dies with 'To modify pip, please run...'.
+        """
+        locked = self._pins("requirements/dev.txt").get("pip")
+        assert locked, "pip is expected in the dev lock (via pip-audit)"
+
+        for name, text in TestInstallCommandsRespectPins._script_text().items():
+            for found in re.findall(r'pip install "pip==([^"]+)"', text):
+                assert found == locked, (
+                    f"{name} bootstraps pip=={found} but the lock pins pip=={locked}; "
+                    "pip would try to modify itself and the install would fail on Windows."
+                )
+
+    def test_scripts_invoke_pip_as_a_module(self):
+        """`python -m pip` survives a pip self-upgrade; `pip.exe` does not."""
+        for name, text in TestInstallCommandsRespectPins._script_text().items():
+            for line in text.splitlines():
+                if "--require-hashes" not in line and not re.search(r"install\s+-e\s", line):
+                    continue
+                if re.search(r'[/\\"](pip)"?\s+install', line):
+                    raise AssertionError(
+                        f"{name}: calls the pip executable directly; use "
+                        f"`python -m pip` -- {line.strip()}"
+                    )
+
+    def test_dockerfile_installs_from_the_lock(self):
+        text = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        assert "--require-hashes" in text and "requirements/docker.txt" in text
+        assert "COPY requirements/" in text, "the lock must be COPYed before install"
+        assert not re.search(r'install[^\n]*-e\s+"?\.\[', text), (
+            "Dockerfile installs extras editably, re-resolving the tree unhashed"
+        )

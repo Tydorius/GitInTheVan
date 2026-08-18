@@ -1,5 +1,12 @@
 @echo off
 setlocal enabledelayedexpansion
+
+REM --dev installs the contributor dependency tree (pytest/ruff/pip-audit)
+REM instead of the smaller end-user one. Order-independent and optional.
+set "GITV_INSTALL_DEV=0"
+for %%A in (%*) do (
+    if /I "%%~A"=="--dev" set "GITV_INSTALL_DEV=1"
+)
 title GitInTheVan Deploy
 
 cd /d "%~dp0\.."
@@ -261,10 +268,27 @@ if not exist "%GITV_ROOT%\.venv\Scripts\python.exe" (
 )
 echo Installing pip...
 REM Pinned like every other dependency (exact pins only, never ranges).
-"%GITV_ROOT%\.venv\Scripts\python" -m pip install "pip==26.2" -q >> "%LOG_FILE%" 2>&1
+"%GITV_ROOT%\.venv\Scripts\python" -m pip install "pip==26.2.1" -q >> "%LOG_FILE%" 2>&1
 echo Installing dependencies...
 echo Installing Python dependencies... >> "%LOG_FILE%"
-"%GITV_ROOT%\.venv\Scripts\pip" install -e "%GITV_ROOT%[dev]" -q >> "%LOG_FILE%" 2>&1
+REM End users get requirements\main.txt; --dev adds the test/lint tooling that
+REM only contributors need. Nothing in app\ imports pytest, ruff or pip-audit,
+REM so the smaller tree is a complete install.
+set "GITV_REQ=%GITV_ROOT%\requirements\main.txt"
+if "%GITV_INSTALL_DEV%"=="1" set "GITV_REQ=%GITV_ROOT%\requirements\dev.txt"
+if not exist "%GITV_REQ%" (
+    echo ERROR: %GITV_REQ% not found. This file pins every third-party package
+    echo to an exact version and hash; refusing to install an unverified
+    echo dependency tree. Regenerate it -- see the dependency pinning policy.
+    exit /b 1
+)
+REM Third-party deps install from a hash-pinned lockfile: pip verifies every
+REM artifact and refuses anything whose hash does not match, so a substituted
+REM or compromised package cannot land silently. The app itself installs
+REM separately -- --require-hashes cannot be combined with an editable install
+REM -- and --no-deps stops pip re-resolving the tree it just verified.
+"%GITV_ROOT%\.venv\Scripts\python" -m pip install --require-hashes -r "%GITV_REQ%" -q >> "%LOG_FILE%" 2>&1
+"%GITV_ROOT%\.venv\Scripts\python" -m pip install -e "%GITV_ROOT%" --no-deps -q >> "%LOG_FILE%" 2>&1
 if errorlevel 1 (
     echo ERROR: Failed to install Python dependencies. >> "%LOG_FILE%"
     echo ERROR: Failed to install Python dependencies.

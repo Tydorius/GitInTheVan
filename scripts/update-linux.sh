@@ -13,9 +13,11 @@ CHAIN_LOG="$GITV_ROOT/data/update-chain.log"
 #   <port>        port the server listens on (default 8000)
 GITV_PORT=8000
 GITV_AUTO=0
+GITV_INSTALL_DEV=0
 for arg in "$@"; do
     case "$arg" in
         --auto) GITV_AUTO=1 ;;
+        --dev)  GITV_INSTALL_DEV=1 ;;
         [0-9]*) GITV_PORT="$arg" ;;
     esac
 done
@@ -222,8 +224,27 @@ echo "[4/6] Reinstalling Python dependencies..."
 if [ -f "$GITV_ROOT/.venv/bin/python" ]; then
     # Pinned like every other dependency (exact pins only, never ranges) - an unpinned
     # `--upgrade pip` is an unreviewed network fetch on every single update.
-    "$GITV_ROOT/.venv/bin/python" -m pip install "pip==26.2" -q
-    "$GITV_ROOT/.venv/bin/pip" install -e "$GITV_ROOT[dev]" -q
+    "$GITV_ROOT/.venv/bin/python" -m pip install "pip==26.2.1" -q
+    # End users get requirements/main.txt; --dev adds the test/lint tooling that
+    # only contributors need. Nothing in app/ imports pytest, ruff or pip-audit,
+    # so the smaller tree is a complete install.
+    GITV_REQ="$GITV_ROOT/requirements/main.txt"
+    if [ "$GITV_INSTALL_DEV" = "1" ]; then
+        GITV_REQ="$GITV_ROOT/requirements/dev.txt"
+    fi
+    if [ ! -f "$GITV_REQ" ]; then
+        echo "ERROR: $GITV_REQ not found. This file pins every third-party package"
+        echo "to an exact version and hash; refusing to install an unverified"
+        echo "dependency tree. Regenerate it -- see the dependency pinning policy."
+        exit 1
+    fi
+    # Third-party deps install from a hash-pinned lockfile: pip verifies every
+    # artifact and refuses anything whose hash does not match, so a substituted
+    # or compromised package cannot land silently. The app itself installs
+    # separately -- --require-hashes cannot be combined with an editable
+    # install -- and --no-deps stops pip re-resolving the tree it just verified.
+    "$GITV_ROOT/.venv/bin/python" -m pip install --require-hashes -r "$GITV_REQ" -q
+    "$GITV_ROOT/.venv/bin/python" -m pip install -e "$GITV_ROOT" --no-deps -q
     echo "Dependencies installed."
 else
     echo "ERROR: Python venv not found. Run the full deploy script first."

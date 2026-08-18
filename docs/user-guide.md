@@ -154,7 +154,35 @@ Go to **Admin** → **Network** tab to:
 - Regenerate the certificate with additional IP addresses
 - Check whether HTTPS is active
 
-The deploy scripts automatically detect your LAN IP and include it in the certificate. If your IP changes, regenerate the certificate from the Admin panel and restart the server.
+The deploy scripts automatically detect your LAN IP and include it in the certificate.
+
+### When Your IP Address Changes
+
+A certificate is tied to the IP addresses it was issued for. If your machine's
+address changes -- most often after a power cut or router reboot hands out new
+DHCP leases -- the certificate no longer matches, and every device that connects
+over HTTPS will fail certificate validation. The server itself still starts
+normally, which is what makes this confusing to diagnose.
+
+Admins now see a red banner at the top of every page when this happens, naming
+both the address the certificate was issued for and the address the machine
+currently has.
+
+**The easiest fix is usually to put the machine back on its old address**, using
+a static IP or a DHCP reservation in your router. The existing certificate then
+matches again and every device that already trusts it keeps working -- nothing
+needs to be re-trusted.
+
+Regenerating from **Admin** → **Network** also works, but it costs you more:
+every device that connects over HTTPS has to accept the new certificate again,
+one at a time. Regenerating does not clear the banner until you restart the
+server, because the old certificate is still the one being served until then.
+
+If you cannot deal with it immediately, tick the acknowledgement checkbox in the
+banner and press **Acknowledge** to hide it. It stays hidden until the server
+restarts -- so if the problem is still there next time you start up, you get
+reminded again rather than forgetting about it. If the address changes a second
+time, the banner returns even if you dismissed the first one.
 
 ---
 
