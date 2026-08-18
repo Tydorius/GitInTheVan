@@ -12,6 +12,7 @@
 #   $3 branch
 #   $4 host port to publish
 #   $5 compose file, relative to the repo root
+#   $6 mock upstream port (0 to skip, when -replicate supplies real endpoints)
 set -u
 
 RUN_DIR="$1"
@@ -19,6 +20,7 @@ REPO_URL="$2"
 BRANCH="$3"
 PORT="$4"
 COMPOSE_FILE="$5"
+MOCK_PORT="${6:-0}"
 
 SRC="$RUN_DIR/GitInTheVan"
 LOGS="$RUN_DIR/harness-logs"
@@ -74,6 +76,23 @@ GITV_PORT="$PORT" $DC -f "$COMPOSE_FILE" -p "$PROJECT" up -d \
     tail -60 "$LOGS/docker-up.log" >&2
     fail "compose up failed"
 }
+
+# ------------------------------------------------------------ mock up -------
+
+# The posix provisioner starts this too, but binds it to loopback, which is
+# right there and wrong here: the server runs inside a container, so 127.0.0.1
+# is the container and the mock on the host is unreachable. Bind all interfaces
+# and let the harness seed an endpoint pointing at the host's own address.
+#
+# This does expose the mock to the LAN for the length of a run. It serves canned
+# responses, holds no credentials, and the box is a throwaway test host.
+if [ "$MOCK_PORT" -gt 0 ] 2>/dev/null; then
+    PY=$(command -v python3 || command -v python) || fail "no python on PATH to run the mock upstream"
+    log "starting mock upstream on 0.0.0.0:$MOCK_PORT"
+    nohup "$PY" "$RUN_DIR/mock_upstream.py" --host 0.0.0.0 --port "$MOCK_PORT" \
+        > "$LOGS/mock-upstream.log" 2>&1 &
+    echo $! > "$RUN_DIR/.mock.pid"
+fi
 
 # ------------------------------------------------------------- readiness ----
 

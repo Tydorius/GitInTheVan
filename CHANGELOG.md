@@ -6,6 +6,21 @@ All notable changes to GitInTheVan are documented in this file.
 
 ### Fixed
 
+- **The docker target had no working mock upstream, so it had never passed.** Three
+  gaps stacked on each other. `provision-docker.sh` never started the mock at all --
+  that block existed only in the posix provisioner. `mock_upstream.py` binds loopback,
+  and its docstring assumes the instance reaches it *at* 127.0.0.1, which is true for
+  a native install and false from inside a container, where 127.0.0.1 is the
+  container. And the seeded endpoint hardcoded 127.0.0.1 whatever the target was. The
+  result was 30 x `proxy connection error` against a port nothing was listening on. The
+  docker provisioner now starts the mock on `0.0.0.0` and the seeded endpoint points at
+  an address the container can route to, rather than adding `extra_hosts` to a shipped
+  compose file for the convenience of testing it.
+- **Docker teardown left work behind.** It only ran `compose down`, which never touches a
+  host-side process, so the mock upstream would have been orphaned on every run --
+  the same thing that let a stale mock silently serve an entire green macos run. A
+  failed `compose up` also left a container in state `Created`, plus its network, behind
+  after teardown reported success. Both are now cleaned up.
 - **The docker target could never start while the linux target existed.** Both took
   their port from a single global `GITV_PORT`, but the linux test box is a container
   running on the docker host and publishes that port on the host network, so compose

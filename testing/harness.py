@@ -482,7 +482,7 @@ def cmd_up(cfg: dict, target: TargetSpec, tr: Transport, args) -> RunState:
     if target.kind == "docker":
         cmd = (f"bash {shlex.quote(run_dir + '/' + script.name)} "
                f"{shlex.quote(run_dir)} {shlex.quote(repo_url)} {shlex.quote(args.branch)} "
-               f"{port} {shlex.quote(target.compose_file)}")
+               f"{port} {shlex.quote(target.compose_file)} {mock_port}")
     elif target.kind == "windows":
         cmd = (f"powershell -NoProfile -ExecutionPolicy Bypass -File "
                f"'{run_dir}\\{script.name}' -RunDir '{run_dir}' -RepoUrl '{repo_url}' "
@@ -580,6 +580,24 @@ def admin_token(cfg: dict, base: str) -> str:
     return payload.get("access_token", "")
 
 
+def mock_host(state: RunState) -> str:
+    """Address the *instance under test* uses to reach the mock upstream.
+
+    Loopback is correct for a native install, where the mock and the server
+    share a machine. It is wrong for docker: inside the container 127.0.0.1 is
+    the container, so the mock -- which runs on the host -- is unreachable, and
+    every proxied call fails with a connection error. That is exactly how the
+    docker target failed: 30 x `proxy connection error: http://127.0.0.1:8299`.
+
+    The host address already known to the config is used rather than adding
+    `extra_hosts: host.docker.internal` to a shipped compose file, which would
+    change the artifact under test for the convenience of testing it.
+    """
+    if state.kind == "docker":
+        return state.http_host or "172.17.0.1"
+    return "127.0.0.1"
+
+
 def seed_endpoint(state: RunState, cfg: dict, base: str, args) -> None:
     token = admin_token(cfg, base)
 
@@ -590,7 +608,7 @@ def seed_endpoint(state: RunState, cfg: dict, base: str, args) -> None:
 
     body = {
         "name": "Mock Upstream",
-        "base_url": f"http://127.0.0.1:{state.mock_port}",
+        "base_url": f"http://{mock_host(state)}:{state.mock_port}",
         "api_key": "mock-key-not-a-real-credential",
         "api_base_path": "",
         "default_model": "mock-model-v1",
@@ -912,6 +930,26 @@ def cmd_down(cfg: dict, target: TargetSpec, tr: Transport, state: RunState) -> N
                    f"(docker compose -f {shlex.quote(target.compose_file)} -p {shlex.quote(project)} down -v "
                    f"|| docker-compose -f {shlex.quote(target.compose_file)} -p {shlex.quote(project)} down -v)",
                    check=False, timeout=600)
+            # `compose down` runs from the clone, so it cannot clean up when
+            # provisioning failed before or during it. A failed `up` left a
+            # container in state Created, plus its network, behind after down
+            # reported success. Sweep anything still carrying the project label.
+            tr.run(
+                f"docker ps -aq --filter label=com.docker.compose.project={shlex.quote(project)} "
+                f"| xargs -r docker rm -f >/dev/null 2>&1; "
+                f"docker network rm {shlex.quote(project)}_default >/dev/null 2>&1; true",
+                check=False, timeout=300,
+            )
+        # The mock upstream runs on the host, not in the container, so compose
+        # never touches it. Without this every docker run leaves an orphan on the
+        # mock port -- the same thing that silently served an entire green macos
+        # run before anyone noticed the real mock had died.
+        say("stopping mock upstream")
+        tr.run(
+            f"p={shlex.quote(state.run_dir)}/.mock.pid; "
+            f'[ -f "$p" ] && kill $(cat "$p") 2>/dev/null; true',
+            check=False, timeout=120,
+        )
     elif target.kind == "windows":
         say("stopping server and mock upstream")
         tr.run(
