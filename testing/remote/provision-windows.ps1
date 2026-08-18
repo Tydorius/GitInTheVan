@@ -23,6 +23,30 @@ New-Item -ItemType Directory -Force -Path $logs | Out-Null
 function Log([string]$m) { Write-Host "[provision] $m" }
 function Fail([string]$m) { Write-Error "[provision] ERROR: $m"; exit 1 }
 
+# Native executables must not be run under ErrorActionPreference='Stop'.
+# Windows PowerShell 5.1 turns *any* stderr output from a native command into a
+# terminating error, and git writes its ordinary progress to stderr -- so a
+# perfectly successful clone aborted the script. Exit codes are the only
+# trustworthy signal here.
+function Invoke-Native {
+    param(
+        [Parameter(Mandatory = $true)][string]$File,
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [string]$LogPath,
+        [switch]$PassOutput
+    )
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & $File @Arguments 2>&1
+        if ($LogPath) { $output | Out-File -FilePath $LogPath -Encoding utf8 }
+        if ($PassOutput) { return @{ Code = $LASTEXITCODE; Output = $output } }
+        return @{ Code = $LASTEXITCODE; Output = $null }
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     Fail 'git is not installed on this host'
 }
@@ -30,13 +54,17 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 # ---------------------------------------------------------------- clone -----
 
 Log "cloning $RepoUrl branch $Branch"
-git clone --depth 1 -b $Branch $RepoUrl $src *> (Join-Path $logs 'clone.log')
-if ($LASTEXITCODE -ne 0) {
-    Get-Content (Join-Path $logs 'clone.log') | Write-Host
+$clone = Invoke-Native -File 'git' `
+    -Arguments @('clone', '--depth', '1', '-b', $Branch, $RepoUrl, $src) `
+    -LogPath (Join-Path $logs 'clone.log')
+if ($clone.Code -ne 0) {
+    Get-Content (Join-Path $logs 'clone.log') -ErrorAction SilentlyContinue | Write-Host
     Fail 'clone failed'
 }
 
-$commit = (git -C $src rev-parse HEAD).Trim()
+$rev = Invoke-Native -File 'git' -Arguments @('-C', $src, 'rev-parse', 'HEAD') -PassOutput
+if ($rev.Code -ne 0) { Fail 'could not read the cloned commit' }
+$commit = ($rev.Output | Select-Object -First 1).ToString().Trim()
 Set-Content -Path (Join-Path $RunDir '.commit') -Value $commit
 Log "commit $commit"
 
@@ -53,10 +81,11 @@ Add-Content -Path $envFile -Value 'GITV_LOG_LEVEL=INFO'
 
 # ---------------------------------------------------------- mock upstream ---
 
+$py = (Get-Command python -ErrorAction SilentlyContinue)
+if (-not $py) { $py = (Get-Command python3 -ErrorAction SilentlyContinue) }
+if (-not $py) { Fail 'no python on PATH' }
+
 if ($MockPort -ne 0) {
-    $py = (Get-Command python -ErrorAction SilentlyContinue)
-    if (-not $py) { $py = (Get-Command python3 -ErrorAction SilentlyContinue) }
-    if (-not $py) { Fail 'no python on PATH to run the mock upstream' }
     Log "starting mock upstream on port $MockPort"
     $mock = Start-Process -FilePath $py.Source `
         -ArgumentList @((Join-Path $RunDir 'mock_upstream.py'), '--port', "$MockPort") `
@@ -81,23 +110,14 @@ Set-Content -Path (Join-Path $RunDir '.deploy.pid') -Value $deploy.Id
 
 # ------------------------------------------------------------- readiness ----
 
-Log "waiting for http://127.0.0.1:$Port/health"
-$deadline = (Get-Date).AddSeconds(900)
-$ok = 0
-while ((Get-Date) -lt $deadline) {
-    try {
-        $r = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 3
-        if ($r.status -eq 'ok') {
-            # Twice: the updater's maintenance page binds the same port and
-            # serves HTML for every path, so one response proves nothing.
-            $ok++
-            if ($ok -ge 2) { break }
-        } else { $ok = 0 }
-    } catch { $ok = 0 }
-    Start-Sleep -Seconds 3
-}
-
-if ($ok -lt 2) {
+# Delegated to wait_health.py rather than Invoke-RestMethod: a default deploy
+# enables HTTPS with a self-signed certificate, and -SkipCertificateCheck does
+# not exist in Windows PowerShell 5.1.
+Log "waiting for /health on port $Port"
+$wait = Invoke-Native -File $py.Source `
+    -Arguments @((Join-Path $RunDir 'wait_health.py'), '--port', "$Port", '--timeout', '900') `
+    -PassOutput
+if ($wait.Code -ne 0) {
     if (Test-Path (Join-Path $logs 'deploy.log')) {
         Write-Host '--- deploy.log (tail) ---'
         Get-Content (Join-Path $logs 'deploy.log') -Tail 60 | Write-Host
@@ -105,10 +125,14 @@ if ($ok -lt 2) {
     Fail 'server did not become healthy within 900s'
 }
 
+$match = ($wait.Output | Out-String) | Select-String -Pattern 'SCHEME=(\w+)'
+if (-not $match) { Fail 'readiness check did not report a scheme' }
+$scheme = $match.Matches[0].Groups[1].Value
+
 $pidFile = Join-Path $src 'data\gitv.pid'
 if (Test-Path $pidFile) {
     Copy-Item $pidFile (Join-Path $RunDir '.server.pid') -Force
 }
 
-Log "healthy on port $Port"
-Write-Output "PROVISION_OK commit=$commit port=$Port"
+Log "healthy on $scheme port $Port"
+Write-Output "PROVISION_OK commit=$commit port=$Port scheme=$scheme"

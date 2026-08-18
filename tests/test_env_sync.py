@@ -80,3 +80,46 @@ def test_set_env_value_preserves_comments(tmp_path):
     assert "# Deno binary path" in content
     assert "GITV_DENO_PATH=/opt/deno" in content
     assert "GITV_PORT=8000" in content
+
+
+class TestSetEnvValueWithWindowsPaths:
+    r"""Regression: a Windows path in the value crashed the rewrite.
+
+    Found by the cross-platform harness on its first real Windows deploy.
+    `re.sub` parses a replacement *string* as a template, so the `\g` in
+    `E:\github\...` was read as the start of a `\g<name>` group reference and
+    raised `re.error: missing <`. The deploy script's GITV_DENO_PATH write
+    therefore failed on any machine whose path contained such a sequence, and
+    the .env plumbing added in 0.17.1 silently did nothing.
+    """
+
+    def test_overwrites_a_value_containing_a_group_like_escape(self, tmp_path):
+        env = tmp_path / ".env"
+        env.write_text("GITV_DENO_PATH=old\n", encoding="utf-8")
+        value = r"E:\github\_gitv-testing\GitInTheVan\.deno\deno.exe"
+
+        set_env_value(env, "GITV_DENO_PATH", value)
+
+        assert env.read_text(encoding="utf-8") == f"GITV_DENO_PATH={value}\n"
+
+    def test_backslash_digit_is_not_treated_as_a_group_reference(self, tmp_path):
+        """`\1` would silently expand to group 1 rather than erroring."""
+        env = tmp_path / ".env"
+        env.write_text("GITV_DENO_PATH=old\n", encoding="utf-8")
+        value = r"C:\1temp\2deno\deno.exe"
+
+        set_env_value(env, "GITV_DENO_PATH", value)
+
+        assert env.read_text(encoding="utf-8").strip() == f"GITV_DENO_PATH={value}"
+
+    def test_other_lines_are_left_alone(self, tmp_path):
+        env = tmp_path / ".env"
+        env.write_text("GITV_PORT=8000\nGITV_DENO_PATH=old\nGITV_LOG_LEVEL=INFO\n",
+                       encoding="utf-8")
+
+        set_env_value(env, "GITV_DENO_PATH", r"E:\github\x\deno.exe")
+
+        text = env.read_text(encoding="utf-8")
+        assert "GITV_PORT=8000" in text
+        assert "GITV_LOG_LEVEL=INFO" in text
+        assert text.count("GITV_DENO_PATH=") == 1

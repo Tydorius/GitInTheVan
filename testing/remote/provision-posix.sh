@@ -85,34 +85,18 @@ echo $! > "$RUN_DIR/.deploy.pid"
 
 # ------------------------------------------------------------- readiness ----
 
-log "waiting for http://127.0.0.1:$PORT/health"
+# Delegated to wait_health.py: a default deploy enables HTTPS with a
+# self-signed certificate, so the scheme has to be discovered rather than
+# assumed, and it needs verification disabled.
+log "waiting for /health on port $PORT"
 PY=$(command -v python3 || command -v python) || fail "no python on PATH"
-DEADLINE=$(( $(date +%s) + 900 ))
-OK=0
-while [ "$(date +%s)" -lt "$DEADLINE" ]; do
-    if "$PY" - "$PORT" <<'EOF' >/dev/null 2>&1
-import json, sys, urllib.request
-port = sys.argv[1]
-with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=3) as r:
-    sys.exit(0 if json.load(r).get("status") == "ok" else 1)
-EOF
-    then
-        OK=$((OK + 1))
-        # Twice, because the update system's maintenance page also binds this
-        # port and serves HTML for every path -- a listening socket proves
-        # nothing. Same reasoning as app/services/updater.py.
-        [ "$OK" -ge 2 ] && break
-    else
-        OK=0
-    fi
-    sleep 3
-done
 
-if [ "$OK" -lt 2 ]; then
+SCHEME_LINE=$("$PY" "$RUN_DIR/wait_health.py" --port "$PORT" --timeout 900) || {
     echo "--- deploy.log (tail) ---" >&2
     tail -60 "$LOGS/deploy.log" >&2 2>/dev/null || true
     fail "server did not become healthy within 900s"
-fi
+}
+SCHEME=${SCHEME_LINE#SCHEME=}
 
 # Record the server PID so teardown can stop it without a port scan.
 "$PY" - "$SRC" > "$RUN_DIR/.server.pid" 2>/dev/null <<'EOF' || true
@@ -121,5 +105,5 @@ pid = pathlib.Path(sys.argv[1], "data", "gitv.pid")
 print(pid.read_text().strip() if pid.exists() else "")
 EOF
 
-log "healthy on port $PORT"
-echo "PROVISION_OK commit=$COMMIT port=$PORT"
+log "healthy on $SCHEME port $PORT"
+echo "PROVISION_OK commit=$COMMIT port=$PORT scheme=$SCHEME"

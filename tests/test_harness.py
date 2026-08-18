@@ -263,5 +263,7 @@ class TestShippedScriptIntegrity:
     def test_harness_and_remote_python_compile(self):
         import py_compile
 
-        for path in (HARNESS_PATH, ROOT / "testing" / "remote" / "mock_upstream.py"):
+        targets = [HARNESS_PATH, *(ROOT / "testing" / "remote").glob("*.py")]
+        assert len(targets) >= 3, "expected harness plus the remote helpers"
+        for path in targets:
             py_compile.compile(str(path), doraise=True)

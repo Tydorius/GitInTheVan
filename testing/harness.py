@@ -24,8 +24,10 @@ import os
 import re
 import shlex
 import shutil
+import ssl
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -44,6 +46,12 @@ RUN_ROOT_NAME = "_gitv-testruns"
 MARKER_NAME = ".gitv-testrun"
 
 LINE = "=" * 72
+
+# The instance under test serves a self-signed certificate by design, so
+# verification is disabled for these loopback/LAN checks.
+_UNVERIFIED = ssl.create_default_context()
+_UNVERIFIED.check_hostname = False
+_UNVERIFIED.verify_mode = ssl.CERT_NONE
 
 
 # --------------------------------------------------------------- plumbing ---
@@ -150,9 +158,28 @@ class Transport:
         else:
             argv = [*self._ssh_base(), self.target.dest, command]
 
-        proc = subprocess.run(
-            argv, capture_output=capture, text=True, timeout=timeout,
-        )
+        # Output goes to temp files, never pipes. capture_output=True reads
+        # until EOF, and EOF only arrives once every inherited copy of the
+        # handle is closed -- so a provisioning step that deliberately leaves a
+        # server running in the background hangs the harness forever, even
+        # though the command it ran exited cleanly. Observed on the Windows
+        # target: the instance was healthy and provision-windows.ps1 had
+        # exited, but the detached server still held the pipe.
+        # ignore_cleanup_errors: the same inherited handles that made pipes
+        # hang also keep these files open, and Windows refuses to unlink a
+        # file a live process still holds. The content has already been read
+        # by then, so a leftover temp file is cosmetic; failing the run over
+        # it is not.
+        with tempfile.TemporaryDirectory(prefix="gitv-harness-",
+                                         ignore_cleanup_errors=True) as tmp:
+            out_path = Path(tmp) / "stdout.txt"
+            err_path = Path(tmp) / "stderr.txt"
+            with open(out_path, "wb") as out, open(err_path, "wb") as err:
+                code = subprocess.call(argv, stdout=out, stderr=err, timeout=timeout)
+            stdout = out_path.read_text(encoding="utf-8", errors="replace")
+            stderr = err_path.read_text(encoding="utf-8", errors="replace")
+
+        proc = subprocess.CompletedProcess(argv, code, stdout, stderr)
         if check and proc.returncode != 0:
             detail = (proc.stderr or proc.stdout or "").strip()
             raise HarnessError(
@@ -210,6 +237,7 @@ class RunState:
     port: int
     mock_port: int
     commit: str = ""
+    scheme: str = "http"
     compose_project: str = ""
     started_at: str = ""
     replicated: bool = False
@@ -255,7 +283,8 @@ def http_json(url: str, method: str = "GET", body: dict | None = None,
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        ctx = _UNVERIFIED if url.startswith("https") else None
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
             try:
                 return resp.status, json.loads(raw) if raw else {}
@@ -337,6 +366,8 @@ def cmd_up(cfg: dict, target: TargetSpec, tr: Transport, args) -> RunState:
         script = REMOTE_DIR / "provision-posix.sh"
 
     tr.push(script, f"{run_dir}/{script.name}")
+    if target.kind != "docker":
+        tr.push(REMOTE_DIR / "wait_health.py", f"{run_dir}/wait_health.py")
     if mock_port:
         tr.push(REMOTE_DIR / "mock_upstream.py", f"{run_dir}/mock_upstream.py")
 
@@ -376,6 +407,8 @@ def cmd_up(cfg: dict, target: TargetSpec, tr: Transport, args) -> RunState:
                 key, _, value = token.partition("=")
                 if key == "commit":
                     state.commit = value
+                elif key == "scheme":
+                    state.scheme = value
                 elif key == "project":
                     state.compose_project = value
     state.save()
@@ -399,7 +432,7 @@ def instance_url(state: RunState, cfg: dict) -> str:
     host = state.dest.split("@")[-1] if "@" in state.dest else state.dest
     if host.lower() == "localhost":
         host = "127.0.0.1"
-    return f"http://{host}:{state.port}"
+    return f"{state.scheme}://{host}:{state.port}"
 
 
 def bootstrap_admin(state: RunState, cfg: dict, base: str) -> None:
@@ -538,11 +571,11 @@ def run_flow_test(cfg, target: TargetSpec, tr: Transport, state: RunState, base:
     src = f"{state.run_dir}/GitInTheVan"
     if target.kind == "windows":
         cmd = (f"& '{src}\\.venv\\Scripts\\python.exe' '{src}\\scripts\\flow_test.py' "
-               f"--server 'http://127.0.0.1:{state.port}' "
+               f"--server '{state.scheme}://127.0.0.1:{state.port}' "
                f"--admin-user '{user}' --admin-pass '{password}'")
     else:
         cmd = (f"cd {shlex.quote(src)} && ./.venv/bin/python scripts/flow_test.py "
-               f"--server http://127.0.0.1:{state.port} "
+               f"--server {state.scheme}://127.0.0.1:{state.port} "
                f"--admin-user {shlex.quote(user)} --admin-pass {shlex.quote(password)}")
 
     proc = tr.run(cmd, check=False, timeout=1800)

@@ -60,7 +60,13 @@ def set_env_value(env_path: Path, key: str, value: str) -> None:
         return
     content = env_path.read_text(encoding="utf-8")
     if pattern.search(content):
-        env_path.write_text(pattern.sub(f"{key}={value}", content), encoding="utf-8")
+        # The replacement must be a callable, not a string: re parses a
+        # replacement string as a template, and a Windows path such as
+        # E:\github\... contains \g, which it reads as the start of a
+        # \g<name> group reference and rejects with 'missing <'. Backslash
+        # digits would silently expand to group references too. A callable
+        # is substituted literally.
+        env_path.write_text(pattern.sub(lambda _: f"{key}={value}", content), encoding="utf-8")
     else:
         sep = "" if content.endswith("\n") else "\n"
         env_path.write_text(content + f"{sep}{key}={value}\n", encoding="utf-8")
