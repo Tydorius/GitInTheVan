@@ -333,3 +333,60 @@ class TestJumpHostResolution:
 
         assert "-J" not in harness.Transport(target, "").ssh_opts
         assert "-J" not in harness.Transport(target, "")._ssh_base()
+
+
+class TestShellScriptErrorHandling:
+    r"""Guards against the `set -e` + `$?` trap.
+
+    `deploy-linux.sh` and `deploy-macos.sh` both ran a bare command and then
+    inspected `$?` on the following line. Under `set -e` that line is
+    unreachable: a bare command exiting non-zero terminates the shell at once.
+    For the port check, non-zero meant "the port is free" -- the normal case on
+    a clean machine -- so the script exited silently right after announcing
+    that the server was starting, and `app.main` never ran. Neither script had
+    ever been executed, so nothing caught it until the harness did.
+    """
+
+    def _set_e_scripts(self) -> list[Path]:
+        return [
+            p for p in (ROOT / "scripts").glob("*.sh")
+            if p.read_text(encoding="utf-8").lstrip().startswith("#!/bin/bash\nset -e")
+            or "\nset -e\n" in p.read_text(encoding="utf-8")
+        ]
+
+    def test_there_are_set_e_scripts_to_check(self):
+        assert self._set_e_scripts(), "fixture check: expected set -e shell scripts"
+
+    def test_no_exit_status_tested_after_a_bare_command(self):
+        offenders = []
+        for path in self._set_e_scripts():
+            for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if "[ $? -eq" in line or "[ $? -ne" in line:
+                    offenders.append(f"{path.name}:{i}")
+        assert not offenders, (
+            "Under `set -e` the script dies before $? can be read. Use "
+            "`if cmd; then` instead, or capture the status with `cmd || true` "
+            "followed immediately by STATUS=$?. Offenders: " + ", ".join(offenders)
+        )
+
+    def test_deploy_scripts_start_the_server_on_the_configured_port(self):
+        """The port check and the banner both hardcoded 8000.
+
+        The app binds GITV_PORT from .env, so on any non-default install the
+        script probed the wrong port and printed a URL that did not work.
+        """
+        for name in ("deploy-linux.sh", "deploy-macos.sh"):
+            text = (ROOT / "scripts" / name).read_text(encoding="utf-8")
+
+            assert 'GITV_PORT=$(grep -E "^GITV_PORT="' in text, (
+                f"{name} does not read GITV_PORT from .env"
+            )
+            assert "connect_ex(('127.0.0.1',8000))" not in text, (
+                f"{name} still probes a hardcoded port"
+            )
+            assert "localhost:8000" not in text, (
+                f"{name} still advertises a hardcoded port in its banner"
+            )
+            assert text.rstrip().endswith("-m app.main"), (
+                f"{name} must end by starting the server"
+            )

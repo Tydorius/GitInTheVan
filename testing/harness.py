@@ -78,6 +78,7 @@ class TargetSpec:
     kind: str            # posix | windows | docker
     compose_file: str = ""
     jump: str = ""       # ProxyJump host, resolved per target
+    http_host: str = ""  # host to reach the instance on, if not `dest`
 
     @property
     def is_local(self) -> bool:
@@ -148,6 +149,7 @@ def build_target(cfg: dict[str, str], name: str, jump_override: str | None = Non
         name=name, dest=dest, folder=folder, kind=kind,
         compose_file=cfg.get("DOCKER_COMPOSE_FILE", "docker-compose.sqlite.yml"),
         jump=resolve_jump(cfg, name, jump_override),
+        http_host=cfg.get(f"{name.upper()}_HTTP_HOST", "").strip(),
     )
 
 
@@ -261,6 +263,7 @@ class RunState:
     mock_port: int
     commit: str = ""
     scheme: str = "http"
+    http_host: str = ""
     compose_project: str = ""
     started_at: str = ""
     replicated: bool = False
@@ -346,6 +349,28 @@ def wait_healthy(base: str, timeout: int = 600) -> bool:
 
 # ------------------------------------------------------------------- up -----
 
+def resolve_home(target: TargetSpec, tr: Transport) -> None:
+    """Expand a leading ~ in the target folder, once, on the target itself.
+
+    Everything downstream quotes paths for the remote shell, and quoting
+    defeats tilde expansion: `mkdir -p '~/github/x'` creates a directory
+    literally named '~', while scp performs its own expansion and writes to
+    the real $HOME. The two disagree and the run fails confusingly. Resolving
+    up front means one absolute path is used everywhere.
+    """
+    if not target.folder.startswith("~"):
+        return
+    if target.is_local:
+        target.folder = str(Path(target.folder).expanduser())
+        return
+
+    home = tr.run('printf %s "$HOME"', timeout=60).stdout.strip()
+    if not home:
+        raise HarnessError(f"could not resolve $HOME on {target.dest}")
+    target.folder = home + target.folder[1:]
+    say(f"resolved {target.name} folder to {target.folder}")
+
+
 def remote_join(target: TargetSpec, *parts: str) -> str:
     sep = "\\" if target.kind == "windows" and target.is_local else "/"
     base = target.folder.rstrip("/\\")
@@ -363,6 +388,7 @@ def cmd_up(cfg: dict, target: TargetSpec, tr: Transport, args) -> RunState:
     state = RunState(
         run_id=run_id, target=target.name, kind=target.kind, dest=target.dest,
         run_dir=run_dir, branch=args.branch, port=port, mock_port=mock_port,
+        http_host=target.http_host,
         started_at=datetime.now(UTC).isoformat(), replicated=args.replicate,
     )
     state.save()
@@ -451,8 +477,17 @@ def cmd_up(cfg: dict, target: TargetSpec, tr: Transport, args) -> RunState:
 
 
 def instance_url(state: RunState, cfg: dict) -> str:
-    """URL this machine uses to reach the instance."""
-    host = state.dest.split("@")[-1] if "@" in state.dest else state.dest
+    """URL this machine uses to reach the instance over the network.
+
+    The SSH destination is not always the HTTP host. An ssh_config alias is not
+    resolvable by anything but ssh, and a target reached inside a container is
+    published on its *host* rather than on the name used to log in. Set
+    <TARGET>_HTTP_HOST when the two differ.
+    """
+    if state.http_host:
+        host = state.http_host
+    else:
+        host = state.dest.split("@")[-1] if "@" in state.dest else state.dest
     if host.lower() == "localhost":
         host = "127.0.0.1"
     return f"{state.scheme}://{host}:{state.port}"
@@ -904,6 +939,8 @@ def main() -> int:
         tr = Transport(target, cfg.get("SSH_OPTS", ""))
         if target.jump and not target.is_local:
             say(f"connecting to {target.dest} via jump host {target.jump}")
+
+        resolve_home(target, tr)
 
         commands = ["up", "test", "logs", "down"] if "all" in args.commands else args.commands
         state: RunState | None = None

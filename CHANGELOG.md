@@ -26,6 +26,21 @@ All notable changes to GitInTheVan are documented in this file.
 - **Teardown is gated four ways**, because it deletes directories on machines holding real repositories. A run directory is always `<FOLDER>/_gitv-testruns/<run-id>/`, and `down` refuses unless the path contains that marker directory, contains its own run id, is not the configured parent/drive root/`/`/`~`, and carries a `.gitv-testrun` file **on the target** whose contents match the run id — verified immediately before removal, so a stale local state file cannot aim a delete at the wrong directory. Archived logs are never touched.
 - 29 tests in `tests/test_harness.py` covering config parsing, every teardown refusal path, log redaction and scanning, and run-state round-tripping. Also asserts that the example config's `ADMIN_PASSWORD` satisfies the app's own password rules, and that shipped scripts keep their line endings.
 
+### Fixed — deploy-linux.sh / deploy-macos.sh never started the server
+
+Found on the first ever real execution of these scripts, via the harness's `linux` target. Neither had been run before — they were syntax-checked only — so nothing had caught any of this.
+
+- **The server was never started on a clean machine.** Both scripts run `set -e`, then ran the "is port 8000 already in use" probe as a *bare command* and inspected `$?` on the following line. Under `set -e` that line is unreachable: a bare command exiting non-zero terminates the shell immediately — and non-zero is what this probe returns when the port is **free**, i.e. the normal case. The script printed `GitInTheVan is starting…`, printed the full "open this URL in your browser" banner, and then exited silently without ever running `app.main`. The probe now lives inside the `if` itself.
+- **Deno and Node download failures killed the script instead of reporting.** The same pattern appeared four more times: a bare `curl … -o …` followed by `if [ $? -ne 0 ]`. A failed download terminated the script before its own error branch — including the portable-Node fallthrough added in the 2026-07-12 resilience pass, which could therefore never have run. All four are now `if ! curl …; then`.
+- **The port check and the startup banner both hardcoded 8000** while the app binds `GITV_PORT` from `.env`, so any non-default install probed the wrong port and printed a URL that did not work. Both now read the configured port.
+- `tests/test_harness.py::TestShellScriptErrorHandling` fails on any `[ $? -eq ]` or `[ $? -ne ]` in a `set -e` script, and asserts the deploy scripts read `GITV_PORT` and end by starting the server.
+
+### Fixed — test harness
+
+- **A `~` in a target folder broke provisioning.** Remote paths are quoted for the shell, and quoting defeats tilde expansion: `mkdir -p '~/github/x'` created a directory literally named `~`, while `scp` performed its own expansion and wrote to the real `$HOME`. The two disagreed and the upload failed. The harness now resolves `~` against the target's `$HOME` once, up front, so a single absolute path is used everywhere.
+- **The SSH destination is no longer assumed to be the HTTP host.** An `ssh_config` alias is not resolvable by anything but `ssh`, and an instance running inside a container is published on that container's *host*. `<TARGET>_HTTP_HOST` covers both.
+- **Jump hosts are resolved per target** (`<TARGET>_SSH_JUMP`, or `-jump` on the command line, falling back to `SSH_JUMP`). A single global jump would have routed directly reachable machines through the bastion.
+
 ### Fixed — docker-compose
 
 - **The published port was hardcoded at `8000:8000` in all four compose files**, so the container could not run on a host already using that port without editing the file. This is the same limitation the deploy scripts shed in 0.19.0 when they gained a port argument; compose kept it. Now `${GITV_PORT:-8000}:8000` — the default is unchanged, so existing users see no difference.

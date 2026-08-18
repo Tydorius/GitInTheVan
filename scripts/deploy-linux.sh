@@ -223,8 +223,9 @@ elif command -v deno &> /dev/null; then
 else
     echo "Deno not found. Downloading..."
     mkdir -p "$DENO_DIR"
-    curl -fsSL "https://github.com/denoland/deno/releases/download/${DENO_VERSION}/deno-${DENO_ARCH}.zip" -o "$DENO_DIR/deno.zip"
-    if [ $? -ne 0 ]; then
+    # Folded into the `if`: under `set -e` a bare failing curl
+    # terminates the script before this error branch can run.
+    if ! curl -fsSL "https://github.com/denoland/deno/releases/download/${DENO_VERSION}/deno-${DENO_ARCH}.zip" -o "$DENO_DIR/deno.zip"; then
         echo "WARNING: Could not download Deno automatically."
         echo "Cantrips will not work. Please install Deno manually from https://deno.land"
         rm -f "$DENO_DIR/deno.zip"
@@ -317,8 +318,9 @@ if [ -z "$NODE_CMD" ]; then
             NODE_TARBALL="node-v24.17.0-linux-x64.tar.xz"
         fi
         mkdir -p "$NODE_LOCAL_DIR"
-        curl -fsSL "https://nodejs.org/dist/v24.17.0/$NODE_TARBALL" -o "/tmp/gitv-node.tar.xz"
-        if [ $? -ne 0 ]; then
+        # Folded into the `if`: under `set -e` a bare failing curl
+        # terminates the script before this error branch can run.
+        if ! curl -fsSL "https://nodejs.org/dist/v24.17.0/$NODE_TARBALL" -o "/tmp/gitv-node.tar.xz"; then
             echo "WARNING: Portable Node.js download failed."
             rm -f "/tmp/gitv-node.tar.xz"
         else
@@ -502,11 +504,16 @@ else
         fi
         echo "Generating self-signed certificate..."
         if [ -n "$LAN_IP" ]; then
-            "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert(extra_ips=['${LAN_IP}'])" >> "$LOG_FILE" 2>&1
+            "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert(extra_ips=['${LAN_IP}'])" >> "$LOG_FILE" 2>&1 || true
         else
-            "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert()" >> "$LOG_FILE" 2>&1
+            "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert()" >> "$LOG_FILE" 2>&1 || true
         fi
-        if [ $? -eq 0 ]; then
+        CERT_STATUS=$?
+        # Same reason as the port check below: under `set -e` a failed
+        # certificate generation kills the script here, so the else branch
+        # that reports the failure could never run. Capturing the status
+        # immediately keeps that error handling reachable.
+        if [ "$CERT_STATUS" -eq 0 ]; then
             if ! grep -q "^GITV_SSL_CERTFILE=" "$GITV_ROOT/.env" 2>/dev/null; then
                 echo "GITV_SSL_CERTFILE=data/ssl/cert.pem" >> "$GITV_ROOT/.env"
                 echo "GITV_SSL_KEYFILE=data/ssl/key.pem" >> "$GITV_ROOT/.env"
@@ -524,43 +531,55 @@ fi
 echo "[6/6] Starting GitInTheVan..."
 echo
 
+# The server binds GITV_PORT from .env; the banner and the in-use check
+# both assumed 8000, which is wrong on any non-default install.
+GITV_PORT=$(grep -E "^GITV_PORT=" "$GITV_ROOT/.env" 2>/dev/null | tail -1 | cut -d= -f2 | tr -d "[:space:]")
+[ -z "$GITV_PORT" ] && GITV_PORT=8000
+
+
 if [ -f "$GITV_ROOT/data/ssl/cert.pem" ]; then
     echo "============================================"
     echo "  GitInTheVan is starting with HTTPS..."
-    echo "  Web UI: https://localhost:8000"
-    if [ -n "$LAN_IP" ]; then echo "  LAN:    https://${LAN_IP}:8000"; fi
+    echo "  Web UI: https://localhost:${GITV_PORT}"
+    if [ -n "$LAN_IP" ]; then echo "  LAN:    https://${LAN_IP}:${GITV_PORT}"; fi
     echo "  Press Ctrl+C to stop."
     echo "============================================"
     echo
     echo "IMPORTANT: On each device/browser that will use this proxy:"
     if [ -n "$LAN_IP" ]; then
-        echo "  1. Open https://${LAN_IP}:8000 in the browser"
+        echo "  1. Open https://${LAN_IP}:${GITV_PORT} in the browser"
         echo "  2. Accept the self-signed certificate warning"
-        echo "  3. In JanitorAI, use https://${LAN_IP}:8000/v1/chat/completions"
+        echo "  3. In JanitorAI, use https://${LAN_IP}:${GITV_PORT}/v1/chat/completions"
         echo "  as the reverse proxy URL."
     else
-        echo "  1. Open https://YOUR-LAN-IP:8000 in the browser"
+        echo "  1. Open https://YOUR-LAN-IP:${GITV_PORT} in the browser"
         echo "  2. Accept the self-signed certificate warning"
-        echo "  3. In JanitorAI, use https://YOUR-LAN-IP:8000/v1/chat/completions"
+        echo "  3. In JanitorAI, use https://YOUR-LAN-IP:${GITV_PORT}/v1/chat/completions"
         echo "  as the reverse proxy URL."
     fi
     echo
 else
     echo "============================================"
     echo "  GitInTheVan is starting..."
-    echo "  Web UI: http://localhost:8000"
-    echo "  (or http://127.0.0.1:8000)"
+    echo "  Web UI: http://localhost:${GITV_PORT}"
+    echo "  (or http://127.0.0.1:${GITV_PORT})"
     echo "  Press Ctrl+C to stop."
     echo "============================================"
 fi
 echo
 
 cd "$GITV_ROOT"
-# Check if port 8000 is already in use
-"$GITV_ROOT/.venv/bin/python" -c "import socket; s=socket.socket(); s.settimeout(1); r=s.connect_ex(('127.0.0.1',8000)); s.close(); exit(0 if r==0 else 1)" 2>/dev/null
-if [ $? -eq 0 ]; then
+# Is the port already taken?
+#
+# This MUST stay inside the `if` rather than running bare and testing $? on the
+# next line. `set -e` terminates the script the moment a bare command exits
+# non-zero, and for this check non-zero means "the port is free" -- the normal
+# case. The script therefore exited silently, immediately after announcing that
+# the server was starting, and never ran app.main at all. Found on the first
+# real execution of this script (harness `linux` target).
+if "$GITV_ROOT/.venv/bin/python" -c "import socket; s=socket.socket(); s.settimeout(1); r=s.connect_ex(('127.0.0.1',$GITV_PORT)); s.close(); exit(0 if r==0 else 1)" 2>/dev/null; then
     echo "============================================"
-    echo "WARNING: Port 8000 is already in use."
+    echo "WARNING: Port $GITV_PORT is already in use."
     echo "A GitInTheVan server may already be running."
     echo "Stop the other instance first, then re-run."
     echo "============================================"
