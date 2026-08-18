@@ -97,6 +97,22 @@ Then `TARGET_LINUX=gitv-linux` and no jump setting is needed at all.
 Exit codes: `0` pass, `1` a test or log scan failed, `2` harness error
 (bad config, unreachable target, provisioning failure).
 
+
+### Ports
+
+Each target serves on `GITV_PORT`, overridable per target with `<TARGET>_PORT`:
+
+```
+GITV_PORT=8100
+DOCKER_PORT=8200                   # linux and docker share a host
+```
+
+This is not cosmetic. The linux test box is a container running *on* the docker
+host, and it publishes its port on that host's network -- so with one global port
+the docker target can never start, and compose fails with "port is already allocated".
+No teardown clears that, because nothing is stale: both targets genuinely want the
+same port on the same machine. The mock upstream sits at the target's port + 99.
+
 ## Targets
 
 | Target | Exercises |
