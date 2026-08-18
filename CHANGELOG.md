@@ -6,6 +6,13 @@ All notable changes to GitInTheVan are documented in this file.
 
 ### Fixed
 
+- **flow_test could fail on a connection the server had already closed.** uvicorn
+  retires an idle keep-alive connection after 5s; the client held no such limit, so a
+  request could be written into a socket nobody was reading and then wait out its full
+  read timeout for a reply that could not arrive. Seen once on linux, where
+  `POST /api/endpoints` was absent from uvicorn's access log entirely while the server
+  stayed healthy and served every later request. The client now expires idle connections
+  after 2s, so it gives up on them before the server does.
 - **The certificate/LAN-address check could block for 35 seconds on macOS.**
   `get_local_ips()` resolves the machine's own hostname, and a Mac's default hostname
   is an mDNS `.local` name. Under a Homebrew Python that lookup spends 35 real seconds

@@ -24,6 +24,16 @@ TEST_USER = "flow_test_user"
 TEST_PASS = "flow_test_pass_123"
 LINE = "=" * 70
 
+# Retire an idle connection before the server does. uvicorn's default
+# --timeout-keep-alive is 5s; if the client still believes a connection is good
+# after uvicorn has closed it, the next request is written into a socket nobody
+# is reading and the client waits out its whole read timeout for a reply that
+# cannot arrive. That is not theoretical: a linux run failed exactly once this
+# way, with `POST /api/endpoints` absent from uvicorn's access log entirely
+# while the server stayed healthy and answered every later request. Expiring
+# first removes the race rather than lengthening the wait for it.
+_LIMITS = httpx.Limits(keepalive_expiry=2.0)
+
 
 def section(title: str) -> None:
     print(f"\n{LINE}\n  {title}\n{LINE}")
@@ -63,12 +73,12 @@ class TestClient:
                 resp = httpx.get(url, timeout=5.0, verify=False)
                 if resp.status_code == 200:
                     self.server = f"{proto}://127.0.0.1:8000"
-                    self.client = httpx.Client(verify=False, timeout=self.timeout)
+                    self.client = httpx.Client(verify=False, timeout=self.timeout, limits=_LIMITS)
                     return
             except Exception:
                 continue
         self.server = "http://127.0.0.1:8000"
-        self.client = httpx.Client(timeout=self.timeout)
+        self.client = httpx.Client(timeout=self.timeout, limits=_LIMITS)
 
     def admin_headers(self) -> dict:
         return {"Authorization": f"Bearer {self.admin_token}", "Content-Type": "application/json"}
@@ -1109,7 +1119,7 @@ def main() -> None:
 
     if args.server:
         tc.server = args.server
-        tc.client = httpx.Client(verify=False, timeout=tc.timeout)
+        tc.client = httpx.Client(verify=False, timeout=tc.timeout, limits=_LIMITS)
 
     tc.admin_user = args.admin_user
     tc.admin_pass = args.admin_pass
