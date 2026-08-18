@@ -77,6 +77,7 @@ class TargetSpec:
     folder: str          # parent folder on the target
     kind: str            # posix | windows | docker
     compose_file: str = ""
+    jump: str = ""       # ProxyJump host, resolved per target
 
     @property
     def is_local(self) -> bool:
@@ -104,7 +105,28 @@ def load_config(path: Path) -> dict[str, str]:
     return cfg
 
 
-def build_target(cfg: dict[str, str], name: str) -> TargetSpec:
+def resolve_jump(cfg: dict[str, str], name: str, override: str | None = None) -> str:
+    """Pick the ProxyJump host for one target.
+
+    A single global jump is wrong for a mixed network: routing a directly
+    reachable machine through a bastion is at best pointless and at worst
+    broken. Precedence, most specific first:
+
+        -jump on the command line   ('none' disables it for this run)
+        <TARGET>_SSH_JUMP           (present-but-empty means "no jump")
+        SSH_JUMP                    (fallback for every target)
+    """
+    if override is not None:
+        return "" if override.strip().lower() in ("none", "") else override.strip()
+
+    specific = f"{name.upper()}_SSH_JUMP"
+    if specific in cfg:
+        # Present but empty is a deliberate opt-out, not a missing value.
+        return cfg[specific].strip()
+    return cfg.get("SSH_JUMP", "").strip()
+
+
+def build_target(cfg: dict[str, str], name: str, jump_override: str | None = None) -> TargetSpec:
     table = {
         "macos":   ("TARGET_MACOS", "MACOS_FOLDER", "posix"),
         "linux":   ("TARGET_LINUX", "LINUX_FOLDER", "posix"),
@@ -125,6 +147,7 @@ def build_target(cfg: dict[str, str], name: str) -> TargetSpec:
     return TargetSpec(
         name=name, dest=dest, folder=folder, kind=kind,
         compose_file=cfg.get("DOCKER_COMPOSE_FILE", "docker-compose.sqlite.yml"),
+        jump=resolve_jump(cfg, name, jump_override),
     )
 
 
@@ -137,10 +160,10 @@ class Transport:
     sshd and no key material.
     """
 
-    def __init__(self, target: TargetSpec, ssh_opts: str, jump: str):
+    def __init__(self, target: TargetSpec, ssh_opts: str):
         self.target = target
         self.ssh_opts = shlex.split(ssh_opts) if ssh_opts else []
-        self.jump = jump.strip()
+        self.jump = target.jump.strip()
 
     def _ssh_base(self) -> list[str]:
         cmd = ["ssh", *self.ssh_opts]
@@ -866,6 +889,9 @@ def main() -> int:
                         help="branch to clone (default: BRANCH from config)")
     parser.add_argument("-run", dest="run_id", default="",
                         help="operate on a specific run id instead of the latest")
+    parser.add_argument("-jump", dest="jump", default=None,
+                        help="ProxyJump host for this run, overriding the config. "
+                             "Use '-jump none' to connect directly.")
     parser.add_argument("-replicate", action="store_true",
                         help="copy endpoints from the local database instead of using "
                              "the mock upstream (WARNING: copies real API keys)")
@@ -874,8 +900,10 @@ def main() -> int:
     try:
         cfg = load_config(Path(args.env))
         args.branch = args.branch or cfg.get("BRANCH", "main")
-        target = build_target(cfg, args.target)
-        tr = Transport(target, cfg.get("SSH_OPTS", ""), cfg.get("SSH_JUMP", ""))
+        target = build_target(cfg, args.target, args.jump)
+        tr = Transport(target, cfg.get("SSH_OPTS", ""))
+        if target.jump and not target.is_local:
+            say(f"connecting to {target.dest} via jump host {target.jump}")
 
         commands = ["up", "test", "logs", "down"] if "all" in args.commands else args.commands
         state: RunState | None = None

@@ -267,3 +267,69 @@ class TestShippedScriptIntegrity:
         assert len(targets) >= 3, "expected harness plus the remote helpers"
         for path in targets:
             py_compile.compile(str(path), doraise=True)
+
+
+class TestJumpHostResolution:
+    """A single global jump host is wrong on a mixed network.
+
+    Routing a directly reachable machine through a bastion is pointless at
+    best and broken at worst, so the jump is resolved per target.
+    """
+
+    def test_target_specific_key_wins_over_the_global_default(self):
+        cfg = {"SSH_JUMP": "root@bastion", "LINUX_SSH_JUMP": "root@other"}
+
+        assert harness.resolve_jump(cfg, "linux") == "root@other"
+
+    def test_global_default_applies_when_no_specific_key_exists(self):
+        cfg = {"SSH_JUMP": "root@bastion"}
+
+        assert harness.resolve_jump(cfg, "docker") == "root@bastion"
+
+    def test_present_but_empty_key_opts_a_target_out(self):
+        """The macOS case: reachable directly while others need the bastion."""
+        cfg = {"SSH_JUMP": "root@bastion", "MACOS_SSH_JUMP": ""}
+
+        assert harness.resolve_jump(cfg, "macos") == ""
+
+    def test_no_configuration_means_no_jump(self):
+        assert harness.resolve_jump({}, "linux") == ""
+
+    def test_cli_override_beats_configuration(self):
+        cfg = {"SSH_JUMP": "root@bastion", "LINUX_SSH_JUMP": "root@other"}
+
+        assert harness.resolve_jump(cfg, "linux", "root@cli") == "root@cli"
+
+    @pytest.mark.parametrize("value", ["none", "NONE", " none ", ""])
+    def test_cli_none_disables_the_jump(self, value):
+        cfg = {"SSH_JUMP": "root@bastion"}
+
+        assert harness.resolve_jump(cfg, "linux", value) == ""
+
+    def test_build_target_attaches_the_resolved_jump(self):
+        cfg = {
+            "TARGET_LINUX": "linuxuser@dock-21", "LINUX_FOLDER": "~/github",
+            "SSH_JUMP": "root@bastion",
+        }
+
+        assert harness.build_target(cfg, "linux").jump == "root@bastion"
+
+    def test_transport_passes_the_jump_to_ssh_and_scp(self):
+        target = harness.TargetSpec(
+            name="linux", dest="linuxuser@dock-21", folder="~/github",
+            kind="posix", jump="root@bastion",
+        )
+
+        transport = harness.Transport(target, "-o BatchMode=yes")
+
+        assert transport.jump == "root@bastion"
+        assert "-J" in transport._ssh_base()
+        assert "root@bastion" in transport._ssh_base()
+
+    def test_no_jump_means_no_proxyjump_flag(self):
+        target = harness.TargetSpec(
+            name="macos", dest="tydorius@host", folder="~/github", kind="posix",
+        )
+
+        assert "-J" not in harness.Transport(target, "").ssh_opts
+        assert "-J" not in harness.Transport(target, "")._ssh_base()

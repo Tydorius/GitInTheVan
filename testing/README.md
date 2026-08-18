@@ -61,6 +61,38 @@ they pick the most recent run for the target unless you pass `-run <run-id>`.
 | `-branch` | branch to clone; defaults to `BRANCH` in the config |
 | `-run` | operate on a specific run id rather than the latest |
 | `-replicate` | copy endpoints from the local database instead of using the mock upstream |
+| `-jump` | ProxyJump host for this run, overriding the config; `-jump none` connects directly |
+
+### Jump hosts
+
+Set a jump per target rather than globally — a single `SSH_JUMP` would also
+route directly reachable machines through the bastion:
+
+```
+MACOS_SSH_JUMP=                    # directly reachable, no jump
+LINUX_SSH_JUMP=root@10.0.0.1
+DOCKER_SSH_JUMP=root@10.0.0.1
+```
+
+Precedence is `-jump`, then `<TARGET>_SSH_JUMP`, then `SSH_JUMP`. A
+target-specific key that is present but empty means "no jump" — that is how you
+opt one target out of a global fallback.
+
+Note that a **port** cannot go in `SSH_OPTS`: that string is shared between
+`ssh` and `scp`, which disagree (`ssh -p` is the port, `scp -p` preserves
+timestamps). Use a `~/.ssh/config` host alias, which both honour, and which can
+carry `ProxyJump` too:
+
+```
+Host gitv-linux
+    HostName dock-21
+    Port 2222
+    User linuxuser
+    ProxyJump root@10.0.0.1
+    IdentityFile ~/.ssh/id_ed25519_gitvlinux
+```
+
+Then `TARGET_LINUX=gitv-linux` and no jump setting is needed at all.
 
 Exit codes: `0` pass, `1` a test or log scan failed, `2` harness error
 (bad config, unreachable target, provisioning failure).
