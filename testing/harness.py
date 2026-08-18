@@ -32,6 +32,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field
+
 # `datetime.UTC` is 3.11+, but this module's whole point is running before any
 # venv exists -- and remote-test.bat's fallback is whatever `python` is on PATH,
 # which is older than 3.11 on at least one maintainer machine. `timezone.utc`
@@ -129,6 +130,21 @@ def resolve_jump(cfg: dict[str, str], name: str, override: str | None = None) ->
         # Present but empty is a deliberate opt-out, not a missing value.
         return cfg[specific].strip()
     return cfg.get("SSH_JUMP", "").strip()
+
+
+def resolve_port(cfg: dict[str, str], name: str) -> int:
+    """The port one target serves on, overridable per target.
+
+    A single global port breaks as soon as two targets share a host, and here
+    they do: the linux box is a container running on the docker host, and it
+    publishes its port on that host's network. `docker` then cannot bind the
+    same number and compose fails with "port is already allocated" -- not a
+    stale process, a structural collision that no teardown can clear.
+
+    Same precedence as the jump host: <TARGET>_PORT, then GITV_PORT.
+    """
+    specific = cfg.get(f"{name.upper()}_PORT", "").strip()
+    return int(specific or cfg.get("GITV_PORT", "8100"))
 
 
 def build_target(cfg: dict[str, str], name: str, jump_override: str | None = None) -> TargetSpec:
@@ -419,7 +435,7 @@ def cmd_up(cfg: dict, target: TargetSpec, tr: Transport, args) -> RunState:
 
     run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S") + f"-{os.getpid() % 9973:04d}"
     run_dir = remote_join(target, RUN_ROOT_NAME, run_id)
-    port = int(cfg.get("GITV_PORT", "8100"))
+    port = resolve_port(cfg, target.name)
     mock_port = 0 if args.replicate else port + 99
 
     state = RunState(

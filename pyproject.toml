@@ -63,3 +63,10 @@ line-length = 120
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# UP017 rewrites timezone.utc to datetime.UTC, which is 3.11+. The harness is
+# stdlib-only so it can run before any virtualenv exists, and remote-test.bat
+# falls back to whatever python is on PATH -- 3.10 on at least one maintainer
+# machine, where the alias does not exist and the harness died on import.
+"testing/harness.py" = ["UP017"]

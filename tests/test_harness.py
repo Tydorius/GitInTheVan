@@ -426,3 +426,29 @@ class TestDocumentedCommandIntegrity:
                 if chr(9) in line:
                     offenders.append(f"{rel}:{i}")
         assert not offenders, f"literal tab (expanded escape?) in: {offenders}"
+
+
+class TestPortResolution:
+    """Two targets can share a host, so the port cannot be one global value.
+
+    The linux test box is a container running on the docker host and publishes
+    its port on that host's network, so `docker` could not bind the same number
+    and compose failed with "port is already allocated" -- a structural
+    collision no teardown clears.
+    """
+
+    def test_target_override_wins(self):
+        cfg = {"GITV_PORT": "8100", "DOCKER_PORT": "8200"}
+        assert harness.resolve_port(cfg, "docker") == 8200
+        assert harness.resolve_port(cfg, "linux") == 8100
+
+    def test_falls_back_to_the_global_port(self):
+        assert harness.resolve_port({"GITV_PORT": "8100"}, "docker") == 8100
+
+    def test_empty_override_is_not_treated_as_zero(self):
+        """A key left blank must fall back, not resolve to an invalid port."""
+        cfg = {"GITV_PORT": "8100", "DOCKER_PORT": ""}
+        assert harness.resolve_port(cfg, "docker") == 8100
+
+    def test_default_when_nothing_is_configured(self):
+        assert harness.resolve_port({}, "macos") == 8100

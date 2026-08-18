@@ -6,6 +6,12 @@ All notable changes to GitInTheVan are documented in this file.
 
 ### Fixed
 
+- **The docker target could never start while the linux target existed.** Both took
+  their port from a single global `GITV_PORT`, but the linux test box is a container
+  running on the docker host and publishes that port on the host network, so compose
+  failed with "port is already allocated". That is structural, not a stale process:
+  no teardown could clear it. Ports are now resolvable per target via `<TARGET>_PORT`,
+  the same precedence `<TARGET>_SSH_JUMP` already used.
 - **flow_test could fail on a connection the server had already closed.** uvicorn
   retires an idle keep-alive connection after 5s; the client held no such limit, so a
   request could be written into a socket nobody was reading and then wait out its full
