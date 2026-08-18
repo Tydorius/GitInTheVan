@@ -390,3 +390,39 @@ class TestShellScriptErrorHandling:
             assert text.rstrip().endswith("-m app.main"), (
                 f"{name} must end by starting the server"
             )
+
+
+class TestDocumentedCommandIntegrity:
+    """A backslash-t escape expanded while editing eats the character after it.
+
+    The harness example pointed at a testing directory that rendered as
+    <TAB>esting in both CHANGELOG.md and README.md. The tab is invisible in a
+    rendered diff and the path is simply wrong for anyone who copies the
+    command. Same failure mode as the stray CR above, in prose not in a script.
+
+    The file list is explicit rather than a glob: a glob also picks up
+    untracked local Markdown, which makes the result depend on the developer
+    machine and can name a local file in the assertion message.
+    """
+
+    DOCS = (
+        "README.md",
+        "CHANGELOG.md",
+        "docs/user-guide.md",
+        "docs/examples/map/README.md",
+        "testing/README.md",
+        "frontend/README.md",
+    )
+
+    def test_documented_files_all_exist(self):
+        missing = [rel for rel in self.DOCS if not (ROOT / rel).exists()]
+        assert not missing, f"listed doc file is gone; update DOCS: {missing}"
+
+    def test_no_literal_tabs_in_documentation(self):
+        offenders = []
+        for rel in self.DOCS:
+            text = (ROOT / rel).read_text(encoding="utf-8")
+            for i, line in enumerate(text.splitlines(), 1):
+                if chr(9) in line:
+                    offenders.append(f"{rel}:{i}")
+        assert not offenders, f"literal tab (expanded escape?) in: {offenders}"

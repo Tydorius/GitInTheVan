@@ -1,4 +1,4 @@
-"""Supply-chain guards for the dependency pinning policy (every dependency exactly pinned).
+"""Supply-chain guards for the pinning rule (every dependency exactly pinned).
 
 The rule already existed and was violated anyway: frontend/package.json shipped
 caret ranges, and every deploy/update script ran `npm install`, which re-resolves

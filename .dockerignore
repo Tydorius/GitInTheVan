@@ -16,7 +16,9 @@ frontend/node_modules/
 *.swo
 .git/
 .gitignore
-the project docs
+# Root-level docs: only README.md is copied into the image.
+/*.md
+!/README.md
 Planning/
 Reference/
 Archive/

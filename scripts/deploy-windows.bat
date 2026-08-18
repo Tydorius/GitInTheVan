@@ -279,7 +279,7 @@ if "%GITV_INSTALL_DEV%"=="1" set "GITV_REQ=%GITV_ROOT%\requirements\dev.txt"
 if not exist "%GITV_REQ%" (
     echo ERROR: %GITV_REQ% not found. This file pins every third-party package
     echo to an exact version and hash; refusing to install an unverified
-    echo dependency tree. Regenerate it -- see the dependency pinning policy.
+    echo dependency tree. Regenerate it -- see the Dependency Lockfiles section in README.md.
     exit /b 1
 )
 REM Third-party deps install from a hash-pinned lockfile: pip verifies every
@@ -544,7 +544,7 @@ echo Building frontend... >> "%LOG_FILE%"
 cd /d "%GITV_ROOT%\frontend"
 REM `npm ci` installs strictly from package-lock.json. `npm install` would
 REM re-resolve against the live registry and rewrite the lockfile, which
-REM defeats the exact pinning required by the dependency pinning policy.
+REM defeats the exact pinning required by this project.
 echo Installing frontend dependencies...
 call "!NPM_CMD!" ci -q >> "%LOG_FILE%" 2>&1
 echo Building frontend...

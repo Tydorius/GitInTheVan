@@ -2,6 +2,25 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.20.1] - 2026-08-18
+
+### Changed
+
+- **The lockfile regeneration commands are documented in `README.md` itself** rather
+  than by cross-reference to an internal document end users never receive. The deploy
+  and update scripts told an operator to regenerate a lockfile by pointing at a file
+  that is not in the distribution, so the error message was unactionable for exactly
+  the person seeing it. `README.md` > Dependency Lockfiles now carries all three
+  `uv pip compile` invocations -- including the one for `main.txt`, which had never
+  been written down anywhere but the lockfile's own header comment.
+- `.dockerignore` excludes root-level Markdown by pattern instead of naming files one
+  at a time, keeping `README.md`, the only one the image copies.
+- **An expanded `\t` escape had corrupted the documented harness command.**
+  `.\testing\harness.env` was written with a real tab, which also ate the
+  `t`, in both `CHANGELOG.md` and `README.md` -- the published command did not work if
+  copied. `tests/test_harness.py` now asserts no shipped document contains a literal tab.
+  Same corruption class as the stray CR caught in 0.20.0, in prose rather than in a script.
+
 ## [0.20.0] - 2026-08-18
 
 ### Added
@@ -16,7 +35,7 @@ All notable changes to GitInTheVan are documented in this file.
 - **`testing/` provisions a throwaway install on any target, tests it, archives the logs, and deletes itself.** `deploy-macos.sh` and `deploy-linux.sh` had never actually been executed — syntax-checked only, an open item since July — and the Dockerfile's hash-verified build had never been run either. Verifying a branch was a manual afternoon per platform, on machines holding real work. It is now one command per target:
 
   ```
-  remote-test.bat -env .	esting\harness.env -target linux -branch main all
+  remote-test.bat -env .\testing\harness.env -target linux -branch main all
   ```
 
 - Targets are `macos`, `linux`, `docker` (image build + compose, run directly on a Docker host — nothing nested), and `windows` (where `TARGET_WINDOWS=localhost` skips SSH entirely). Configuration lives in a gitignored `testing/harness.env`; `testing/harness.env.example` is committed.
@@ -70,7 +89,7 @@ equirements\dev.txt"` had been written as `"%GITV_ROOT%equirements\dev.txt"`: th
 - `requirements/dev.txt` (97 packages, used by all six deploy/update scripts) and `requirements/docker.txt` (74 packages, used by the `Dockerfile`) pin every package in the tree to an exact version and sha256. Installs use `--require-hashes`, which fails closed on any artifact whose hash does not match. Generated with `uv pip compile --universal`, so one lockfile carries environment markers valid on Windows, macOS and Linux — without `--universal`, a lock generated on Windows silently drops `uvloop` and every Linux/macOS install loses it.
 - Because `--require-hashes` cannot be combined with an editable install, the app installs in a second step as `-e . --no-deps`, which also stops pip re-resolving the tree it just verified. The Dockerfile drops `-e ".[postgres,mysql]"` for the same two-step pattern, so dev tooling (pytest, ruff, pip-audit) no longer ships in the image.
 - Scripts now invoke pip as `python -m pip` rather than the `pip` executable. `pip-audit` pulls `pip` itself into the dev lock, and on Windows a running `pip.exe` cannot overwrite itself — the lockfile install failed with `To modify pip, please run...` on every Windows deploy and update. The bootstrap pin was also raised to `pip==26.2.1` to match the lock so no self-modification is attempted at all.
-- Verified by building a throwaway virtualenv, installing entirely through `--require-hashes`, and running the full suite against it: 748 passed. Both lockfiles are byte-for-byte reproducible from the commands documented in the dependency pinning policy.
+- Verified by building a throwaway virtualenv, installing entirely through `--require-hashes`, and running the full suite against it: 748 passed. Both lockfiles are byte-for-byte reproducible from the commands documented in README.md.
 - 9 new tests in `tests/test_dependency_pinning.py`: locks exist and are populated, every entry carries a sha256, lock and `pyproject.toml` agree (so a stale lock cannot silently reinstate a version we patched), no script installs extras editably, editable installs use `--no-deps`, the bootstrap pip pin equals the locked pip, and no script calls the pip executable directly. The bootstrap-pip test was confirmed to fail when the bug is reintroduced.
 
 ### Security
@@ -138,7 +157,7 @@ The updater always runs the *currently installed* version's script, so an instal
 - Update scripts: `--auto` flag (suppresses the Windows `pause` calls, which block forever under `CREATE_NEW_CONSOLE` with stdin detached), a port argument replacing hardcoded `8000` (chaining was broken on any non-8000 install), an `ERR` trap so a `set -e` abort is recorded instead of leaving the maintenance page up forever, `updater.log` rotation into `data/update-logs/` so each hop keeps the previous hop's evidence, per-hop database backups pruned to the newest 10, and `copy /Y` plus seconds in the Windows backup filename. New arguments have defaults so a new app version driving an old script — which happens on hop 1 of every upgrade — still works.
 - The server's stdout no longer inherits the update script's `tee`, so `updater.log` stops collecting every line the server prints for its entire lifetime.
 
-### Changed — Supply chain (exact pins only, never ranges)
+### Changed — Supply chain (dependency pinning)
 
 - **`frontend/package.json` pinned exactly.** All eight dependencies used `^`/`~` ranges. Versions are unchanged — every range already resolved to its floor.
 - **All deploy and update scripts use `npm ci`, not `npm install`.** `npm install` re-resolves ranges against the live registry and rewrites the lockfile, so the committed lock gave no protection on the path that runs unattended on every user's machine. `npm ci` failures fall back to the existing build rather than to `npm install`.

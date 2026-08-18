@@ -901,9 +901,20 @@ whose hash does not match:
 | `dev.txt` | deploy/update scripts with `--dev` (contributors) |
 | `docker.txt` | `Dockerfile` |
 
-Regenerate all three after changing `pyproject.toml` dependencies — see
-`the project docs` rule 17 for the exact commands. `tests/test_dependency_pinning.py`
-fails if a lockfile and `pyproject.toml` disagree.
+Regenerate all three after changing `pyproject.toml` dependencies.
+`tests/test_dependency_pinning.py` fails if a lockfile and `pyproject.toml`
+disagree.
+
+```bash
+uv pip compile pyproject.toml --universal --generate-hashes --python-version 3.12 -o requirements/main.txt
+uv pip compile pyproject.toml --extra dev --universal --generate-hashes --python-version 3.12 -o requirements/dev.txt
+uv pip compile pyproject.toml --extra postgres --extra mysql --universal --generate-hashes --python-version 3.12 -o requirements/docker.txt
+```
+
+`--universal` is required: it emits environment markers so one lockfile is valid
+on Windows, macOS and Linux. Without it, a lockfile generated on Windows silently
+omits `uvloop` and every Linux/macOS install loses it. Each lockfile also records
+its own generating command in its header comment.
 
 ### Cross-Platform Testing
 
@@ -911,7 +922,7 @@ fails if a lockfile and `pyproject.toml` disagree.
 machine, runs the test suite against it, archives the logs, and deletes itself:
 
 ```bash
-remote-test.bat -env .	esting\harness.env -target linux -branch main all
+remote-test.bat -env .\testing\harness.env -target linux -branch main all
 ```
 
 Targets are `macos`, `linux`, `docker`, and `windows`. It runs the real deploy

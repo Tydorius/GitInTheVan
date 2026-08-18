@@ -235,7 +235,7 @@ if [ -f "$GITV_ROOT/.venv/bin/python" ]; then
     if [ ! -f "$GITV_REQ" ]; then
         echo "ERROR: $GITV_REQ not found. This file pins every third-party package"
         echo "to an exact version and hash; refusing to install an unverified"
-        echo "dependency tree. Regenerate it -- see the dependency pinning policy."
+        echo "dependency tree. Regenerate it -- see the Dependency Lockfiles section in README.md."
         exit 1
     fi
     # Third-party deps install from a hash-pinned lockfile: pip verifies every
@@ -278,7 +278,7 @@ else
     # install with no system-wide Node.js on PATH.
     # `npm ci` installs strictly from package-lock.json. `npm install` would
     # re-resolve against the live registry and rewrite the lockfile, which
-    # defeats the exact pinning required by the dependency pinning policy.
+    # defeats the exact pinning required by this project.
     #
     # Guarded with `if`: under `set -e` an unguarded failure would abort the
     # update after the new files are already extracted but before the server is
