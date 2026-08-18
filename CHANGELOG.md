@@ -2,6 +2,30 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.20.2] - 2026-08-18
+
+### Fixed
+
+- **The certificate-generation failure branch was unreachable in `deploy-linux.sh` and
+  `deploy-macos.sh`.** `... || true` forces the enclosing `if` compound to exit 0, so
+  the `CERT_STATUS=$?` on the next line always read 0 and the `else` branch that
+  reports a failed certificate could never run -- which is exactly the bug the comment
+  directly beneath it claimed to have fixed in 0.20.0. The status is now seeded and set
+  by the failing command itself, which still keeps `set -e` from aborting the install.
+- **The test harness could not start on the interpreter it documents as its fallback.**
+  `harness.py` states it is stdlib-only so it can run before any virtualenv exists, and
+  `remote-test.bat` falls back to whatever `python` is on PATH -- but it imported
+  `datetime.UTC`, which is 3.11+. On a machine whose PATH python is 3.10 the harness
+  died on import before doing anything. Uses `timezone.utc`, equivalent and available
+  since 3.2.
+- **A run could pass green while being served by an orphan from a different run.**
+  When a stale mock upstream already holds the mock port, the one the run starts dies
+  with `Address already in use`, provisioning still reports success, and every test
+  then exercises the older process. A macos run went 14/14 and 8/8 against an orphan
+  from an aborted run five hours earlier; only the log scan noticed, and only because
+  the dead process left a traceback. `up` now refuses to provision when the mock port
+  is already serving, and says which run to tear down.
+
 ## [0.20.1] - 2026-08-18
 
 ### Changed

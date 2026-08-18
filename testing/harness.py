@@ -32,7 +32,11 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+# `datetime.UTC` is 3.11+, but this module's whole point is running before any
+# venv exists -- and remote-test.bat's fallback is whatever `python` is on PATH,
+# which is older than 3.11 on at least one maintainer machine. `timezone.utc`
+# is the same object and works back to 3.2. Do not "modernise" this import.
+from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -377,10 +381,43 @@ def remote_join(target: TargetSpec, *parts: str) -> str:
     return sep.join([base, *parts])
 
 
+def assert_mock_port_free(target: TargetSpec, tr: Transport, mock_port: int) -> None:
+    """Refuse to provision when something already listens on the mock port.
+
+    A stale mock upstream silently substitutes for the one this run starts:
+    the new process dies with `Address already in use`, provisioning still
+    reports success, and every test then passes against a process belonging to
+    some other run. That is not a hypothetical -- a macos run went fully green
+    (14/14 flow groups, 8/8 network checks) while being served by an orphan
+    from an aborted run five hours earlier. Only the log scan caught it, and
+    only because the dead process left a traceback behind.
+
+    A green run has to mean the thing under test answered, so this fails fast
+    instead. Windows is skipped: the check needs an interpreter on PATH, and on
+    that target the venv does not exist yet.
+    """
+    if target.kind == "windows":
+        return
+
+    probe = (
+        "python3 -c \"import socket,sys; s=socket.socket(); s.settimeout(2);"
+        f" r=s.connect_ex(('127.0.0.1',{mock_port})); s.close(); sys.exit(0 if r==0 else 1)\""
+    )
+    if tr.run(probe, check=False, timeout=60).returncode == 0:
+        raise HarnessError(
+            f"port {mock_port} on {target.name} is already serving.\n"
+            f"That is almost certainly a mock upstream left behind by an earlier run: it "
+            f"would answer this run's requests and the results would be meaningless.\n"
+            f"Tear the old run down first:\n"
+            f"    python testing/harness.py -env <env> -target {target.name} -run <run-id> down\n"
+            f"Run ids are in testing/runs/."
+        )
+
+
 def cmd_up(cfg: dict, target: TargetSpec, tr: Transport, args) -> RunState:
     section(f"UP  target={target.name}  branch={args.branch}")
 
-    run_id = datetime.now(UTC).strftime("%Y%m%d-%H%M%S") + f"-{os.getpid() % 9973:04d}"
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S") + f"-{os.getpid() % 9973:04d}"
     run_dir = remote_join(target, RUN_ROOT_NAME, run_id)
     port = int(cfg.get("GITV_PORT", "8100"))
     mock_port = 0 if args.replicate else port + 99
@@ -389,7 +426,7 @@ def cmd_up(cfg: dict, target: TargetSpec, tr: Transport, args) -> RunState:
         run_id=run_id, target=target.name, kind=target.kind, dest=target.dest,
         run_dir=run_dir, branch=args.branch, port=port, mock_port=mock_port,
         http_host=target.http_host,
-        started_at=datetime.now(UTC).isoformat(), replicated=args.replicate,
+        started_at=datetime.now(timezone.utc).isoformat(), replicated=args.replicate,
     )
     state.save()
     say(f"run id {run_id}")
@@ -418,6 +455,7 @@ def cmd_up(cfg: dict, target: TargetSpec, tr: Transport, args) -> RunState:
     if target.kind != "docker":
         tr.push(REMOTE_DIR / "wait_health.py", f"{run_dir}/wait_health.py")
     if mock_port:
+        assert_mock_port_free(target, tr, mock_port)
         tr.push(REMOTE_DIR / "mock_upstream.py", f"{run_dir}/mock_upstream.py")
 
     repo_url = cfg.get("REPO_URL", "").strip()
@@ -656,14 +694,26 @@ def local_checks(cfg: dict, state: RunState, base: str) -> bool:
         results.append((name, passed, detail))
         print(f"  {'PASS' if passed else 'FAIL'}: {name}{' - ' + detail if detail else ''}")
 
+    def detail_for(status: int, payload) -> str:
+        """Include the payload when a check fails.
+
+        http_json returns status 0 with the exception string as the payload for
+        anything that never completed, but every call site formatted only the
+        status -- so a failure arrived as a bare `status=0` with the reason
+        thrown away, and diagnosing it meant re-running the whole target.
+        """
+        if status == 200:
+            return f"status={status}"
+        return f"status={status} detail={str(payload)[:300]}"
+
     status, payload = http_json(f"{base}/health")
-    check("health reachable over the network", status == 200, f"status={status}")
+    check("health reachable over the network", status == 200, detail_for(status, payload))
 
-    status, _ = http_json(f"{base}/api/site-banner")
-    check("public site-banner endpoint", status == 200, f"status={status}")
+    status, payload = http_json(f"{base}/api/site-banner")
+    check("public site-banner endpoint", status == 200, detail_for(status, payload))
 
-    status, _ = http_json(f"{base}/api/admin/settings")
-    check("admin route rejects unauthenticated caller", status in (401, 403), f"status={status}")
+    status, payload = http_json(f"{base}/api/admin/settings")
+    check("admin route rejects unauthenticated caller", status in (401, 403), detail_for(status, payload))
 
     try:
         token = admin_token(cfg, base)
@@ -674,19 +724,19 @@ def local_checks(cfg: dict, state: RunState, base: str) -> bool:
 
     if token:
         status, payload = http_json(f"{base}/api/admin/settings", token=token)
-        check("authenticated admin settings", status == 200, f"status={status}")
+        check("authenticated admin settings", status == 200, detail_for(status, payload))
 
         status, payload = http_json(f"{base}/api/admin/ssl/ip-check", token=token)
-        check("certificate/LAN-address check responds", status == 200, f"status={status}")
+        check("certificate/LAN-address check responds", status == 200, detail_for(status, payload))
         if status == 200 and isinstance(payload, dict) and payload.get("mismatch"):
             print(f"    note: instance reports a cert/IP mismatch "
                   f"(cert={payload.get('cert_ips')}, local={payload.get('local_ips')})")
 
         status, payload = http_json(f"{base}/api/diagnostics/audit", token=token)
-        check("diagnostics audit", status == 200, f"status={status}")
+        check("diagnostics audit", status == 200, detail_for(status, payload))
 
         status, payload = http_json(f"{base}/api/admin/update/check", token=token)
-        check("update check", status == 200, f"status={status}")
+        check("update check", status == 200, detail_for(status, payload))
 
     passed = sum(1 for _, ok, _ in results if ok)
     print(f"\n  {passed}/{len(results)} local checks passed")

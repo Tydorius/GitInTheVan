@@ -473,16 +473,18 @@ else
             echo "cert.pem exists but ca.pem missing, regenerating with CA chain."
         fi
         echo "Generating self-signed certificate..."
+        # `|| true` forces the whole `if` compound to exit 0, so the
+        # `CERT_STATUS=$?` that used to sit below it always read 0 and the
+        # failure branch stayed unreachable -- the exact bug the old comment
+        # here claimed to have fixed. Seed the status and let each command
+        # set it on failure: that still stops `set -e` from aborting, but
+        # records the real exit code.
+        CERT_STATUS=0
         if [ -n "$LAN_IP" ]; then
-            "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert(extra_ips=['${LAN_IP}'])" >> "$LOG_FILE" 2>&1 || true
+            "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert(extra_ips=['${LAN_IP}'])" >> "$LOG_FILE" 2>&1 || CERT_STATUS=$?
         else
-            "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert()" >> "$LOG_FILE" 2>&1 || true
+            "$GITV_ROOT/.venv/bin/python" -c "from app.services.ssl_manager import generate_self_signed_cert; generate_self_signed_cert()" >> "$LOG_FILE" 2>&1 || CERT_STATUS=$?
         fi
-        CERT_STATUS=$?
-        # Same reason as the port check below: under `set -e` a failed
-        # certificate generation kills the script here, so the else branch
-        # that reports the failure could never run. Capturing the status
-        # immediately keeps that error handling reachable.
         if [ "$CERT_STATUS" -eq 0 ]; then
             if ! grep -q "^GITV_SSL_CERTFILE=" "$GITV_ROOT/.env" 2>/dev/null; then
                 echo "GITV_SSL_CERTFILE=data/ssl/cert.pem" >> "$GITV_ROOT/.env"
