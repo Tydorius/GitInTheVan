@@ -16,6 +16,7 @@ Licensed under Mozilla Public License 2.0.
 [Configuration](#Configuration)  
 [Database Support](#Database-Support)  
 [Using with JanitorAI](#Using-with-JanitorAI)  
+[Using with Wyvern Chat](#Using-with-Wyvern-Chat)  
 [Cantrips](#Cantrips)  
 [Verification](#Verification)  
 [Persistent Memory](#Persistent-Memory)  
@@ -525,6 +526,38 @@ For JanitorAI: set the Reverse Proxy URL to the above and use your `gitv_` key a
 6. Select your model
 
 All requests will flow through GitInTheVan, applying any configured lorebooks, cantrips, and verification rules.
+
+## Using with Wyvern Chat
+
+Wyvern Chat reaches custom providers **from your browser** rather than through its server-side proxy, so GitInTheVan
+must be served over **HTTPS** — see [HTTPS and LAN Access](#https-and-lan-access). An `http://` LAN address will be
+blocked by the browser as mixed content and cannot be made to work from Wyvern's HTTPS-hosted app.
+
+Follow these steps in order. Several are counter-intuitive; the order matters.
+
+1. **Delete any existing GitInTheVan connections.** Do not edit them — see the note below.
+2. **Create a new custom provider.**
+3. **Leave "No API Key Required" OFF.** This is the counter-intuitive one. The key is supplied separately in step 6,
+   not embedded here.
+4. **Turn "Local Network / Browser-Only" ON.**
+5. **Save the provider.**
+6. **Click the "Needs key" badge** next to the provider name in the AI Connections list and enter your `gitv_` key.
+7. **Click the provider**, then **Fetch Models**.
+8. If your provider supports model listing, your models appear. If not, type a model ID manually, save, and test it in
+   a chat.
+
+Use your GitInTheVan HTTPS address as the API URL, for example `https://YOUR-LAN-IP:8000/v1`.
+
+> **Note — Wyvern stale connection state (as of 2026-08-24)**
+>
+> Wyvern persists its browser-versus-proxy routing decision on the *connection* record, and does not recompute it when
+> the connection's provider is edited. A connection that was ever bound to a Browser-Only provider keeps that
+> behaviour afterwards, and the Edit Provider dialog gives no indication of it — the settings look correct while the
+> connection behaves otherwise.
+>
+> The practical consequence is that **editing an existing connection may silently do nothing.** If a GitInTheVan
+> connection misbehaves, delete it and build a new one rather than adjusting it in place. This affected the original
+> diagnosis of this integration: the setup appeared broken when the settings simply were not taking effect.
 
 ## Cantrips (JavaScript Lorebooks)
 

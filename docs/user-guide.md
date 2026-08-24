@@ -147,6 +147,33 @@ iOS requires installing the root CA certificate:
 4. Set the Reverse Proxy URL to `https://YOUR-LAN-IP:8000/v1/chat/completions`
 5. Set the API key to your `gitv_` key
 
+### Configuring Wyvern Chat
+
+Wyvern Chat dispatches custom-provider requests **from your browser**, not through its server-side proxy. HTTPS is
+therefore mandatory — an `http://` LAN address is blocked as mixed content and cannot be made to work. Complete the
+certificate trust steps above first.
+
+Follow these steps in order; several are counter-intuitive.
+
+1. Delete any existing GitInTheVan connections in Wyvern (do not edit them — see the note below)
+2. Create a new custom provider, with the API URL set to `https://YOUR-LAN-IP:8000/v1`
+3. Leave **No API Key Required** *off* — the key is supplied separately in step 6, not embedded here
+4. Turn **Local Network / Browser-Only** *on*
+5. Save the provider
+6. Click the **Needs key** badge beside the provider name and enter your `gitv_` key
+7. Click the provider, then **Fetch Models**
+8. If model listing is unsupported, type a model ID manually, save, and test it in a chat
+
+> **Wyvern stale connection state (as of 2026-08-24)**
+>
+> Wyvern stores its browser-versus-proxy routing decision on the *connection* record and does not recompute it when
+> the connection's provider is edited. A connection that was ever bound to a Browser-Only provider keeps that
+> behaviour, and the Edit Provider dialog shows no sign of it — the settings look right while the connection behaves
+> otherwise.
+>
+> In practice, **editing an existing connection may silently have no effect.** If a GitInTheVan connection
+> misbehaves, delete it and create a new one instead of adjusting it in place.
+
 ### Managing Certificates
 
 Go to **Admin** → **Network** tab to:

@@ -145,6 +145,24 @@ iOS requires installing the root CA certificate:
 <li>Set the Reverse Proxy URL to <code>https://YOUR-LAN-IP:8000/v1/chat/completions</code></li>
 <li>Set the API key to your <code>gitv_</code> key</li>
 </ol>
+<h3 id="configuring-wyvern-chat">Configuring Wyvern Chat</h3>
+<p>Wyvern Chat dispatches custom-provider requests <strong>from your browser</strong>, not through its server-side proxy. HTTPS is therefore mandatory — an <code>http://</code> LAN address is blocked as mixed content and cannot be made to work. Complete the certificate trust steps above first.</p>
+<p>Follow these steps in order; several are counter-intuitive.</p>
+<ol>
+<li>Delete any existing GitInTheVan connections in Wyvern (do not edit them — see the note below)</li>
+<li>Create a new custom provider, with the API URL set to <code>https://YOUR-LAN-IP:8000/v1</code></li>
+<li>Leave <strong>No API Key Required</strong> <em>off</em> — the key is supplied separately in step 6, not embedded here</li>
+<li>Turn <strong>Local Network / Browser-Only</strong> <em>on</em></li>
+<li>Save the provider</li>
+<li>Click the <strong>Needs key</strong> badge beside the provider name and enter your <code>gitv_</code> key</li>
+<li>Click the provider, then <strong>Fetch Models</strong></li>
+<li>If model listing is unsupported, type a model ID manually, save, and test it in a chat</li>
+</ol>
+<blockquote>
+<p><strong>Wyvern stale connection state (as of 2026-08-24)</strong></p>
+<p>Wyvern stores its browser-versus-proxy routing decision on the <em>connection</em> record and does not recompute it when the connection's provider is edited. A connection that was ever bound to a Browser-Only provider keeps that behaviour, and the Edit Provider dialog shows no sign of it — the settings look right while the connection behaves otherwise.</p>
+<p>In practice, <strong>editing an existing connection may silently have no effect.</strong> If a GitInTheVan connection misbehaves, delete it and create a new one instead of adjusting it in place.</p>
+</blockquote>
 <h3 id="managing-certificates">Managing Certificates</h3>
 <p>Go to <strong>Admin</strong> → <strong>Network</strong> tab to:
 - View certificate status and validity period
