@@ -32,6 +32,7 @@ async def get_caps() -> dict[str, int]:
     return {
         "max_driver_callable_turns": s.max_driver_callable_turns,
         "max_verification_retries": s.max_verification_retries,
+        "max_map_stages": s.max_map_stages,
         "rate_limit_proxy_per_min": s.rate_limit_proxy_per_min,
         "rate_limit_api_per_min": s.rate_limit_api_per_min,
     }

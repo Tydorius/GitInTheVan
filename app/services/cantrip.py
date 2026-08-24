@@ -186,7 +186,18 @@ async def process_cantrips(
     tags: list | None = None,
     position: str = "pre_driver",
     internal_chat_id: str = "",
+    only_ids: set[str] | None = None,
+    exclude_ids: set[str] | None = None,
 ) -> dict[str, Any]:
+    """Run cantrips at a pipeline position.
+
+    ``only_ids`` and ``exclude_ids`` scope the run to a subset of the user's
+    cantrips. The map pipeline uses them to honour stage attachments: the
+    pre-stage "global" pass excludes every cantrip bound to a stage, and each
+    stage runs only the cantrips attached to it. Without that split a cantrip
+    with side effects -- a dice roll, a balance change, a counter -- fires once
+    globally and again on every stage of the map.
+    """
     messages = body_json.get("messages", [])
     if not messages:
         return body_json
@@ -195,6 +206,13 @@ async def process_cantrips(
 
     async with async_session() as db:
         all_cantrips = await _load_active_cantrips(db, user_id, position)
+        if not all_cantrips:
+            return body_json
+
+        if only_ids is not None:
+            all_cantrips = [c for c in all_cantrips if c.id in only_ids]
+        if exclude_ids:
+            all_cantrips = [c for c in all_cantrips if c.id not in exclude_ids]
         if not all_cantrips:
             return body_json
 

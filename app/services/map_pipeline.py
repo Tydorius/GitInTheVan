@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import logging
 from typing import Any
@@ -59,6 +60,22 @@ async def resolve_map(user_id: str, tags: list | None) -> Map | None:
                 return default_map
 
         return None
+
+
+def stage_bound_cantrip_ids(map_obj: Map) -> set[str]:
+    """Cantrip ids attached to any stage of this map.
+
+    A cantrip attached to a stage runs on that stage only, so the global
+    pre-stage pass must exclude these. Without the split a cantrip with side
+    effects -- dealing a card, moving a balance, incrementing a counter --
+    fires once globally and again on every stage of the map.
+    """
+    return {
+        r.resource_id
+        for stage in map_obj.stages
+        for r in stage.resources
+        if r.resource_type == "cantrip"
+    }
 
 
 async def _resolve_stage_endpoint(
@@ -203,12 +220,12 @@ async def _inject_stage_instructions(
 
 
 async def _inject_stage_lorebooks(
-    body_json: dict[str, Any], stage: MapStage, user_id: str
+    body_json: dict[str, Any], resources: list, stage_name: str, user_id: str
 ) -> dict[str, Any]:
-    """Inject lorebooks attached to this stage."""
+    """Inject lorebooks from this stage's resources plus any carried sticky ones."""
 
     stage_lorebook_ids = [
-        r.resource_id for r in stage.resources
+        r.resource_id for r in resources
         if r.resource_type == "lorebook" and r.position == "pre_driver"
     ]
 
@@ -251,19 +268,19 @@ async def _inject_stage_lorebooks(
                 body_json["messages"] = inject_entries(messages, matched)
                 logger.info(
                     "Map stage '%s': %d lorebook entries injected",
-                    stage.name, len(matched),
+                    stage_name, len(matched),
                 )
 
     return body_json
 
 
 async def _inject_stage_skills(
-    body_json: dict[str, Any], stage: MapStage, user_id: str
+    body_json: dict[str, Any], resources: list, stage_name: str, user_id: str
 ) -> dict[str, Any]:
-    """Inject skills and samples attached to this stage."""
+    """Inject skills/samples from this stage's resources plus carried sticky ones."""
 
     stage_skill_ids = [
-        r.resource_id for r in stage.resources
+        r.resource_id for r in resources
         if r.resource_type in ("skill", "sample") and r.position == "pre_driver"
     ]
 
@@ -296,7 +313,7 @@ async def _inject_stage_skills(
         if skill_contents or sample_contents:
             logger.info(
                 "Map stage '%s': %d skills + %d samples injected",
-                stage.name, len(skill_contents), len(sample_contents),
+                stage_name, len(skill_contents), len(sample_contents),
             )
 
     return body_json
@@ -425,6 +442,42 @@ async def _verify_stage(
     return True, ""
 
 
+async def _scan_stage_forbidden(
+    content: str, stage: MapStage, stage_idx: int, user_id: str
+) -> str:
+    """Scan a stage's output for forbidden words.
+
+    Returns a system-message body naming what was found, or "" if clean. The
+    findings are handed to *later* stages rather than used as a gate: an early
+    stage should write to the prompt without also policing a word list, and a
+    dedicated editing stage can act on the findings where a pass/fail verdict
+    could only force a blind regeneration.
+    """
+    from app.services.forbidden_words import scan_response
+
+    try:
+        scan_result = await scan_response(content, user_id)
+    except Exception:
+        logger.exception("Map stage '%s': forbidden words scan failed", stage.name)
+        return ""
+
+    if not scan_result.has_matches:
+        return ""
+
+    logger.info(
+        "Map stage '%s': %d forbidden phrase(s) found, flagging for later stages",
+        stage.name, len(scan_result.matches),
+    )
+    header = f"[FORBIDDEN WORDS FLAGGED IN STAGE {stage_idx + 1} OUTPUT: {stage.name}]"
+    return "\n".join([
+        header,
+        scan_result.summary,
+        "Replace each of these phrases with wording that carries the same meaning. "
+        "Do not comment on this notice or mention that words were flagged.",
+        f"[/FORBIDDEN WORDS FLAGGED IN STAGE {stage_idx + 1} OUTPUT]",
+    ])
+
+
 async def _forward_stage_llm(
     body_json: dict[str, Any],
     endpoints: list[Endpoint],
@@ -511,6 +564,12 @@ async def run_map_pipeline(
     stages = sorted(map_obj.stages, key=lambda s: s.stage_order)[:max_stages]
     tags = body_json.get("_gitv_tags", [])
 
+    # Honours the same <FORBIDDEN:off> command override as the non-map path;
+    # scan_response() itself is a no-op when the user setting is disabled.
+    forbidden_enabled = (
+        body_json.get("_gitv_command_overrides", {}).get("forbidden") is not False
+    )
+
     logger.info(
         "Map pipeline '%s': %d stages (cap=%d)",
         map_obj.name, len(stages), caps["max_map_stages"],
@@ -518,9 +577,23 @@ async def run_map_pipeline(
 
     sticky_context: list[dict[str, str]] = []
 
+    # Every stage builds its request from this pristine snapshot rather than from
+    # the previous stage's mutated list. Stage injections are not all removable
+    # after the fact -- inject_skills appends into messages[0]["content"] and
+    # inject_samples inserts a free-standing system message -- so without a reset
+    # each stage inherits every earlier stage's skills, samples and lorebooks, and
+    # the sticky context (re-appended in full each pass) compounds on top of that.
+    base_messages = copy.deepcopy(body_json.get("messages", []))
+
+    # Resources flagged sticky carry forward into every later stage (README:
+    # "Resource Attachments"). Everything else is stage-only.
+    sticky_resources: list = []
+
     for stage_idx, stage in enumerate(stages):
         is_last_stage = stage_idx == len(stages) - 1
         logger.info("Map stage %d/%d: '%s'", stage_idx + 1, len(stages), stage.name)
+
+        body_json["messages"] = copy.deepcopy(base_messages)
 
         async with async_session() as db:
             endpoints, model = await _resolve_stage_endpoint(db, stage, user_id)
@@ -532,9 +605,25 @@ async def run_map_pipeline(
                 "error": f"No endpoint configured for stage '{stage.name}'",
             }
 
+        # A resource marked sticky on an earlier stage keeps being injected; a
+        # stage-only one (the default) applies to its own stage and no other.
+        # Deduplicated because a sticky resource re-attached to a later stage
+        # would otherwise be injected twice into that stage.
+        seen_ids: set[str] = set()
+        active_resources = []
+        for r in list(sticky_resources) + list(stage.resources):
+            if r.resource_id in seen_ids:
+                continue
+            seen_ids.add(r.resource_id)
+            active_resources.append(r)
+
         body_json = await _inject_stage_instructions(body_json, stage, map_obj)
-        body_json = await _inject_stage_lorebooks(body_json, stage, user_id)
-        body_json = await _inject_stage_skills(body_json, stage, user_id)
+        body_json = await _inject_stage_lorebooks(
+            body_json, active_resources, stage.name, user_id
+        )
+        body_json = await _inject_stage_skills(
+            body_json, active_resources, stage.name, user_id
+        )
 
         for ctx in sticky_context:
             messages = body_json.get("messages", [])
@@ -543,13 +632,32 @@ async def run_map_pipeline(
 
         from app.services.cantrip import process_cantrips
 
-        body_json = await process_cantrips(
-            body_json, user_id, request_headers,
-            tags=tags,
-            internal_chat_id=body_json.get("_gitv_chat_id", ""),
-        )
+        stage_cantrip_ids = {
+            r.resource_id for r in active_resources if r.resource_type == "cantrip"
+        }
+        if stage_cantrip_ids:
+            body_json = await process_cantrips(
+                body_json, user_id, request_headers,
+                tags=tags,
+                internal_chat_id=body_json.get("_gitv_chat_id", ""),
+                only_ids=stage_cantrip_ids,
+            )
 
         if stage.driver_callable_turns > 0:
+            # NOT IMPLEMENTED under maps. These flags are only read by
+            # _run_driver_callable_loop in proxy.py, which the map branch never
+            # reaches, and build_tool_notification is never called -- so the
+            # stage's model is not told the tools exist and no tool loop runs.
+            # Wiring it up means teaching the loop to forward through the
+            # stage's failover chain instead of a single url/headers pair.
+            # Setting the flags anyway so the intent survives, but warn rather
+            # than let a configured stage quietly do nothing.
+            logger.warning(
+                "Map stage '%s' requests %d driver-callable turn(s), but the tool "
+                "loop is not wired into the map pipeline -- no tools will be "
+                "offered and no tool calls will execute on this stage.",
+                stage.name, stage.driver_callable_turns,
+            )
             body_json["_gitv_driver_callable"] = True
             body_json["_gitv_driver_callable_turns"] = min(
                 stage.driver_callable_turns, caps["max_driver_callable_turns"]
@@ -571,6 +679,21 @@ async def run_map_pipeline(
                     stage.name, reason,
                 )
 
+        if forbidden_enabled:
+            notice = await _scan_stage_forbidden(content, stage, stage_idx, user_id)
+            if notice:
+                if is_last_stage:
+                    # Nothing downstream can act on it, so say so rather than
+                    # letting the finding disappear.
+                    logger.warning(
+                        "Map '%s': forbidden phrases in the FINAL stage '%s' reach "
+                        "the client unedited -- no stage follows it. Move the "
+                        "editing stage later, or add one.",
+                        map_obj.name, stage.name,
+                    )
+                else:
+                    sticky_context.append({"role": "system", "content": notice})
+
         if not is_last_stage:
             if stage.output_mode == "persist":
                 sticky_context.append({"role": "assistant", "content": content})
@@ -582,7 +705,12 @@ async def run_map_pipeline(
             elif stage.output_mode == "discard":
                 pass
 
-            body_json = _strip_stage_injections(body_json, stage)
+            sticky_resources.extend(r for r in stage.resources if r.sticky)
+
+            # Message-level injections are undone by the snapshot reset at the top
+            # of the next iteration; only the out-of-band cantrip bookkeeping needs
+            # clearing here.
+            body_json.pop("_gitv_map_stage_cantrip_ids", None)
 
         logger.info("Map stage '%s' completed: %d chars output", stage.name, len(content))
 
@@ -597,24 +725,3 @@ async def run_map_pipeline(
             logger.exception("Scenario summarization (POST, map) failed")
 
     return response_data
-
-
-def _strip_stage_injections(
-    body_json: dict[str, Any], stage: MapStage
-) -> dict[str, Any]:
-    """Remove non-sticky stage injections from messages before the next stage."""
-    messages = body_json.get("messages", [])
-
-    filtered = [
-        msg for msg in messages
-        if not (
-            msg.get("role") == "system"
-            and isinstance(msg.get("content"), str)
-            and "[STAGE INSTRUCTIONS]" in msg.get("content", "")
-        )
-    ]
-
-    body_json["messages"] = filtered
-    body_json.pop("_gitv_map_stage_cantrip_ids", None)
-
-    return body_json

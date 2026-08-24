@@ -321,7 +321,11 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
                 detail="Context budget allocated",
                 metadata={"budget": body_json.get("_gitv_budget", {})})
 
-        from app.services.map_pipeline import resolve_map, run_map_pipeline
+        from app.services.map_pipeline import (
+            resolve_map,
+            run_map_pipeline,
+            stage_bound_cantrip_ids,
+        )
         cmd_overrides_map = body_json.get("_gitv_command_overrides", {})
         map_active = None
         if cmd_overrides_map.get("map") is not False:
@@ -332,7 +336,25 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
             map_timeout = _httpx.Timeout(settings.request_timeout, connect=10.0)
             logger.info("Map '%s' active — routing to map pipeline", map_active.name)
             body_json["_gitv_chat_id"] = internal_chat_id
-            body_json = await process_cantrips(body_json, user_id, request_headers, tags, internal_chat_id=internal_chat_id)
+
+            # Writing samples are injected below on the non-map path, after this
+            # branch has already returned. Do it here too, or a sample attached to
+            # the endpoint silently never reaches any stage.
+            map_samples = body_json.pop("_gitv_sample_contents", None)
+            if map_samples:
+                from app.services.skills import inject_samples
+                await _flag_injection_content(
+                    user_id, "\n".join(map_samples), "writing_samples"
+                )
+                body_json["messages"] = inject_samples(body_json["messages"], map_samples)
+
+            # The global cantrip pass excludes anything bound to a map stage;
+            # those run on their own stage inside run_map_pipeline.
+            body_json = await process_cantrips(
+                body_json, user_id, request_headers, tags,
+                internal_chat_id=internal_chat_id,
+                exclude_ids=stage_bound_cantrip_ids(map_active),
+            )
             response_data = await run_map_pipeline(body_json, user_id, request_headers, map_active, map_timeout)
 
             if body_json.get("_gitv_chat_id"):

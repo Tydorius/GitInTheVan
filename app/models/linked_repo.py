@@ -49,6 +49,21 @@ class InstalledItem(Base):
     installed_version: Mapped[str] = mapped_column(String(32), nullable=False, default="")
     installed_commit: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     local_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
+    # Provenance. repo_id alone cannot identify a resource across installs (it is
+    # a local UUID) and is CASCADE-deleted when a repo is unlinked, so the
+    # normalized URL is stored alongside it. file_path may address a resource
+    # inside a file -- "maps/pipeline.json:Dice Controller" -- for resources a
+    # pack ships only as part of a map.
+    source_url: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(80), default="", server_default="", nullable=False)
+    # Set on resources pulled in as part of a parent install (a map's stage
+    # resources). Empty for anything the user installed directly.
+    parent_item_id: Mapped[str] = mapped_column(String(36), default="", server_default="", nullable=False)
+    # "embedded" (content shipped inside the parent) or "linked" (resolved from
+    # the repo at install time, so it tracks upstream).
+    link_mode: Mapped[str] = mapped_column(String(16), default="embedded", server_default="embedded", nullable=False)
+
     is_fork: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     scan_result: Mapped[str] = mapped_column(Text, nullable=False, default="")

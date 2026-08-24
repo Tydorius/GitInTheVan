@@ -2,6 +2,163 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.21.0] - 2026-08-24
+
+Resource identity for content packs: a map is now installed as the collection of
+objects it is, rather than as one opaque blob.
+
+### Added
+
+- **Decentralized resource identity** (`app/services/resource_identity.py`).
+  Two keys, no central registry. **Origin** is `(normalized repo URL, resource
+  path)` -- `git@github.com:x/y.git`, `https://github.com/x/y/` and
+  `https://github.com/x/y.git` all reduce to one string, and a local repo
+  reduces to a resolved absolute path. **Content hash** is sha256 over the
+  fields that decide whether two resources are the same thing, so re-tagging a
+  cantrip is not a new cantrip.
+- **Composite resource paths.** Not every cantrip is published as its own file.
+  One embedded in a map is addressed through it --
+  `maps/pipeline.json:Dice Controller` -- which gives it a stable origin, so
+  re-installing that map matches instead of creating another copy. The same
+  grammar lets one map link a resource that lives inside another map.
+- **Deduplication on install.** Resolution runs origin, then content hash, then
+  the legacy name-based modes. Installing a dozen maps that share one dice
+  cantrip now yields one dice cantrip. `smart` is the new default resource mode
+  for map import; `keep_both`, `reuse` and `overwrite` still behave as before.
+- **Linked map resources.** A stage resource may carry a `source` with no
+  `resource_content`, resolved from the repo at install time, so a pack author
+  maintains each cantrip in one place instead of re-exporting every map that
+  uses it. `GET /api/maps/{id}/export?mode=linked` produces that form; the
+  shipped Overthink map exports at 7.5 KB linked against 18 KB embedded.
+  Repos are read with a single clone via `fetch_files_content` rather than one
+  clone per file.
+- **Per-object security scanning.** `decompose_map` breaks a map into its
+  objects and each goes through the same `scan_json_content` a direct install
+  uses, so a finding names the cantrip it came from instead of only the map.
+  Each object's result is stored on its own installed-item row.
+- **Reference counting.** A map's objects get their own `installed_items` rows,
+  several of which can point at one resource. Uninstalling a map removes its
+  rows and then collects only what nothing else refers to.
+
+### Fixed
+
+- **Arbitrary JSON file read through a local pack repo.**
+  `_fetch_local_file_content` joined `Path(repo.url) / file_path` with no
+  containment check, and `file_path` is caller-supplied.
+  `Path("C:/repo") / "C:/Windows/win.ini"` returns the absolute path, `..`
+  walks out, and `_resolve_repo_access` lets any user reach a repo marked
+  global -- so a non-admin could have any server-readable JSON installed as a
+  resource and read it back. `safe_repo_join` now refuses absolute paths, `..`
+  escapes, symlink escapes, and anything outside the published resource
+  folders.
+- **Embedded cantrip code in a map was never scanned.** `scan_json_content`
+  returned `safe=True` for `map` unconditionally, so JS flagged on a direct
+  cantrip install passed unexamined inside a map. Only reachable since map
+  install began working in 0.20.3.
+- **Writing samples were never deleted.** A sample is a `Skill` row with
+  `type="sample"`, but `_create_local_resource` and `_delete_local_resource`
+  matched only `"skill"`, so samples accumulated with no way to remove them.
+- **Map export dropped every cantrip execution setting.** `timeout_ms`,
+  `execution_order` and `run_driver_callable` were not serialized, so a round
+  trip silently reset them to defaults.
+- **A resource inside a map is no longer counted as a separate install.** The
+  Installed list nests them under their map and the per-repo install counts
+  ignore them; enabling a map enables what it brought with it.
+- Update checks compare a composite path against the file that carries it, so a
+  map-embedded resource no longer reports "(removed from repo)".
+
+### Security
+
+An origin match **never overwrites**. If a map declares a trusted origin but
+ships a different payload, the installed copy is linked and left byte-identical
+and the mismatch is reported -- a map cannot swap out code the user has already
+vetted by claiming a trusted path. A repo the user has not linked is never
+cloned on the strength of a path claimed inside a map; the install reports
+`requires_repos` instead.
+
+## [0.20.3] - 2026-08-24
+
+### Fixed
+
+- **Maps were completely non-functional.** `run_map_pipeline` reads
+  `caps["max_map_stages"]` on its first line, but `get_caps()` never returned that
+  key -- migration 026 added the column and the admin router surfaced it, and
+  `get_caps()` was not updated. Every request that resolved to a map raised
+  `KeyError` and returned 500. `get_caps()` has never carried the key in its
+  history, so Maps have been dead since the feature shipped in `dcb7ab6`
+  (2026-06-23); there were no map tests, so nothing caught it. A side effect is
+  that the two behaviour changes below cannot break an existing map -- no map has
+  successfully run.
+- **Stage attachments leaked into later stages, and `sticky` did nothing.** The
+  between-stage cleanup only removed `[STAGE INSTRUCTIONS]` system messages, but
+  `inject_skills` appends into `messages[0]["content"]` and `inject_samples`
+  inserts a free-standing system message -- neither is reachable by that filter.
+  So every stage inherited every earlier stage's skills, samples and lorebooks
+  regardless of the `sticky` flag, which made stage-only and sticky attachments
+  behave identically. Each stage now builds its request from a snapshot of the
+  pre-stage message list, and `sticky` is honoured as documented.
+- **Stage cantrip attachments did nothing, and every cantrip ran once per
+  stage.** The pipeline never read `MapStageResource` rows of type `cantrip`, so
+  a cantrip attached to a stage was decorative while *every* active cantrip ran
+  in the global pass and again on each stage. Anything with side effects -- a
+  dice roll, a balance change, a counter -- fired N+1 times per user message.
+  The two passes are now split as the design doc describes: the global pass
+  excludes stage-bound cantrips, and each stage runs only its own.
+- **Endpoint-level writing samples never reached a map.** `_gitv_sample_contents`
+  is injected further down the non-map path, after the map branch has already
+  returned, so a sample attached to an endpoint silently vanished under Maps.
+- **A map published to a content pack could not be installed back.** The
+  pack-push serializer emitted its own lossy shape -- no resources, no
+  verification settings, no endpoint tags, no global instructions, and a local
+  `endpoint_id` UUID meaningless on another install. Both directions now share
+  one format in `app/services/map_transfer.py`.
+- **Prior stage output was re-appended once per remaining stage.** The whole
+  sticky-context list was appended on every pass over a message list that already
+  carried it, so in a four-stage map the first stage's output reached the last
+  stage three times. Invisible at two stages, quadratic beyond that.
+
+### Added
+
+- **Content packs can install maps and skills.** The pack browser has always
+  listed `maps/` and `skills/`, but `_create_local_resource` had no branch for
+  either: install recorded an `InstalledItem` pointing at nothing and created no
+  resource. Map install now runs the same builder the Maps import endpoint uses,
+  so a packaged map arrives with its stages, endpoint tags, verification settings
+  and embedded lorebooks/cantrips/skills intact -- installed inactive, like every
+  other pack resource.
+- **Embedded cantrip code in a map is scanned.** `scan_json_content` returned
+  `safe=True` for `map` unconditionally, so JS that would be flagged on a direct
+  cantrip install passed unexamined when it arrived inside a map. Findings are
+  now prefixed with the stage and resource they came from. This only became
+  reachable once map install worked, and the Maps design doc always called for
+  it.
+- **Per-stage forbidden-word flagging.** Each stage's output is scanned and any
+  hits are handed to the *next* stage as a `[FORBIDDEN WORDS FLAGGED IN STAGE N
+  OUTPUT]` block naming the phrases. Earlier stages are never shown the list --
+  a model spending attention dodging banned words writes stilted prose -- so an
+  editing stage fixes them instead. Honours `<FORBIDDEN:off>`. A hit in the final
+  stage is logged, since nothing downstream can act on it.
+- **`endpoint_tag` on map stages is now settable.** Phase 16 shipped the resolver
+  (`_resolve_stage_endpoint` treats the tag as priority 1) but no surface: the
+  column could not be set through the API, the Maps UI, or map export/import. A
+  shared map can now name the *role* a stage needs -- `planner`, `drafter`,
+  `critic` -- and the importer points those tags at whatever models they run,
+  with Phase 16 failover applying per stage.
+- `tests/test_maps.py`, `tests/test_maps_stage_resources.py` -- first tests for
+  the map pipeline. Cover stage routing by tag, export/import round trips, output
+  ordering, per-stage isolation, sticky attachments, stage-bound cantrips,
+  forbidden-word flagging, pack transfer, and the map safety scan.
+
+### Known issues
+
+- **Driver-callable turns on a map stage still do nothing.** The stage sets
+  `_gitv_driver_callable`, but only `_run_driver_callable_loop` in `proxy.py`
+  reads it and the map branch never reaches it; `build_tool_notification` is
+  never called either, so the model is not told the tools exist. Wiring it up
+  means teaching the loop to forward through a stage's failover chain rather
+  than one url/headers pair. A configured stage now logs a warning instead of
+  silently doing nothing.
+
 ## [0.20.2] - 2026-08-18
 
 ### Fixed

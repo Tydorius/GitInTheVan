@@ -789,22 +789,67 @@ Maps are workflow presets that chain multiple LLM stages into a single request. 
    - **Discard**: response dropped (only used for verification within its own stage)
 5. The final stage's response becomes the HTTP response
 
+### Stage Routing
+
+Each stage picks its endpoint in this order:
+
+1. **Endpoint Tag** — every enabled endpoint whose Role Tag matches, in priority order, as a failover chain
+2. **Endpoint** — a specific endpoint pinned to the stage
+3. The user's default endpoint
+4. The first enabled endpoint
+
+Tagging is what makes a map portable. A stage that asks for a `planner` endpoint
+means the same thing on someone else's install, where a pinned endpoint ID or a
+`model_override` string does not — the importer points their own tags at whatever
+models they run. Tags also give each stage failover for free.
+
 ### Resource Attachments
 
-Lorebooks and cantrips attach to specific stages. Each attachment has a **Sticky** option:
+Lorebooks, cantrips, skills and samples attach to specific stages. Each attachment has a **Sticky** option:
 - **Sticky**: the injection persists through all subsequent stages
-- **Stage-only** (default): the injection is stripped after this stage completes
+- **Stage-only** (default): the injection applies to its own stage and no other
+
+A cantrip attached to a stage runs **only on that stage**. Cantrips attached to no stage run once in the global pass before the first stage, as they do outside a map. Nothing runs twice.
 
 `context.chat_data` and `context.memory` are shared across all stages, so state written in an early stage is readable later.
 
+### Forbidden Words in a Map
+
+Each stage's output is scanned against your Forbidden Words list, and any hits are passed to the **next** stage as a `[FORBIDDEN WORDS FLAGGED IN STAGE N OUTPUT]` block naming the phrases found.
+
+Earlier stages are never shown the list. A model spending attention avoiding banned words writes stilted prose, so a writing stage is left to follow its prompt and a later editing stage is given the specific phrases to replace. A hit introduced by the final stage is logged — nothing downstream can act on it, so put your editing stage last.
+
 ### Import/Export
 
-Maps export as a single JSON file containing all stages, embedded resource contents, and configuration. Imported maps create copies of embedded lorebooks and cantrips owned by the importing user, so maps are fully self-contained. Three resource-handling modes on import:
+Maps export as a single JSON file containing all stages (including their endpoint tags), embedded resource contents, and configuration. Two export modes:
+
+- **Embedded** (default): the full content of every attached resource travels with the map, so the file installs on a machine with nothing linked.
+- **Linked**: resources whose origin is known are written as a reference instead of a copy, so the map tracks upstream and you maintain each cantrip in one place. Falls back to embedding anything it cannot reference.
+
+Either way each resource carries a `source` block when its origin is known — the repo it came from and its path — which is what lets an import recognize resources you already have.
+
+Four resource-handling modes on import:
+- **Smart** (default): reuse by origin, then by content hash, else create a copy
 - **Keep Both**: always create new copies
 - **Reuse Existing**: link to same-named resources you already have
 - **Overwrite**: update same-named resources
 
-Maps are managed on the **Maps** page and integrate with content packs (`maps/` folder auto-discovered in git repos).
+### Resource Identity and Deduplication
+
+Install a dozen maps that all use the same dice cantrip and you get **one** dice cantrip. Two keys make that work without any central registry, so a self-hosted install is as capable as any other:
+
+| Key | What it is |
+|---|---|
+| **Origin** | `(normalized repo URL, resource path)`. `git@github.com:x/y.git`, `https://github.com/x/y/` and `https://github.com/x/y.git` all reduce to the same string; a local repo reduces to an absolute path. |
+| **Content hash** | sha256 over the fields that decide whether two resources are the same thing. Catches copies with no origin — hand-made ones, and ones imported from a file. |
+
+A resource that a pack ships only *inside* a map is addressed through it: `maps/pipeline.json:Dice Controller`. That gives it a stable origin, and lets one map link a resource that lives in another.
+
+**An origin match never overwrites.** If a map declares a trusted origin but ships a different payload, GitInTheVan links your installed copy, leaves it untouched, and reports the mismatch. A map cannot swap out code you have already vetted by claiming a trusted path. A repo you have not linked is never cloned because a map asked for it — the install reports what it needs and you decide.
+
+Installing a map creates an entry for each object it carries, so the Installed list shows per-object scan results, and a resource is removed only when the last install that references it goes.
+
+Maps are managed on the **Maps** page and integrate with content packs (`maps/` folder auto-discovered in git repos). Installing a map from a pack creates it inactive along with its resources. Each object is scanned independently through the same path a direct install uses, so a finding names the cantrip it came from rather than only the map.
 
 ## Debug Mode
 

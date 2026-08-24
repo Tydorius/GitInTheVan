@@ -253,10 +253,13 @@ export const api = {
     request<any>(`/api/maps/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteMap: (id: string) =>
     request<void>(`/api/maps/${id}`, { method: 'DELETE' }),
-  exportMap: (id: string) =>
-    request<any>(`/api/maps/${id}/export`),
-  importMap: (data: any, name?: string) =>
-    request<any>('/api/maps/import', { method: 'POST', body: JSON.stringify({ data, name }) }),
+  exportMap: (id: string, mode: 'embedded' | 'linked' = 'embedded') =>
+    request<any>(`/api/maps/${id}/export?mode=${mode}`),
+  importMap: (data: any, name?: string, resourceMode?: string) =>
+    request<any>('/api/maps/import', {
+      method: 'POST',
+      body: JSON.stringify({ data, name, resource_mode: resourceMode }),
+    }),
 
   // API Keys (Per-Endpoint)
   listApiKeys: () =>

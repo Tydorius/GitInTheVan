@@ -103,11 +103,42 @@
     installingPath = filePath
     try {
       const result = await api.installFile({ repo_id: repoId, file_path: filePath, fork })
+      const lines: string[] = []
+
       if (result.scan?.max_severity === 'critical') {
-        alert(`WARNING: ${result.scan.findings.map((f: any) => f.description).join(', ')}\n\nInstalled in disabled state.`)
+        lines.push(`WARNING: ${result.scan.findings.map((f: any) => f.description).join(', ')}`)
       } else if (result.scan?.max_severity === 'warning') {
-        alert(`Scan warnings: ${result.scan.findings.map((f: any) => f.description).join(', ')}\n\nInstalled in disabled state.`)
+        lines.push(`Scan warnings: ${result.scan.findings.map((f: any) => f.description).join(', ')}`)
       }
+
+      // A map is a collection: report what it brought with it, what was reused
+      // from resources already held, and any object that failed its own scan.
+      const resources = result.resources || []
+      if (resources.length) {
+        const reused = resources.filter((r: any) => (r.action || '').startsWith('reused'))
+        const created = resources.filter((r: any) => r.action === 'created')
+        const flagged = resources.filter((r: any) => r.max_severity === 'critical' || r.max_severity === 'warning')
+
+        const parts: string[] = []
+        if (created.length) parts.push(`${created.length} added`)
+        if (reused.length) parts.push(`${reused.length} reused from what you already have`)
+        if (parts.length) lines.push(`Bundled resources: ${parts.join(', ')}.`)
+
+        for (const r of flagged) {
+          lines.push(`  ${r.type} "${r.name}" — ${r.max_severity}: ${(r.findings || []).map((f: any) => f.description).join(', ')}`)
+        }
+      }
+
+      for (const w of result.warnings || []) lines.push(w)
+
+      if ((result.requires_repos || []).length) {
+        lines.push(
+          `This map links resources from a repository you have not added: ${result.requires_repos.join(', ')}. ` +
+          `Link it and install again to resolve them.`
+        )
+      }
+
+      if (lines.length) alert(`${lines.join('\n')}\n\nInstalled in disabled state.`)
       await load()
     } catch (e: any) { error = e.message }
     finally { installingPath = '' }
@@ -477,18 +508,7 @@
               <td style="font-size: 11px;">{i.type}</td>
               <td style="font-size: 11px;">{i.author || '—'}</td>
               <td style="font-size: 11px;">{i.installed_version}</td>
-              <td style="font-size: 11px;">
-                {#if i.scan_result}
-                  {@const scan = JSON.parse(i.scan_result)}
-                  {#if scan.max_severity === 'clean'}
-                    <span style="color: var(--success);">Clean</span>
-                  {:else if scan.max_severity === 'critical'}
-                    <span style="color: var(--danger);">Critical</span>
-                  {:else if scan.max_severity === 'warning'}
-                    <span style="color: var(--warning, orange);">Warning</span>
-                  {/if}
-                {/if}
-              </td>
+              <td style="font-size: 11px;">{@render scanBadge(i.scan_result)}</td>
               <td>
                 {#if i.is_enabled}
                   <span style="color: var(--success); font-size: 11px;">Enabled</span>
@@ -501,6 +521,30 @@
                 <button class="danger" onclick={() => uninstall(i.id)} style="font-size: 12px;">Uninstall</button>
               </td>
             </tr>
+            <!-- Objects a map brought with it. They have no Uninstall of their
+                 own: a shared resource is removed when the last install that
+                 references it goes. -->
+            {#each i.children || [] as c}
+              <tr style="background: var(--bg-elevated);">
+                <td style="padding-left: 28px; font-size: 12px;">
+                  <span style="color: var(--text-dim);">↳</span> {c.name}
+                  {#if c.shared}<span title="Shared with another install" style="color: var(--text-dim); font-size: 10px;"> shared</span>{/if}
+                  {#if c.link_mode === 'linked'}<span title="Resolved from the repo on install" style="color: var(--accent); font-size: 10px;"> linked</span>{/if}
+                </td>
+                <td style="font-size: 11px; color: var(--text-dim);">{c.type}</td>
+                <td style="font-size: 11px; color: var(--text-dim);">—</td>
+                <td style="font-size: 11px; color: var(--text-dim);">{c.installed_version || '—'}</td>
+                <td style="font-size: 11px;">{@render scanBadge(c.scan_result)}</td>
+                <td>
+                  {#if c.is_enabled}
+                    <span style="color: var(--success); font-size: 11px;">Enabled</span>
+                  {:else}
+                    <span style="color: var(--text-dim); font-size: 11px;">Disabled</span>
+                  {/if}
+                </td>
+                <td style="font-size: 11px; color: var(--text-dim);">with map</td>
+              </tr>
+            {/each}
           {/each}
         </tbody>
       </table>
@@ -512,6 +556,21 @@
   {/if}
 {/if}
 {/if}
+
+{#snippet scanBadge(scanResult: string)}
+  {#if scanResult}
+    {@const scan = JSON.parse(scanResult)}
+    {#if scan.max_severity === 'clean'}
+      <span style="color: var(--success);">Clean</span>
+    {:else if scan.max_severity === 'critical'}
+      <span style="color: var(--danger);" title={(scan.findings || []).map((f: any) => f.description).join('\n')}>Critical</span>
+    {:else if scan.max_severity === 'warning'}
+      <span style="color: var(--warning, orange);" title={(scan.findings || []).map((f: any) => f.description).join('\n')}>Warning</span>
+    {/if}
+  {:else}
+    <span style="color: var(--text-dim);">—</span>
+  {/if}
+{/snippet}
 
 {#if showLinkForm}
   <div class="modal-overlay" role="dialog" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) showLinkForm = false; }}>

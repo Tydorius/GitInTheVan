@@ -49,6 +49,7 @@
       description: '',
       system_instructions: '',
       endpoint_id: null,
+      endpoint_tag: '',
       model_override: '',
       driver_callable_turns: 0,
       verification_enabled: false,
@@ -137,16 +138,16 @@
   let showImport = false
   let importJson = ''
   let importName = ''
-  let importMode = 'keep_both'
+  let importMode = 'smart'
 
-  async function exportMap(m: any) {
+  async function exportMap(m: any, mode: 'embedded' | 'linked' = 'embedded') {
     try {
-      const data = await api.exportMap(m.id)
+      const data = await api.exportMap(m.id, mode)
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${data.name || 'map'}.json`
+      a.download = `${data.name || 'map'}${mode === 'linked' ? '.linked' : ''}.json`
       a.click()
       URL.revokeObjectURL(url)
     } catch (e: any) { error = e.message }
@@ -156,11 +157,20 @@
     error = ''
     try {
       const data = JSON.parse(importJson)
-      await api.importMap(data, importName || undefined)
+      const result = await api.importMap(data, importName || undefined, importMode)
+
+      const notes: string[] = [...(result.import_warnings || [])]
+      if ((result.requires_repos || []).length) {
+        notes.push(
+          `This map links resources from a repository you have not added: ${result.requires_repos.join(', ')}. ` +
+          `Add it under Content Packs and install the map from there to resolve them.`
+        )
+      }
+      if (notes.length) alert(notes.join('\n\n'))
       showImport = false
       importJson = ''
       importName = ''
-      importMode = 'keep_both'
+      importMode = 'smart'
       await withScroll(load)
     } catch (e: any) { error = e.message || 'Invalid JSON' }
   }
@@ -242,6 +252,14 @@
         <div class="form-group">
           <label>Model Override</label>
           <input bind:value={stage.model_override} placeholder="Leave blank for default" />
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Endpoint Tag (takes priority over Endpoint)</label>
+          <input bind:value={stage.endpoint_tag} placeholder="e.g. planner — blank to use the Endpoint above" />
+          <div style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">Routes this stage to any endpoint carrying this tag, with failover. Lets a shared map name the role a stage needs instead of pinning one endpoint.</div>
         </div>
       </div>
 
@@ -375,7 +393,8 @@
           </td>
           <td>
             <button onclick={() => startEdit(m)}>Edit</button>
-            <button onclick={() => exportMap(m)}>Export</button>
+            <button onclick={() => exportMap(m)} title="Full content of every attached resource — installs anywhere">Export</button>
+            <button onclick={() => exportMap(m, 'linked')} title="References instead of copies where the origin is known — the map tracks upstream">Export (linked)</button>
             <button class="danger" onclick={() => deleteMap(m.id)}>Delete</button>
           </td>
         </tr>
@@ -396,6 +415,7 @@
       <div class="form-group">
         <label for="import-mode">Resource Handling</label>
         <select id="import-mode" bind:value={importMode}>
+          <option value="smart">Smart (reuse resources you already have)</option>
           <option value="keep_both">Keep Both (always create new copies)</option>
           <option value="reuse">Reuse Existing (link to same-named resources)</option>
           <option value="overwrite">Overwrite (update same-named resources)</option>

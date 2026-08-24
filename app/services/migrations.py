@@ -659,6 +659,27 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
         ALTER TABLE skills ADD COLUMN budget_weight REAL DEFAULT 1.0 NOT NULL;
         """,
     ),
+    (
+        # Resource provenance, so installing a map can tell "I already have this
+        # cantrip" from "this is a new one".  source_url is the normalized repo
+        # location: repo_id is a local UUID and is CASCADE-deleted when a repo is
+        # unlinked, so identity cannot rest on it.  content_hash is filled lazily
+        # by the matcher -- raw SQL cannot hash -- and backfilled to "" here.
+        "043_installed_item_provenance",
+        """
+        ALTER TABLE installed_items ADD COLUMN source_url TEXT DEFAULT '' NOT NULL;
+        ALTER TABLE installed_items ADD COLUMN content_hash VARCHAR(80) DEFAULT '' NOT NULL;
+        ALTER TABLE installed_items ADD COLUMN parent_item_id VARCHAR(36) DEFAULT '' NOT NULL;
+        ALTER TABLE installed_items ADD COLUMN link_mode VARCHAR(16) DEFAULT 'embedded' NOT NULL;
+        UPDATE installed_items SET source_url = (
+            SELECT linked_repos.url FROM linked_repos
+            WHERE linked_repos.id = installed_items.repo_id
+        ) WHERE repo_id IS NOT NULL AND source_url = '';
+        UPDATE installed_items SET source_url = '' WHERE source_url IS NULL;
+        CREATE INDEX IF NOT EXISTS ix_installed_items_origin
+            ON installed_items (user_id, source_url, file_path);
+        """,
+    ),
 ]
 
 

@@ -167,10 +167,23 @@ def _discover_local_files(repo_path) -> list[dict]:
 
 
 def _fetch_local_file_content(path: str, file_path: str) -> str:
-    """Read a file from a local repo path."""
-    from pathlib import Path
-    full_path = Path(path) / file_path
-    if not full_path.exists():
+    """Read a resource file from a local repo path.
+
+    file_path is caller-supplied and a local repo can be marked global, so any
+    user could reach it. safe_repo_join refuses absolute paths, `..`, and
+    anything outside the published resource folders -- without it,
+    `Path(root) / "C:/Windows/win.ini"` returns the absolute path and the file
+    is installed as a resource.
+    """
+    from app.services.git_sync import UnsafeRepoPathError, safe_repo_join
+
+    try:
+        full_path = safe_repo_join(path, file_path)
+    except UnsafeRepoPathError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
+    if not full_path.is_file():
         raise FileNotFoundError(f"File not found: {file_path}")
     return full_path.read_text(encoding="utf-8")
 
@@ -267,6 +280,9 @@ async def list_repos(
     items = items_result.scalars().all()
     counts: dict[str, int] = {}
     for item in items:
+        # Bundled resources belong to their map, not to the repo's install count.
+        if item.parent_item_id:
+            continue
         counts[item.repo_id or ""] = counts.get(item.repo_id or "", 0) + 1
 
     return {
@@ -490,16 +506,26 @@ async def install_file(
     except json.JSONDecodeError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File is not valid JSON")
 
-    local_id = await _create_local_resource(db, current_user.id, resource_type, data)
+    from app.services.resource_identity import content_hash, normalize_repo_url
 
-    scan_summary = json.dumps({
-        "safe": scan_result.safe,
-        "max_severity": scan_result.max_severity,
-        "findings": [
-            {"severity": f.severity, "description": f.description, "line": f.line}
-            for f in scan_result.findings
-        ],
-    })
+    source_url = normalize_repo_url(repo.url)
+    outcome = None
+
+    if resource_type == "map":
+        # A map is a collection: each object it carries is resolved, scanned and
+        # recorded in its own right rather than the map being treated as a blob.
+        from app.services.map_transfer import build_map_from_export
+
+        outcome = await build_map_from_export(
+            db, current_user.id, data,
+            resource_mode="smart", is_active=False,
+            repo=repo, map_path=req.file_path, allow_fetch=True,
+        )
+        local_id = outcome.map_obj.id
+        digest = ""
+    else:
+        local_id = await _create_local_resource(db, current_user.id, resource_type, data)
+        digest = content_hash(resource_type, data)
 
     item = InstalledItem(
         user_id=current_user.id,
@@ -512,11 +538,21 @@ async def install_file(
         installed_version=data.get("version", "1.0.0"),
         installed_commit="",
         local_id=local_id,
+        source_url="" if req.fork else source_url,
+        content_hash=digest,
         is_fork=req.fork,
         is_enabled=False,
-        scan_result=scan_summary,
+        scan_result=_scan_summary(scan_result),
     )
     db.add(item)
+    await db.flush()
+
+    children: list[dict] = []
+    if outcome is not None:
+        children = await _record_map_children(
+            db, current_user.id, item, outcome, source_url, req.fork
+        )
+
     await db.commit()
     await db.refresh(item)
 
@@ -532,8 +568,90 @@ async def install_file(
                 for f in scan_result.findings
             ],
         },
+        "resources": children,
+        "warnings": outcome.warnings if outcome else [],
+        "requires_repos": outcome.requires_repos if outcome else [],
         "disclaimer": DISCLAIMER,
     }
+
+
+def _scan_summary(scan_result) -> str:
+    return json.dumps({
+        "safe": scan_result.safe,
+        "max_severity": scan_result.max_severity,
+        "findings": [
+            {"severity": f.severity, "description": f.description, "line": f.line}
+            for f in scan_result.findings
+        ],
+    })
+
+
+async def _record_map_children(
+    db: AsyncSession,
+    user_id: str,
+    parent: InstalledItem,
+    outcome,
+    source_url: str,
+    is_fork: bool,
+) -> list[dict]:
+    """Give each object a map carried its own installed-item row.
+
+    One row per (map, resource), all pointing at the same local_id when the
+    resource was deduplicated. That is what makes the reference count work:
+    uninstalling one map cannot delete a cantrip another map still uses.
+    """
+    from app.services.resource_identity import parse_resource_path
+
+    children: list[dict] = []
+
+    for resolved in outcome.resources:
+        if not resolved.resource_id:
+            children.append({
+                "name": resolved.resource.name,
+                "type": resolved.resource.resource_type,
+                "action": "unresolved",
+                "max_severity": "clean",
+            })
+            continue
+
+        file_path = resolved.origin_path or parent.file_path
+        item = InstalledItem(
+            user_id=user_id,
+            repo_id=parent.repo_id,
+            file_path=file_path,
+            type=resolved.resource.resource_type,
+            name=resolved.resource.name,
+            description="",
+            author=parent.author,
+            installed_version=resolved.resource.declared_version or parent.installed_version,
+            installed_commit="",
+            local_id=resolved.resource_id,
+            source_url="" if is_fork else (resolved.origin_url or source_url),
+            content_hash=resolved.content_hash,
+            parent_item_id=parent.id,
+            link_mode="linked" if resolved.resource.is_linked else "embedded",
+            is_fork=is_fork,
+            is_enabled=False,
+            scan_result=_scan_summary(resolved.scan) if resolved.scan else "",
+        )
+        db.add(item)
+        _, key = parse_resource_path(file_path)
+        children.append({
+            "name": resolved.resource.name,
+            "type": resolved.resource.resource_type,
+            "action": resolved.action,
+            "path": file_path,
+            "embedded_in_map": bool(key),
+            "linked": resolved.resource.is_linked,
+            "max_severity": resolved.scan.max_severity if resolved.scan else "clean",
+            "findings": [
+                {"severity": f.severity, "description": f.description}
+                for f in (resolved.scan.findings if resolved.scan else [])
+            ],
+        })
+
+    await db.flush()
+    return children
 
 
 @router.get("/installed")
@@ -544,29 +662,59 @@ async def list_installed(
     result = await db.execute(
         select(InstalledItem).where(InstalledItem.user_id == current_user.id)
     )
-    items = result.scalars().all()
-    return {
-        "items": [
-            InstalledItemResponse(
-                id=i.id,
-                repo_id=i.repo_id,
-                file_path=i.file_path,
-                type=i.type,
-                name=i.name,
-                description=i.description,
-                author=i.author,
-                installed_version=i.installed_version,
-                is_fork=i.is_fork,
-                is_enabled=i.is_enabled,
-                update_available=i.update_available,
-                scan_result=i.scan_result,
-                created_at=i.created_at.isoformat() if i.created_at else "",
-                updated_at=i.updated_at.isoformat() if i.updated_at else "",
-            ).model_dump()
-            for i in items
-        ],
-        "disclaimer": DISCLAIMER,
-    }
+    items = list(result.scalars().all())
+
+    # Objects a map brought with it are its children, not separate installs.
+    children: dict[str, list[dict]] = {}
+    for i in items:
+        if i.parent_item_id:
+            children.setdefault(i.parent_item_id, []).append(_installed_to_dict(i))
+
+    shared = _shared_local_ids(items)
+
+    top_level = []
+    for i in items:
+        if i.parent_item_id:
+            continue
+        entry = _installed_to_dict(i)
+        entry["children"] = children.get(i.id, [])
+        for child in entry["children"]:
+            child["shared"] = child.get("local_id") in shared
+        top_level.append(entry)
+
+    return {"items": top_level, "disclaimer": DISCLAIMER}
+
+
+def _shared_local_ids(items: list[InstalledItem]) -> set[str]:
+    """Resources more than one install points at, so the UI can say so."""
+    seen: dict[str, int] = {}
+    for i in items:
+        if i.local_id:
+            seen[i.local_id] = seen.get(i.local_id, 0) + 1
+    return {local_id for local_id, count in seen.items() if count > 1}
+
+
+def _installed_to_dict(i: InstalledItem) -> dict:
+    data = InstalledItemResponse(
+        id=i.id,
+        repo_id=i.repo_id,
+        file_path=i.file_path,
+        type=i.type,
+        name=i.name,
+        description=i.description,
+        author=i.author,
+        installed_version=i.installed_version,
+        is_fork=i.is_fork,
+        is_enabled=i.is_enabled,
+        update_available=i.update_available,
+        scan_result=i.scan_result,
+        created_at=i.created_at.isoformat() if i.created_at else "",
+        updated_at=i.updated_at.isoformat() if i.updated_at else "",
+    ).model_dump()
+    data["local_id"] = i.local_id or ""
+    data["link_mode"] = i.link_mode
+    data["source_url"] = i.source_url
+    return data
 
 
 @router.put("/installed/{item_id}/toggle")
@@ -589,6 +737,19 @@ async def toggle_installed(
     if item.local_id:
         await _toggle_local_resource(db, item.type, item.local_id, item.is_enabled)
 
+    # A map is useless with its cantrips left disabled, so the toggle carries to
+    # the objects it brought with it.
+    children_result = await db.execute(
+        select(InstalledItem).where(
+            InstalledItem.user_id == current_user.id,
+            InstalledItem.parent_item_id == item.id,
+        )
+    )
+    for child in children_result.scalars().all():
+        child.is_enabled = item.is_enabled
+        if child.local_id:
+            await _toggle_local_resource(db, child.type, child.local_id, item.is_enabled)
+
     await db.commit()
     return {"is_enabled": item.is_enabled}
 
@@ -608,11 +769,49 @@ async def uninstall_item(
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
 
-    if item.local_id:
-        await _delete_local_resource(db, item.type, item.local_id)
+    # Children first: a map's objects are separate rows pointing at the same
+    # resources, and the reference count below has to see them gone.
+    children_result = await db.execute(
+        select(InstalledItem).where(
+            InstalledItem.user_id == current_user.id,
+            InstalledItem.parent_item_id == item.id,
+        )
+    )
+    children = list(children_result.scalars().all())
 
+    doomed = [(c.type, c.local_id) for c in children if c.local_id]
+    if item.local_id:
+        doomed.append((item.type, item.local_id))
+
+    for child in children:
+        await db.delete(child)
     await db.delete(item)
+    await db.flush()
+
+    # Only now, with this install's rows gone, is it safe to ask whether anything
+    # else still refers to each resource.
+    for res_type, local_id in doomed:
+        if not await _is_still_referenced(db, current_user.id, local_id):
+            await _delete_local_resource(db, res_type, local_id)
+
     await db.commit()
+
+
+async def _is_still_referenced(
+    db: AsyncSession, user_id: str, local_id: str
+) -> bool:
+    """Does any remaining installed item point at this resource?
+
+    Deduplication means several installs can share one cantrip. Without this
+    check, uninstalling one map would delete a cantrip another map still needs.
+    """
+    result = await db.execute(
+        select(InstalledItem.id).where(
+            InstalledItem.user_id == user_id,
+            InstalledItem.local_id == local_id,
+        ).limit(1)
+    )
+    return result.scalar_one_or_none() is not None
 
 
 @router.post("/repos/{repo_id}/check-updates")
@@ -831,26 +1030,25 @@ async def _serialize_resource(
         return data, f"rules/{slug}.json", {"path": f"rules/{slug}.json", "type": "rule", **data}
 
     if rtype == "map":
+        from sqlalchemy.orm import selectinload
+
         from app.models.map import Map, MapStage
-        result = await db.execute(select(Map).where(Map.id == rid, Map.user_id == user_id))
+        from app.services.map_transfer import serialize_map_to_export
+        result = await db.execute(
+            select(Map)
+            .where(Map.id == rid, Map.user_id == user_id)
+            .options(selectinload(Map.stages).selectinload(MapStage.resources))
+        )
         obj = result.scalar_one_or_none()
         if not obj:
             return None, "", {}
-        stages_result = await db.execute(select(MapStage).where(MapStage.map_id == rid))
-        stages = stages_result.scalars().all()
-        stage_list = []
-        for s in stages:
-            stage_list.append({
-                "name": s.name, "system_instructions": s.system_instructions or "",
-                "endpoint_id": s.endpoint_id, "model_override": s.model_override or "",
-                "driver_callable_turns": s.driver_callable_turns,
-                "output_mode": s.output_mode,
-            })
-        data = {
-            "name": obj.name, "description": "",
-            "stages": stage_list, "author": "", "version": "1.0.0",
-            "updated": obj.created_at.isoformat() if obj.created_at else "",
-        }
+        # Same serializer the export endpoint uses, so a published map can be
+        # installed back with its stages, endpoint tags, verification settings
+        # and embedded resources intact.
+        data = await serialize_map_to_export(db, obj)
+        data.setdefault("author", "")
+        data["version"] = data.get("version") or "1.0.0"
+        data["updated"] = obj.updated_at.isoformat() if obj.updated_at else ""
         slug = obj.name.lower().replace(" ", "_")[:64]
         return data, f"maps/{slug}.json", {"path": f"maps/{slug}.json", "type": "map", **data}
 
@@ -933,6 +1131,33 @@ async def _create_local_resource(
         await db.flush()
         return sr.id
 
+    if resource_type in ("skill", "sample"):
+        from app.models.skill import Skill
+        skill = Skill(
+            user_id=user_id,
+            name=data.get("name", "Imported"),
+            description=data.get("description", ""),
+            content=data.get("content", ""),
+            # A published "sample" is a Skill row with type=sample; the folder it
+            # ships in cannot carry that distinction, so it comes from the file.
+            type=data.get("type", "skill") if data.get("type") in ("skill", "sample") else "skill",
+        )
+        db.add(skill)
+        await db.flush()
+        return skill.id
+
+    if resource_type == "map":
+        from app.services.map_transfer import build_map_from_export
+        # Same builder the Maps import endpoint uses, so a packaged map installs
+        # identically to one imported by hand. install_file() calls the builder
+        # directly (it has the repo and file path needed for provenance); this
+        # branch covers callers that do not, and cannot fetch linked resources.
+        outcome = await build_map_from_export(
+            db, user_id, data, resource_mode="smart", is_active=False,
+            allow_fetch=False,
+        )
+        return outcome.map_obj.id
+
     return ""
 
 
@@ -960,6 +1185,13 @@ async def _toggle_local_resource(
         obj = result.scalar_one_or_none()
         if obj:
             obj.is_active = enabled
+    elif resource_type == "map":
+        from app.models.map import Map
+        result = await db.execute(select(Map).where(Map.id == local_id))
+        obj = result.scalar_one_or_none()
+        if obj:
+            obj.is_active = enabled
+    # Skills have no is_active flag -- they apply wherever they are attached.
 
 
 async def _delete_local_resource(
@@ -985,4 +1217,18 @@ async def _delete_local_resource(
         result = await db.execute(select(ScenarioRule).where(ScenarioRule.id == local_id))
         obj = result.scalar_one_or_none()
         if obj:
+            await db.delete(obj)
+    elif resource_type in ("skill", "sample"):
+        from app.models.skill import Skill
+        result = await db.execute(select(Skill).where(Skill.id == local_id))
+        obj = result.scalar_one_or_none()
+        if obj:
+            await db.delete(obj)
+    elif resource_type == "map":
+        from app.models.map import Map
+        result = await db.execute(select(Map).where(Map.id == local_id))
+        obj = result.scalar_one_or_none()
+        if obj:
+            # Stages and stage-resource rows cascade; the lorebooks, cantrips and
+            # skills the import created are standalone and are left in place.
             await db.delete(obj)
