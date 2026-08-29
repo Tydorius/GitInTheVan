@@ -10,6 +10,8 @@ import app.services.cantrip as _cantrip_module
 import app.services.command_tags as _command_tags_module
 import app.services.conversation as _conversation_module
 import app.services.debug as _debug_module
+import app.services.debug_replay as _debug_replay_module
+import app.services.debug_sandbox as _debug_sandbox_module
 import app.services.driver_callable as _driver_callable_module
 import app.services.forbidden_words as _forbidden_words_module
 import app.services.map_pipeline as _map_pipeline_module
@@ -26,22 +28,33 @@ from app.models.base import Base
 test_engine = create_async_engine("sqlite+aiosqlite://", echo=False)
 TestSessionLocal = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
 
-_original_proxy_session = _proxy_module.async_session
-_original_cantrip_session = _cantrip_module.async_session
-_original_memory_session = _memory_module.async_session
-_original_verification_session = _verification_module.async_session
-_original_conversation_session = _conversation_module.async_session
-_original_summarization_session = _summarization_module.async_session
-_original_forbidden_words_session = _forbidden_words_module.async_session
-_original_driver_callable_session = _driver_callable_module.async_session
-_original_command_tags_session = _command_tags_module.async_session
-_original_bypass_session = _bypass_module.async_session
-_original_budget_session = _budget_module.async_session
-_original_debug_session = _debug_module.async_session
-_original_admin_session = _admin_module.async_session
-_original_backup_session = _backup_module.async_session
-_original_map_pipeline_session = _map_pipeline_module.async_session
-_original_scenario_summarizer_session = _scenario_summarizer_module.async_session
+# Every service module that binds `async_session` at import time needs its
+# binding swapped for the test session and restored afterwards. This was two
+# hand-maintained lists; a module added to one and not the other failed at query
+# time with "no such table", a long way from the cause. One list now drives both
+# directions, so adding a service means adding a single line here.
+_SESSION_MODULES = [
+    _admin_module,
+    _backup_module,
+    _budget_module,
+    _bypass_module,
+    _cantrip_module,
+    _command_tags_module,
+    _conversation_module,
+    _debug_module,
+    _debug_replay_module,
+    _debug_sandbox_module,
+    _driver_callable_module,
+    _forbidden_words_module,
+    _map_pipeline_module,
+    _memory_module,
+    _proxy_module,
+    _scenario_summarizer_module,
+    _summarization_module,
+    _verification_module,
+]
+
+_ORIGINAL_SESSIONS = {m: m.async_session for m in _SESSION_MODULES}
 
 
 async def override_get_db():
@@ -56,41 +69,13 @@ app_settings.rate_limit_enabled = False
 
 @pytest.fixture(autouse=True)
 async def setup_database():
-    _proxy_module.async_session = TestSessionLocal
-    _cantrip_module.async_session = TestSessionLocal
-    _memory_module.async_session = TestSessionLocal
-    _conversation_module.async_session = TestSessionLocal
-    _verification_module.async_session = TestSessionLocal
-    _summarization_module.async_session = TestSessionLocal
-    _forbidden_words_module.async_session = TestSessionLocal
-    _driver_callable_module.async_session = TestSessionLocal
-    _command_tags_module.async_session = TestSessionLocal
-    _bypass_module.async_session = TestSessionLocal
-    _budget_module.async_session = TestSessionLocal
-    _debug_module.async_session = TestSessionLocal
-    _admin_module.async_session = TestSessionLocal
-    _backup_module.async_session = TestSessionLocal
-    _map_pipeline_module.async_session = TestSessionLocal
-    _scenario_summarizer_module.async_session = TestSessionLocal
+    for module in _SESSION_MODULES:
+        module.async_session = TestSessionLocal
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
-    _proxy_module.async_session = _original_proxy_session
-    _cantrip_module.async_session = _original_cantrip_session
-    _memory_module.async_session = _original_memory_session
-    _conversation_module.async_session = _original_conversation_session
-    _verification_module.async_session = _original_verification_session
-    _summarization_module.async_session = _original_summarization_session
-    _forbidden_words_module.async_session = _original_forbidden_words_session
-    _driver_callable_module.async_session = _original_driver_callable_session
-    _command_tags_module.async_session = _original_command_tags_session
-    _bypass_module.async_session = _original_bypass_session
-    _budget_module.async_session = _original_budget_session
-    _debug_module.async_session = _original_debug_session
-    _admin_module.async_session = _original_admin_session
-    _backup_module.async_session = _original_backup_session
-    _map_pipeline_module.async_session = _original_map_pipeline_session
-    _scenario_summarizer_module.async_session = _original_scenario_summarizer_session
+    for module, original in _ORIGINAL_SESSIONS.items():
+        module.async_session = original
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
 

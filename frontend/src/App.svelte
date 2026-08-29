@@ -16,6 +16,7 @@
   import Packs from './pages/Packs.svelte'
   import Settings from './pages/Settings.svelte'
   import Admin from './pages/Admin.svelte'
+  import Compare from './pages/Compare.svelte'
 
   const navItems = [
     { path: '/', label: 'Dashboard', icon: '◧' },
@@ -172,6 +173,8 @@
         <Settings />
       {:else if page === '/admin'}
         <Admin />
+      {:else if page === '/debug/compare'}
+        <Compare />
       {:else}
         <Dashboard />
       {/if}

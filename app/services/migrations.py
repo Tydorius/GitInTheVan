@@ -680,6 +680,111 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             ON installed_items (user_id, source_url, file_path);
         """,
     ),
+    (
+        # Phase 22.  Two admin caps for the debug store: how many runs a user may
+        # pin against the rolling retention prune, and the ceiling on a single
+        # serialized exchange now that reasoning is no longer truncated.
+        "044_add_debug_caps",
+        """
+        ALTER TABLE admin_settings ADD COLUMN max_saved_debug_runs INTEGER DEFAULT 10 NOT NULL;
+        ALTER TABLE admin_settings ADD COLUMN max_debug_exchange_kb INTEGER DEFAULT 512 NOT NULL;
+        """,
+    ),
+    (
+        # Phase 22.  A saved run is exempt from the rolling prune and from Clear
+        # All, so a comparison baseline cannot be evicted mid-comparison.
+        # saved_at is nullable on purpose: it records when the user pinned the
+        # run, which is not the same instant the run happened.
+        "045_debug_exchange_saved",
+        {
+            "sqlite": """
+            ALTER TABLE debug_exchanges ADD COLUMN saved BOOLEAN DEFAULT 0 NOT NULL;
+            ALTER TABLE debug_exchanges ADD COLUMN label VARCHAR(128) DEFAULT '' NOT NULL;
+            ALTER TABLE debug_exchanges ADD COLUMN saved_at TIMESTAMP NULL;
+            CREATE INDEX IF NOT EXISTS ix_debug_exchanges_saved
+                ON debug_exchanges (user_id, saved);
+            """,
+            "postgresql": """
+            ALTER TABLE debug_exchanges ADD COLUMN saved BOOLEAN DEFAULT FALSE NOT NULL;
+            ALTER TABLE debug_exchanges ADD COLUMN label VARCHAR(128) DEFAULT '' NOT NULL;
+            ALTER TABLE debug_exchanges ADD COLUMN saved_at TIMESTAMP NULL;
+            CREATE INDEX IF NOT EXISTS ix_debug_exchanges_saved
+                ON debug_exchanges (user_id, saved);
+            """,
+            "mysql": """
+            ALTER TABLE debug_exchanges ADD COLUMN saved BOOLEAN DEFAULT 0 NOT NULL;
+            ALTER TABLE debug_exchanges ADD COLUMN label VARCHAR(128) DEFAULT '' NOT NULL;
+            ALTER TABLE debug_exchanges ADD COLUMN saved_at TIMESTAMP NULL;
+            CREATE INDEX ix_debug_exchanges_saved ON debug_exchanges (user_id, saved);
+            """,
+        },
+    ),
+    (
+        # Phase 22b.  A sandbox is a forked copy of one request that can be
+        # re-fired from inside GitInTheVan.  sandbox_chat_id is its own
+        # conversation id: the forked memories, chat data and summary are keyed
+        # to it, so repeated runs accumulate there and never touch the
+        # conversation the sandbox was made from.
+        "046_create_debug_sandboxes",
+        {
+            "sqlite": """
+            CREATE TABLE IF NOT EXISTS debug_sandboxes (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name VARCHAR(128) DEFAULT '' NOT NULL,
+                source_exchange_id VARCHAR(36) DEFAULT '' NOT NULL,
+                source_chat_id VARCHAR(256) DEFAULT '' NOT NULL,
+                sandbox_chat_id VARCHAR(256) DEFAULT '' NOT NULL,
+                messages TEXT DEFAULT '[]' NOT NULL,
+                model VARCHAR(128) DEFAULT '' NOT NULL,
+                run_count INTEGER DEFAULT 0 NOT NULL,
+                last_run_at TIMESTAMP NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS ix_debug_sandboxes_user_id
+                ON debug_sandboxes (user_id);
+            CREATE INDEX IF NOT EXISTS ix_debug_sandboxes_chat
+                ON debug_sandboxes (sandbox_chat_id);
+            """,
+            "postgresql": """
+            CREATE TABLE IF NOT EXISTS debug_sandboxes (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name VARCHAR(128) DEFAULT '' NOT NULL,
+                source_exchange_id VARCHAR(36) DEFAULT '' NOT NULL,
+                source_chat_id VARCHAR(256) DEFAULT '' NOT NULL,
+                sandbox_chat_id VARCHAR(256) DEFAULT '' NOT NULL,
+                messages TEXT DEFAULT '[]' NOT NULL,
+                model VARCHAR(128) DEFAULT '' NOT NULL,
+                run_count INTEGER DEFAULT 0 NOT NULL,
+                last_run_at TIMESTAMP NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS ix_debug_sandboxes_user_id
+                ON debug_sandboxes (user_id);
+            CREATE INDEX IF NOT EXISTS ix_debug_sandboxes_chat
+                ON debug_sandboxes (sandbox_chat_id);
+            """,
+            "mysql": """
+            CREATE TABLE IF NOT EXISTS debug_sandboxes (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL,
+                name VARCHAR(128) DEFAULT '' NOT NULL,
+                source_exchange_id VARCHAR(36) DEFAULT '' NOT NULL,
+                source_chat_id VARCHAR(256) DEFAULT '' NOT NULL,
+                sandbox_chat_id VARCHAR(256) DEFAULT '' NOT NULL,
+                messages TEXT NOT NULL,
+                model VARCHAR(128) DEFAULT '' NOT NULL,
+                run_count INTEGER DEFAULT 0 NOT NULL,
+                last_run_at TIMESTAMP NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            CREATE INDEX ix_debug_sandboxes_user_id ON debug_sandboxes (user_id);
+            CREATE INDEX ix_debug_sandboxes_chat ON debug_sandboxes (sandbox_chat_id);
+            """,
+        },
+    ),
 ]
 
 

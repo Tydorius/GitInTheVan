@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
@@ -134,7 +134,7 @@ async def load_driver_callable_config(
     result = await db.execute(
         select(Cantrip).where(
             Cantrip.user_id == user_id,
-            Cantrip.is_active.is_(True),
+            or_(Cantrip.is_active.is_(True), Cantrip.tag != ""),
             Cantrip.run_driver_callable.is_(True),
         ).order_by(Cantrip.execution_order, Cantrip.created_at)
     )
@@ -147,12 +147,9 @@ async def load_driver_callable_config(
 
     tools = []
     for t in all_tools:
-        if t.tag and tags:
-            if should_activate_resource(
-                t.tag, "cantrip", t.is_active, t.is_public, t.user_id, user_id, tags
-            ):
-                tools.append(t)
-        else:
+        if should_activate_resource(
+            t.tag, "cantrip", t.is_active, t.is_public, t.user_id, user_id, tags or []
+        ):
             tools.append(t)
 
     if not tools:

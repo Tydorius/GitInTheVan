@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.database import async_session
 from app.models.cantrip import Cantrip
@@ -139,18 +139,19 @@ async def load_weighted_resources(
 
         active_lorebooks = []
         for lb in lorebooks:
-            if lb.tag and tags:
-                if should_activate_resource(
-                    lb.tag, "lore", lb.is_active, lb.is_public, lb.user_id, user_id, tags
-                ):
-                    active_lorebooks.append(lb)
-            elif lb.is_active and lb.run_pre_driver:
+            if not lb.run_pre_driver:
+                continue
+            if should_activate_resource(
+                lb.tag, "lore", lb.is_active, lb.is_public, lb.user_id, user_id, tags or []
+            ):
                 active_lorebooks.append(lb)
 
+        # Candidates, not decisions: a tagged inactive cantrip has to reach
+        # should_activate_resource for its tag to be able to switch it on.
         cantrip_result = await db.execute(
             select(Cantrip).where(
                 Cantrip.user_id == user_id,
-                Cantrip.is_active.is_(True),
+                or_(Cantrip.is_active.is_(True), Cantrip.tag != ""),
                 Cantrip.run_pre_driver.is_(True),
             )
         )
@@ -158,12 +159,9 @@ async def load_weighted_resources(
 
         active_cantrips = []
         for c in all_cantrips:
-            if c.tag and tags:
-                if should_activate_resource(
-                    c.tag, "cantrip", c.is_active, c.is_public, c.user_id, user_id, tags
-                ):
-                    active_cantrips.append(c)
-            else:
+            if should_activate_resource(
+                c.tag, "cantrip", c.is_active, c.is_public, c.user_id, user_id, tags or []
+            ):
                 active_cantrips.append(c)
 
         skill_result = await db.execute(

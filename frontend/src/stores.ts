@@ -1,10 +1,21 @@
-import { writable, get } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
 import { getToken, clearToken } from './api';
 import { api } from './api';
 import type { CertIPCheck } from './api';
+import { parseRoute } from './lib/deeplink';
 
 export const isAuthenticated = writable(!!getToken());
 export const currentRoute = writable(window.location.hash.slice(1) || '/');
+
+/**
+ * The current route split into its page and query parameters.
+ *
+ * Pages read this to open a specific object from a link, e.g.
+ * `#/cantrips?id=abc`. Before this existed the query was stripped and ignored,
+ * so every such link landed on the page with nothing selected.
+ */
+export const routeParams = derived(currentRoute, ($route) => parseRoute($route));
+export const routePage = derived(currentRoute, ($route) => parseRoute($route).page);
 export const isAdmin = writable(false);
 export const siteBanner = writable<{ banner: string; level: string } | null>(null);
 export const certIpWarning = writable<CertIPCheck | null>(null);

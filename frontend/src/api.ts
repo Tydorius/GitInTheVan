@@ -81,6 +81,165 @@ export interface CertIPCheck {
   acknowledged: boolean;
 }
 
+/** Token, latency and efficiency figures for one debug run. */
+export interface DebugRunTotals {
+  llm_call_count: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  reasoning_tokens: number;
+  total_tokens: number;
+  injected_tokens: number;
+  /** 'upstream' | 'estimated' | 'mixed'. Never present an estimate as measured. */
+  tokens_source: string;
+  llm_latency_ms: number;
+  total_latency_ms: number | null;
+  /** Wall clock minus upstream: what this proxy's own pipeline cost. */
+  overhead_ms: number | null;
+  tokens_per_second: number | null;
+  injection_overhead_pct: number | null;
+}
+
+export interface DebugExchangeListItem {
+  id: string;
+  chat_id: string;
+  model: string;
+  label: string;
+  saved: boolean;
+  saved_at: string;
+  created_at: string;
+  has_response: boolean;
+  has_verification: boolean;
+  stage_count: number;
+  source: string;
+  totals: DebugRunTotals;
+}
+
+export interface DebugListResponse {
+  exchanges: DebugExchangeListItem[];
+  saved_count: number;
+  max_saved: number;
+}
+
+/** One cantrip a run considered, whether or not it fired. */
+export interface DebugCantrip {
+  id: string;
+  name: string;
+  position: string;
+  triggered: boolean;
+  reason?: string;
+  tag?: string;
+  code?: string;
+  code_hash?: string;
+  duration_ms?: number;
+  debug_logs?: string[];
+  error?: string;
+  output?: Record<string, any>;
+  fields_changed?: string[];
+  /** Per-store deltas: what this cantrip wrote to chat/user/cantrip data. */
+  data_changes?: Record<string, Record<string, { op: string; from?: any; to?: any }>>;
+}
+
+export interface DebugLlmCall {
+  purpose: string;
+  stage_index: number | null;
+  endpoint_id: string;
+  endpoint_name: string;
+  provider: string;
+  model_requested: string;
+  model_resolved: string;
+  failover_attempt: number;
+  latency_ms: number;
+  status_code: number;
+  error: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  reasoning_tokens: number;
+  total_tokens: number;
+  tokens_source: string;
+}
+
+export interface DebugStage {
+  name: string;
+  label: string;
+  item_id: string | null;
+  item_name: string | null;
+  detail: string;
+  setting: string;
+  setting_value: any;
+  messages_before?: string | null;
+  messages_after?: string | null;
+  content_before?: string;
+  content_after?: string;
+  /** Set when the trace exceeded the size cap and snapshots were shed. */
+  messages_dropped?: boolean;
+  metadata: Record<string, any>;
+}
+
+export interface DebugPipelineData {
+  schema_version?: number;
+  stages: DebugStage[];
+  original_messages: string;
+  tags: string[];
+  truncated?: boolean;
+  truncated_reason?: string;
+  run: {
+    started_at: string;
+    source: string;
+    replay_of: string;
+    llm_calls: DebugLlmCall[];
+    cantrips: DebugCantrip[];
+    totals: Partial<DebugRunTotals>;
+  };
+}
+
+export interface DebugExchange {
+  id: string;
+  chat_id: string;
+  model: string;
+  label: string;
+  saved: boolean;
+  saved_at: string;
+  pipeline_data: DebugPipelineData;
+  response_content: string;
+  verification_data: Record<string, any>;
+  created_at: string;
+}
+
+/** One line-level diff between a baseline and another run. */
+export interface DebugTextDiff {
+  identical: boolean;
+  similarity: number;
+  /** 'word' for short prose, 'line' for code and long output, 'none' when equal. */
+  granularity: string;
+  baseline_empty: boolean;
+  hunks: { op: string; baseline: string[]; other: string[] }[];
+}
+
+/** A forked copy of one request, re-runnable without touching the original. */
+export interface DebugSandbox {
+  id: string;
+  name: string;
+  source_exchange_id: string;
+  /** The real conversation it was forked from. Displayed only, never written. */
+  source_chat_id: string;
+  /** Its own conversation; forked memories and chat data live here. */
+  sandbox_chat_id: string;
+  message_list: { role: string; content: string }[];
+  message_count: number;
+  model: string;
+  run_count: number;
+  last_run_at: string;
+  created_at: string;
+}
+
+export interface DebugComparison {
+  baseline_id: string;
+  /** Baseline first, so columns render straight from this. */
+  order: string[];
+  runs: Record<string, any>;
+  diffs: Record<string, any>;
+}
+
 export const api = {
   // Auth
   setup: (username: string, password: string) =>
@@ -324,12 +483,54 @@ export const api = {
     request<{ success: boolean; message: string; error: string }>('/api/admin/update/chain/resume', { method: 'POST' }),
 
   // Debug
-  listDebugExchanges: () =>
-    request<{ exchanges: any[] }>('/api/debug'),
+  listDebugExchanges: (savedOnly = false) =>
+    request<DebugListResponse>(`/api/debug${savedOnly ? '?saved_only=true' : ''}`),
   getDebugExchange: (id: string) =>
-    request<any>(`/api/debug/${id}`),
-  clearDebugExchanges: () =>
-    request<void>(`/api/debug`, { method: 'DELETE' }),
+    request<DebugExchange>(`/api/debug/${id}`),
+  clearDebugExchanges: (includeSaved = false) =>
+    request<void>(`/api/debug${includeSaved ? '?include_saved=true' : ''}`, { method: 'DELETE' }),
+  deleteDebugExchange: (id: string) =>
+    request<void>(`/api/debug/${id}`, { method: 'DELETE' }),
+  saveDebugExchange: (id: string, label = '') =>
+    request<DebugExchange>(`/api/debug/${id}/save`, {
+      method: 'POST',
+      body: JSON.stringify({ label }),
+    }),
+  unsaveDebugExchange: (id: string) =>
+    request<DebugExchange>(`/api/debug/${id}/save`, { method: 'DELETE' }),
+  renameDebugExchange: (id: string, label: string) =>
+    request<DebugExchange>(`/api/debug/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ label }),
+    }),
+  replayDebugExchange: (id: string) =>
+    request<{ run_id: string; warning: string }>(`/api/debug/${id}/replay`, { method: 'POST' }),
+  // Sandboxes: forked, re-runnable copies of a request.
+  listDebugSandboxes: () =>
+    request<{ sandboxes: DebugSandbox[] }>('/api/debug/sandboxes/list'),
+  createDebugSandbox: (exchangeId: string, name = '') =>
+    request<DebugSandbox>(`/api/debug/${exchangeId}/sandbox`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+  runDebugSandbox: (sandboxId: string) =>
+    request<{ run_id: string; run_count: number }>(
+      `/api/debug/sandboxes/${sandboxId}/run`, { method: 'POST' },
+    ),
+  resetDebugSandbox: (sandboxId: string) =>
+    request<DebugSandbox>(`/api/debug/sandboxes/${sandboxId}/reset`, { method: 'POST' }),
+  updateDebugSandbox: (sandboxId: string, messages: any[]) =>
+    request<DebugSandbox>(`/api/debug/sandboxes/${sandboxId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ messages }),
+    }),
+  deleteDebugSandbox: (sandboxId: string) =>
+    request<void>(`/api/debug/sandboxes/${sandboxId}`, { method: 'DELETE' }),
+  compareDebugExchanges: (ids: string[], baselineId = '') =>
+    request<DebugComparison>('/api/debug/compare', {
+      method: 'POST',
+      body: JSON.stringify({ ids, baseline_id: baselineId }),
+    }),
 
   // Summarization
   getSummarizationSettings: () =>

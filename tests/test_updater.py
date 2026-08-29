@@ -3,6 +3,7 @@
 import json
 import re
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -90,6 +91,22 @@ class TestVersionFromChangelog:
         """get_current_version must agree with the shipped CHANGELOG.md."""
         text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
         assert get_current_version() == _version_from_changelog(text)
+
+    def test_changelog_agrees_with_pyproject(self):
+        """The two version markers that ship in a release must not drift apart.
+
+        CHANGELOG.md is what get_current_version() reads on a source install and
+        pyproject.toml is what the importlib.metadata fallback reads in the
+        Docker image, so a release whose two markers disagree reports a
+        different version depending on how it was installed. A release that
+        forgets to bump either one also makes the updater's post-hop check fail
+        with "Expected X but found Y" and halt the chain.
+        """
+        changelog_version = _version_from_changelog(
+            (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        )
+        pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        assert changelog_version == pyproject["project"]["version"]
 
 
 class TestGetCurrentVersion:

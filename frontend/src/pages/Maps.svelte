@@ -1,6 +1,8 @@
 <script lang="ts">
   import { api } from '../api'
   import { onMount } from 'svelte'
+  import { routeParams } from '../stores'
+  import { downloadJson } from '../lib/download'
   import CodeEditor from '../lib/CodeEditor.svelte'
   import { withScroll } from '../lib/scroll'
 
@@ -143,13 +145,7 @@
   async function exportMap(m: any, mode: 'embedded' | 'linked' = 'embedded') {
     try {
       const data = await api.exportMap(m.id, mode)
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${data.name || 'map'}${mode === 'linked' ? '.linked' : ''}.json`
-      a.click()
-      URL.revokeObjectURL(url)
+      downloadJson(data, `${data.name || 'map'}${mode === 'linked' ? '.linked' : ''}.json`)
     } catch (e: any) { error = e.message }
   }
 
@@ -190,7 +186,27 @@
     reader.readAsText(file)
   }
 
-  onMount(load)
+  /**
+   * Open the object named by `#/...?id=`.
+   *
+   * Links from the Debug and comparison views, and from the Packs page, carry
+   * the object's id. The query used to be stripped before any page saw it, so
+   * those links landed here with nothing selected.
+   */
+  function openFromRoute() {
+    const id = $routeParams.params.id
+    if (!id) return
+    const match = maps.find((item: any) => item.id === id)
+    if (match) startEdit(match)
+  }
+
+  onMount(async () => {
+    await load()
+    openFromRoute()
+  })
+
+  // A link clicked while this page is already open changes only the hash.
+  $: if ($routeParams.params.id && maps.length) openFromRoute()
 </script>
 
 <div class="page-header">

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import require_admin
+from app.models.admin_settings import AdminSettings
 from app.models.user import User
 from app.services.admin import (
     apply_runtime_log_level,
@@ -31,6 +32,9 @@ class AdminSettingsResponse(BaseModel):
     max_script_size_kb: int
     max_rule_size_kb: int
     max_lorebook_size_kb: int
+    max_saved_debug_runs: int
+    max_debug_exchange_kb: int
+    url_blocklist: str
     runtime_log_level: str
     effective_log_level: str
     site_banner: str
@@ -52,6 +56,9 @@ class AdminSettingsUpdate(BaseModel):
     max_script_size_kb: int | None = None
     max_rule_size_kb: int | None = None
     max_lorebook_size_kb: int | None = None
+    max_saved_debug_runs: int | None = None
+    max_debug_exchange_kb: int | None = None
+    url_blocklist: str | None = None
     runtime_log_level: str | None = None
     site_banner: str | None = None
     site_banner_level: str | None = None
@@ -60,6 +67,38 @@ class AdminSettingsUpdate(BaseModel):
     backup_schedule_time: str | None = None
     backup_retention_count: int | None = None
     backup_dir: str | None = None
+
+
+def _settings_response(s: AdminSettings, effective: str) -> AdminSettingsResponse:
+    """Project an AdminSettings row onto the response model.
+
+    Both the GET and the PUT return the full settings object. This was two
+    identical 18-line constructions; a field added to one and not the other
+    silently disappeared from that endpoint.
+    """
+    return AdminSettingsResponse(
+        max_driver_callable_turns=s.max_driver_callable_turns,
+        max_verification_retries=s.max_verification_retries,
+        max_map_stages=s.max_map_stages,
+        rate_limit_proxy_per_min=s.rate_limit_proxy_per_min,
+        rate_limit_api_per_min=s.rate_limit_api_per_min,
+        max_memory_size_mb=s.max_memory_size_mb,
+        max_script_size_kb=s.max_script_size_kb,
+        max_rule_size_kb=s.max_rule_size_kb,
+        max_lorebook_size_kb=s.max_lorebook_size_kb,
+        max_saved_debug_runs=s.max_saved_debug_runs,
+        max_debug_exchange_kb=s.max_debug_exchange_kb,
+        url_blocklist=s.url_blocklist,
+        runtime_log_level=s.runtime_log_level,
+        effective_log_level=effective,
+        site_banner=s.site_banner,
+        site_banner_level=s.site_banner_level,
+        backup_schedule_enabled=s.backup_schedule_enabled,
+        backup_schedule_days=s.backup_schedule_days,
+        backup_schedule_time=s.backup_schedule_time,
+        backup_retention_count=s.backup_retention_count,
+        backup_dir=s.backup_dir,
+    )
 
 
 class AuditLogItem(BaseModel):
@@ -90,26 +129,7 @@ async def get_settings(
     from app.services.admin import get_effective_log_level
     s = await get_admin_settings()
     effective = await get_effective_log_level()
-    return AdminSettingsResponse(
-        max_driver_callable_turns=s.max_driver_callable_turns,
-        max_verification_retries=s.max_verification_retries,
-        max_map_stages=s.max_map_stages,
-        rate_limit_proxy_per_min=s.rate_limit_proxy_per_min,
-        rate_limit_api_per_min=s.rate_limit_api_per_min,
-        max_memory_size_mb=s.max_memory_size_mb,
-        max_script_size_kb=s.max_script_size_kb,
-        max_rule_size_kb=s.max_rule_size_kb,
-        max_lorebook_size_kb=s.max_lorebook_size_kb,
-        runtime_log_level=s.runtime_log_level,
-        effective_log_level=effective,
-        site_banner=s.site_banner,
-        site_banner_level=s.site_banner_level,
-        backup_schedule_enabled=s.backup_schedule_enabled,
-        backup_schedule_days=s.backup_schedule_days,
-        backup_schedule_time=s.backup_schedule_time,
-        backup_retention_count=s.backup_retention_count,
-        backup_dir=s.backup_dir,
-    )
+    return _settings_response(s, effective)
 
 
 @router.put("/settings", response_model=AdminSettingsResponse)
@@ -137,6 +157,15 @@ async def update_settings(
         updates["max_rule_size_kb"] = max(1, req.max_rule_size_kb)
     if req.max_lorebook_size_kb is not None:
         updates["max_lorebook_size_kb"] = max(1, req.max_lorebook_size_kb)
+    if req.max_saved_debug_runs is not None:
+        updates["max_saved_debug_runs"] = max(0, req.max_saved_debug_runs)
+    if req.max_debug_exchange_kb is not None:
+        updates["max_debug_exchange_kb"] = max(1, req.max_debug_exchange_kb)
+    if req.url_blocklist is not None:
+        # Stored as the comma-separated string get_url_blocklist() parses.
+        updates["url_blocklist"] = ",".join(
+            d.strip() for d in req.url_blocklist.split(",") if d.strip()
+        )
     if req.runtime_log_level is not None:
         level = req.runtime_log_level.strip().upper()
         if level and level not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
@@ -165,26 +194,7 @@ async def update_settings(
     s = await update_admin_settings(updates)
     from app.services.admin import get_effective_log_level
     effective = await get_effective_log_level()
-    return AdminSettingsResponse(
-        max_driver_callable_turns=s.max_driver_callable_turns,
-        max_verification_retries=s.max_verification_retries,
-        max_map_stages=s.max_map_stages,
-        rate_limit_proxy_per_min=s.rate_limit_proxy_per_min,
-        rate_limit_api_per_min=s.rate_limit_api_per_min,
-        max_memory_size_mb=s.max_memory_size_mb,
-        max_script_size_kb=s.max_script_size_kb,
-        max_rule_size_kb=s.max_rule_size_kb,
-        max_lorebook_size_kb=s.max_lorebook_size_kb,
-        runtime_log_level=s.runtime_log_level,
-        effective_log_level=effective,
-        site_banner=s.site_banner,
-        site_banner_level=s.site_banner_level,
-        backup_schedule_enabled=s.backup_schedule_enabled,
-        backup_schedule_days=s.backup_schedule_days,
-        backup_schedule_time=s.backup_schedule_time,
-        backup_retention_count=s.backup_retention_count,
-        backup_dir=s.backup_dir,
-    )
+    return _settings_response(s, effective)
 
 
 @router.get("/audit", response_model=AuditLogListResponse)

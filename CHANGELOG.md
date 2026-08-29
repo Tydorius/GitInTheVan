@@ -2,6 +2,212 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.23.0] - 2026-08-24
+
+The Activation Hierarchy is now a fixed, documented, tested contract, and debug
+runs can be forked into sandboxes that are re-runnable in place.
+
+### Fixed
+
+- **Four of the five resource types could not be activated by their own tag.**
+  Tagging is the mechanism the whole product rests on, and it only worked for
+  lorebooks and verification rules. Two independent causes:
+
+  - `parse_tag` recognised only `lore`, `cantrip`, `verify` and `taggroup`, so
+    `<#map-...#>` and `<#memory-rule-...#>` parsed as type `unknown` and matched
+    nothing — no error, no log line. Tag types are now a declared list, matched
+    longest-first so a multi-word type like `memory-rule` resolves correctly.
+  - The cantrip, map and memory-rule loaders filtered `is_active` in SQL, so a
+    resource that was off could never reach the tag check that would have turned
+    it on. Loaders now select candidates and let the hierarchy decide.
+
+- **`<#map-...#>` was not what selected a map.** Because the tag never matched,
+  selection fell through to the Active flag, so the first active tagged map won
+  on *any* request carrying *any* tag — including an unrelated cantrip tag. Maps
+  and memory rules now match on their own tag only, with the user's explicit
+  default as the fallback.
+
+- **The `if resource.tag and tags:` pre-check bypassed the hierarchy.** When a
+  request carried no tags at all, the `else` branch activated the resource
+  unconditionally, ignoring its Active flag. Every activation site now calls
+  `should_activate_resource()` with no pre-check.
+
+### Added
+
+- **The Activation Hierarchy**, documented in the README's "Activation
+  Hierarchy" section and pinned by `tests/test_activation_hierarchy.py`
+  for every resource type:
+
+  1. Off is the default.
+  2. Activation is a union — sources add, never subtract. There is deliberately
+     no way to express "off", so no source can countermand another.
+  3. Proximity wins: a tag in the system prompt, persona or message text
+     activates the resource regardless of its Active flag.
+  4. Active is the blanket source, used when no tag has spoken.
+
+  Maps and memory rules are the one documented exception, to rule 4 only: exactly
+  one can win, so Active cannot also mean "apply to everything" — blanket-running
+  a multi-stage map would silently multiply what every request costs. They use
+  `tag_matches_resource()` plus an explicit single-valued default.
+
+- **Sandbox copies.** A debug run can be forked into a sandbox that is re-runnable
+  from inside GitInTheVan, so iterating no longer means going back to the chat
+  client to resend. The fork copies the request *and* the conversation state it
+  read — memories, chat data, summary — into a conversation of its own, so runs
+  accumulate there and the original thread is never touched. Run, edit the
+  prompt, reset to the original state, or delete it and its state entirely.
+
+  Nothing is sent to the service the request originally came from: a sandbox run
+  starts here and its response is displayed here, so a chat platform that is not
+  expecting a response never receives an unsolicited one. The only outbound call
+  is to the user's own LLM endpoint.
+
+  Cantrip side effects are deliberately *not* suppressed — a dice roll should
+  happen, and it lands in the fork where it can be inspected and re-run.
+
+- **Per-cantrip persistent-store deltas.** Each cantrip now records what it wrote
+  to `chat_data`, `user_data` and `cantrip_data` as a before/after delta, and the
+  comparison view diffs them. Cantrips at one position run in sequence against a
+  shared store, so recording only the final state would attribute every change to
+  whichever ran last.
+
+### Changed
+
+- Debug runs carry `source` of `live`, `replay` or `sandbox`, shown in the run
+  list and in every comparison column, since a sandbox run reads a forked
+  conversation and a replay reads a throwaway one — neither is directly
+  comparable to live traffic without saying so.
+
+## [0.22.0] - 2026-08-24
+
+Phase 22, stages A-D. Debug records what it always appeared to record, and up to
+four runs can be compared side by side.
+
+### Added
+
+- **Per-run token, latency and endpoint accounting**
+  (`app/services/debug_metrics.py`). Every upstream call is recorded with its
+  endpoint, provider, requested and *resolved* model, failover attempt, latency,
+  status and token counts. Totals include **pipeline overhead** -- wall clock
+  minus time spent waiting on upstreams, which is what this proxy's own
+  processing costs and is not visible anywhere else. Also injected tokens,
+  tokens per second, and injection overhead as a percentage of the original
+  prompt.
+- **Token counts come from the upstream `usage` object**, which the app parsed
+  nowhere before now; it passed `usage` through to the client without reading
+  it. Endpoints that return no usage fall back to the char/4 estimator and the
+  run is labelled `estimated`. A run whose calls disagree reports `mixed`. The
+  UI and both exports always show which, because comparing an estimate against a
+  measurement without saying so makes the comparison lie.
+- **Cantrip execution is recorded.** Name, id, position, trigger, execution
+  order, timeout, duration, a content hash of the code, the code itself, the
+  fields the cantrip changed, its `console.log` output, its tool result and any
+  error. Cantrips that were *considered and did not run* are recorded too --
+  "fired in run A, silent in run B" is the most useful cantrip comparison there
+  is, and it is invisible if only executions are stored.
+- **Map stages are recorded.** Per stage: index, resolved endpoint, endpoint
+  tag, model override, output mode, sticky flag, attached resources, the stage's
+  LLM call, its output, its reasoning and its verification result.
+- **Object identity on injections.** Lorebook injection now records which
+  entries matched, which lorebook each came from and their token cost; skills
+  and writing samples record ids, names and sizes instead of bare counts.
+- **Streaming requests produce a debug run.** They previously produced nothing
+  at all unless verification or driver-callable forced a stream-to-buffered
+  conversion, so a user whose client streams saw an empty Debug tab while the
+  pipeline worked normally.
+- **Saved runs.** A run can be pinned and named; pinned runs are exempt from the
+  rolling retention prune and from Clear All, so a comparison baseline cannot be
+  evicted by later traffic. Capped by a new admin setting, default 10.
+- **Replay.** Re-send a run's original messages through the current
+  configuration and compare the result against the original, without going back
+  to the chat client. The replay uses a synthetic conversation id so summaries,
+  conversation hashes and memory extraction cannot touch the real conversation,
+  and memory writes are skipped so a second replay does not read back what the
+  first one stored. Cantrip side effects are **not** sandboxed -- a cantrip that
+  writes user data or rolls dice runs again -- and the UI says so rather than
+  implying a safety that is not there.
+- **Side-by-side comparison** of two to four runs (`#/debug/compare`). A radio at
+  the top of each column selects the baseline; choosing a new one moves that run
+  to the first column and recomputes every diff against it without re-running
+  anything, which is what makes iterative A/B testing cheap. The selection and
+  baseline live in the URL, so a comparison is reloadable and shareable.
+- **Diffs** for the non-LLM components: cantrips added, removed, code-changed,
+  output-changed or trigger-changed; lorebook entry, skill and sample sets with
+  token deltas; pipeline stages present in only one run; verification pass/fail,
+  retries and per-violation changes; model, endpoint and provider differences;
+  and per-metric deltas. Text diffing adapts its granularity -- words for short
+  prose, lines for code and long output -- because a one-line response diffed by
+  line is a whole-block replace that reports 0% similarity and explains nothing.
+  All of it is computed server-side with `difflib`, so the screen, the Markdown
+  export and the JSON export share one implementation and none of it needs a new
+  dependency in either language.
+- **Export** a run or a comparison as JSON or Markdown
+  (`app/services/debug_export.py`). JSON is lossless and re-readable; Markdown
+  is a report. Code fences widen when the content contains fences of its own, so
+  a cantrip that emits Markdown does not break the document.
+- **GITV links.** Debug and comparison views link to the cantrips, lorebook
+  entries, skills, samples and maps a run touched, opening in a new tab so the
+  comparison survives. This also repairs the Packs page, which has always
+  written `#/cantrips?id=...` links that no page ever read.
+- **Admin controls for settings that had none.** `max_memory_size_mb`,
+  `max_script_size_kb`, `max_rule_size_kb` and `max_lorebook_size_kb` were
+  enforced but had no input. `url_blocklist` was enforced in two places but
+  appeared in neither the request nor the response model, so nothing could ever
+  set it and the check was dead on every install.
+- Runs are auto-labelled from what they activated (`map:Overthink + 3 cantrips`)
+  rather than being a column of identical timestamps. Single-run delete and
+  rename were added alongside the existing clear-all.
+
+### Fixed
+
+- **Reasoning and response content are no longer truncated.** Reasoning was cut
+  at 500 characters and stored response content at 10,000, so a comparison could
+  not show where two runs diverged -- the point of having one. Size is bounded
+  by a new admin cap on the serialized run instead, and when it bites the run is
+  *marked* as truncated with the reason, shedding the reconstructible per-stage
+  message snapshots first. A silent trim in a diffing tool is worse than none.
+- **Map runs stored empty verification data.** The map branch called
+  `_save_debug_exchange` without a verification result, so every map run
+  reported `has_verification: false`. The pipeline now returns its per-stage
+  results and the flag checks for an `approved` key rather than a truthy dict.
+- **Verification violations were stored as Python reprs.** `c.violations` is a
+  list of `VerificationJudgment` dataclasses serialized with
+  `json.dumps(default=str)`; the UI printed the repr raw and a diff would have
+  compared repr strings character by character.
+- `_do_forward_litellm` reported a hardcoded `0.0` elapsed time on both its
+  streaming and non-streaming paths.
+
+### Changed
+
+- `debug_capture`'s `item_id` and `item_name` parameters are populated. They
+  have existed since the stage system shipped and no call site had ever passed
+  either, so every stage stored `item_id: null`.
+- The trace carries `schema_version: 2`. Runs captured before this release are
+  read back with an empty run block rather than failing, and compare and export
+  handle them.
+- `Debug.svelte`'s stage timeline moved to a shared `RunColumn` component used
+  by both the single-run view and every comparison column, so the two cannot
+  drift apart. The metrics bar is likewise shared, as the same figures are shown
+  in both places.
+- One `downloadBlob` helper replaces the object-URL snippet that had been
+  copy-pasted into Admin, Lorebooks, Maps and Packs, one of which forgot to
+  revoke the URL.
+- `tests/conftest.py` drives its session-swapping from a single list instead of
+  two hand-maintained ones. A service module added to one and not the other
+  failed at query time with "no such table", a long way from the cause.
+
+### Known issues
+
+- **A tag on an active cantrip restricts nothing.** `_load_active_cantrips`
+  filters `is_active is True`, and `should_activate_resource` falls back to
+  `resource_is_active` when no tag matches, so every cantrip reaching the
+  activation loop activates. Lorebooks behave as the user guide describes --
+  `_apply_lorebook_injection` loads them with no `is_active` filter, so a tagged
+  inactive lorebook is switched on by its tag. The cantrip loader is the odd one
+  out. Pinned by a test rather than changed, since it alters behaviour for
+  existing installs.
+- Driver-callable turns still do nothing on map stages (carried from 0.20.3).
+
 ## [0.21.0] - 2026-08-24
 
 Resource identity for content packs: a map is now installed as the collection of

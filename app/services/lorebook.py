@@ -13,6 +13,12 @@ class MatchedEntry:
     position: str
     insertion_order: int
     name: str
+    # Provenance, so a debug trace can name which lorebook an injected entry
+    # came from and link back to it. Defaulted because callers that build entry
+    # dicts by hand (imports, tests) do not supply them.
+    lorebook_id: str = ""
+    lorebook_name: str = ""
+    entry_id: str = ""
 
 
 def parse_json_list(raw: str) -> list[str]:
@@ -152,4 +158,7 @@ def _to_matched_entry(entry: dict) -> MatchedEntry:
         position=entry.get("position", "before_last_message"),
         insertion_order=entry.get("insertion_order", 10),
         name=entry.get("name", ""),
+        lorebook_id=entry.get("lorebook_id", ""),
+        lorebook_name=entry.get("lorebook_name", ""),
+        entry_id=entry.get("entry_id", ""),
     )

@@ -1,6 +1,8 @@
 <script lang="ts">
   import { api } from '../api'
   import { onMount } from 'svelte'
+  import { routeParams } from '../stores'
+  import { downloadJson } from '../lib/download'
   import CodeEditor from '../lib/CodeEditor.svelte'
   import TagEditModal from '../lib/TagEditModal.svelte'
   import { withScroll } from '../lib/scroll'
@@ -290,17 +292,38 @@
   async function handleExport(id: string) {
     try {
       const data = await api.exportLorebook(id)
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${data.name || 'lorebook'}.json`
-      a.click()
-      URL.revokeObjectURL(url)
+      downloadJson(data, `${data.name || 'lorebook'}.json`)
     } catch (e: any) { error = e.message }
   }
 
-  onMount(load)
+  /**
+   * Open the lorebook named by `#/lorebooks?id=`, and scroll to the entry named
+   * by `?entry=` when the link came from a debug trace that matched one.
+   */
+  async function openFromRoute() {
+    const id = $routeParams.params.id
+    if (!id) return
+    const match = lorebooks.find((lb: any) => lb.id === id)
+    if (!match) return
+    await openLorebook(match)
+
+    const entryId = $routeParams.params.entry
+    if (entryId) {
+      // After the entry list has rendered.
+      setTimeout(() => {
+        const el = document.querySelector(`[data-entry-id="${entryId}"]`)
+        el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 50)
+    }
+  }
+
+  onMount(async () => {
+    await load()
+    await openFromRoute()
+  })
+
+  // A link clicked while this page is already open changes only the hash.
+  $: if ($routeParams.params.id && lorebooks.length) openFromRoute()
 </script>
 
 <div class="page-header">

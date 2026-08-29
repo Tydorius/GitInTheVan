@@ -1,11 +1,12 @@
 <script lang="ts">
   import { api } from '../api'
   import { onMount, onDestroy } from 'svelte'
+  import { downloadFromApi } from '../lib/download'
   import CollapsibleCard from '../lib/CollapsibleCard.svelte'
   import { CollapseController } from '../lib/collapse'
 
   let tab = 'caps'
-  let collapse = new CollapseController('admin', ['caps-limits', 'caps-logging', 'caps-banner', 'logs-viewer', 'network-ssl', 'update-panel', 'backup-schedule', 'backup-list'])
+  let collapse = new CollapseController('admin', ['caps-limits', 'caps-sizes', 'caps-debug', 'caps-blocklist', 'caps-logging', 'caps-banner', 'logs-viewer', 'network-ssl', 'update-panel', 'backup-schedule', 'backup-list'])
   let loading = true
   let error = ''
   let saved = false
@@ -30,6 +31,16 @@
     max_map_stages: 3,
     rate_limit_proxy_per_min: 60,
     rate_limit_api_per_min: 120,
+    // Content size limits and the URL blocklist were wired through the API and
+    // enforced in the pipeline, but had no control here -- the blocklist had no
+    // API field at all, so it was empty on every install and its check was dead.
+    max_memory_size_mb: 50,
+    max_script_size_kb: 50,
+    max_rule_size_kb: 25,
+    max_lorebook_size_kb: 500,
+    max_saved_debug_runs: 10,
+    max_debug_exchange_kb: 512,
+    url_blocklist: '',
     runtime_log_level: '',
   }
 
@@ -77,6 +88,13 @@
         max_map_stages: adminSettings.max_map_stages,
         rate_limit_proxy_per_min: adminSettings.rate_limit_proxy_per_min,
         rate_limit_api_per_min: adminSettings.rate_limit_api_per_min,
+        max_memory_size_mb: adminSettings.max_memory_size_mb,
+        max_script_size_kb: adminSettings.max_script_size_kb,
+        max_rule_size_kb: adminSettings.max_rule_size_kb,
+        max_lorebook_size_kb: adminSettings.max_lorebook_size_kb,
+        max_saved_debug_runs: adminSettings.max_saved_debug_runs,
+        max_debug_exchange_kb: adminSettings.max_debug_exchange_kb,
+        url_blocklist: adminSettings.url_blocklist || '',
         runtime_log_level: adminSettings.runtime_log_level || '',
       }
       logLevelInput = adminSettings.runtime_log_level || ''
@@ -192,18 +210,10 @@
   async function downloadBackupEntry(id: string, filePath: string) {
     backupError = ''
     try {
-      const token = localStorage.getItem('gitv_token')
-      const resp = await fetch(`/api/admin/backup/download/${id}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-      if (!resp.ok) throw new Error('Download failed')
-      const blob = await resp.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = filePath.split(/[\\/]/).pop() || 'backup'
-      a.click()
-      URL.revokeObjectURL(url)
+      await downloadFromApi(
+        `/api/admin/backup/download/${id}`,
+        filePath.split(/[\\/]/).pop() || 'backup',
+      )
     } catch (e: any) { backupError = e.message }
   }
 
@@ -453,6 +463,71 @@
         <label for="cap-api-rl">Rate Limit: Management API (req/min)</label>
         <input id="cap-api-rl" type="number" bind:value={capsForm.rate_limit_api_per_min} min="0" />
       </div>
+    </div>
+    <button class="primary" onclick={saveCaps}>Save</button>
+  </CollapsibleCard>
+
+  <CollapsibleCard title="Content Size Limits" cardKey="caps-sizes" {collapse}>
+    <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
+      Maximum size of user-authored content. Enforced when a resource is created or
+      updated, and when a content pack is installed.
+    </p>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="cap-memory">Max Memory Store (MB per user)</label>
+        <input id="cap-memory" type="number" bind:value={capsForm.max_memory_size_mb} min="1" />
+      </div>
+      <div class="form-group">
+        <label for="cap-script">Max Cantrip Code (KB)</label>
+        <input id="cap-script" type="number" bind:value={capsForm.max_script_size_kb} min="1" />
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="cap-rule">Max Verification Rule (KB)</label>
+        <input id="cap-rule" type="number" bind:value={capsForm.max_rule_size_kb} min="1" />
+      </div>
+      <div class="form-group">
+        <label for="cap-lorebook">Max Lorebook (KB)</label>
+        <input id="cap-lorebook" type="number" bind:value={capsForm.max_lorebook_size_kb} min="1" />
+      </div>
+    </div>
+    <button class="primary" onclick={saveCaps}>Save</button>
+  </CollapsibleCard>
+
+  <CollapsibleCard title="Debug Runs" cardKey="caps-debug" {collapse}>
+    <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
+      Users capture debug runs by enabling Debug Mode in their own Settings. Recent runs
+      are pruned automatically; saved runs are exempt so a comparison baseline is not
+      lost to later traffic.
+    </p>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="cap-saved-runs">Max Saved Runs (per user)</label>
+        <input id="cap-saved-runs" type="number" bind:value={capsForm.max_saved_debug_runs} min="0" />
+      </div>
+      <div class="form-group">
+        <label for="cap-debug-kb">Max Size Per Run (KB)</label>
+        <input id="cap-debug-kb" type="number" bind:value={capsForm.max_debug_exchange_kb} min="1" />
+      </div>
+    </div>
+    <p style="color: var(--text-dim); font-size: 12px;">
+      A run larger than the size limit keeps its reasoning, cantrip output and metrics;
+      the per-stage message snapshots are dropped first and the run is marked as
+      truncated rather than being silently trimmed.
+    </p>
+    <button class="primary" onclick={saveCaps}>Save</button>
+  </CollapsibleCard>
+
+  <CollapsibleCard title="URL Blocklist" cardKey="caps-blocklist" {collapse}>
+    <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
+      Comma-separated domains that user content may not reference and that endpoints may
+      not point at. Leave blank to allow everything.
+    </p>
+    <div class="form-group">
+      <label for="cap-blocklist">Blocked Domains</label>
+      <input id="cap-blocklist" type="text" bind:value={capsForm.url_blocklist}
+             placeholder="evil.example, tracker.example.net" />
     </div>
     <button class="primary" onclick={saveCaps}>Save</button>
   </CollapsibleCard>

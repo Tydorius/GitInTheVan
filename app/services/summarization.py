@@ -5,7 +5,7 @@ import logging
 from typing import Any
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
@@ -276,9 +276,14 @@ async def resolve_memory_rule(
     Rules are evaluated in execution_order. Tagged rules are checked first,
     then untagged (default) rules. Returns None if no rules match.
     """
+    # Candidates, not decisions: a tagged inactive rule must reach the tag check
+    # for its tag to be able to select it.
     result = await db.execute(
         select(MemoryRule)
-        .where(MemoryRule.user_id == user_id, MemoryRule.is_active.is_(True))
+        .where(
+            MemoryRule.user_id == user_id,
+            or_(MemoryRule.is_active.is_(True), MemoryRule.tag != ""),
+        )
         .order_by(MemoryRule.execution_order, MemoryRule.created_at)
     )
     all_rules = list(result.scalars().all())
@@ -286,19 +291,23 @@ async def resolve_memory_rule(
     if not all_rules:
         return None
 
-    from app.services.tagging import should_activate_resource
+    from app.services.tagging import tag_matches_resource
 
     tagged_rule = None
     default_rule = None
 
+    # Match-only for the tagged branch, as for maps: one rule wins, so the Active
+    # flag cannot also mean "apply to everything" without the first active tagged
+    # rule hijacking every request that carries any tag. The untagged active rule
+    # is the blanket source here.
     for rule in all_rules:
-        if rule.tag and tags:
-            if should_activate_resource(
-                rule.tag, "memory-rule", rule.is_active, False, rule.user_id, user_id, tags
+        if rule.tag:
+            if tagged_rule is None and tag_matches_resource(
+                rule.tag, "memory-rule", False, rule.user_id, user_id, tags or []
             ):
                 tagged_rule = rule
                 break
-        elif not rule.tag and not default_rule:
+        elif rule.is_active and not default_rule:
             default_rule = rule
 
     return tagged_rule or default_rule

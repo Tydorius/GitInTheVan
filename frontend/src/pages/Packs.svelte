@@ -2,6 +2,7 @@
   import { api, getToken } from '../api'
   import { onMount } from 'svelte'
   import { isAdmin } from '../stores'
+  import { downloadBlob } from '../lib/download'
 
   let repos: any[] = []
   let installed: any[] = []
@@ -204,12 +205,10 @@
     creatingPack = true
     try {
       const blob = await api.createPack({ ...packMeta, resources })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${(packMeta.pack_name || 'content-pack').toLowerCase().replace(/\s+/g, '-')}.zip`
-      a.click()
-      URL.revokeObjectURL(url)
+      downloadBlob(
+        blob,
+        `${(packMeta.pack_name || 'content-pack').toLowerCase().replace(/\s+/g, '-')}.zip`,
+      )
     } catch (e: any) { error = e.message }
     finally { creatingPack = false }
   }

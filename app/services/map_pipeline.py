@@ -3,10 +3,11 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import time
 from typing import Any
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 
 from app.database import async_session
@@ -23,9 +24,11 @@ async def resolve_map(user_id: str, tags: list | None) -> Map | None:
     Returns None if no maps match.
     """
     async with async_session() as db:
+        # Candidates, not decisions: a tagged inactive map must reach the tag
+        # check for its tag to be able to select it.
         result = await db.execute(
             select(Map)
-            .where(Map.user_id == user_id, Map.is_active.is_(True))
+            .where(Map.user_id == user_id, or_(Map.is_active.is_(True), Map.tag != ""))
             .options(selectinload(Map.stages).selectinload(MapStage.resources))
             .order_by(Map.updated_at)
         )
@@ -34,16 +37,20 @@ async def resolve_map(user_id: str, tags: list | None) -> Map | None:
         if not all_maps:
             return None
 
-        from app.services.tagging import should_activate_resource
+        from app.services.tagging import tag_matches_resource
 
+        # Match-only, deliberately. should_activate_resource falls back to the
+        # Active flag when no tag matches, which here meant the first active
+        # tagged map won on any request carrying any tag at all -- including an
+        # unrelated cantrip tag. A map is selected by its own tag or by the
+        # user's explicit default, never by accident.
         tagged_map = None
         for m in all_maps:
-            if m.tag and tags:
-                if should_activate_resource(
-                    m.tag, "map", m.is_active, m.is_public, m.user_id, user_id, tags
-                ):
-                    tagged_map = m
-                    break
+            if tag_matches_resource(
+                m.tag, "map", m.is_public, m.user_id, user_id, tags or []
+            ):
+                tagged_map = m
+                break
 
         if tagged_map:
             return tagged_map
@@ -483,6 +490,7 @@ async def _forward_stage_llm(
     endpoints: list[Endpoint],
     model: str,
     timeout: httpx.Timeout,
+    stage_index: int | None = None,
 ) -> tuple[dict[str, Any], int]:
     """Forward a request to the stage's LLM endpoint(s) with failover.
 
@@ -497,6 +505,8 @@ async def _forward_stage_llm(
 
     if model:
         forward_body["model"] = model
+
+    from app.services.debug_metrics import PURPOSE_MAP_STAGE, record_llm_call
 
     for idx, endpoint in enumerate(endpoints):
         api_base_path = endpoint.api_base_path or ""
@@ -513,6 +523,7 @@ async def _forward_stage_llm(
 
         body_bytes = json.dumps(forward_body).encode()
 
+        started = time.monotonic()
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 resp = await client.post(url, content=body_bytes, headers=headers)
@@ -522,6 +533,23 @@ async def _forward_stage_llm(
             except Exception:
                 response_data = {"error": {"message": resp.text[:500]}}
 
+            # This forwarder bypasses every instrument in proxy.py, which is why
+            # map stages were invisible to Debug entirely.
+            record_llm_call(
+                body_json,
+                purpose=PURPOSE_MAP_STAGE,
+                latency_ms=(time.monotonic() - started) * 1000.0,
+                status_code=resp.status_code,
+                response_data=response_data,
+                messages=forward_body.get("messages"),
+                stage_index=stage_index,
+                endpoint_id=endpoint.id,
+                endpoint_name=endpoint.name,
+                provider=endpoint.provider or "",
+                model_requested=forward_body.get("model", ""),
+                failover_attempt=idx,
+            )
+
             if resp.status_code == 200:
                 return response_data, 200
 
@@ -529,14 +557,58 @@ async def _forward_stage_llm(
                 "Map stage failover: endpoint '%s' returned %d, trying next",
                 endpoint.name, resp.status_code,
             )
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "Map stage failover: endpoint '%s' raised an exception, trying next",
                 endpoint.name,
             )
+            record_llm_call(
+                body_json,
+                purpose=PURPOSE_MAP_STAGE,
+                latency_ms=(time.monotonic() - started) * 1000.0,
+                status_code=0,
+                response_data=None,
+                messages=forward_body.get("messages"),
+                stage_index=stage_index,
+                endpoint_id=endpoint.id,
+                endpoint_name=endpoint.name,
+                provider=endpoint.provider or "",
+                model_requested=forward_body.get("model", ""),
+                failover_attempt=idx,
+                error=f"{type(exc).__name__}: {exc}"[:500],
+            )
 
     logger.warning("Map stage failover: all %d endpoint(s) exhausted", len(endpoints))
     return ({"error": {"message": "All stage endpoints failed"}}, 503)
+
+
+class _MapVerificationResult:
+    """Adapter presenting per-stage verification as a VerificationLoopResult.
+
+    The map pipeline verifies each stage independently and has no retry loop, so
+    there is no real loop result to hand over. Rather than teach
+    _save_debug_exchange about a second shape, present the stage outcomes in the
+    shape it already reads. ``check_history`` entries expose ``approved``,
+    ``violations`` and ``judgments``, which is all it touches.
+    """
+
+    class _Check:
+        def __init__(self, entry: dict[str, Any]) -> None:
+            self.approved = entry["approved"]
+            self.violations = (
+                [] if entry["approved"]
+                else [{
+                    "stage": entry["stage_name"],
+                    "stage_index": entry["stage_index"],
+                    "detail": entry["reason"],
+                }]
+            )
+            self.judgments: list[Any] = []
+
+    def __init__(self, stage_results: list[dict[str, Any]]) -> None:
+        self.approved = all(r["approved"] for r in stage_results)
+        self.retries_used = 0
+        self.check_history = [self._Check(r) for r in stage_results]
 
 
 async def run_map_pipeline(
@@ -574,6 +646,14 @@ async def run_map_pipeline(
         "Map pipeline '%s': %d stages (cap=%d)",
         map_obj.name, len(stages), caps["max_map_stages"],
     )
+
+    from app.services.debug import debug_capture, debug_capture_response
+    debug_on = bool(body_json.get("_gitv_debug"))
+
+    # Collected so the map branch can hand a real verification result to
+    # _save_debug_exchange; without it every map run stored an empty
+    # verification_data and reported has_verification=False.
+    stage_verifications: list[dict[str, Any]] = []
 
     sticky_context: list[dict[str, str]] = []
 
@@ -642,6 +722,48 @@ async def run_map_pipeline(
                 internal_chat_id=body_json.get("_gitv_chat_id", ""),
                 only_ids=stage_cantrip_ids,
             )
+            if debug_on:
+                ran = [
+                    c for c in body_json.get("_gitv_debug", {}).get("run", {}).get("cantrips", [])
+                    if c.get("id") in stage_cantrip_ids and c.get("triggered")
+                ]
+                debug_capture(
+                    body_json, "map_stage_cantrips",
+                    f"Stage {stage_idx + 1} Cantrips: {stage.name}",
+                    item_id=stage.id, item_name=stage.name,
+                    detail=f"{len(ran)} of {len(stage_cantrip_ids)} ran",
+                    metadata={
+                        "stage_index": stage_idx,
+                        "ran": [{"id": c["id"], "name": c["name"]} for c in ran],
+                    },
+                )
+
+        if debug_on:
+            debug_capture(
+                body_json, "map_stage", f"Map Stage {stage_idx + 1}: {stage.name}",
+                item_id=stage.id, item_name=stage.name,
+                detail=f"{len(active_resources)} resource(s), output mode '{stage.output_mode}'",
+                setting="endpoint", setting_value=endpoints[0].name if endpoints else "",
+                metadata={
+                    "stage_index": stage_idx,
+                    "map_id": map_obj.id,
+                    "map_name": map_obj.name,
+                    "endpoint_tag": getattr(stage, "endpoint_tag", "") or "",
+                    "endpoint_resolved": endpoints[0].name if endpoints else "",
+                    "model_override": model or "",
+                    "output_mode": stage.output_mode,
+                    "verification_enabled": stage.verification_enabled,
+                    "driver_callable_turns": stage.driver_callable_turns,
+                    "resources": [
+                        {
+                            "id": r.resource_id,
+                            "type": r.resource_type,
+                            "sticky": bool(r.sticky),
+                        }
+                        for r in active_resources
+                    ],
+                },
+            )
 
         if stage.driver_callable_turns > 0:
             # NOT IMPLEMENTED under maps. These flags are only read by
@@ -663,7 +785,9 @@ async def run_map_pipeline(
                 stage.driver_callable_turns, caps["max_driver_callable_turns"]
             )
 
-        response_data, status_code = await _forward_stage_llm(body_json, endpoints, model, timeout)
+        response_data, status_code = await _forward_stage_llm(
+            body_json, endpoints, model, timeout, stage_index=stage_idx
+        )
 
         if status_code != 200:
             logger.warning("Map stage '%s': LLM returned %d", stage.name, status_code)
@@ -671,12 +795,45 @@ async def run_map_pipeline(
 
         content = response_data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
+        if debug_on:
+            message = response_data.get("choices", [{}])[0].get("message", {})
+            thinking = message.get("reasoning_content") or message.get("thinking") or ""
+            debug_capture_response(
+                body_json, "map_stage_output", f"Stage {stage_idx + 1} Output: {stage.name}",
+                content_after=content,
+                detail=f"{len(content)} chars",
+                metadata={
+                    "stage_index": stage_idx,
+                    "stage_id": stage.id,
+                    "output_mode": stage.output_mode,
+                    **({"thinking": thinking} if thinking else {}),
+                },
+            )
+
         if stage.verification_enabled:
             approved, reason = await _verify_stage(content, stage, user_id)
             if not approved:
                 logger.warning(
                     "Map stage '%s': verification failed after retries: %s. Continuing to next stage.",
                     stage.name, reason,
+                )
+            stage_verifications.append({
+                "stage_index": stage_idx,
+                "stage_id": stage.id,
+                "stage_name": stage.name,
+                "approved": approved,
+                "reason": reason,
+            })
+            if debug_on:
+                debug_capture_response(
+                    body_json, "map_stage_verification",
+                    f"Stage {stage_idx + 1} Verification: {stage.name}",
+                    detail="Approved" if approved else f"Rejected: {reason}",
+                    metadata={
+                        "stage_index": stage_idx,
+                        "approved": approved,
+                        "reason": reason,
+                    },
                 )
 
         if forbidden_enabled:
@@ -723,5 +880,11 @@ async def run_map_pipeline(
             body_json = await maybe_summarize_scenario(body_json, user_id, "post")
         except Exception:
             logger.exception("Scenario summarization (POST, map) failed")
+
+    # Handed to _save_debug_exchange by the map branch in proxy.py. Shaped like
+    # VerificationLoopResult so the one consumer needs no special case: a map
+    # "passes" only if every verified stage did.
+    if stage_verifications:
+        body_json["_gitv_map_vresult"] = _MapVerificationResult(stage_verifications)
 
     return response_data

@@ -23,7 +23,9 @@ Licensed under Mozilla Public License 2.0.
 [Conversation Summarization](#Conversation-Summarization)  
 [Context Budgeting](#Context-Budgeting)  
 [Memory Rules](#Memory-Rules)  
+[Activation Hierarchy](#Activation-Hierarchy)  
 [Debug Mode](#Debug-Mode)  
+[Comparing Runs](#Comparing-Runs)  
 [Command Tags](#Command-Tags)  
 [Maps](#Maps)  
 [Development](#Development)
@@ -80,6 +82,7 @@ I will stress that I am not going to replicate or 100% replace Lorebary's functi
 - **Content Discovery and Sync** — Link any git repository as a content pack. Browse, install (linked with update tracking), or fork (independent copy) cantrips, lorebooks, skills, scenario rules, and maps. Safety scanner checks for malicious code. Admins can link local filesystem folders as global content sources. Create your own packs from existing resources via the Pack Creator
 - **Skills & Writing Samples** — Reusable instruction sets and style references attached to endpoints. Skills inject behavioral directives into the system message; Writing Samples inject style references before the last user message
 - **Diagnostics** — Automated endpoint and configuration checker for troubleshooting connectivity issues
+- **Per-Server Sharing** — Mark a cantrip, lorebook or map public to share it with other users on the same instance. Public resources are browsable by tag and importable by any user, while private resources stay owner-only. Toggle per resource in its editor or in bulk from the Tags and Groups page
 - **Security Hardening** — Rate limiting (proxy + management API), configurable CORS origins, password strength validation, request body size limits, audit logging for admin actions, configurable JWT expiration, global caps for driver-callable turns and verification retries
 - **Per-Endpoint API Keys** — Create multiple `gitv_` API keys per user, each mapped to a specific endpoint for multi-platform routing. Managed on each endpoint card in the UI
 - **Admin Panel** — Global caps (turns/retries use min of user/global), Users tab (create, edit, disable, delete, password reset, key regeneration), Update tab (in-app version check with GitHub release notifications and download links), Backup tab (scheduled and on-demand database backups, download/restore/delete, dialect-aware for SQLite/PostgreSQL/MariaDB), read-only audit logs, read-only server logs with runtime log level override without restart. Red badge on Admin sidebar button when updates are available
@@ -90,7 +93,8 @@ I will stress that I am not going to replicate or 100% replace Lorebary's functi
 - **LiteLLM Provider Compatibility** — Optional provider selection on endpoints enables LiteLLM integration for automatic parameter translation, auth format handling, and response normalization across 100+ LLM providers (Gemini, OpenAI, Anthropic, OpenRouter, DeepSeek, xAI, and more). Endpoints without a provider set use raw HTTP passthrough (backward compatible)
 - **Context Budgeting** — Weighted token budget allocation across cantrips and lorebooks. Cantrips access their share via `context.budget` and can dynamically scale output detail (full/summary/bullets) based on remaining tokens. Configurable per-user budget percentage and context window override
 - **Memory Rules** — Taggable per-conversation summarization overrides. Rules can override the token threshold, keep-recent count, prompt, or disable summarization entirely for specific conversations. Activate via `<#memory-rule-tag#>` tags
-- **Debug Mode** — Stage-based pipeline timeline capturing 16 pipeline stages (memory injection, lorebooks, cantrips, skills, scenario summarization, verification, and more) with before/after message snapshots, metadata (keywords matched, budget allocation, tool calls, cantrip debug logs), and per-stage change detection. Available as a tab under Dashboard, gated by Debug Mode toggle in Settings
+- **Debug Mode** — Stage-based pipeline timeline covering every transformation, plus the objects that acted on it: which cantrips ran (with their code, output and logs) and which did not, which lorebook entries matched and from where, which skills were injected, and each map stage's endpoint, output and verification. Records real token counts from the endpoint's usage response, per-call latency, and pipeline overhead — the time the proxy itself cost. Reasoning is kept in full. Streaming and non-streaming requests are both captured. Available as a tab under Dashboard, gated by the Debug Mode toggle in Settings
+- **Run Comparison** — Put up to four debug runs side by side and diff them against a baseline you pick with a radio button, switching baseline freely without re-running anything. Diffs the non-LLM components directly — triggered cantrips, cantrip code, lorebook entries, skills, pass/fail verification results, model and endpoint differences — alongside token and latency deltas. **Replay** re-sends a run through your current configuration so you can change one cantrip and compare, without going back to your chat client. Save runs to pin them against retention, and export a run or comparison as JSON or Markdown
 - **Thinking/Reasoning Output** — `preserve_thinking` setting controls whether `<think>` blocks and `reasoning_content` fields are stripped from or preserved in client-facing responses. Verification tester displays model thinking output alongside judgment results. Debug pipeline captures thinking content in metadata
 - **Update System** — In-app update notifications: checks GitHub releases automatically, shows red badge on Admin sidebar button when updates are available. Admin Update tab displays version comparison, release notes, and download links with step-by-step instructions. Platform-specific update scripts (Windows/macOS/Linux) handle server stop, database backup, dependency reinstall, frontend rebuild, and server restart, serving a maintenance page on the server's port for the duration of the update
 
@@ -134,13 +138,14 @@ GITV_DATABASE_URL=mysql+aiomysql://user:password@localhost:3306/gitinthevan
 
 **Migrations** are dialect-aware and run automatically on startup. Advisory locking prevents concurrent migration races when multiple application instances start against the same database simultaneously.
 
-> **Note:** PostgreSQL and MariaDB support is implemented and unit-tested but has **not yet been tested against live database servers**. SQLite is the battle-tested default. Docker Compose configurations for all three backends are planned as part of the Docker distribution.
+> **Note:** SQLite is the default and needs no setup. PostgreSQL and MariaDB are supported and have been verified against live servers — full migration and CRUD runs against ephemeral test containers for each. Docker Compose files ship for all three backends: `docker-compose.sqlite.yml`, `docker-compose.postgres.yml` and `docker-compose.mariadb.yml`.
 
 ## Upcoming Features
 
 The following are planned for future releases.
 
-- **Per-server sharing** — Share resources among users on the same GitInTheVan instance via public flags
+- **Debug Comparison** — Compare up to four debug runs side by side, diff the cantrips, lorebooks and verification results between them, and track token and latency cost per run
+- **Per-Object Version History** — Snapshot a cantrip, lorebook or skill before each edit, then copy, download or restore an earlier version without touching anything else
 - **Cantrip Chaining** — Multi-turn LLM interactions for complex systems like dice resolution and critical tables
 - **Natural-Language Cantrip Generator** — Describe what you want in plain English and an LLM generates the cantrip code or lorebook
 
@@ -559,6 +564,72 @@ Use your GitInTheVan HTTPS address as the API URL, for example `https://YOUR-LAN
 > connection misbehaves, delete it and build a new one rather than adjusting it in place. This affected the original
 > diagnosis of this integration: the setup appeared broken when the settings simply were not taking effect.
 
+## Activation Hierarchy
+
+Every lorebook, cantrip, verification rule, map and memory rule is either *on* or
+*off* for a given request. One set of rules decides that, for every resource type,
+and they are fixed.
+
+**1. Off is the default.** Nothing participates unless something turns it on. With
+nothing turned on, GitInTheVan is a plain proxy that forwards your request
+unchanged.
+
+**2. Activation only ever adds. Nothing deactivates.** There is deliberately no way
+to express "off" — only "not yet on". No source can countermand another, so a
+resource you asked for cannot be silently suppressed by something else.
+
+**3. The closer to the message, the more authority.** A `<#type-name#>` tag in your
+system prompt, character persona or message text is the most direct statement of
+intent you can make, so it **always** activates that resource — whatever its Active
+setting says.
+
+**4. The Active checkbox is the blanket switch.** It applies when no tag has spoken
+for that resource. **Active means "on for every request", not "available".**
+
+### What that means in practice
+
+| Active | Tag set | Tag in your message | Runs? |
+|---|---|---|---|
+| off | — | — | No |
+| off | `dice` | — | No |
+| off | `dice` | `<#cantrip-dice#>` | **Yes** — rule 3 |
+| on | — | — | **Yes** — rule 4 |
+| on | `dice` | — | **Yes** — rule 4; a tag never restricts |
+| on | `dice` | `<#cantrip-dice#>` | **Yes** |
+
+**To make something tag-only, turn Active off.** That is the whole mechanism: Active
+off plus a tag means "run this only when I ask for it by name".
+
+### Tag format
+
+```
+<#type-name#>              e.g. <#cantrip-dice#>, <#lore-ashfall#>
+<#owner-type-name#>        another user's public resource
+<#taggroup-name#>          activates every member of a group
+```
+
+Recognised types: `lore`, `cantrip`, `verify`, `map`, `memory-rule`, `taggroup`.
+Tags are stripped from your message before it reaches the LLM.
+
+### Maps and memory rules are chosen, not stacked
+
+Only one map and one memory rule can apply to a request, so for these two the
+Active checkbox does **not** mean "apply to everything" — a map is a multi-stage
+pipeline, and running one on every message would quietly multiply what each message
+costs you. They obey rules 1 to 3 exactly as everything else does, but their blanket
+source is a single explicit choice instead:
+
+- **Maps** — activated by `<#map-name#>`, or by the default map in your Settings.
+- **Memory rules** — the first rule whose tag you used, otherwise your untagged
+  default rule.
+
+### Command tags are separate
+
+`<VERIFY:off>` and friends switch *pipeline features* on and off for a request. They
+are the one place where turning something **off** is possible, and they are
+deliberately a separate system from resource activation. See
+[Command Tags](#Command-Tags).
+
 ## Cantrips (JavaScript Lorebooks)
 
 Cantrips are sandboxed JavaScript snippets that run in a Deno subprocess with no network, filesystem, or environment access. They are compatible with existing JanitorAI scripts.
@@ -853,27 +924,143 @@ Maps are managed on the **Maps** page and integrate with content packs (`maps/` 
 
 ## Debug Mode
 
-Debug Mode captures pipeline data for the last 20 exchanges as an expandable timeline, showing every transformation step with before/after snapshots.
+Debug Mode captures each request through the proxy as an expandable timeline, with
+every transformation step, the objects that acted on it, and what the run cost in
+tokens and time.
 
 ### What It Captures
 
-Each captured exchange shows a **Pipeline Timeline** with 16 capture points:
+Each captured run shows a **Pipeline Timeline** covering:
 
-- **Request-side stages**: Memory injection, scenario summarization (pre/post), lorebook injection, skills injection, budget preparation, cantrip processing, conversation summarization, writing samples, driver-callable tools, prefill normalization, bypass encoding
-- **Response-side stages**: Pre-Navigator cantrips, forbidden words scan, verification checks, post-Navigator cantrips, memory extraction, bypass decoding
-- Each stage shows: label, detail summary, "changed" badge if messages were modified, before/after message diff, metadata (matched keywords, memory keys, budget allocation, tool calls, cantrip debug logs), and the setting that controls it
-- LLM thinking/reasoning content captured in metadata for models that return `reasoning_content`
-- Tags detected in the request are shown at the top of the timeline
+- **Request-side stages**: memory injection, scenario summarization (pre/post),
+  lorebook injection, skills injection, budget preparation, cantrip processing,
+  conversation summarization, writing samples, driver-callable tools, prefill
+  normalization, bypass encoding
+- **Response-side stages**: pre-Navigator cantrips, forbidden words scan,
+  verification checks, post-Navigator cantrips, memory extraction, bypass decoding
+- **Map stages**: each stage's resolved endpoint, model override, output mode,
+  attached resources, output, reasoning and verification result
+- **Cantrips**: every cantrip that ran, with its code, a content hash of that code,
+  duration, the fields it changed, its `console.log` output and any error. Cantrips
+  that were considered and did **not** run are recorded too, with the reason
+- **Objects, not counts**: which lorebook entries matched and which lorebook each
+  came from, which skills and samples were injected, and what each cost in tokens.
+  Every one links out to its editor in a new tab
+- **Reasoning** in full, for models that return `reasoning_content`
+
+Streaming and non-streaming requests are both captured.
+
+### Metrics
+
+Every run reports:
+
+| Metric | Meaning |
+|---|---|
+| Tokens | Prompt plus completion across every upstream call |
+| Injected tokens | What the pipeline added to the prompt: lorebooks, skills, memory, samples |
+| Total time | Wall clock for the whole request |
+| **Pipeline overhead** | Total time minus time waiting on upstreams — what GitInTheVan itself cost |
+| Tokens/second | Completion tokens divided by upstream time |
+| LLM calls | Upstream requests, including map stages, verification judges and failover retries |
+
+Token counts come from the endpoint's `usage` response when it sends one. When it
+does not, they are estimated from content length and the run is labelled
+**estimated**; a run whose calls disagree is labelled **mixed**. The label is always
+shown, because comparing an estimate against a measurement without saying so would
+be misleading.
 
 ### Using Debug Mode
 
 1. Enable **Debug Mode** in **Settings > Proxy Configuration**
 2. Send requests through the proxy as normal
 3. Open the **Debug** tab under **Dashboard**
-4. Select an exchange from the list to view the pipeline timeline
-5. Click any stage to expand it and see the before/after diff
+4. Select a run to view its timeline, metrics and objects
+5. Click any stage to expand it
 
-Debug exchanges are automatically pruned to the most recent 20 per user. Use **Clear All** to wipe all captured data. Old-format debug exchanges from prior versions are auto-migrated to the stage-based format.
+Runs are pruned to the most recent 20 per user. **Save** a run to pin it: saved runs
+are exempt from pruning and from **Clear All**, so a comparison baseline is not lost
+to later traffic. The number of saved runs per user is an admin setting (default 10).
+
+Runs from prior versions are auto-migrated and remain viewable; they simply carry no
+metrics, since none were recorded at the time.
+
+### Comparing Runs
+
+**Debug > Compare runs** puts up to four runs side by side.
+
+- Pick two to four runs, then choose a **baseline** with the radio at the top of any
+  column. The baseline moves to the first column and every diff recomputes against
+  it — no re-running, so you can change your reference point freely while iterating.
+- Non-LLM components are diffed directly: cantrips added, removed, code-changed,
+  output-changed or trigger-changed; lorebook entry, skill and sample sets with token
+  deltas; pipeline stages present in only one run; verification pass/fail, retries and
+  individual violations; and any difference in model, endpoint or provider.
+- Metrics show per-column deltas against the baseline, coloured by direction.
+- Response and reasoning are diffed as text, by word for short output and by line for
+  long output or code.
+- Anything a run touched links out to its editor **in a new tab**, so you keep the
+  comparison open while you go and change the thing it showed you.
+- The selection and baseline live in the URL, so a comparison can be reloaded or
+  shared.
+
+### Replay
+
+**Replay** re-sends a run's original messages through your *current* configuration
+and opens the result beside the original. This is what makes A/B iteration cheap:
+change a cantrip, replay, compare — without returning to your chat client.
+
+Replay uses a separate conversation id, so summaries, conversation hashes and memory
+extraction cannot touch the real conversation, and memory writes are skipped.
+
+> **Cantrip side effects are not sandboxed.** A cantrip that writes `user_data` or
+> `cantrip_data`, rolls dice, or advances a counter will do so again on every replay.
+
+### Sandbox Copies
+
+**Create sandbox copy** forks a run into something you can fire from inside
+GitInTheVan, as many times as you like.
+
+It copies the request *and* the conversation state that request read — memories,
+chat data, the summary — into a conversation of its own. Running the sandbox
+evolves that copy, so the second run sees what the first one wrote, exactly as a
+real conversation would. The chat it was forked from is never touched.
+
+- **Run** fires it and opens the resulting debug run.
+- **Edit prompt** changes what it sends, so you can vary the input as well as the
+  configuration.
+- **Reset** discards everything the runs accumulated and re-copies from the
+  original.
+- **Delete** removes the sandbox and its state. The original is untouched.
+
+Cantrip side effects are *not* suppressed, and that is deliberate: a dice roll or
+a balance change should happen, and it lands in the fork where you can inspect it
+and re-run without consequence.
+
+**Nothing is sent back to the service the request came from.** A sandbox run
+starts here and its response is displayed here. JanitorAI, Wyvern or whatever
+client produced the original request is not contacted and is not expecting to be
+— the only outbound call is to your own configured LLM endpoint, exactly as with
+any other request.
+
+#### Sandbox or replay?
+
+| | Replay | Sandbox |
+|---|---|---|
+| Runs | once | as often as you like |
+| Conversation state | read-only, thrown away | forked, and it evolves |
+| Prompt | fixed | editable |
+| Use it for | did my change alter this exact output? | iterating on a scenario |
+
+### Exporting
+
+A single run or a whole comparison can be exported as **JSON** or **Markdown**. JSON
+is lossless — the complete trace, including reasoning and cantrip code — so it can be
+kept, diffed offline or attached to a bug report. Markdown is a readable report.
+
+If a run exceeds the admin size limit, its per-stage message snapshots are dropped
+first and the run is explicitly **marked as truncated** with the reason. Reasoning,
+cantrip output and metrics are kept. Nothing is trimmed silently.
+
 
 ## Command Tags
 

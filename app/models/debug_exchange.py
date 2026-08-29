@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -28,5 +28,10 @@ class DebugExchange(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
+    # A saved run is exempt from the rolling retention prune and survives Clear
+    # All, so a comparison baseline cannot be evicted out from under the user.
+    saved: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+    label: Mapped[str] = mapped_column(String(128), default="", server_default="", nullable=False)
+    saved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped[User] = relationship()

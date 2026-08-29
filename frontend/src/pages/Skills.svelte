@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from '../api'
   import { onMount } from 'svelte'
+  import { routeParams } from '../stores'
   import CodeEditor from '../lib/CodeEditor.svelte'
   import { withScroll } from '../lib/scroll'
 
@@ -86,7 +87,27 @@
 
   $: filteredSkills = skills.filter(s => s.type === tab)
 
-  onMount(() => { load() })
+  /**
+   * Open the object named by `#/...?id=`.
+   *
+   * Links from the Debug and comparison views, and from the Packs page, carry
+   * the object's id. The query used to be stripped before any page saw it, so
+   * those links landed here with nothing selected.
+   */
+  function openFromRoute() {
+    const id = $routeParams.params.id
+    if (!id) return
+    const match = skills.find((item: any) => item.id === id)
+    if (match) startEdit(match)
+  }
+
+  onMount(async () => {
+    await load()
+    openFromRoute()
+  })
+
+  // A link clicked while this page is already open changes only the hash.
+  $: if ($routeParams.params.id && skills.length) openFromRoute()
 </script>
 
 <div class="page-header">

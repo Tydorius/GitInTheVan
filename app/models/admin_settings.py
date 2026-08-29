@@ -21,6 +21,8 @@ class AdminSettings(Base):
     max_script_size_kb: Mapped[int] = mapped_column(Integer, default=50, server_default="50", nullable=False)
     max_rule_size_kb: Mapped[int] = mapped_column(Integer, default=25, server_default="25", nullable=False)
     max_lorebook_size_kb: Mapped[int] = mapped_column(Integer, default=500, server_default="500", nullable=False)
+    max_saved_debug_runs: Mapped[int] = mapped_column(Integer, default=10, server_default="10", nullable=False)
+    max_debug_exchange_kb: Mapped[int] = mapped_column(Integer, default=512, server_default="512", nullable=False)
     url_blocklist: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
     runtime_log_level: Mapped[str] = mapped_column(String(16), default="", server_default="", nullable=False)
     site_banner: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)

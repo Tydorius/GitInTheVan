@@ -35,6 +35,8 @@ async def get_caps() -> dict[str, int]:
         "max_map_stages": s.max_map_stages,
         "rate_limit_proxy_per_min": s.rate_limit_proxy_per_min,
         "rate_limit_api_per_min": s.rate_limit_api_per_min,
+        "max_saved_debug_runs": s.max_saved_debug_runs,
+        "max_debug_exchange_kb": s.max_debug_exchange_kb,
     }
 
 

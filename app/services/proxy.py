@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -114,9 +115,17 @@ async def _resolve_target(
     return None
 
 
-async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
+async def forward_request(
+    request: Request, target: tuple | None = None
+) -> JSONResponse | StreamingResponse:
+    """Run the proxy pipeline for a request.
+
+    ``target`` pre-resolves routing, which replay supplies because it holds a
+    session rather than a proxy API key. Everything downstream is identical, so
+    a replayed run exercises the same pipeline as live traffic.
+    """
     try:
-        return await _forward_request_impl(request)
+        return await _forward_request_impl(request, target)
     except Exception as exc:
         logger.exception("Unhandled error in proxy pipeline")
         return JSONResponse(
@@ -130,8 +139,11 @@ async def forward_request(request: Request) -> JSONResponse | StreamingResponse:
         )
 
 
-async def _forward_request_impl(request: Request) -> JSONResponse | StreamingResponse:
-    target = await _resolve_target(request)
+async def _forward_request_impl(
+    request: Request, target: tuple | None = None
+) -> JSONResponse | StreamingResponse:
+    if target is None:
+        target = await _resolve_target(request)
 
     if target is None:
         return JSONResponse(
@@ -218,6 +230,10 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
         debug_on = await is_debug_mode(user_id)
         if debug_on:
             init_debug(body_json, tags)
+            # Wall-clock start. summarize_run subtracts the summed upstream
+            # latency from this to get the pipeline's own overhead, which is the
+            # one cost figure nothing else in the product surfaces.
+            body_json["_gitv_request_started"] = time.monotonic()
 
         from app.services.group_resolver import resolve_group_tags
         async with async_session() as group_db:
@@ -239,6 +255,27 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
 
         messages_for_conv = body_json.get("messages", [])
         internal_chat_id, is_new_conv = await resolve_conversation(messages_for_conv, user_id)
+
+        if body_json.get("_gitv_sandbox"):
+            # A sandbox owns a forked conversation: its memories, chat data and
+            # summary were copied at fork time and are keyed to this id. Writes
+            # are *allowed* and land in the fork, so a second run sees what the
+            # first one wrote. The conversation it was forked from is never
+            # resolved and never touched.
+            internal_chat_id = body_json.get("_gitv_sandbox_chat_id", "")
+            logger.info("Sandbox run %s in chat %s",
+                        body_json.get("_gitv_sandbox_id", "")[:8], internal_chat_id[:24])
+
+        elif body_json.get("_gitv_replay"):
+            # A replay resends messages the real conversation already contains,
+            # so resolve_conversation matches that conversation. Left alone it
+            # would write a second summary over it, re-extract its memories, and
+            # advance its rolling hash -- corrupting the very state the user is
+            # trying to hold still between A and B. A synthetic id keeps the
+            # read paths identical and the writes off to one side.
+            internal_chat_id = f"replay:{body_json.get('_gitv_replay_of', '')}"
+            logger.info("Replay of run %s: isolated as chat %s",
+                        body_json.get("_gitv_replay_of", "")[:8], internal_chat_id[:20])
 
         from app.services.command_tags import resolve_command_overrides
         command_overrides = await resolve_command_overrides(
@@ -290,16 +327,31 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
 
         body_json = await _apply_lorebook_injection(body_json, user_id, tags)
         if debug_on:
+            entries = body_json.pop("_gitv_matched_entries", [])
             debug_capture(body_json, "lorebook_injection", "Lorebook Injection",
-                detail="Lorebook entries processed",
-                metadata={"tags": [t.get("raw", "") for t in (tags or [])]})
+                detail=(
+                    f"{len(entries)} entr{'y' if len(entries) == 1 else 'ies'} matched"
+                    if entries else "No entries matched"
+                ),
+                metadata={
+                    "tags": [t.get("raw", "") for t in (tags or [])],
+                    "entries": entries,
+                    "tokens": sum(e.get("tokens", 0) for e in entries),
+                })
+        else:
+            body_json.pop("_gitv_matched_entries", None)
 
         if user_id and endpoint_id:
-            from app.services.skills import inject_skills, load_skills_for_endpoint
+            from app.services.skills import (
+                inject_skills,
+                load_skills_for_endpoint,
+                take_loaded_detail,
+            )
             async with async_session() as skills_db:
                 skill_contents, sample_contents = await load_skills_for_endpoint(
                     endpoint_id, user_id, skills_db
                 )
+            loaded_detail = take_loaded_detail(endpoint_id)
             if skill_contents:
                 await _flag_injection_content(user_id, "\n".join(skill_contents), "skills_injection")
                 body_json["messages"] = inject_skills(body_json["messages"], skill_contents)
@@ -309,7 +361,16 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
                 debug_capture(body_json, "skills_injection", "Skills Injection",
                     detail=f"{len(skill_contents)} skill(s), {len(sample_contents)} sample(s) loaded",
                     setting="endpoint_skills", setting_value=len(skill_contents) > 0,
-                    metadata={"skill_count": len(skill_contents), "sample_count": len(sample_contents)})
+                    metadata={
+                        "skill_count": len(skill_contents),
+                        "sample_count": len(sample_contents),
+                        # Bare counts cannot answer "which skill did this run
+                        # use that the other did not", and the per-item tokens
+                        # make the injection-cost breakdown attributable.
+                        "skills": [d for d in loaded_detail if d["type"] == "skill"],
+                        "samples": [d for d in loaded_detail if d["type"] == "sample"],
+                        "tokens": sum(d["tokens"] for d in loaded_detail),
+                    })
         elif debug_on:
             debug_capture(body_json, "skills_injection", "Skills Injection",
                 detail="No endpoint configured", setting="endpoint_skills", setting_value=False)
@@ -355,13 +416,23 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
                 internal_chat_id=internal_chat_id,
                 exclude_ids=stage_bound_cantrip_ids(map_active),
             )
+            if debug_on:
+                _capture_cantrip_pass(
+                    body_json, "pre_driver", "Cantrips (Global Pass, Pre-Map)"
+                )
             response_data = await run_map_pipeline(body_json, user_id, request_headers, map_active, map_timeout)
 
             if body_json.get("_gitv_chat_id"):
                 response_data = await _extract_response_memories(response_data, user_id, body_json)
 
             if body_json.get("_gitv_debug") and user_id:
-                await _save_debug_exchange(response_data, body_json, user_id)
+                # The map pipeline returns its own verification result; passing
+                # it through is what stops every map run storing empty
+                # verification_data (and reporting has_verification=False).
+                await _save_debug_exchange(
+                    response_data, body_json, user_id,
+                    vresult=body_json.pop("_gitv_map_vresult", None),
+                )
 
             if stream:
                 ux_settings = await _load_ux_settings(user_id)
@@ -376,6 +447,8 @@ async def _forward_request_impl(request: Request) -> JSONResponse | StreamingRes
             return JSONResponse(status_code=200, content=response_data)
 
         body_json = await process_cantrips(body_json, user_id, request_headers, tags, internal_chat_id=internal_chat_id)
+        if debug_on:
+            _capture_cantrip_pass(body_json, "pre_driver", "Cantrips (Pre-Driver)")
 
         body_json["_gitv_chat_id"] = internal_chat_id
         body_json["_gitv_messages_for_hash"] = body_json.get("messages", [])
@@ -687,6 +760,22 @@ async def _apply_lorebook_injection(
                     "Lorebook injection: %d entries matched for user %s", len(matched), user_id
                 )
 
+            # Which entries matched was computed here and thrown away, so the
+            # Debug timeline could only report a tag list. Stash it for the
+            # caller's capture rather than widening the return type, which has
+            # several call sites.
+            body_json["_gitv_matched_entries"] = [
+                {
+                    "lorebook_id": e.lorebook_id,
+                    "lorebook_name": e.lorebook_name,
+                    "entry_id": e.entry_id,
+                    "entry_name": e.name,
+                    "position": e.position,
+                    "tokens": max(1, len(e.content) // 4),
+                }
+                for e in matched
+            ]
+
             return body_json
     except Exception:
         logger.exception("Lorebook injection failed, forwarding original request")
@@ -732,6 +821,14 @@ async def _extract_response_memories(
 
     if cleaned != content:
         response_data["choices"][0]["message"]["content"] = cleaned
+
+    if chat_id and memories and body_json.get("_gitv_replay"):
+        # Guarded here rather than at the five call sites, so a new one cannot
+        # miss it. Replay must not persist memories: a second replay would read
+        # them back and inject them, so run B would differ from run A for a
+        # reason that has nothing to do with what the user changed.
+        logger.info("Replay: skipping %d memory write(s)", len(memories))
+        memories = {}
 
     if chat_id and memories:
         # LLM-output-derived write path, not a router — same control-char stripping
@@ -1031,14 +1128,14 @@ async def _save_debug_exchange(
             "check_history": [
                 {
                     "approved": c.approved,
-                    "violations": c.violations,
+                    "violations": _serialize_violations(c.violations),
                     "thinking": c.judgments[0].thinking if c.judgments else "",
                 }
                 for c in vresult.check_history
             ],
         }
         debug_capture_response(body_json, "verification", "Verification",
-            content_after=response_content[:500],
+            content_after=response_content,
             detail=f"{'Approved' if vresult.approved else 'Rejected'}, {vresult.retries_used} retry/retries",
             metadata=verification_data)
     elif body_json.get("_gitv_debug"):
@@ -1047,15 +1144,26 @@ async def _save_debug_exchange(
 
     if body_json.get("_gitv_bypass_method"):
         debug_capture_response(body_json, "bypass_decoding", "Bypass Decoding",
-            content_after=response_content[:500],
+            content_after=response_content,
             detail=f"Method: {body_json['_gitv_bypass_method']}")
 
+    # Content and reasoning are stored whole. A comparison built on text clipped
+    # at 500 characters cannot show where two runs diverged, which was the point.
+    # The size bound is applied to the serialized trace in capture_exchange.
     debug_capture_response(body_json, "llm_response", "LLM Response",
-        content_after=response_content[:500],
+        content_after=response_content,
         detail="Final response from upstream LLM",
-        metadata={"thinking": response_thinking[:500]} if response_thinking else None)
+        metadata={"thinking": response_thinking} if response_thinking else None)
 
     pipeline_data = body_json.get("_gitv_debug", {})
+
+    from app.services.debug_metrics import summarize_run
+    started = body_json.get("_gitv_request_started")
+    total_ms = (time.monotonic() - started) * 1000.0 if started else None
+    if isinstance(pipeline_data, dict):
+        pipeline_data.setdefault("run", {})["totals"] = summarize_run(
+            pipeline_data, total_latency_ms=total_ms
+        )
 
     await capture_exchange(
         user_id=user_id,
@@ -1065,6 +1173,27 @@ async def _save_debug_exchange(
         response_content=response_content,
         verification_data=verification_data,
     )
+
+
+def _serialize_violations(violations: Any) -> list[dict[str, Any]]:
+    """Convert VerificationJudgment dataclasses to plain dicts.
+
+    These used to reach the database through json.dumps(default=str), which
+    renders a dataclass as its Python repr. The UI printed that repr raw, and a
+    diff between two runs would have compared repr strings character by
+    character -- noise, not signal.
+    """
+    from dataclasses import asdict, is_dataclass
+
+    out: list[dict[str, Any]] = []
+    for v in violations or []:
+        if is_dataclass(v) and not isinstance(v, type):
+            out.append(asdict(v))
+        elif isinstance(v, dict):
+            out.append(v)
+        else:
+            out.append({"detail": str(v)})
+    return out
 
 
 async def _apply_post_driver_processing(
@@ -1180,6 +1309,82 @@ async def _apply_post_navigator_processing(
     return response_data
 
 
+def _capture_cantrip_pass(body_json: dict[str, Any], position: str, label: str) -> None:
+    """Add one timeline stage for a whole cantrip pass.
+
+    One stage per pass rather than one per cantrip, because cantrips accumulate
+    their output and it is applied to the message list once at the end -- a
+    per-cantrip stage would show an identical before/after for every one of them
+    and read as "nothing changed" when plenty did.
+
+    The stage stores only ids; the detail lives in the run's `cantrips` list, so
+    a cantrip's code and output are serialized once per trace rather than twice.
+    """
+    from app.services.debug import debug_capture
+
+    run = body_json.get("_gitv_debug", {}).get("run", {})
+    considered = [c for c in run.get("cantrips", []) if c.get("position") == position]
+    if not considered:
+        return
+
+    fired = [c for c in considered if c.get("triggered")]
+    errored = [c for c in fired if c.get("error")]
+
+    detail = f"{len(fired)} of {len(considered)} ran"
+    if errored:
+        detail += f", {len(errored)} errored"
+
+    debug_capture(
+        body_json, f"cantrips_{position}", label,
+        detail=detail,
+        metadata={
+            "position": position,
+            "ran": [{"id": c["id"], "name": c["name"]} for c in fired],
+            "skipped": [
+                {"id": c["id"], "name": c["name"], "reason": c.get("reason", "")}
+                for c in considered if not c.get("triggered")
+            ],
+            "total_duration_ms": round(
+                sum(float(c.get("duration_ms") or 0.0) for c in fired), 1
+            ),
+        },
+    )
+
+
+def _record_call(
+    body_json: dict[str, Any],
+    candidate: FailoverEndpoint,
+    attempt: int,
+    started: float,
+    *,
+    status_code: int,
+    response_data: dict[str, Any] | None,
+    error: str = "",
+) -> None:
+    """Record one upstream attempt on the debug trace.
+
+    Called for failures as well as successes: a run whose first endpoint 502'd
+    and whose second answered took the sum of both latencies, and a comparison
+    that only showed the winner would mis-attribute the wall-clock time.
+    """
+    from app.services.debug_metrics import PURPOSE_MAIN, record_llm_call
+
+    record_llm_call(
+        body_json,
+        purpose=PURPOSE_MAIN,
+        latency_ms=(time.monotonic() - started) * 1000.0,
+        status_code=status_code,
+        response_data=response_data,
+        messages=body_json.get("messages"),
+        endpoint_id=candidate.endpoint_id,
+        endpoint_name=candidate.endpoint_name,
+        provider=candidate.provider,
+        model_requested=candidate.model or body_json.get("model", ""),
+        failover_attempt=attempt,
+        error=error,
+    )
+
+
 async def _forward_with_failover(
     body_json: dict[str, Any],
     chain: list[FailoverEndpoint],
@@ -1224,6 +1429,7 @@ async def _forward_with_failover(
                 {k: v for k, v in trial_body.items() if not k.startswith("_gitv")}
             ).encode()
 
+        started = time.monotonic()
         try:
             response_data, status_code = await _do_forward(
                 method, upstream_url, headers, forward_body, timeout,
@@ -1231,13 +1437,20 @@ async def _forward_with_failover(
                 base_url=candidate.base_url,
                 api_key=candidate.api_key,
             )
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "Failover: endpoint '%s' (%s) raised an exception, trying next",
                 candidate.endpoint_name, upstream_url,
             )
+            _record_call(
+                body_json, candidate, idx, started,
+                status_code=0, response_data=None, error=str(exc)[:500],
+            )
             failover_notes.append(f"'{candidate.endpoint_name}' failed with an exception")
             continue
+
+        _record_call(body_json, candidate, idx, started,
+                     status_code=status_code, response_data=response_data)
 
         if status_code == 200:
             if failover_notes:
@@ -1428,6 +1641,113 @@ async def _do_forward_litellm(
         return {"error": {"message": error_msg, "type": error_type}}, status_code
 
 
+class _StreamAccumulator:
+    """Reassembles an SSE stream into a non-streaming response shape.
+
+    Only what the debug trace needs: content, reasoning, finish reason and the
+    usage block some providers append to the final chunk. Chunk boundaries fall
+    anywhere, including mid-line, so a partial tail is carried between feeds.
+    """
+
+    def __init__(self) -> None:
+        self._buffer = ""
+        self.content: list[str] = []
+        self.reasoning: list[str] = []
+        self.usage: dict[str, Any] | None = None
+        self.finish_reason = ""
+        self.model = ""
+
+    def feed(self, chunk: bytes) -> None:
+        try:
+            self._buffer += chunk.decode("utf-8", "replace")
+        except Exception:
+            return
+
+        # Keep the last partial line; SSE events end with a newline.
+        *lines, self._buffer = self._buffer.split("\n")
+        for line in lines:
+            line = line.strip()
+            if not line.startswith("data:"):
+                continue
+            payload = line[5:].strip()
+            if not payload or payload == "[DONE]":
+                continue
+            try:
+                event = json.loads(payload)
+            except ValueError:
+                continue
+            self._absorb(event)
+
+    def _absorb(self, event: dict[str, Any]) -> None:
+        if not isinstance(event, dict):
+            return
+        if event.get("model"):
+            self.model = event["model"]
+        if isinstance(event.get("usage"), dict):
+            self.usage = event["usage"]
+        for choice in event.get("choices") or []:
+            if not isinstance(choice, dict):
+                continue
+            if choice.get("finish_reason"):
+                self.finish_reason = choice["finish_reason"]
+            delta = choice.get("delta") or {}
+            if delta.get("content"):
+                self.content.append(delta["content"])
+            if delta.get("reasoning_content"):
+                self.reasoning.append(delta["reasoning_content"])
+            elif delta.get("thinking"):
+                self.reasoning.append(delta["thinking"])
+
+    def as_response(self, fallback_model: str) -> dict[str, Any]:
+        message: dict[str, Any] = {
+            "role": "assistant",
+            "content": "".join(self.content),
+        }
+        if self.reasoning:
+            message["reasoning_content"] = "".join(self.reasoning)
+
+        response: dict[str, Any] = {
+            "object": "chat.completion",
+            "model": self.model or fallback_model,
+            "choices": [{
+                "index": 0,
+                "message": message,
+                "finish_reason": self.finish_reason or "stop",
+            }],
+        }
+        if self.usage:
+            response["usage"] = self.usage
+        return response
+
+
+def _record_stream_call(
+    body_json: dict[str, Any],
+    started: float,
+    status_code: int,
+    response_data: dict[str, Any],
+    error: str,
+) -> None:
+    """Record the upstream call behind a passthrough stream.
+
+    The raw path never went through _forward_with_failover, so nothing else
+    records it. Endpoint identity comes off the body, which routing stashed.
+    """
+    from app.services.debug_metrics import PURPOSE_MAIN, record_llm_call
+
+    record_llm_call(
+        body_json,
+        purpose=PURPOSE_MAIN,
+        latency_ms=(time.monotonic() - started) * 1000.0,
+        status_code=status_code,
+        response_data=response_data,
+        messages=body_json.get("messages"),
+        endpoint_id=body_json.get("_gitv_endpoint_id", ""),
+        provider=body_json.get("_gitv_provider", ""),
+        model_requested=body_json.get("model", ""),
+        error=error,
+    )
+
+
 async def _forward_streaming(
     method: str,
     url: str,
@@ -1445,7 +1765,10 @@ async def _forward_streaming(
     )
 
     if not has_memory_processing:
-        return await _forward_streaming_raw(method, url, headers, body, timeout)
+        return await _forward_streaming_raw(
+            method, url, headers, body, timeout,
+            user_id=user_id, body_json=body_json,
+        )
 
     return await _forward_streaming_with_memory(
         method, url, headers, body, timeout, user_id, body_json, path
@@ -1453,30 +1776,57 @@ async def _forward_streaming(
 
 
 async def _forward_streaming_raw(
-    method: str, url: str, headers: dict[str, str], body: bytes, timeout: httpx.Timeout
+    method: str, url: str, headers: dict[str, str], body: bytes, timeout: httpx.Timeout,
+    user_id: str | None = None, body_json: dict[str, Any] | None = None,
 ) -> StreamingResponse:
+    """True passthrough stream: bytes reach the client as they arrive.
+
+    When debug is on the SSE deltas are also accumulated as they pass, so the
+    exchange can be saved once the stream ends. Accumulation never gates a
+    yield and its failure is swallowed -- a debug problem must not stall or
+    corrupt the stream the user is reading.
+    """
     client = httpx.AsyncClient(timeout=timeout)
+    debug_on = bool(body_json is not None and body_json.get("_gitv_debug") and user_id)
+    started = time.monotonic()
 
     async def stream_generator():
+        accumulator = _StreamAccumulator() if debug_on else None
+        status = 0
+        error = ""
         try:
             async with client.stream(method, url, headers=headers, content=body) as response:
+                status = response.status_code
                 _log_response(response.status_code, 0)
                 async for chunk in response.aiter_bytes():
+                    if accumulator is not None:
+                        accumulator.feed(chunk)
                     yield chunk
         except httpx.ConnectError:
             logger.error("proxy streaming connection error: %s", url)
+            error = "Failed to connect to upstream endpoint"
             yield (
                 b'data: {"error":{"message":"Failed to connect to upstream endpoint",'
                 b'"type":"proxy_error"}}\n\n'
             )
         except httpx.TimeoutException:
             logger.error("proxy streaming timeout: %s", url)
+            error = "Upstream endpoint timed out"
             yield (
                 b'data: {"error":{"message":"Upstream endpoint timed out",'
                 b'"type":"proxy_error"}}\n\n'
             )
         finally:
             await client.aclose()
+            if accumulator is not None:
+                # A stream that died partway still produced a trace worth
+                # keeping -- often the most interesting one.
+                try:
+                    response_data = accumulator.as_response(body_json.get("model", ""))
+                    _record_stream_call(body_json, started, status, response_data, error)
+                    await _save_debug_exchange(response_data, body_json, user_id)
+                except Exception:
+                    logger.exception("Failed to save debug exchange for streamed response")
 
     return StreamingResponse(
         stream_generator(),
@@ -1516,6 +1866,14 @@ async def _forward_streaming_with_memory(
 
     if status_code == 200:
         response_data = await _extract_response_memories(response_data, user_id, body_json)
+
+        # This path buffers the whole response before re-emitting it as SSE, so
+        # the exchange is as complete as the non-streaming one. It was simply
+        # never saved -- which is why a user whose client streams saw an empty
+        # Debug tab while the pipeline was working normally.
+        if body_json.get("_gitv_debug"):
+            await _save_debug_exchange(response_data, body_json, user_id)
+
         model = body_json.get("model", "")
         ux_settings = await _load_ux_settings(user_id)
         return _convert_to_sse(

@@ -216,6 +216,24 @@ async def resolve_routing(bearer_token: str, db: AsyncSession) -> RoutingResult 
     return _routing_result_from_primary(endpoint, user.id, chain, model=effective_model)
 
 
+async def resolve_routing_for_user(user_id: str, db: AsyncSession) -> RoutingResult | None:
+    """Resolve routing from a user id rather than a bearer token.
+
+    Replay has an authenticated session, not a proxy API key, and API keys are
+    stored as unsalted SHA-256 -- there is no plaintext to forge a client
+    request with, and inventing one would be the wrong shape anyway. Resolves
+    the user's default endpoint exactly as an API key with no endpoint binding
+    would.
+    """
+    endpoint = await _resolve_default_endpoint(db, user_id)
+    if endpoint is None:
+        logger.warning("Routing failed: no enabled endpoint for user %s", user_id[:8])
+        return None
+
+    chain = await _build_failover_chain(db, endpoint, user_id)
+    return _routing_result_from_primary(endpoint, user_id, chain)
+
+
 async def resolve_endpoints_by_tag(
     db: AsyncSession, user_id: str, tag: str
 ) -> list[Endpoint]:

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
@@ -156,6 +157,34 @@ async def _save_cantrip_data(
     await db.commit()
 
 
+def _diff_store(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+    """What one cantrip changed in a persistent store.
+
+    Cantrips at the same position run in sequence against a shared chat_data and
+    user_data, so the store a cantrip received already carries the previous
+    cantrip's writes. Only the delta identifies who did what.
+
+    Values are recorded as they are; the trace's size cap bounds the whole thing
+    if a cantrip writes something enormous.
+    """
+    before = before or {}
+    after = after or {}
+    changes: dict[str, Any] = {}
+
+    for key in set(before) | set(after):
+        old, new = before.get(key), after.get(key)
+        if old == new:
+            continue
+        if key not in before:
+            changes[key] = {"op": "added", "to": new}
+        elif key not in after:
+            changes[key] = {"op": "removed", "from": old}
+        else:
+            changes[key] = {"op": "changed", "from": old, "to": new}
+
+    return changes
+
+
 async def _load_active_cantrips(
     db: AsyncSession, user_id: str, position: str = "pre_driver"
 ) -> list[Cantrip]:
@@ -166,11 +195,15 @@ async def _load_active_cantrips(
     }
     flag = flag_map.get(position, Cantrip.run_pre_driver)
 
+    # Loads candidates, not decisions. A cantrip that is inactive but tagged must
+    # reach should_activate_resource, or its tag can never switch it on -- which
+    # is rule 3 of the Activation Hierarchy (see the README). Filtering
+    # is_active here is what made cantrip tags unable to activate anything.
     query = (
         select(Cantrip)
         .where(
             Cantrip.user_id == user_id,
-            Cantrip.is_active.is_(True),
+            or_(Cantrip.is_active.is_(True), Cantrip.tag != ""),
             flag.is_(True),
         )
         .order_by(Cantrip.execution_order, Cantrip.created_at)
@@ -216,16 +249,29 @@ async def process_cantrips(
         if not all_cantrips:
             return body_json
 
+        from app.services.debug_metrics import record_cantrip
         from app.services.tagging import should_activate_resource
         cantrips = []
         for c in all_cantrips:
-            if c.tag and tags:
-                if should_activate_resource(
-                    c.tag, "cantrip", c.is_active, c.is_public, c.user_id, user_id, tags
-                ):
-                    cantrips.append(c)
-            else:
+            # Asked for every candidate. There used to be an `if c.tag and tags`
+            # pre-check with an unconditional `else: append`, which skipped the
+            # hierarchy entirely whenever the request carried no tags -- so an
+            # inactive cantrip ran anyway.
+            if should_activate_resource(
+                c.tag, "cantrip", c.is_active, c.is_public, c.user_id, user_id, tags or []
+            ):
                 cantrips.append(c)
+            else:
+                # Recorded so a comparison can show "this fired in run A and not
+                # in run B", which is invisible if only executions are stored.
+                record_cantrip(
+                    body_json, cantrip_id=c.id, name=c.name, position=position,
+                    triggered=False, tag=c.tag,
+                    reason=(
+                        f"tag '{c.tag}' not present in this request"
+                        if c.tag else "not active and no tag activates it"
+                    ),
+                )
 
         if not cantrips:
             return body_json
@@ -259,6 +305,7 @@ async def process_cantrips(
 
             cantrip_data = await _load_cantrip_data(db, user_id, cantrip.id)
 
+            started = time.monotonic()
             try:
                 if internal_chat_id and accumulated_memories:
                     context["__memories"] = {**context.get("__memories", {}), **accumulated_memories}
@@ -271,8 +318,15 @@ async def process_cantrips(
                     cantrip_data=cantrip_data,
                     timeout_ms=cantrip.timeout_ms,
                 )
-            except Exception:
+            except Exception as exc:
                 logger.exception("Script '%s' failed to execute", cantrip.name)
+                record_cantrip(
+                    body_json, cantrip_id=cantrip.id, name=cantrip.name, position=position,
+                    triggered=True, tag=cantrip.tag or "", code=cantrip.code,
+                    execution_order=cantrip.execution_order, timeout_ms=cantrip.timeout_ms,
+                    duration_ms=(time.monotonic() - started) * 1000.0,
+                    error=f"{type(exc).__name__}: {exc}"[:500],
+                )
                 continue
 
             if result.has_error:
@@ -282,6 +336,35 @@ async def process_cantrips(
                 logger.debug(
                     "Script '%s' logs: %s", cantrip.name, " | ".join(result.debug_logs)
                 )
+
+            # The whole CantripResult used to be discarded once its fields were
+            # accumulated, so the Debug timeline could not name a single cantrip
+            # that had run. This is the record the comparison view diffs.
+            #
+            # The data stores are captured as before/after deltas rather than as
+            # output fields, because cantrips at the same position run in
+            # sequence against a shared chat_data and user_data: the second
+            # cantrip reads what the first one wrote. Recording only the final
+            # state would attribute every change to whichever ran last.
+            record_cantrip(
+                body_json, cantrip_id=cantrip.id, name=cantrip.name, position=position,
+                triggered=True, tag=cantrip.tag or "", code=cantrip.code,
+                execution_order=cantrip.execution_order, timeout_ms=cantrip.timeout_ms,
+                duration_ms=(time.monotonic() - started) * 1000.0,
+                debug_logs=result.debug_logs, error=result.error or "",
+                output={
+                    "personality": result.personality,
+                    "scenario": result.scenario,
+                    "example_dialogs": result.example_dialogs,
+                    "memories": result.memories,
+                    "tool_result": result.tool_result,
+                },
+                data_changes={
+                    "chat_data": _diff_store(chat_data, result.chat_data),
+                    "user_data": _diff_store(user_data, result.user_data),
+                    "cantrip_data": _diff_store(cantrip_data, result.cantrip_data),
+                },
+            )
 
             accumulated_personality += result.personality
             accumulated_scenario += result.scenario
@@ -361,12 +444,9 @@ async def process_cantrips_post_driver(
         from app.services.tagging import should_activate_resource
         cantrips = []
         for c in all_cantrips:
-            if c.tag and tags:
-                if should_activate_resource(
-                    c.tag, "cantrip", c.is_active, c.is_public, c.user_id, user_id, tags
-                ):
-                    cantrips.append(c)
-            else:
+            if should_activate_resource(
+                c.tag, "cantrip", c.is_active, c.is_public, c.user_id, user_id, tags or []
+            ):
                 cantrips.append(c)
 
         if not cantrips:

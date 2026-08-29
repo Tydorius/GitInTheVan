@@ -7,6 +7,11 @@ from app.models.skill import EndpointSkill, Skill
 
 logger = logging.getLogger(__name__)
 
+# endpoint_id -> the skills/samples its last load returned. Written by
+# load_skills_for_endpoint, drained by take_loaded_detail. Bounded by the
+# number of endpoints, and each entry is replaced on every load.
+_last_loaded: dict[str, list[dict]] = {}
+
 
 async def load_skills_for_endpoint(
     endpoint_id: str | None, user_id: str, db: AsyncSession
@@ -29,12 +34,32 @@ async def load_skills_for_endpoint(
     skills = [s.content for s in items if s.type == "skill" and s.content.strip()]
     samples = [s.content for s in items if s.type == "sample" and s.content.strip()]
 
+    # Identity for the debug trace. The rows are already loaded here; a bare
+    # count cannot answer "which skill did this run use that the other did not",
+    # and stashing it avoids widening a return type with several call sites.
+    _last_loaded[endpoint_id] = [
+        {"id": s.id, "name": s.name, "type": s.type, "tokens": max(1, len(s.content) // 4)}
+        for s in items
+        if s.content.strip()
+    ]
+
     if skills:
         logger.debug("Loaded %d skill(s) for endpoint %s", len(skills), endpoint_id)
     if samples:
         logger.debug("Loaded %d sample(s) for endpoint %s", len(samples), endpoint_id)
 
     return skills, samples
+
+
+def take_loaded_detail(endpoint_id: str | None) -> list[dict]:
+    """Identity of the skills and samples the last load returned, then forget it.
+
+    Read once, immediately after load_skills_for_endpoint, by the debug capture.
+    The entry is popped so a later request cannot report a stale set.
+    """
+    if not endpoint_id:
+        return []
+    return _last_loaded.pop(endpoint_id, [])
 
 
 def inject_skills(messages: list[dict], skill_contents: list[str]) -> list[dict]:
