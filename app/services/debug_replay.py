@@ -71,6 +71,9 @@ async def replay_exchange(user_id: str, exchange_id: str) -> str:
     )
 
     body = {
+        # The client's own parameters, so the replay sends what the original run
+        # sent rather than a bare body the configured layers then write over.
+        **_original_params(source),
         "model": source.get("model", "") or routing.model,
         "messages": messages,
         # Replay is always buffered. A streamed replay would return before the
@@ -104,6 +107,21 @@ async def replay_exchange(user_id: str, exchange_id: str) -> str:
         "The replay completed but no debug run was recorded. "
         "Check that debug mode is still enabled in Settings."
     )
+
+
+def _original_params(exchange: dict[str, Any]) -> dict[str, Any]:
+    """The client's own body parameters from the source run.
+
+    Absent on any run captured before this was stored, which is the normal case
+    for existing traces -- an empty dict just means the replay behaves as it did.
+    """
+    params = exchange.get("pipeline_data", {}).get("original_params")
+    if not isinstance(params, dict):
+        return {}
+    return {
+        k: v for k, v in params.items()
+        if k not in ("messages", "model", "stream") and not k.startswith("_gitv")
+    }
 
 
 def _original_messages(exchange: dict[str, Any]) -> list[dict[str, Any]]:

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -13,6 +15,7 @@ from app.models.conversation_summary import ConversationSummary
 from app.models.endpoint import Endpoint
 from app.models.memory_rule import MemoryRule
 from app.models.user_settings import UserSettings
+from app.services.llm_params import apply_to_body, parse_params, resolve
 
 logger = logging.getLogger(__name__)
 
@@ -153,12 +156,27 @@ def _format_transcript(messages: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _build_endpoint_url(endpoint: Endpoint) -> str:
-    api_base_path = endpoint.api_base_path or ""
-    if api_base_path.endswith("/chat/completions"):
-        return f"{endpoint.base_url}{api_base_path}"
-    path_prefix = api_base_path or "/v1"
-    return f"{endpoint.base_url}{path_prefix}/chat/completions"
+def summarizer_parameters(
+    user_settings: UserSettings | None, endpoint: Endpoint | None, model: str
+) -> dict[str, Any]:
+    """Resolve the conversation summarizer's parameters.
+
+    The summarizer has no rule-level scope of its own, so the endpoint and its
+    curated model entry are the closest layers to the call.
+    """
+    from app.services.routing import endpoint_parameters, model_parameter_map
+
+    layers = [
+        (
+            "user settings (summarization)",
+            parse_params(user_settings.summarization_parameters_json, "user settings")
+            if user_settings else [],
+        ),
+    ]
+    if endpoint is not None:
+        layers.append((f"endpoint '{endpoint.name}'", endpoint_parameters(endpoint)))
+        layers.append((f"model '{model}'", model_parameter_map(endpoint).get(model, [])))
+    return dict(resolve(layers).values)
 
 
 async def summarize_messages(
@@ -168,7 +186,32 @@ async def summarize_messages(
     prompt: str,
     existing_summary: str = "",
     timeout: int = 120,
+    configured: dict[str, Any] | None = None,
+    body_json: dict[str, Any] | None = None,
 ) -> str:
+    """Summarize `messages` on the summarization endpoint.
+
+    Goes through `proxy._do_forward`, so a summarizer on a provider endpoint
+    routes through LiteLLM exactly as the driver does.
+
+    Every failure returns `existing_summary` and lets the request through
+    unsummarized -- summarization must never block a reply. `body_json` carries
+    the debug trace so that degradation is recorded rather than silent.
+    """
+    from app.services.debug import debug_capture
+    from app.services.debug_metrics import PURPOSE_SUMMARIZER, record_llm_call
+    from app.services.proxy import _build_upstream_url, _do_forward
+
+    def _degraded(detail: str) -> str:
+        logger.warning("Summarization did not run: %s", detail)
+        if body_json is not None:
+            debug_capture(
+                body_json, "summarization_error", "Summarization",
+                detail=f"Did not run: {detail}. Conversation forwarded unsummarized.",
+                metadata={"error": detail, "endpoint": endpoint.name},
+            )
+        return existing_summary
+
     transcript = _format_transcript(messages)
     if not transcript:
         return existing_summary
@@ -182,11 +225,15 @@ async def summarize_messages(
     else:
         user_content = f"Conversation excerpt to summarize:\n{transcript}"
 
-    url = _build_endpoint_url(endpoint)
+    url = _build_upstream_url(
+        endpoint.base_url, "/v1/chat/completions", endpoint.api_base_path or ""
+    )
     headers = {
         "Authorization": f"Bearer {endpoint.api_key}",
         "Content-Type": "application/json",
     }
+    # `temperature` is a default here, not a fixed value -- a configured
+    # parameter at any layer overrides it.
     body: dict[str, Any] = {
         "model": model or "gpt-4",
         "messages": [
@@ -196,41 +243,61 @@ async def summarize_messages(
         "temperature": 0.2,
         "stream": False,
     }
+    body = apply_to_body(body, configured or {})
 
-    async with httpx.AsyncClient(
-        timeout=httpx.Timeout(timeout, connect=15.0)
-    ) as client:
-        try:
-            resp = await client.post(url, json=body, headers=headers)
-        except Exception:
-            logger.exception("Summarization LLM request failed")
-            return existing_summary
-
-        if resp.status_code != 200:
-            logger.warning(
-                "Summarization LLM returned %d: %s",
-                resp.status_code,
-                resp.text[:200],
-            )
-            return existing_summary
-
-        try:
-            data = resp.json()
-        except Exception:
-            logger.warning("Summarization LLM returned non-JSON")
-            return existing_summary
-
-        content = (
-            data.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-            .strip()
+    started = time.monotonic()
+    try:
+        data, status_code = await _do_forward(
+            "POST", url, headers, json.dumps(body).encode(),
+            httpx.Timeout(timeout, connect=15.0),
+            provider=endpoint.provider or "",
+            base_url=endpoint.base_url,
+            api_key=endpoint.api_key,
+            configured=configured,
         )
-        if not content:
-            logger.warning("Summarization LLM returned empty content")
-            return existing_summary
+    except Exception as exc:
+        logger.exception("Summarization LLM request failed")
+        record_llm_call(
+            body_json or {},
+            purpose=PURPOSE_SUMMARIZER,
+            latency_ms=(time.monotonic() - started) * 1000.0,
+            status_code=0,
+            response_data=None,
+            messages=body.get("messages"),
+            endpoint_id=endpoint.id,
+            endpoint_name=endpoint.name,
+            provider=endpoint.provider or "",
+            model_requested=body.get("model", ""),
+            error=f"{type(exc).__name__}: {exc}"[:500],
+        )
+        return _degraded(f"{type(exc).__name__}")
 
-        return content
+    record_llm_call(
+        body_json or {},
+        purpose=PURPOSE_SUMMARIZER,
+        latency_ms=(time.monotonic() - started) * 1000.0,
+        status_code=status_code,
+        response_data=data,
+        messages=body.get("messages"),
+        endpoint_id=endpoint.id,
+        endpoint_name=endpoint.name,
+        provider=endpoint.provider or "",
+        model_requested=body.get("model", ""),
+    )
+
+    if status_code != 200:
+        return _degraded(f"the endpoint returned {status_code}")
+
+    content = (
+        data.get("choices", [{}])[0]
+        .get("message", {})
+        .get("content", "")
+        .strip()
+    )
+    if not content:
+        return _degraded("the endpoint returned empty content")
+
+    return content
 
 
 def build_summary_context_block(summary: str) -> str:
@@ -381,6 +448,10 @@ async def maybe_summarize(
                 user_settings.summarization_model,
                 prompt,
                 existing_summary=existing.summary if existing else "",
+                configured=summarizer_parameters(
+                    user_settings, endpoint, user_settings.summarization_model
+                ),
+                body_json=body_json,
             )
             if summary_text:
                 async with async_session() as db:

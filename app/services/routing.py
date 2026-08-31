@@ -2,7 +2,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.api_key import ApiKey
@@ -10,6 +10,7 @@ from app.models.endpoint import Endpoint
 from app.models.user import User
 from app.models.user_settings import UserSettings
 from app.services.auth import hash_api_key
+from app.services.llm_params import ParamDef, parse_params
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,24 @@ class FailoverEndpoint:
     endpoint_id: str = ""
     endpoint_name: str = ""
     priority: int = 1
+    # Parameter layers, read here while the session is open. Candidates are
+    # allowed to differ in model and provider, so they are allowed to differ in
+    # parameters too, and failing over must re-apply the new candidate's set
+    # rather than the first one's.
+    #
+    # The model layer is a map rather than a resolved list because the model
+    # actually sent is not always `self.model` -- when an endpoint has no
+    # default_model the client's choice is what goes on the wire, and that is
+    # only known at apply time.
+    parameters: list[ParamDef] = field(default_factory=list)
+    model_parameters: dict[str, list[ParamDef]] = field(default_factory=dict)
+
+    def params_for_model(self, model: str) -> list[ParamDef]:
+        """The curated model entry's parameters, or none if it is not listed.
+
+        Model names are free text everywhere, so an unlisted model is normal
+        rather than an error -- it simply contributes no layer."""
+        return self.model_parameters.get(model or "", [])
 
 
 @dataclass
@@ -111,6 +130,32 @@ async def _build_failover_chain(
     return chain
 
 
+def endpoint_parameters(ep: Endpoint) -> list[ParamDef]:
+    """The endpoint's own parameter layer."""
+    return parse_params(ep.parameters_json, f"endpoint '{ep.name}'")
+
+
+def model_parameter_map(ep: Endpoint) -> dict[str, list[ParamDef]]:
+    """Every curated model's parameter layer, keyed by model name.
+
+    `Endpoint.models` is `lazy="selectin"`, so any endpoint that came out of a
+    query has it populated. An endpoint that was constructed in Python and
+    detached does not, and touching the collection there would raise. This runs
+    on the proxy hot path, so it degrades to "no model layer" with a warning
+    rather than turning every request into a 500.
+    """
+    try:
+        if "models" in inspect(ep).unloaded:
+            logger.warning(
+                "Endpoint '%s' has an unloaded model list; per-model parameters skipped", ep.name
+            )
+            return {}
+        return {m.name: parse_params(m.parameters_json, f"model '{m.name}'") for m in ep.models}
+    except Exception:
+        logger.warning("Could not read model parameters for endpoint '%s'", ep.name, exc_info=True)
+        return {}
+
+
 def _endpoint_to_candidate(ep: Endpoint, model: str = "") -> FailoverEndpoint:
     return FailoverEndpoint(
         base_url=ep.base_url,
@@ -122,6 +167,8 @@ def _endpoint_to_candidate(ep: Endpoint, model: str = "") -> FailoverEndpoint:
         endpoint_id=ep.id,
         endpoint_name=ep.name,
         priority=ep.priority,
+        parameters=endpoint_parameters(ep),
+        model_parameters=model_parameter_map(ep),
     )
 
 

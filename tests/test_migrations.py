@@ -208,6 +208,78 @@ class TestFullMigrationRun:
             assert result.scalar() == 1
 
 
+class TestParameterColumnUpgradePath:
+    """Phase 23's columns must appear on an *upgraded* database, not just a fresh one.
+
+    `fresh_sqlite_engine` runs `create_all` first, so every test above it is
+    structurally unable to catch a model column with no matching migration --
+    that is exactly how `skills.budget_weight` shipped broken in 0.18.0. This
+    test tears the new columns back out to reconstruct a pre-047 schema, then
+    migrates onto it, which is the path a real upgrade takes.
+    """
+
+    # (table, column) added by 047. endpoint_models (048) is handled separately
+    # because it is a whole table rather than a column.
+    ADDED_COLUMNS = [
+        ("endpoints", "parameters_json"),
+        ("verification_rules", "parameters_json"),
+        ("scenario_rules", "parameters_json"),
+        ("map_stages", "parameters_json"),
+        ("map_stages", "verification_parameters_json"),
+        ("user_settings", "parameters_json"),
+        ("user_settings", "verification_parameters_json"),
+        ("user_settings", "summarization_parameters_json"),
+    ]
+
+    async def _columns(self, conn, table):
+        result = await conn.execute(text(f"PRAGMA table_info({table});"))
+        return {row[1] for row in result.fetchall()}
+
+    async def test_columns_and_table_arrive_on_an_upgraded_database(self, fresh_sqlite_engine):
+        async with fresh_sqlite_engine.begin() as conn:
+            for table, column in self.ADDED_COLUMNS:
+                await conn.execute(text(f"ALTER TABLE {table} DROP COLUMN {column};"))
+            await conn.execute(text("DROP TABLE endpoint_models;"))
+
+            # Prove the teardown actually removed them, or the assertions below
+            # would pass against a schema that never needed migrating.
+            for table, column in self.ADDED_COLUMNS:
+                assert column not in await self._columns(conn, table)
+
+        await run_migrations(fresh_sqlite_engine)
+
+        async with fresh_sqlite_engine.begin() as conn:
+            for table, column in self.ADDED_COLUMNS:
+                assert column in await self._columns(conn, table), (
+                    f"{table}.{column} is missing after migration -- the model has a "
+                    f"column that no migration adds"
+                )
+            assert "parameters_json" in await self._columns(conn, "endpoint_models")
+
+    async def test_upgraded_columns_default_to_an_empty_list(self, fresh_sqlite_engine):
+        """Existing rows must come out of the upgrade with a value parse_params
+        accepts, not NULL -- the proxy reads these on every request."""
+        async with fresh_sqlite_engine.begin() as conn:
+            await conn.execute(text("ALTER TABLE endpoints DROP COLUMN parameters_json;"))
+            await conn.execute(
+                text(
+                    "INSERT INTO endpoints (id, user_id, name, base_url, api_key, "
+                    "api_base_path, provider, default_model, bypass_method, enabled, "
+                    "role_tag, priority, custom_tag, created_at) VALUES "
+                    "('e1', 'u1', 'Legacy', 'https://x', '', '', '', '', 'none', 1, "
+                    "'default', 1, '', CURRENT_TIMESTAMP);"
+                )
+            )
+
+        await run_migrations(fresh_sqlite_engine)
+
+        async with fresh_sqlite_engine.begin() as conn:
+            result = await conn.execute(
+                text("SELECT parameters_json FROM endpoints WHERE id = 'e1';")
+            )
+            assert result.scalar() == "[]"
+
+
 class TestMigrationCoverage:
     """Guard against the 0.18.0 skills.budget_weight class of bug.
 
@@ -280,7 +352,7 @@ class TestAdvisoryLock:
 
     async def test_migration_count(self):
         """Sanity check: verify we have the expected number of migrations."""
-        assert len(MIGRATIONS) == 46
+        assert len(MIGRATIONS) == 48
 
     async def test_all_migrations_have_unique_names(self):
         names = [name for name, _ in MIGRATIONS]

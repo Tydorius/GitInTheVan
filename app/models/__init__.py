@@ -10,7 +10,7 @@ from app.models.conversation_hash import ConversationHash
 from app.models.conversation_summary import ConversationSummary
 from app.models.debug_exchange import DebugExchange
 from app.models.debug_sandbox import DebugSandbox
-from app.models.endpoint import Endpoint
+from app.models.endpoint import Endpoint, EndpointModel
 from app.models.forbidden_word import ForbiddenWord
 from app.models.linked_repo import InstalledItem, LinkedRepo
 from app.models.lorebook import Lorebook
@@ -30,6 +30,7 @@ __all__ = [
     "Base",
     "User",
     "Endpoint",
+    "EndpointModel",
     "UserSettings",
     "AdminSettings",
     "ApiKey",

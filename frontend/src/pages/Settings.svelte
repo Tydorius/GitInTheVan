@@ -2,6 +2,8 @@
   import { api, getApiKey, setApiKey } from '../api'
   import { onMount } from 'svelte'
   import CollapsibleCard from '../lib/CollapsibleCard.svelte'
+  import ParameterEditor from '../lib/ParameterEditor.svelte'
+  import ModelSelect from '../lib/ModelSelect.svelte'
   import { CollapseController } from '../lib/collapse'
 
   let settings = {
@@ -9,6 +11,16 @@
     preserve_thinking: true,
     gitv_status: false,
     simulated_streaming_speed: 0,
+  }
+  // One parameter set per LLM role. These are the blanket layer: broader than
+  // the endpoint, narrower than whatever the client sent.
+  let driverParams: any[] = []
+  let verificationParams: any[] = []
+  let summarizationParams: any[] = []
+
+  function modelsFor(endpointId: string | null): string[] {
+    const ep = endpoints.find((e: any) => e.id === endpointId)
+    return (ep?.models || []).map((m: any) => m.name).filter(Boolean)
   }
   let summarization = {
     summarization_enabled: false,
@@ -44,6 +56,9 @@
       settings.preserve_thinking = s.preserve_thinking
       settings.gitv_status = s.gitv_status
       settings.simulated_streaming_speed = s.simulated_streaming_speed || 0
+      driverParams = structuredClone(s.parameters || [])
+      verificationParams = structuredClone(s.verification_parameters || [])
+      summarizationParams = structuredClone(s.summarization_parameters || [])
       endpoints = e.endpoints
       const mapData = await api.listMaps()
       maps = mapData.maps
@@ -75,7 +90,7 @@
 
   async function save() {
     error = ''; saved = false
-    try { await api.updateSettings({ ...settings, debug_mode: debugMode }); saved = true }
+    try { await api.updateSettings({ ...settings, debug_mode: debugMode, parameters: driverParams, verification_parameters: verificationParams } as any); saved = true }
     catch (e: any) { error = e.message }
   }
 
@@ -86,6 +101,10 @@
         ...summarization,
         summarization_endpoint_id: summarization.summarization_endpoint_id || '',
       })
+      // Parameters live on user_settings rather than the summarization
+      // settings row, so they save through the general settings endpoint --
+      // but from this button, where the user edited them.
+      await api.updateSettings({ summarization_parameters: summarizationParams } as any)
       sumSaved = true
     } catch (e: any) { error = e.message }
   }
@@ -150,6 +169,21 @@
       <option value="">None</option>
       {#each endpoints as ep}<option value={ep.id}>{ep.name}</option>{/each}
     </select>
+  </div>
+  <div class="form-group">
+    <ParameterEditor
+      bind:params={driverParams}
+      title="Default Parameters (all requests)"
+      hint="Sent on every request unless an endpoint, model, rule or map stage sets the same name. These override whatever the client sent."
+      scopeNote="Whatever the client sends is passed through untouched."
+    />
+  </div>
+  <div class="form-group">
+    <ParameterEditor
+      bind:params={verificationParams}
+      title="Default Parameters (verification calls)"
+      hint="Sent on verification judge calls instead of the defaults above."
+    />
   </div>
   <div class="form-group">
     <label>
@@ -218,7 +252,20 @@
   </div>
   <div class="form-group">
     <label for="sum-model">Summarization Model Override</label>
-    <input id="sum-model" autocomplete="off" bind:value={summarization.summarization_model} placeholder="Leave blank to use endpoint default" />
+    <ModelSelect
+      id="sum-model"
+      bind:value={summarization.summarization_model}
+      models={modelsFor(summarization.summarization_endpoint_id)}
+      emptyLabel="Use endpoint default"
+      placeholder="Leave blank to use endpoint default"
+    />
+  </div>
+  <div class="form-group">
+    <ParameterEditor
+      bind:params={summarizationParams}
+      title="Default Parameters (summarization calls)"
+      hint="Sent on conversation and scenario summarization calls, instead of the default parameters."
+    />
   </div>
   <div class="form-group">
     <label for="sum-threshold">Token Threshold</label>

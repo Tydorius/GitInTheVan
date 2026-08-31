@@ -13,6 +13,13 @@ from app.config import settings
 from app.database import async_session
 from app.models.lorebook import Lorebook
 from app.services.cantrip import process_cantrips
+from app.services.llm_params import (
+    RESERVED_NAMES,
+    ParamDef,
+    apply_to_body,
+    parse_params,
+    resolve,
+)
 from app.services.lorebook import inject_entries, match_entries
 from app.services.routing import FailoverEndpoint, resolve_routing
 from app.services.verification import run_verification_loop
@@ -21,6 +28,21 @@ logger = logging.getLogger(__name__)
 
 FORWARD_HEADERS = {"content-type", "accept"}
 SKIP_HEADERS = {"host", "authorization", "content-length", "transfer-encoding"}
+
+# Parameters LiteLLM accepts as named kwargs. Anything outside this set that the
+# user has deliberately configured is passed through `extra_body` instead;
+# anything outside it that only the *client* sent is still dropped, because the
+# raw body is not forwarded on this path and guessing which unknown client keys
+# a provider will tolerate is how the Gemini `top_k` failures started.
+#
+# `reasoning_effort` and `max_completion_tokens` were absent until Phase 23,
+# which is why a client that sent either lost it on every provider endpoint.
+LITELLM_NATIVE_PARAMS: frozenset[str] = frozenset({
+    "temperature", "max_tokens", "top_p", "top_k", "stream",
+    "stop", "frequency_penalty", "presence_penalty", "seed",
+    "n", "logprobs", "user",
+    "reasoning_effort", "max_completion_tokens", "response_format", "thinking",
+})
 
 
 async def _flag_injection_content(user_id: str, text: str, source: str) -> None:
@@ -188,6 +210,7 @@ async def _forward_request_impl(
     body_json["_gitv_provider"] = provider
     body_json["_gitv_base_url"] = base_url
     body_json["_gitv_api_key"] = api_key
+    body_json["_gitv_endpoint_id"] = endpoint_id
     body_json["_gitv_failover_chain"] = failover_chain
 
     _log_request(request.method, upstream_url, model, stream)
@@ -559,6 +582,23 @@ async def _forward_request_impl(
             debug_capture(body_json, "bypass_encoding", "Bypass Encoding",
                 detail="No bypass", setting="bypass_method", setting_value="none")
 
+        # Parameters are applied last, immediately before serialization, so a
+        # configured value cannot be undone by a later pipeline stage.
+        user_param_layer = await _load_user_param_layer(user_id, "parameters_json")
+        primary = failover_chain[0] if failover_chain else None
+        body_json = _apply_llm_parameters(
+            body_json, primary, user_param_layer, body_json.get("model", "")
+        )
+        if debug_on:
+            resolved_values = body_json.get("_gitv_llm_params", {})
+            sources = body_json.get("_gitv_llm_param_sources", {})
+            debug_capture(body_json, "llm_parameters", "LLM Parameters",
+                detail=(
+                    ", ".join(f"{k}={v} (from {sources.get(k, '?')})" for k, v in resolved_values.items())
+                    if resolved_values else "No parameters configured"
+                ),
+                metadata={"resolved": resolved_values, "sources": sources})
+
         if debug_on:
             debug_capture(body_json, "final_messages", "Final Messages (Pre-Forward)",
                 detail="Messages ready to send to upstream LLM")
@@ -633,6 +673,59 @@ async def _load_ux_settings(user_id: str) -> dict[str, Any]:
     except Exception:
         pass
     return {"gitv_status": False, "simulated_streaming_speed": 0, "preserve_thinking": True}
+
+
+async def _load_user_param_layer(user_id: str, field_name: str) -> list[ParamDef]:
+    """Load one of the three user-settings parameter layers.
+
+    Broader than the endpoint and narrower than the client payload. Failure to
+    load is not fatal -- an unreachable settings row means one fewer layer, not
+    a failed request.
+    """
+    from app.models.user_settings import UserSettings
+    if not user_id:
+        return []
+    try:
+        async with async_session() as db:
+            result = await db.execute(
+                select(UserSettings).where(UserSettings.user_id == user_id)
+            )
+            s = result.scalar_one_or_none()
+            if s:
+                return parse_params(getattr(s, field_name, ""), f"user settings ({field_name})")
+    except Exception:
+        logger.warning("Could not load %s for user %s", field_name, user_id[:8], exc_info=True)
+    return []
+
+
+def _apply_llm_parameters(
+    body_json: dict[str, Any],
+    candidate: FailoverEndpoint | None,
+    user_layer: list[ParamDef],
+    model: str,
+) -> dict[str, Any]:
+    """Resolve the driver's parameter layers and write them onto the body.
+
+    Layer order is the whole contract: user settings, then endpoint, then the
+    curated model. The client payload is not a layer -- it is the body being
+    written over, so a key nobody configured survives untouched and a key that
+    is configured is overwritten.
+
+    Returns the merged body. The resolved set is stashed as `_gitv_llm_params`
+    so the LiteLLM forwarder can pass keys it does not model through extra_body;
+    it is stripped with every other `_gitv` key before serialization.
+    """
+    layers: list[tuple[str, list[ParamDef]]] = [("user settings", user_layer)]
+    if candidate is not None:
+        label = f"endpoint '{candidate.endpoint_name}'" if candidate.endpoint_name else "endpoint"
+        layers.append((label, candidate.parameters))
+        layers.append((f"model '{model}'", candidate.params_for_model(model)))
+
+    resolved = resolve(layers)
+    out = apply_to_body(body_json, resolved)
+    out["_gitv_llm_params"] = dict(resolved.values)
+    out["_gitv_llm_param_sources"] = dict(resolved.sources)
+    return out
 
 
 def _strip_think_tags(content: str) -> str:
@@ -780,24 +873,6 @@ async def _apply_lorebook_injection(
     except Exception:
         logger.exception("Lorebook injection failed, forwarding original request")
         return body_json
-
-
-async def _forward_non_streaming(
-    method: str, url: str, headers: dict[str, str], body: bytes, timeout: httpx.Timeout,
-    user_id: str | None = None, body_json: dict[str, Any] | None = None,
-) -> JSONResponse:
-    response_data, status_code = await _do_forward(
-        method, url, headers, body, timeout,
-        provider=body_json.get("_gitv_provider", "") if body_json else "",
-        base_url=body_json.get("_gitv_base_url", "") if body_json else "",
-        api_key=body_json.get("_gitv_api_key", "") if body_json else "",
-    )
-
-    if status_code == 200 and user_id and body_json and body_json.get("_gitv_chat_id"):
-        if body_json.get("_gitv_command_overrides", {}).get("memory") is not False:
-            response_data = await _extract_response_memories(response_data, user_id, body_json)
-
-    return JSONResponse(status_code=status_code, content=response_data)
 
 
 async def _extract_response_memories(
@@ -1010,7 +1085,7 @@ async def _forward_non_streaming_verified(
                     try:
                         response_data, vresult = await run_verification_loop(
                             response_data, body_json, method, url, headers, timeout,
-                            user_id, conversation_id, body_json.get("_gitv_tags"),
+                            user_id, conversation_id, body_json.get("_gitv_tags"), path,
                         )
                         if vresult:
                             logger.info(
@@ -1067,7 +1142,7 @@ async def _forward_non_streaming_verified(
         try:
             response_data, vresult = await run_verification_loop(
                 response_data, body_json, method, url, headers, timeout,
-                user_id, conversation_id, body_json.get("_gitv_tags"),
+                user_id, conversation_id, body_json.get("_gitv_tags"), path,
             )
             if vresult:
                 logger.info(
@@ -1419,12 +1494,42 @@ async def _forward_with_failover(
         body_json["_gitv_provider"] = candidate.provider
         body_json["_gitv_base_url"] = candidate.base_url
         body_json["_gitv_api_key"] = candidate.api_key
+        body_json["_gitv_endpoint_id"] = candidate.endpoint_id
 
-        # If this candidate has a model and it differs from the body's, rebuild.
+        effective_model = candidate.model or body_json.get("model", "")
+
+        # Candidates may carry different endpoint- and model-level parameters, so
+        # the first candidate's resolved set is not reusable. Re-resolve against
+        # this one. The user-settings layer travels on body_json from the driver
+        # path and does not change between candidates.
+        if idx == 0:
+            candidate_params = body_json.get("_gitv_llm_params", {})
+        else:
+            resolved = resolve(
+                [
+                    (
+                        f"endpoint '{candidate.endpoint_name}'"
+                        if candidate.endpoint_name
+                        else "endpoint",
+                        candidate.parameters,
+                    ),
+                    (f"model '{effective_model}'", candidate.params_for_model(effective_model)),
+                ]
+            )
+            # Keep whatever the user-settings layer contributed on the first
+            # pass, then let this candidate's own layers win over it.
+            candidate_params = {**body_json.get("_gitv_llm_params", {}), **resolved.values}
+
+        # Rebuild when this candidate changes the model or the parameters.
         forward_body = body_bytes
-        if candidate.model and body_json.get("model") != candidate.model:
+        needs_rebuild = (candidate.model and body_json.get("model") != candidate.model) or (
+            idx > 0 and candidate_params != body_json.get("_gitv_llm_params", {})
+        )
+        if needs_rebuild:
             trial_body = dict(body_json)
-            trial_body["model"] = candidate.model
+            if candidate.model:
+                trial_body["model"] = candidate.model
+            trial_body = apply_to_body(trial_body, candidate_params)
             forward_body = json.dumps(
                 {k: v for k, v in trial_body.items() if not k.startswith("_gitv")}
             ).encode()
@@ -1436,6 +1541,7 @@ async def _forward_with_failover(
                 provider=candidate.provider,
                 base_url=candidate.base_url,
                 api_key=candidate.api_key,
+                configured=candidate_params,
             )
         except Exception as exc:
             logger.exception(
@@ -1481,9 +1587,18 @@ async def _forward_with_failover(
 async def _do_forward(
     method: str, url: str, headers: dict[str, str], body: bytes, timeout: httpx.Timeout,
     provider: str = "", base_url: str = "", api_key: str = "",
+    configured: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], int]:
+    """Forward one request upstream.
+
+    `configured` is the resolved LLM parameter set. The raw httpx path does not
+    need it -- the caller already wrote those keys into `body`, which is
+    forwarded verbatim. LiteLLM does need it, because it builds its call from
+    named kwargs rather than the body, so it has to be told which keys are
+    deliberate rather than incidental.
+    """
     if provider:
-        return await _do_forward_litellm(body, provider, base_url, api_key, timeout)
+        return await _do_forward_litellm(body, provider, base_url, api_key, timeout, configured)
 
     async with httpx.AsyncClient(timeout=timeout) as client:
         try:
@@ -1514,9 +1629,16 @@ async def _do_forward(
 
 
 async def _do_forward_litellm(
-    body: bytes, provider: str, base_url: str, api_key: str, timeout: httpx.Timeout
+    body: bytes, provider: str, base_url: str, api_key: str, timeout: httpx.Timeout,
+    configured: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], int]:
-    """Forward request via LiteLLM for provider-specific compatibility."""
+    """Forward request via LiteLLM for provider-specific compatibility.
+
+    Unlike the raw httpx path, which forwards the body verbatim, this builds the
+    call from named kwargs -- so anything not named here is silently dropped.
+    That is how a client's `reasoning_effort` reached a raw endpoint intact and
+    vanished the moment the endpoint had a provider set.
+    """
     try:
         import litellm
     except ImportError:
@@ -1545,14 +1667,22 @@ async def _do_forward_litellm(
         litellm_model = f"openai/{model}"
         kwargs["api_base"] = base_url
 
-    litellm_params = (
-        "temperature", "max_tokens", "top_p", "top_k", "stream",
-        "stop", "frequency_penalty", "presence_penalty", "seed",
-        "n", "logprobs", "user",
-    )
-    for param in litellm_params:
+    for param in LITELLM_NATIVE_PARAMS:
         if param in body_json:
             kwargs[param] = body_json[param]
+
+    # Configured parameters are applied after the client's, so a value the user
+    # set on an endpoint, model, rule or map stage wins. Names LiteLLM models
+    # natively go as kwargs; anything else rides in extra_body, which is how
+    # LiteLLM forwards provider-specific keys it has no opinion about. Without
+    # this an arbitrary user-named parameter could never reach a provider.
+    for name, value in (configured or {}).items():
+        if name in RESERVED_NAMES or name.startswith("_gitv"):
+            continue
+        if name in LITELLM_NATIVE_PARAMS:
+            kwargs[name] = value
+        else:
+            kwargs.setdefault("extra_body", {})[name] = value
 
     if stream:
         kwargs["stream"] = True

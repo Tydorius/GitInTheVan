@@ -175,6 +175,10 @@ async def run_sandbox(user_id: str, sandbox_id: str) -> str:
     )
 
     body = {
+        # The client parameters of the run this was forked from. Read from the
+        # source exchange rather than stored on the sandbox: only the messages
+        # are editable here, so the source stays the truth for everything else.
+        **await _source_params(user_id, sandbox.get("source_exchange_id", "")),
         "model": sandbox["model"] or routing.model,
         "messages": messages,
         # Buffered: the caller needs the resulting run id, and there is no
@@ -361,3 +365,17 @@ def _original_messages(exchange: dict[str, Any]) -> list[dict[str, Any]]:
     from app.services.debug_replay import _original_messages as extract
 
     return extract(exchange)
+
+
+async def _source_params(user_id: str, source_exchange_id: str) -> dict[str, Any]:
+    """The client parameters of the run this sandbox was forked from.
+
+    Empty when the source run has been pruned or predates parameter capture,
+    which leaves the sandbox behaving exactly as it did before.
+    """
+    if not source_exchange_id:
+        return {}
+    from app.services.debug_replay import _original_params
+
+    source = await get_exchange(user_id, source_exchange_id)
+    return _original_params(source) if source else {}

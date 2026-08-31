@@ -2,18 +2,51 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models.endpoint import Endpoint
+from app.models.endpoint import Endpoint, EndpointModel
 from app.models.user import User
+from app.services.llm_params import ParameterDef, params_from_api, params_to_api
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/endpoints", tags=["endpoints"])
+
+
+class EndpointModelInput(BaseModel):
+    name: str
+    description: str = ""
+    parameters: list[ParameterDef] = Field(default_factory=list)
+
+    @field_validator("name")
+    @classmethod
+    def check_name(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("Model name is required")
+        if len(v) > 128:
+            raise ValueError("Model name exceeds 128 characters")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def check_description(cls, v: str) -> str:
+        v = (v or "").strip()
+        if len(v) > 512:
+            raise ValueError("Model description exceeds 512 characters")
+        return v
+
+
+class EndpointModelResponse(BaseModel):
+    id: str
+    name: str
+    description: str
+    parameters: list[ParameterDef]
 
 
 class EndpointCreate(BaseModel):
@@ -28,6 +61,8 @@ class EndpointCreate(BaseModel):
     role_tag: str = "default"
     priority: int = 1
     custom_tag: str = ""
+    parameters: list[ParameterDef] = Field(default_factory=list)
+    models: list[EndpointModelInput] = Field(default_factory=list)
 
     @field_validator("base_url")
     @classmethod
@@ -47,6 +82,8 @@ class EndpointUpdate(BaseModel):
     role_tag: str | None = None
     priority: int | None = None
     custom_tag: str | None = None
+    parameters: list[ParameterDef] | None = None
+    models: list[EndpointModelInput] | None = None
 
     @field_validator("base_url")
     @classmethod
@@ -67,10 +104,69 @@ class EndpointResponse(BaseModel):
     role_tag: str
     priority: int
     custom_tag: str
+    parameters: list[ParameterDef]
+    models: list[EndpointModelResponse]
 
 
 class EndpointListResponse(BaseModel):
     endpoints: list[EndpointResponse]
+
+
+def _endpoint_to_response(e: Endpoint) -> EndpointResponse:
+    return EndpointResponse(
+        id=e.id,
+        name=e.name,
+        base_url=e.base_url,
+        api_key=e.api_key,
+        api_base_path=e.api_base_path,
+        provider=e.provider,
+        default_model=e.default_model,
+        bypass_method=e.bypass_method,
+        enabled=e.enabled,
+        role_tag=e.role_tag,
+        priority=e.priority,
+        custom_tag=e.custom_tag,
+        parameters=params_to_api(e.parameters_json),
+        models=[
+            EndpointModelResponse(
+                id=m.id,
+                name=m.name,
+                description=m.description,
+                parameters=params_to_api(m.parameters_json),
+            )
+            for m in e.models
+        ],
+    )
+
+
+def _build_models(endpoint_id: str, models: list[EndpointModelInput]) -> list[EndpointModel]:
+    """Build the rows for an endpoint's model list.
+
+    Models are edited as part of the endpoint form, so they arrive as a complete
+    list and are written wholesale rather than through their own CRUD routes --
+    the same shape maps use for stages. Rows are built and added directly rather
+    than through the relationship, because assigning to a collection that has
+    not been loaded triggers IO in a context that cannot perform it.
+    """
+    seen: set[str] = set()
+    rows: list[EndpointModel] = []
+    for i, m in enumerate(models):
+        if m.name in seen:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Duplicate model name '{m.name}' on this endpoint",
+            )
+        seen.add(m.name)
+        rows.append(
+            EndpointModel(
+                endpoint_id=endpoint_id,
+                name=m.name,
+                description=m.description,
+                sort_order=i,
+                parameters_json=params_from_api(m.parameters, f"model '{m.name}' parameters"),
+            )
+        )
+    return rows
 
 
 @router.get("")
@@ -79,20 +175,13 @@ async def list_endpoints(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     result = await db.execute(
-        select(Endpoint).where(Endpoint.user_id == current_user.id).order_by(Endpoint.created_at)
+        select(Endpoint)
+        .where(Endpoint.user_id == current_user.id)
+        .options(selectinload(Endpoint.models))
+        .order_by(Endpoint.created_at)
     )
     endpoints = result.scalars().all()
-    return EndpointListResponse(
-        endpoints=[
-            EndpointResponse(
-                id=e.id, name=e.name, base_url=e.base_url, api_key=e.api_key,
-                api_base_path=e.api_base_path, provider=e.provider,
-                default_model=e.default_model, bypass_method=e.bypass_method, enabled=e.enabled,
-                role_tag=e.role_tag, priority=e.priority, custom_tag=e.custom_tag,
-            )
-            for e in endpoints
-        ]
-    )
+    return EndpointListResponse(endpoints=[_endpoint_to_response(e) for e in endpoints])
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -114,25 +203,19 @@ async def create_endpoint(
         role_tag=req.role_tag,
         priority=req.priority,
         custom_tag=req.custom_tag,
+        parameters_json=params_from_api(req.parameters, "endpoint parameters"),
     )
     db.add(endpoint)
+    await db.flush()
+    for row in _build_models(endpoint.id, req.models):
+        db.add(row)
     await db.commit()
-    await db.refresh(endpoint)
-    logger.info("Endpoint created: %s for user: %s", endpoint.name, current_user.username)
-    return EndpointResponse(
-        id=endpoint.id,
-        name=endpoint.name,
-        base_url=endpoint.base_url,
-        api_key=endpoint.api_key,
-        api_base_path=endpoint.api_base_path,
-        provider=endpoint.provider,
-        default_model=endpoint.default_model,
-        bypass_method=endpoint.bypass_method,
-        enabled=endpoint.enabled,
-        role_tag=endpoint.role_tag,
-        priority=endpoint.priority,
-        custom_tag=endpoint.custom_tag,
+
+    result = await db.execute(
+        select(Endpoint).where(Endpoint.id == endpoint.id).options(selectinload(Endpoint.models))
     )
+    logger.info("Endpoint created: %s for user: %s", endpoint.name, current_user.username)
+    return _endpoint_to_response(result.scalar_one())
 
 
 @router.put("/{endpoint_id}")
@@ -143,7 +226,9 @@ async def update_endpoint(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     result = await db.execute(
-        select(Endpoint).where(Endpoint.id == endpoint_id, Endpoint.user_id == current_user.id)
+        select(Endpoint)
+        .where(Endpoint.id == endpoint_id, Endpoint.user_id == current_user.id)
+        .options(selectinload(Endpoint.models))
     )
     endpoint = result.scalar_one_or_none()
     if endpoint is None:
@@ -171,23 +256,21 @@ async def update_endpoint(
         endpoint.priority = req.priority
     if req.custom_tag is not None:
         endpoint.custom_tag = req.custom_tag
+    if req.parameters is not None:
+        endpoint.parameters_json = params_from_api(req.parameters, "endpoint parameters")
+    if req.models is not None:
+        # Assign through the relationship rather than deleting the rows
+        # individually: the collection is eagerly loaded here, and a row that is
+        # still a member of a loaded collection gets re-persisted by the unit of
+        # work even after db.delete(). delete-orphan removes the dropped ones.
+        endpoint.models = _build_models(endpoint.id, req.models)
 
     await db.commit()
-    await db.refresh(endpoint)
-    return EndpointResponse(
-        id=endpoint.id,
-        name=endpoint.name,
-        base_url=endpoint.base_url,
-        api_key=endpoint.api_key,
-        api_base_path=endpoint.api_base_path,
-        provider=endpoint.provider,
-        default_model=endpoint.default_model,
-        bypass_method=endpoint.bypass_method,
-        enabled=endpoint.enabled,
-        role_tag=endpoint.role_tag,
-        priority=endpoint.priority,
-        custom_tag=endpoint.custom_tag,
+
+    result = await db.execute(
+        select(Endpoint).where(Endpoint.id == endpoint.id).options(selectinload(Endpoint.models))
     )
+    return _endpoint_to_response(result.scalar_one())
 
 
 @router.delete("/{endpoint_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -217,8 +300,16 @@ async def list_endpoint_models(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    """Live-probe the provider for available models.
+
+    This stays a probe. It is what the Endpoints UI offers as candidates when
+    the user builds their curated list; it is not the curated list itself, which
+    lives in `endpoint_models`.
+    """
     result = await db.execute(
-        select(Endpoint).where(Endpoint.id == endpoint_id, Endpoint.user_id == current_user.id)
+        select(Endpoint)
+        .where(Endpoint.id == endpoint_id, Endpoint.user_id == current_user.id)
+        .options(selectinload(Endpoint.models))
     )
     endpoint = result.scalar_one_or_none()
     if endpoint is None:
@@ -244,8 +335,17 @@ async def list_endpoint_models(
         try:
             import httpx
 
-            api_base = endpoint.api_base_path or "/v1"
-            models_url = f"{endpoint.base_url}{api_base}/models"
+            from app.services.proxy import _build_upstream_url
+
+            # Built by hand this used to be `{base_url}{api_base_path}/models`,
+            # which appends to the *chat* path when api_base_path ends in
+            # `/chat/completions` -- an OpenWebUI endpoint was probed at
+            # `/api/chat/completions/models`, got the SPA's HTML back with a 200,
+            # and failed to parse. "Fetch from provider" returned nothing and
+            # said nothing. `_build_upstream_url` already handles this shape.
+            models_url = _build_upstream_url(
+                endpoint.base_url, "/v1/models", endpoint.api_base_path or ""
+            )
             headers = {"Authorization": f"Bearer {endpoint.api_key}"}
             timeout = httpx.Timeout(15.0, connect=10.0)
             async with httpx.AsyncClient(timeout=timeout) as client:
@@ -265,10 +365,15 @@ async def list_endpoint_models(
         except Exception as exc:
             logger.warning("Model list failed: %s", exc)
 
+    # Fall back to what the user has already named rather than returning nothing
+    # when the probe fails -- an endpoint behind a firewall still has a usable
+    # model list.
+    if not models:
+        models = [m.name for m in endpoint.models]
     if not models and endpoint.default_model:
         models = [endpoint.default_model]
 
-    return ModelListResponse(models=sorted(models))
+    return ModelListResponse(models=sorted(set(models)))
 
 
 async def _list_models_litellm(provider: str, api_key: str, base_url: str) -> list[str]:

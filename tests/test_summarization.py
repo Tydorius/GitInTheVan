@@ -1,4 +1,5 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+import json
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -193,20 +194,26 @@ class TestSummaryContextBlock:
 # summarize_messages (LLM call, mocked)
 # ============================================================================
 
+def _forward_returning(*results):
+    """Patch the shared forwarder. As of Phase 24 the summarizer goes through
+    `proxy._do_forward` rather than its own httpx client, so a summarization
+    endpoint with a provider set routes through LiteLLM like the driver does."""
+    calls: list[dict] = []
+    queue = list(results)
+
+    async def fake(method, url, headers, body, timeout, **kwargs):
+        calls.append({"url": url, "headers": headers, "body": json.loads(body), **kwargs})
+        return queue.pop(0) if queue else ({}, 500)
+
+    return patch("app.services.proxy._do_forward", side_effect=fake), calls
+
+
 class TestSummarizeMessages:
     @pytest.mark.asyncio
     async def test_returns_content(self):
         endpoint = _mock_endpoint()
-        with patch("app.services.summarization.httpx.AsyncClient") as mock_client_cls:
-            mock_resp = MagicMock()
-            mock_resp.status_code = 200
-            mock_resp.json.return_value = _mock_llm_response("The summary text.")
-            mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client_cls.return_value = mock_client
-
+        patcher, _ = _forward_returning((_mock_llm_response("The summary text."), 200))
+        with patcher:
             result = await summarize_messages(
                 [{"role": "user", "content": "hello"}], endpoint, "model-x", DEFAULT_PROMPT
             )
@@ -215,21 +222,75 @@ class TestSummarizeMessages:
     @pytest.mark.asyncio
     async def test_returns_existing_on_http_error(self):
         endpoint = _mock_endpoint()
-        with patch("app.services.summarization.httpx.AsyncClient") as mock_client_cls:
-            mock_resp = MagicMock()
-            mock_resp.status_code = 500
-            mock_resp.text = "boom"
-            mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=mock_resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client_cls.return_value = mock_client
-
+        patcher, _ = _forward_returning(({"error": {"message": "boom"}}, 500))
+        with patcher:
             result = await summarize_messages(
                 [{"role": "user", "content": "hello"}], endpoint, "model-x", DEFAULT_PROMPT,
                 existing_summary="prior",
             )
         assert result == "prior"
+
+    @pytest.mark.asyncio
+    async def test_the_summarizer_honours_the_endpoint_provider(self):
+        """Phase 24: this call used to POST OpenAI-shaped JSON at `base_url`
+        regardless of the endpoint's provider."""
+        endpoint = _mock_endpoint()
+        endpoint.provider = "gemini"
+
+        patcher, calls = _forward_returning((_mock_llm_response("Summary."), 200))
+        with patcher:
+            await summarize_messages(
+                [{"role": "user", "content": "hello"}], endpoint, "model-x", DEFAULT_PROMPT
+            )
+
+        assert len(calls) == 1
+        assert calls[0]["provider"] == "gemini"
+        assert calls[0]["base_url"] == endpoint.base_url
+        assert calls[0]["body"]["model"] == "model-x"
+
+    @pytest.mark.asyncio
+    async def test_a_degraded_summarization_is_recorded_on_the_trace(self):
+        """Returning the previous summary and forwarding unsummarized is the
+        right behaviour, but it must not be silent."""
+        from app.services.debug import init_debug
+
+        endpoint = _mock_endpoint()
+        body_json = {"messages": [], "model": "m"}
+        init_debug(body_json, [])
+
+        patcher, _ = _forward_returning(({"error": {}}, 502))
+        with patcher:
+            result = await summarize_messages(
+                [{"role": "user", "content": "hello"}], endpoint, "model-x", DEFAULT_PROMPT,
+                existing_summary="prior", body_json=body_json,
+            )
+
+        assert result == "prior"
+        stages = body_json["_gitv_debug"]["stages"]
+        assert any(st["name"] == "summarization_error" for st in stages)
+        note = next(st for st in stages if st["name"] == "summarization_error")
+        assert "502" in note["detail"]
+
+    @pytest.mark.asyncio
+    async def test_the_summarizer_call_is_recorded_in_the_run_metrics(self):
+        """`PURPOSE_SUMMARIZER` was defined and never emitted, so summarizer
+        cost was invisible to the metrics bar."""
+        from app.services.debug import init_debug
+
+        endpoint = _mock_endpoint()
+        body_json = {"messages": [], "model": "m"}
+        init_debug(body_json, [])
+
+        patcher, _ = _forward_returning((_mock_llm_response("Summary."), 200))
+        with patcher:
+            await summarize_messages(
+                [{"role": "user", "content": "hello"}], endpoint, "model-x", DEFAULT_PROMPT,
+                body_json=body_json,
+            )
+
+        calls = body_json["_gitv_debug"]["run"]["llm_calls"]
+        assert [c["purpose"] for c in calls] == ["summarizer"]
+        assert calls[0]["endpoint_name"] == endpoint.name
 
     @pytest.mark.asyncio
     async def test_empty_transcript_returns_existing(self):

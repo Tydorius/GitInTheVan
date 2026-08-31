@@ -220,6 +220,31 @@ class TestStreamingCapture:
         assert totals["completion_tokens"] == 5
         assert totals["tokens_source"] == "upstream"
 
+    async def test_a_streamed_call_records_which_endpoint_served_it(
+        self, admin_client, httpx_mock
+    ):
+        """`_record_stream_call` has read `_gitv_endpoint_id` since Phase 22 and
+        nothing ever wrote it, so every streamed run attributed its call to an
+        empty endpoint id -- which the comparison view groups by."""
+        client, _, api_key = admin_client
+        uid = await enable_debug(client)
+        endpoint = await make_endpoint(client)
+
+        httpx_mock.add_response(json=upstream_response(content="Hi"))
+
+        resp = await client.post(
+            "/v1/chat/completions",
+            json={"model": "test-model", "messages": [{"role": "user", "content": "Hello"}],
+                  "stream": True},
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert resp.status_code == 200
+        await resp.aread()
+
+        run = await latest_run(uid)
+        call = run["pipeline_data"]["run"]["llm_calls"][0]
+        assert call["endpoint_id"] == endpoint["id"]
+
     def test_the_sse_accumulator_reassembles_a_passthrough_stream(self):
         """The raw passthrough path — no conversation, so nothing is buffered —
         never holds the whole response; it accumulates deltas as they fly past.

@@ -785,6 +785,75 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             """,
         },
     ),
+    # Phase 23: layered LLM parameters. One JSON-array column per scope that can
+    # already name a model, plus a curated per-endpoint model list to hang
+    # per-model parameters on. `map_stages` gets two, because a stage names both
+    # a generation model and a verification model.
+    #
+    # Written as a plain string rather than a dialect dict, matching the six
+    # existing `ADD COLUMN ... TEXT DEFAULT '' NOT NULL` migrations (142, 192,
+    # 193, 268, 578, 584, 670). MariaDB 10.2+ accepts a literal default on TEXT;
+    # stock MySQL does not, which is why 046 dropped the default in its own
+    # mysql variant. If this is ever run against stock MySQL and rejected, split
+    # it into a dialect dict whose mysql variant omits the DEFAULT -- parse_params
+    # already treats NULL as an empty list.
+    (
+        "047_llm_parameters",
+        """
+        ALTER TABLE endpoints ADD COLUMN parameters_json TEXT DEFAULT '[]' NOT NULL;
+        ALTER TABLE verification_rules ADD COLUMN parameters_json TEXT DEFAULT '[]' NOT NULL;
+        ALTER TABLE scenario_rules ADD COLUMN parameters_json TEXT DEFAULT '[]' NOT NULL;
+        ALTER TABLE map_stages ADD COLUMN parameters_json TEXT DEFAULT '[]' NOT NULL;
+        ALTER TABLE map_stages ADD COLUMN verification_parameters_json TEXT DEFAULT '[]' NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN parameters_json TEXT DEFAULT '[]' NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN verification_parameters_json TEXT DEFAULT '[]' NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN summarization_parameters_json TEXT DEFAULT '[]' NOT NULL;
+        """,
+    ),
+    (
+        "048_create_endpoint_models",
+        {
+            "sqlite": """
+            CREATE TABLE IF NOT EXISTS endpoint_models (
+                id VARCHAR(36) PRIMARY KEY,
+                endpoint_id VARCHAR(36) NOT NULL REFERENCES endpoints(id) ON DELETE CASCADE,
+                name VARCHAR(128) NOT NULL,
+                description VARCHAR(512) DEFAULT '' NOT NULL,
+                sort_order INTEGER DEFAULT 0 NOT NULL,
+                parameters_json TEXT DEFAULT '[]' NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS ix_endpoint_models_endpoint_id
+                ON endpoint_models (endpoint_id);
+            """,
+            "postgresql": """
+            CREATE TABLE IF NOT EXISTS endpoint_models (
+                id VARCHAR(36) PRIMARY KEY,
+                endpoint_id VARCHAR(36) NOT NULL REFERENCES endpoints(id) ON DELETE CASCADE,
+                name VARCHAR(128) NOT NULL,
+                description VARCHAR(512) DEFAULT '' NOT NULL,
+                sort_order INTEGER DEFAULT 0 NOT NULL,
+                parameters_json TEXT DEFAULT '[]' NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS ix_endpoint_models_endpoint_id
+                ON endpoint_models (endpoint_id);
+            """,
+            "mysql": """
+            CREATE TABLE IF NOT EXISTS endpoint_models (
+                id VARCHAR(36) PRIMARY KEY,
+                endpoint_id VARCHAR(36) NOT NULL,
+                name VARCHAR(128) NOT NULL,
+                description VARCHAR(512) DEFAULT '' NOT NULL,
+                sort_order INTEGER DEFAULT 0 NOT NULL,
+                parameters_json TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (endpoint_id) REFERENCES endpoints(id) ON DELETE CASCADE
+            );
+            CREATE INDEX ix_endpoint_models_endpoint_id ON endpoint_models (endpoint_id);
+            """,
+        },
+    ),
 ]
 
 

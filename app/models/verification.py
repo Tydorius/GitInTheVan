@@ -34,6 +34,9 @@ class VerificationRule(Base):
         String(36), ForeignKey("endpoints.id", ondelete="SET NULL"), nullable=True
     )
     verification_model: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    parameters_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]", server_default="[]"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
