@@ -2,7 +2,7 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +10,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.user import User
 from app.models.user_settings import UserSettings
+from app.services.llm_params import ParameterDef, params_from_api, params_to_api
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,11 @@ class SettingsResponse(BaseModel):
     context_window_override: int
     debug_mode: bool
     default_map_id: str | None
+    # One parameter set per LLM role, matching the three model fields. These are
+    # the blanket layer: broader than the endpoint, narrower than the client.
+    parameters: list[ParameterDef] = Field(default_factory=list)
+    verification_parameters: list[ParameterDef] = Field(default_factory=list)
+    summarization_parameters: list[ParameterDef] = Field(default_factory=list)
 
 
 class SettingsUpdate(BaseModel):
@@ -44,6 +50,9 @@ class SettingsUpdate(BaseModel):
     context_window_override: int | None = None
     debug_mode: bool | None = None
     default_map_id: str | None = None
+    parameters: list[ParameterDef] | None = None
+    verification_parameters: list[ParameterDef] | None = None
+    summarization_parameters: list[ParameterDef] | None = None
 
 
 @router.get("")
@@ -72,6 +81,9 @@ async def get_settings(
         context_window_override=user_settings.context_window_override,
         debug_mode=user_settings.debug_mode,
         default_map_id=user_settings.default_map_id,
+        parameters=params_to_api(user_settings.parameters_json),
+        verification_parameters=params_to_api(user_settings.verification_parameters_json),
+        summarization_parameters=params_to_api(user_settings.summarization_parameters_json),
     )
 
 
@@ -111,6 +123,16 @@ async def update_settings(
         user_settings.debug_mode = req.debug_mode
     if req.default_map_id is not None:
         user_settings.default_map_id = req.default_map_id or None
+    if req.parameters is not None:
+        user_settings.parameters_json = params_from_api(req.parameters, "driver parameters")
+    if req.verification_parameters is not None:
+        user_settings.verification_parameters_json = params_from_api(
+            req.verification_parameters, "verification parameters"
+        )
+    if req.summarization_parameters is not None:
+        user_settings.summarization_parameters_json = params_from_api(
+            req.summarization_parameters, "summarization parameters"
+        )
 
     await db.commit()
     await db.refresh(user_settings)
@@ -128,4 +150,7 @@ async def update_settings(
         context_window_override=user_settings.context_window_override,
         debug_mode=user_settings.debug_mode,
         default_map_id=user_settings.default_map_id,
+        parameters=params_to_api(user_settings.parameters_json),
+        verification_parameters=params_to_api(user_settings.verification_parameters_json),
+        summarization_parameters=params_to_api(user_settings.summarization_parameters_json),
     )

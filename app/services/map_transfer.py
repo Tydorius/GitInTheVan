@@ -109,6 +109,39 @@ class MapImportResult:
         return [r for r in self.resources if not r.resource_id]
 
 
+def _import_parameters(raw: Any, stage_name: str) -> str:
+    """Validate a pack's stage parameters before they are stored.
+
+    A map pack is untrusted input from another user's machine, so its parameter
+    list goes through the same validator the API uses rather than being trusted
+    as written -- this is the path by which a reserved name like `stream`, or an
+    oversized blob, would otherwise reach the database. A list that does not
+    validate is dropped with a warning rather than failing the whole install:
+    losing a stage's tuning is recoverable, losing the map is not.
+
+    Pre-0.24 packs have no parameters at all, which is the `None` case.
+    """
+    from app.services.llm_params import dump_params, validate_params
+
+    if not raw:
+        return "[]"
+    try:
+        return dump_params(validate_params(raw, f"stage '{stage_name}' parameters"))
+    except Exception as exc:
+        logger.warning(
+            "Map import: dropping invalid parameters on stage '%s': %s", stage_name, exc
+        )
+        return "[]"
+
+
+def _export_parameters(raw: str) -> list[dict[str, Any]]:
+    """Stage parameters as pack JSON, read tolerantly so one corrupt blob cannot
+    fail an entire export."""
+    from app.services.llm_params import dump_params, parse_params
+
+    return json.loads(dump_params(parse_params(raw)))
+
+
 async def build_map_from_export(
     db: AsyncSession,
     user_id: str,
@@ -184,6 +217,15 @@ async def build_map_from_export(
             verification_max_retries=stage_data.get("verification_max_retries", 2),
             verification_instructions=stage_data.get("verification_instructions", ""),
             output_mode=stage_data.get("output_mode", "persist"),
+            # A pack is untrusted input, so its parameters are re-validated
+            # rather than stored as given -- this is where a `stream` or
+            # `_gitv` key would otherwise enter. Absent on pre-0.24 packs.
+            parameters_json=_import_parameters(
+                stage_data.get("parameters"), stage_data.get("name", "Stage")
+            ),
+            verification_parameters_json=_import_parameters(
+                stage_data.get("verification_parameters"), stage_data.get("name", "Stage")
+            ),
         )
         db.add(stage)
         await db.flush()
@@ -798,6 +840,8 @@ async def serialize_map_to_export(
             "verification_max_retries": stage.verification_max_retries,
             "verification_instructions": stage.verification_instructions,
             "output_mode": stage.output_mode,
+            "parameters": _export_parameters(stage.parameters_json),
+            "verification_parameters": _export_parameters(stage.verification_parameters_json),
             "resources": [],
         }
 

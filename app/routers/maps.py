@@ -11,6 +11,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.map import Map, MapStage, MapStageResource
 from app.models.user import User
+from app.services.llm_params import ParameterDef, params_from_api, params_to_api
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,8 @@ class StageInput(BaseModel):
     verification_max_retries: int = 2
     verification_instructions: str = ""
     output_mode: str = "persist"
+    parameters: list[ParameterDef] = []
+    verification_parameters: list[ParameterDef] = []
     resources: list[ResourceInput] = []
 
 
@@ -99,6 +102,8 @@ class StageResponse(BaseModel):
     verification_max_retries: int
     verification_instructions: str
     output_mode: str
+    parameters: list[ParameterDef]
+    verification_parameters: list[ParameterDef]
     resources: list[ResourceResponse]
 
 
@@ -152,6 +157,8 @@ def _stage_to_response(s: MapStage) -> StageResponse:
         verification_max_retries=s.verification_max_retries,
         verification_instructions=s.verification_instructions,
         output_mode=s.output_mode,
+        parameters=params_to_api(s.parameters_json),
+        verification_parameters=params_to_api(s.verification_parameters_json),
         resources=[_resource_to_response(r) for r in s.resources],
     )
 
@@ -195,6 +202,13 @@ def _build_stage(stage_input: StageInput, stage_order: int, map_id: str) -> MapS
         verification_max_retries=stage_input.verification_max_retries,
         verification_instructions=stage_input.verification_instructions,
         output_mode=stage_input.output_mode,
+        parameters_json=params_from_api(
+            stage_input.parameters, f"stage '{stage_input.name}' parameters"
+        ),
+        verification_parameters_json=params_from_api(
+            stage_input.verification_parameters,
+            f"stage '{stage_input.name}' verification parameters",
+        ),
     )
     for r in stage_input.resources:
         stage.resources.append(MapStageResource(

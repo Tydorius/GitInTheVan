@@ -29,6 +29,9 @@ class ScenarioRule(Base):
     model: Mapped[str] = mapped_column(String(128), nullable=False, default="", server_default="")
     prompt: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    parameters_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]", server_default="[]"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

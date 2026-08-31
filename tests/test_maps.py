@@ -329,3 +329,158 @@ class TestStickyResources:
         assert "STAGE_ONLY_TEXT" in json.dumps(_bodies_for(sticky_run, "one.test")[0])
         assert "STAGE_ONLY_TEXT" not in json.dumps(_bodies_for(sticky_run, "two.test")[0])
         assert "STAGE_ONLY_TEXT" not in json.dumps(_bodies_for(sticky_run, "three.test")[0])
+
+
+class TestMapPackParameterRoundTrip:
+    """A shared map carries its tuning with it, and a pack is untrusted input.
+
+    Both halves matter: parameters must survive an export/import cycle, and a
+    hand-edited pack must not be able to write a reserved name or an oversized
+    blob into the importer's database by going around the API.
+    """
+
+    @staticmethod
+    def _map_with(params, vparams=None):
+        return {
+            "name": "Tuned",
+            "tag": "",
+            "stages": [
+                {
+                    "name": "Write",
+                    "endpoint_tag": "drafter",
+                    "output_mode": "persist",
+                    "parameters": params,
+                    "verification_parameters": vparams or [],
+                }
+            ],
+        }
+
+    @pytest.mark.asyncio
+    async def test_parameters_survive_export_and_import(self, admin_client):
+        client, _, _ = admin_client
+        created = await client.post(
+            "/api/maps",
+            json=self._map_with(
+                [
+                    {
+                        "name": "reasoning_effort",
+                        "type": "string",
+                        "value": "low",
+                        "description": "Cheap stage",
+                        "required": True,
+                        "options": ["low", "high"],
+                    }
+                ],
+                [{"name": "max_tokens", "type": "integer", "value": 50}],
+            ),
+        )
+        assert created.status_code == 201, created.text
+        map_id = created.json()["id"]
+
+        exported = await client.get(f"/api/maps/{map_id}/export")
+        assert exported.status_code == 200
+        stage = exported.json()["stages"][0]
+        assert stage["parameters"][0]["value"] == "low"
+        assert stage["parameters"][0]["options"] == ["low", "high"]
+        assert stage["verification_parameters"][0]["value"] == 50
+
+        reimported = await client.post(
+            "/api/maps/import", json={"name": "Tuned Copy", "data": exported.json()}
+        )
+        assert reimported.status_code == 201, reimported.text
+        got = reimported.json()["stages"][0]
+        assert got["parameters"][0]["name"] == "reasoning_effort"
+        assert got["parameters"][0]["value"] == "low"
+        assert got["parameters"][0]["required"] is True
+        assert got["parameters"][0]["description"] == "Cheap stage"
+        assert got["verification_parameters"][0]["value"] == 50
+
+    @pytest.mark.asyncio
+    async def test_a_pre_0_24_pack_still_installs(self, admin_client):
+        """Packs published before parameters existed carry no such key."""
+        client, _, _ = admin_client
+        resp = await client.post(
+            "/api/maps/import",
+            json={
+                "data": {
+                    "name": "Legacy",
+                    "stages": [{"stage_order": 1, "name": "Write", "output_mode": "persist"}],
+                }
+            },
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["stages"][0]["parameters"] == []
+        assert resp.json()["stages"][0]["verification_parameters"] == []
+
+    @pytest.mark.asyncio
+    async def test_a_pack_cannot_smuggle_a_reserved_name(self, admin_client):
+        """Hand-edited pack JSON goes around the API's validator, so the
+        importer runs its own. `stream` is owned by the pipeline."""
+        client, _, _ = admin_client
+        resp = await client.post(
+            "/api/maps/import",
+            json={
+                "data": {
+                    "name": "Hostile",
+                    "stages": [
+                        {
+                            "stage_order": 1,
+                            "name": "Write",
+                            "output_mode": "persist",
+                            "parameters": [
+                                {"name": "stream", "type": "boolean", "value": True},
+                                {"name": "temperature", "type": "float", "value": 0.5},
+                            ],
+                        }
+                    ],
+                }
+            },
+        )
+        # The map still installs -- losing a stage's tuning is recoverable,
+        # losing the map is not -- but the parameters are dropped.
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["stages"][0]["parameters"] == []
+
+    @pytest.mark.asyncio
+    async def test_a_pack_cannot_smuggle_an_oversized_blob(self, admin_client):
+        client, _, _ = admin_client
+        resp = await client.post(
+            "/api/maps/import",
+            json={
+                "data": {
+                    "name": "Huge",
+                    "stages": [
+                        {
+                            "stage_order": 1,
+                            "name": "Write",
+                            "output_mode": "persist",
+                            "parameters": [{"name": "big", "value": "x" * 20000}],
+                        }
+                    ],
+                }
+            },
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["stages"][0]["parameters"] == []
+
+    @pytest.mark.asyncio
+    async def test_a_pack_with_malformed_parameters_still_installs(self, admin_client):
+        client, _, _ = admin_client
+        resp = await client.post(
+            "/api/maps/import",
+            json={
+                "data": {
+                    "name": "Broken",
+                    "stages": [
+                        {
+                            "stage_order": 1,
+                            "name": "Write",
+                            "output_mode": "persist",
+                            "parameters": "not a list",
+                        }
+                    ],
+                }
+            },
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["stages"][0]["parameters"] == []

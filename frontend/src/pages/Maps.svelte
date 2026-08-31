@@ -1,5 +1,7 @@
 <script lang="ts">
   import { api } from '../api'
+  import ParameterEditor from '../lib/ParameterEditor.svelte'
+  import ModelSelect from '../lib/ModelSelect.svelte'
   import { onMount } from 'svelte'
   import { routeParams } from '../stores'
   import { downloadJson } from '../lib/download'
@@ -60,8 +62,17 @@
       verification_max_retries: 2,
       verification_instructions: '',
       output_mode: 'persist',
+      parameters: [],
+      verification_parameters: [],
       resources: [],
     }
+  }
+
+  // A stage names two models -- one to generate with, one to check with -- so
+  // each picker is built from its own endpoint's curated list.
+  function modelsFor(endpointId: string | null): string[] {
+    const ep = endpoints.find((e: any) => e.id === endpointId)
+    return (ep?.models || []).map((m: any) => m.name).filter(Boolean)
   }
 
   function addStage() {
@@ -266,8 +277,14 @@
           </select>
         </div>
         <div class="form-group">
-          <label>Model Override</label>
-          <input bind:value={stage.model_override} placeholder="Leave blank for default" />
+          <label for="stage-model-{idx}">Model Override</label>
+          <ModelSelect
+            id="stage-model-{idx}"
+            bind:value={stage.model_override}
+            models={modelsFor(stage.endpoint_id)}
+            emptyLabel="Use default"
+            placeholder="Leave blank for default"
+          />
         </div>
       </div>
 
@@ -349,16 +366,34 @@
               </select>
             </div>
             <div class="form-group">
-              <label>Verification Model</label>
-              <input bind:value={stage.verification_model} placeholder="Leave blank for default" />
+              <label for="stage-vmodel-{idx}">Verification Model</label>
+              <ModelSelect
+                id="stage-vmodel-{idx}"
+                bind:value={stage.verification_model}
+                models={modelsFor(stage.verification_endpoint_id)}
+                emptyLabel="Use default"
+                placeholder="Leave blank for default"
+              />
             </div>
           </div>
           <div class="form-group">
             <label>Max Retries</label>
             <input type="number" bind:value={stage.verification_max_retries} min="0" />
           </div>
+          <ParameterEditor
+            bind:params={stage.verification_parameters}
+            title="Parameters for this stage's verification call"
+            scopeNote="Inherits the verification endpoint's parameters."
+          />
         </div>
       {/if}
+
+      <ParameterEditor
+        bind:params={stage.parameters}
+        title="Parameters for this stage"
+        hint="Applied to this stage's own LLM call. Overrides the endpoint's and the model's."
+        scopeNote="This stage inherits the endpoint's parameters."
+      />
     </div>
   {/each}
 

@@ -2,7 +2,7 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,7 @@ from app.models.user import User
 from app.models.verification import VerificationLog, VerificationRule
 from app.services.admin import get_admin_settings
 from app.services.content_guard import check_size, sanitize_and_log
+from app.services.llm_params import ParameterDef, params_from_api, params_to_api
 from app.services.verification import (
     check_response,
 )
@@ -33,6 +34,7 @@ class RuleCreate(BaseModel):
     tag: str = ""
     verification_endpoint_id: str | None = None
     verification_model: str = ""
+    parameters: list[ParameterDef] = Field(default_factory=list)
 
 
 class RuleUpdate(BaseModel):
@@ -46,6 +48,7 @@ class RuleUpdate(BaseModel):
     tag: str | None = None
     verification_endpoint_id: str | None = None
     verification_model: str | None = None
+    parameters: list[ParameterDef] | None = None
 
 
 class RuleResponse(BaseModel):
@@ -60,6 +63,7 @@ class RuleResponse(BaseModel):
     tag: str
     verification_endpoint_id: str | None
     verification_model: str
+    parameters: list[ParameterDef] = Field(default_factory=list)
 
 
 class RuleListItem(BaseModel):
@@ -74,6 +78,7 @@ class RuleListItem(BaseModel):
     tag: str
     verification_endpoint_id: str | None
     verification_model: str
+    parameters: list[ParameterDef] = Field(default_factory=list)
 
 
 async def _check_tag_unique(
@@ -132,6 +137,9 @@ class VerificationTestResponse(BaseModel):
     approved: bool
     thinking: str = ""
     raw_response: str = ""
+    # True when the judge did not run. Without it the UI cannot tell a clean pass
+    # from an unreachable verification endpoint -- both are violation=False.
+    errored: bool = False
 
 
 class VerificationSettingsResponse(BaseModel):
@@ -159,6 +167,7 @@ def _rule_to_response(rule: VerificationRule) -> RuleResponse:
         tag=rule.tag,
         verification_endpoint_id=rule.verification_endpoint_id,
         verification_model=rule.verification_model,
+        parameters=params_to_api(rule.parameters_json),
     )
 
 
@@ -175,6 +184,7 @@ def _rule_to_list_item(rule: VerificationRule) -> RuleListItem:
         tag=rule.tag,
         verification_endpoint_id=rule.verification_endpoint_id,
         verification_model=rule.verification_model,
+        parameters=params_to_api(rule.parameters_json),
     )
 
 
@@ -231,6 +241,7 @@ async def create_rule(
         tag=req.tag,
         verification_endpoint_id=req.verification_endpoint_id,
         verification_model=req.verification_model,
+        parameters_json=params_from_api(req.parameters, "verification rule parameters"),
     )
     db.add(rule)
     await db.commit()
@@ -259,6 +270,13 @@ async def update_rule(
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tag already in use")
 
     update_data = req.model_dump(exclude_unset=True)
+    # `parameters` is an API-shaped list but a JSON column on the model, so it
+    # cannot go through the generic setattr loop below -- that would set an
+    # attribute the ORM does not map and silently persist nothing.
+    if "parameters" in update_data:
+        rule.parameters_json = params_from_api(
+            update_data.pop("parameters"), "verification rule parameters"
+        )
     if update_data.get("prompt") is not None:
         admin_settings = await get_admin_settings()
         check_size(update_data["prompt"], admin_settings.max_rule_size_kb * 1024, "Verification rule prompt")
@@ -406,6 +424,7 @@ async def test_verification(
             approved=check_result.approved,
             thinking=j.thinking,
             raw_response=j.raw_response,
+            errored=j.errored,
         )
 
     return VerificationTestResponse(

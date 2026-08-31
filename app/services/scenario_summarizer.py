@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -9,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import async_session
 from app.models.scenario_rule import ScenarioRule
 from app.services.budget import estimate_tokens
+from app.services.llm_params import apply_to_body, parse_params, resolve
+from app.services.routing import endpoint_parameters, model_parameter_map
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +91,7 @@ async def maybe_summarize_scenario(
     )
 
     summary = await _call_summarization_llm(
-        system_content, prompt, triggered_rule, user_id
+        system_content, prompt, triggered_rule, user_id, body_json
     )
 
     if summary and estimate_tokens(summary) < system_tokens:
@@ -111,6 +114,7 @@ async def _call_summarization_llm(
     prompt: str,
     rule: ScenarioRule,
     user_id: str,
+    body_json: dict[str, Any] | None = None,
 ) -> str | None:
     """Call a navigator LLM to summarize the scenario content."""
     from app.services.proxy import _build_upstream_url, _do_forward, _do_forward_litellm
@@ -122,7 +126,7 @@ async def _call_summarization_llm(
         logger.warning("Scenario summarization: no endpoint configured for rule %s", rule.name)
         return None
 
-    base_url, api_key, provider, model = routing
+    base_url, api_key, provider, model, params = routing
 
     if not model:
         logger.warning("Scenario summarization: no model configured for rule %s", rule.name)
@@ -133,6 +137,8 @@ async def _call_summarization_llm(
         {"role": "user", "content": content[:32000]},
     ]
 
+    # These two were hard-coded literals until Phase 23. They remain the
+    # defaults; a configured parameter at any layer now overrides them.
     test_body = {
         "model": model,
         "messages": messages,
@@ -140,22 +146,37 @@ async def _call_summarization_llm(
         "temperature": 0.3,
         "stream": False,
     }
+    test_body = apply_to_body(test_body, params)
 
     body_bytes = json.dumps(test_body).encode()
     timeout = httpx.Timeout(60.0, connect=15.0)
 
+    from app.services.debug_metrics import PURPOSE_SUMMARIZER, record_llm_call
+
+    started = time.monotonic()
     try:
         if provider:
             response_data, status_code = await _do_forward_litellm(
-                body_bytes, provider, base_url, api_key, timeout
+                body_bytes, provider, base_url, api_key, timeout, params
             )
         else:
             api_base_path = ""
             upstream_url = _build_upstream_url(base_url, "/v1/chat/completions", api_base_path)
             headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
             response_data, status_code = await _do_forward(
-                "POST", upstream_url, headers, body_bytes, timeout
+                "POST", upstream_url, headers, body_bytes, timeout, configured=params
             )
+
+        record_llm_call(
+            body_json or {},
+            purpose=PURPOSE_SUMMARIZER,
+            latency_ms=(time.monotonic() - started) * 1000.0,
+            status_code=status_code,
+            response_data=response_data,
+            messages=messages,
+            provider=provider,
+            model_requested=model,
+        )
 
         if status_code != 200:
             logger.warning(
@@ -178,10 +199,12 @@ async def _call_summarization_llm(
 
 async def resolve_routing_by_rule(
     rule: ScenarioRule, user_id: str, db: AsyncSession
-) -> tuple[str, str, str, str] | None:
-    """Resolve endpoint/key/provider/model for a scenario rule.
+) -> tuple[str, str, str, str, dict] | None:
+    """Resolve endpoint/key/provider/model/parameters for a scenario rule.
 
-    Returns (base_url, api_key, provider, model) or None.
+    Returns (base_url, api_key, provider, model, parameters) or None. The
+    parameter layers are resolved here, while the session is open, because the
+    endpoint and its curated model list are only in scope at this point.
     """
     from app.models.endpoint import Endpoint
     from app.models.user_settings import UserSettings
@@ -220,9 +243,26 @@ async def resolve_routing_by_rule(
     if not model:
         model = endpoint.default_model or ""
 
+    settings_result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == user_id)
+    )
+    us = settings_result.scalar_one_or_none()
+    user_layer = (
+        parse_params(us.summarization_parameters_json, "user settings (summarization)")
+        if us else []
+    )
+
+    params = resolve([
+        ("user settings (summarization)", user_layer),
+        (f"endpoint '{endpoint.name}'", endpoint_parameters(endpoint)),
+        (f"model '{model}'", model_parameter_map(endpoint).get(model, [])),
+        (f"scenario rule '{rule.name}'", parse_params(rule.parameters_json, "scenario rule")),
+    ]).values
+
     return (
         endpoint.base_url,
         endpoint.api_key,
         endpoint.provider or "",
         model,
+        dict(params),
     )

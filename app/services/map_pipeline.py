@@ -13,6 +13,8 @@ from sqlalchemy.orm import selectinload
 from app.database import async_session
 from app.models.endpoint import Endpoint
 from app.models.map import Map, MapStage
+from app.services.llm_params import apply_to_body, parse_params, resolve
+from app.services.routing import endpoint_parameters, model_parameter_map
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +85,32 @@ def stage_bound_cantrip_ids(map_obj: Map) -> set[str]:
         for r in stage.resources
         if r.resource_type == "cantrip"
     }
+
+
+async def stage_parameters(
+    db, stage: MapStage, endpoint: Endpoint | None, model: str, user_id: str
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Resolve a map stage's generation parameters.
+
+    A stage is the closest scope to the message that can name a model, so its
+    own layer wins over the endpoint's and the model's. Returns the values plus
+    the layer each came from, which the Debug timeline renders."""
+    from app.models.user_settings import UserSettings
+
+    us_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+    us = us_result.scalar_one_or_none()
+
+    layers = [
+        ("user settings", parse_params(us.parameters_json, "user settings") if us else []),
+    ]
+    if endpoint is not None:
+        layers.append((f"endpoint '{endpoint.name}'", endpoint_parameters(endpoint)))
+        layers.append((f"model '{model}'", model_parameter_map(endpoint).get(model, [])))
+    layers.append(
+        (f"map stage '{stage.name}'", parse_params(stage.parameters_json, "map stage"))
+    )
+    resolved = resolve(layers)
+    return dict(resolved.values), dict(resolved.sources)
 
 
 async def _resolve_stage_endpoint(
@@ -355,21 +383,69 @@ async def _build_stage_verification_body(
     return messages
 
 
+async def _stage_verification_parameters(
+    db, stage: MapStage, endpoint: Endpoint | None, model: str, user_id: str
+) -> dict[str, Any]:
+    """Resolve a map stage's verification parameters.
+
+    Separate from `stage_parameters` because a stage names two models -- one to
+    generate with and one to check with -- and each carries its own layer.
+    """
+    from app.models.user_settings import UserSettings
+
+    us_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+    us = us_result.scalar_one_or_none()
+
+    layers = [
+        (
+            "user settings (verification)",
+            parse_params(us.verification_parameters_json, "user settings") if us else [],
+        ),
+    ]
+    if endpoint is not None:
+        layers.append((f"endpoint '{endpoint.name}'", endpoint_parameters(endpoint)))
+        layers.append((f"model '{model}'", model_parameter_map(endpoint).get(model, [])))
+    layers.append(
+        (
+            f"map stage '{stage.name}' verification",
+            parse_params(stage.verification_parameters_json, "map stage verification"),
+        )
+    )
+    return dict(resolve(layers).values)
+
+
+def _stage_verification_error_note(stage_name: str, detail: str) -> str:
+    """The sentence shown when a stage's judge did not run.
+
+    A stage whose verification endpoint is unreachable is approved by default so
+    the pipeline keeps moving, which without this note is indistinguishable from
+    a stage that actually passed.
+    """
+    return (
+        f"Verification resulted in {detail}, so stage '{stage_name}' was not checked. "
+        "The stage output was kept unverified."
+    )
+
+
 async def _verify_stage(
     content: str,
     stage: MapStage,
     user_id: str,
-) -> tuple[bool, str]:
+) -> tuple[bool, str, bool]:
     """Run verification on a stage's response.
 
-    Returns (approved, reason).
+    Returns (approved, reason, errored). `errored` marks an approval that
+    happened because the judge never ran, not because the output passed.
     """
     async with async_session() as db:
         v_endpoint, v_model = await _resolve_verification_endpoint(db, stage, user_id)
+        v_params = await _stage_verification_parameters(db, stage, v_endpoint, v_model, user_id)
 
     if not v_endpoint:
         logger.warning("Map stage '%s': verification enabled but no endpoint", stage.name)
-        return True, ""
+        return True, _stage_verification_error_note(stage.name, "no configured endpoint"), True
+
+    from app.services.proxy import _build_upstream_url, _do_forward
 
     messages = await _build_stage_verification_body(content, stage)
 
@@ -377,13 +453,11 @@ async def _verify_stage(
         "Authorization": f"Bearer {v_endpoint.api_key}",
         "Content-Type": "application/json",
     }
-    api_base_path = v_endpoint.api_base_path or ""
-    if api_base_path.endswith("/chat/completions"):
-        url = f"{v_endpoint.base_url}{api_base_path}"
-    else:
-        path_prefix = api_base_path or "/v1"
-        url = f"{v_endpoint.base_url}{path_prefix}/chat/completions"
+    url = _build_upstream_url(
+        v_endpoint.base_url, "/v1/chat/completions", v_endpoint.api_base_path or ""
+    )
 
+    # Defaults, not fixed values: a configured parameter at any layer wins.
     body = {
         "model": v_model or "gpt-4",
         "messages": messages,
@@ -391,62 +465,70 @@ async def _verify_stage(
         "temperature": 0.1,
         "stream": False,
     }
+    body = apply_to_body(body, v_params)
 
     max_retries = stage.verification_max_retries
     from app.services.admin import get_caps
     caps = await get_caps()
     max_retries = min(max_retries, caps["max_verification_retries"])
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=15.0)) as client:
-        for attempt in range(max_retries + 1):
+    body_bytes = json.dumps(body).encode()
+    timeout = httpx.Timeout(120, connect=15.0)
+
+    for attempt in range(max_retries + 1):
+        try:
+            data, status_code = await _do_forward(
+                "POST", url, headers, body_bytes, timeout,
+                provider=v_endpoint.provider or "",
+                base_url=v_endpoint.base_url,
+                api_key=v_endpoint.api_key,
+                configured=v_params,
+            )
+            if status_code != 200:
+                logger.warning(
+                    "Map stage '%s' verification: endpoint returned %d",
+                    stage.name, status_code,
+                )
+                return True, _stage_verification_error_note(stage.name, f"a {status_code} error"), True
+
+            llm_content = (
+                data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+            )
+
+            violation = False
+            reason = ""
             try:
-                resp = await client.post(url, json=body, headers=headers)
-                if resp.status_code != 200:
-                    logger.warning(
-                        "Map stage '%s' verification: endpoint returned %d",
-                        stage.name, resp.status_code,
-                    )
-                    return True, f"Verification endpoint error ({resp.status_code})"
+                parsed = json.loads(llm_content)
+                violation = parsed.get("violation", False)
+                reason = parsed.get("reason", "")
+            except (json.JSONDecodeError, TypeError):
+                if "violation" in llm_content.lower():
+                    violation = True
+                    reason = llm_content[:200]
 
-                data = resp.json()
-                llm_content = (
-                    data.get("choices", [{}])[0]
-                    .get("message", {})
-                    .get("content", "")
+            if not violation:
+                logger.info("Map stage '%s' verification: approved (attempt %d)", stage.name, attempt + 1)
+                return True, "", False
+
+            if attempt >= max_retries:
+                logger.warning(
+                    "Map stage '%s' verification: failed after %d retries: %s",
+                    stage.name, max_retries, reason,
                 )
+                return False, reason, False
 
-                violation = False
-                reason = ""
-                try:
-                    parsed = json.loads(llm_content)
-                    violation = parsed.get("violation", False)
-                    reason = parsed.get("reason", "")
-                except (json.JSONDecodeError, TypeError):
-                    if "violation" in llm_content.lower():
-                        violation = True
-                        reason = llm_content[:200]
+            logger.info(
+                "Map stage '%s' verification: violation on attempt %d, retrying: %s",
+                stage.name, attempt + 1, reason,
+            )
 
-                if not violation:
-                    logger.info("Map stage '%s' verification: approved (attempt %d)", stage.name, attempt + 1)
-                    return True, ""
+        except Exception:
+            logger.exception("Map stage '%s' verification failed", stage.name)
+            return True, _stage_verification_error_note(stage.name, "an exception"), True
 
-                if attempt >= max_retries:
-                    logger.warning(
-                        "Map stage '%s' verification: failed after %d retries: %s",
-                        stage.name, max_retries, reason,
-                    )
-                    return False, reason
-
-                logger.info(
-                    "Map stage '%s' verification: violation on attempt %d, retrying: %s",
-                    stage.name, attempt + 1, reason,
-                )
-
-            except Exception:
-                logger.exception("Map stage '%s' verification failed", stage.name)
-                return True, ""
-
-    return True, ""
+    return True, "", False
 
 
 async def _scan_stage_forbidden(
@@ -491,6 +573,7 @@ async def _forward_stage_llm(
     model: str,
     timeout: httpx.Timeout,
     stage_index: int | None = None,
+    configured: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], int]:
     """Forward a request to the stage's LLM endpoint(s) with failover.
 
@@ -506,15 +589,15 @@ async def _forward_stage_llm(
     if model:
         forward_body["model"] = model
 
+    forward_body = apply_to_body(forward_body, configured or {})
+
     from app.services.debug_metrics import PURPOSE_MAP_STAGE, record_llm_call
+    from app.services.proxy import _build_upstream_url, _do_forward
 
     for idx, endpoint in enumerate(endpoints):
-        api_base_path = endpoint.api_base_path or ""
-        if api_base_path.endswith("/chat/completions"):
-            url = f"{endpoint.base_url}{api_base_path}"
-        else:
-            path_prefix = api_base_path or "/v1"
-            url = f"{endpoint.base_url}{path_prefix}/chat/completions"
+        url = _build_upstream_url(
+            endpoint.base_url, "/v1/chat/completions", endpoint.api_base_path or ""
+        )
 
         headers = {
             "Authorization": f"Bearer {endpoint.api_key}",
@@ -525,13 +608,13 @@ async def _forward_stage_llm(
 
         started = time.monotonic()
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(url, content=body_bytes, headers=headers)
-
-            try:
-                response_data = resp.json()
-            except Exception:
-                response_data = {"error": {"message": resp.text[:500]}}
+            response_data, status_code = await _do_forward(
+                "POST", url, headers, body_bytes, timeout,
+                provider=endpoint.provider or "",
+                base_url=endpoint.base_url,
+                api_key=endpoint.api_key,
+                configured=configured,
+            )
 
             # This forwarder bypasses every instrument in proxy.py, which is why
             # map stages were invisible to Debug entirely.
@@ -539,7 +622,7 @@ async def _forward_stage_llm(
                 body_json,
                 purpose=PURPOSE_MAP_STAGE,
                 latency_ms=(time.monotonic() - started) * 1000.0,
-                status_code=resp.status_code,
+                status_code=status_code,
                 response_data=response_data,
                 messages=forward_body.get("messages"),
                 stage_index=stage_index,
@@ -550,12 +633,12 @@ async def _forward_stage_llm(
                 failover_attempt=idx,
             )
 
-            if resp.status_code == 200:
+            if status_code == 200:
                 return response_data, 200
 
             logger.info(
                 "Map stage failover: endpoint '%s' returned %d, trying next",
-                endpoint.name, resp.status_code,
+                endpoint.name, status_code,
             )
         except Exception as exc:
             logger.exception(
@@ -677,6 +760,13 @@ async def run_map_pipeline(
 
         async with async_session() as db:
             endpoints, model = await _resolve_stage_endpoint(db, stage, user_id)
+            # Resolved per stage against the endpoint this stage actually
+            # landed on, which tag-based resolution may make different from the
+            # previous stage's.
+            stage_params, stage_param_sources = await stage_parameters(
+                db, stage, endpoints[0] if endpoints else None,
+                model or (endpoints[0].default_model if endpoints else ""), user_id,
+            )
 
         if not endpoints:
             logger.error("Map stage '%s': no endpoint available", stage.name)
@@ -740,6 +830,23 @@ async def run_map_pipeline(
 
         if debug_on:
             debug_capture(
+                body_json, "map_stage_parameters",
+                f"Stage {stage_idx + 1} LLM Parameters: {stage.name}",
+                item_id=stage.id, item_name=stage.name,
+                detail=(
+                    ", ".join(
+                        f"{k}={v} (from {stage_param_sources.get(k, '?')})"
+                        for k, v in stage_params.items()
+                    )
+                    if stage_params else "No parameters configured"
+                ),
+                metadata={
+                    "stage_index": stage_idx,
+                    "resolved": stage_params,
+                    "sources": stage_param_sources,
+                },
+            )
+            debug_capture(
                 body_json, "map_stage", f"Map Stage {stage_idx + 1}: {stage.name}",
                 item_id=stage.id, item_name=stage.name,
                 detail=f"{len(active_resources)} resource(s), output mode '{stage.output_mode}'",
@@ -786,7 +893,8 @@ async def run_map_pipeline(
             )
 
         response_data, status_code = await _forward_stage_llm(
-            body_json, endpoints, model, timeout, stage_index=stage_idx
+            body_json, endpoints, model, timeout, stage_index=stage_idx,
+            configured=stage_params,
         )
 
         if status_code != 200:
@@ -811,24 +919,31 @@ async def run_map_pipeline(
             )
 
         if stage.verification_enabled:
-            approved, reason = await _verify_stage(content, stage, user_id)
+            approved, reason, errored = await _verify_stage(content, stage, user_id)
             if not approved:
                 logger.warning(
                     "Map stage '%s': verification failed after retries: %s. Continuing to next stage.",
                     stage.name, reason,
                 )
+            elif errored:
+                logger.warning("Map stage '%s': %s", stage.name, reason)
             stage_verifications.append({
                 "stage_index": stage_idx,
                 "stage_id": stage.id,
                 "stage_name": stage.name,
                 "approved": approved,
                 "reason": reason,
+                "errored": errored,
             })
             if debug_on:
                 debug_capture_response(
                     body_json, "map_stage_verification",
                     f"Stage {stage_idx + 1} Verification: {stage.name}",
-                    detail="Approved" if approved else f"Rejected: {reason}",
+                    detail=(
+                        f"Not checked: {reason}" if errored
+                        else "Approved" if approved
+                        else f"Rejected: {reason}"
+                    ),
                     metadata={
                         "stage_index": stage_idx,
                         "approved": approved,

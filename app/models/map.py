@@ -61,6 +61,9 @@ class MapStage(Base):
         String(32), nullable=False, default="", server_default=""
     )
     model_override: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    parameters_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]", server_default="[]"
+    )
 
     driver_callable_turns: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
@@ -71,6 +74,9 @@ class MapStage(Base):
     verification_model: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     verification_max_retries: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     verification_instructions: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    verification_parameters_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]", server_default="[]"
+    )
 
     output_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="persist")
 

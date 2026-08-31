@@ -2,6 +2,154 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.24.0] - 2026-08-31
+
+Every place that can name a model can now say how to call it -- and every call
+it makes now goes out the same way.
+
+### Added
+
+- **Model Parameters.** A typed parameter list attaches at every scope that can
+  already name a model, and merges closest-wins at request time:
+
+  | Layer | Source |
+  |---|---|
+  | 1 (broadest) | whatever the client sent |
+  | 2 | Settings, per role (default / verification / summarization) |
+  | 3 | the endpoint |
+  | 4 | the endpoint's entry for the model in play |
+  | 5 (closest) | the verification rule, map stage, or scenario rule making the call |
+
+  So `reasoning_effort: max` on an endpoint and `low` on a verification rule
+  sends `max` on the driver call and `low` on that rule's judge call, and a
+  client that asked for `high` is overridden in both. A parameter nobody
+  configures is passed through from the client untouched.
+
+  Each parameter has a name, a type (`string`, `string[]`, `number`, `float`,
+  `integer`, `boolean`), a value, an optional description, an optional list of
+  allowed options, and a required flag. Options turn the value field into a
+  picker and are validated on save; `required` blocks saving a blank value.
+  `messages`, `model`, `stream` and anything starting with `_gitv` are reserved
+  and refused -- `stream` is owned by the pipeline, which forces it off for
+  verification and driver-callable runs.
+
+- **A curated model list per endpoint.** Name the models an endpoint offers,
+  optionally seeded from the provider by the existing live probe, and give each
+  its own parameters. The list drives model pickers on Maps, Verification,
+  Memory and Settings. Every model field keeps a free-text escape hatch, so
+  existing configs and unlisted models keep working.
+
+- Map stages carry their parameters through pack export and import. A pack is
+  untrusted input, so its parameters are re-validated on install rather than
+  stored as written; a list that fails validation is dropped with a warning
+  rather than failing the whole install. Packs published before 0.24 install
+  unchanged.
+
+- An **LLM Parameters** stage in the Debug timeline showing the resolved set and
+  which layer supplied each value.
+
+### Fixed
+
+- **The Provider setting only ever applied to the Driver call.** Selecting a
+  provider on an endpoint is documented as "enables LiteLLM compatibility", and
+  it was read in exactly one of seven places that call an LLM. The verification
+  judge, the verification retry, the conversation summarizer and both map-stage
+  calls each built an OpenAI-shaped body and POSTed it straight at the
+  endpoint's Base URL, whatever provider was selected.
+
+  So an endpoint set to Google Gemini or Anthropic worked as the Driver and
+  could not work as a judge, a summarizer or a map stage -- Gemini's API is not
+  OpenAI-shaped, which is the reason LiteLLM was adopted in the first place.
+
+  **The failure was silent, which is why it went unreported.** A judge that
+  cannot be reached returns "no violation" and lets the response through, so
+  verification appeared to run and approved everything. Summarization degraded
+  the same way, forwarding the conversation unsummarized. Only maps failed
+  visibly, with the stage exhausting its endpoints and returning 503.
+
+  Every outbound call now goes through the one forwarder, so the Provider
+  setting means the same thing everywhere. **An endpoint left on
+  `Custom (raw passthrough)` -- the default, and what every pre-LiteLLM endpoint
+  still is -- is unaffected: it sends the same request to the same URL it always
+  did**, and that is pinned by tests at each site.
+
+- **A verification rule that did not run looked exactly like one that passed.**
+  An unreachable judge approves by default, which is the right call -- an
+  endpoint outage must not block your reply -- but nothing said so. The
+  Verification Logs page wrote an approved row with a blank reason, and *Run
+  Verification Check* printed the green "Response approved - no violations
+  detected."
+
+  A skipped rule now says so, in the same words everywhere it appears -- the run
+  in Debug, the log row, and the test panel: *"Verification resulted in a 404
+  error, so rule 'No Purple Prose' did not process. The response was returned
+  unchecked."* Map stages get the same treatment: a stage whose judge failed is
+  reported as "not checked" rather than approved.
+
+- **Judge and summarizer calls were invisible to the run metrics.**
+  `verification_judge` and `summarizer` have been defined as call purposes since
+  0.22.0 and no call site ever emitted either, so the Debug metrics bar counted
+  the Driver's tokens and latency and silently omitted everything verification
+  and summarization spent. Both are now recorded, per failover candidate, along
+  with the scenario summarizer.
+
+- **A replay dropped the parameters the client originally sent.** Replay and
+  sandbox rebuilt the request as model, messages and stream only, so a run that
+  arrived with `reasoning_effort: high` was replayed without it -- a replay that
+  diverges from the run it claims to reproduce. The client's own parameters are
+  now captured on the trace and sent again. Runs captured before this release
+  replay exactly as they did.
+
+- **Streamed calls recorded no endpoint id.** `_record_stream_call` has read
+  `_gitv_endpoint_id` since 0.22.0 and nothing ever wrote it, so every streamed
+  run attributed its call to an empty endpoint -- a field the comparison view
+  groups by.
+
+- **`reasoning_effort` was silently dropped on every provider endpoint.**
+  `_do_forward_litellm` builds its call from a fixed list of named kwargs, and
+  `reasoning_effort` was not among them -- so a client that sent it reached a
+  raw-httpx endpoint intact and lost it the moment the endpoint had a `provider`
+  set. `reasoning_effort` and `max_completion_tokens` are now forwarded, and a
+  configured parameter LiteLLM has no opinion about rides in `extra_body`
+  instead of vanishing.
+
+- The judge, both summarizers and the map-stage verifier hard-coded their
+  sampling values (`max_tokens: 200, temperature: 0.1` for judges,
+  `temperature: 0.2` for the conversation summarizer, `max_tokens: 4096,
+  temperature: 0.3` for scenario summarization). These are now defaults that any
+  configured layer can override.
+
+- A failover candidate re-resolves its own endpoint and model parameters instead
+  of inheriting the first candidate's, matching the existing rule that
+  candidates may differ in model, key and provider.
+
+### Changed
+
+- **The verification judge and the verification retry now fail over.** Both took
+  a single endpoint; if it did not answer, that was the end of it. They now walk
+  the same candidate chain the Driver and map stages already use -- the
+  configured endpoint first, then its tag-mates by priority. A judge that used to
+  fail the check will now try the next tagged endpoint before giving up. Map
+  stage verification is unchanged and still uses a single endpoint.
+
+- A judge call with no model configured anywhere used to send the literal
+  `gpt-4`. It now sends the endpoint's default model, falling back to `gpt-4`
+  only when there is no default either.
+
+### Notes
+
+- No migration in this half: the "did not run" flag lives on the in-memory
+  judgment and rides to the UI on fields that already existed.
+- The debug trace gains an `original_params` key. It is additive -- every reader
+  reaches it through a default and nothing branches on its presence -- so
+  `schema_version` stays at 2 and older traces stay readable.
+- Migrations `047_llm_parameters` and `048_create_endpoint_models`. Additive
+  only; existing rows backfill to an empty list. Verified against an upgraded
+  database, not just a fresh one (`TestParameterColumnUpgradePath`).
+- `parse_params` is deliberately tolerant: a corrupt blob, an uncoercible value
+  or an unknown type degrades to "that parameter is absent" with a log line.
+  This runs on every proxied request and must never become a 500.
+
 ## [0.23.0] - 2026-08-24
 
 The Activation Hierarchy is now a fixed, documented, tested contract, and debug

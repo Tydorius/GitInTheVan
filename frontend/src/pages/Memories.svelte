@@ -1,5 +1,7 @@
 <script lang="ts">
   import { api } from '../api'
+  import ParameterEditor from '../lib/ParameterEditor.svelte'
+  import ModelSelect from '../lib/ModelSelect.svelte'
   import { onMount } from 'svelte'
   import { withScroll } from '../lib/scroll'
   import CollapsibleCard from '../lib/CollapsibleCard.svelte'
@@ -17,6 +19,12 @@
   let scenarioForm = {
     name: '', token_threshold: 2000, fire_position: 'pre',
     endpoint_id: '' as string | null, model: '', prompt: '', is_active: true,
+    parameters: [] as any[],
+  }
+
+  function modelsFor(endpointId: string | null): string[] {
+    const ep = endpoints.find((e: any) => e.id === endpointId)
+    return (ep?.models || []).map((m: any) => m.name).filter(Boolean)
   }
   let defaultScenarioPrompt = ''
   let loading = true
@@ -125,7 +133,7 @@
   }
 
   function resetScenarioForm() {
-    scenarioForm = { name: '', token_threshold: 2000, fire_position: 'pre', endpoint_id: '', model: '', prompt: '', is_active: true }
+    scenarioForm = { name: '', token_threshold: 2000, fire_position: 'pre', endpoint_id: '', model: '', prompt: '', is_active: true, parameters: [] }
     editingScenarioId = null
   }
 
@@ -135,6 +143,7 @@
       name: r.name, token_threshold: r.token_threshold,
       fire_position: r.fire_position, endpoint_id: r.endpoint_id || '',
       model: r.model || '', prompt: r.prompt || '', is_active: r.is_active,
+      parameters: structuredClone(r.parameters || []),
     }
     showScenarioForm = true
   }
@@ -390,8 +399,22 @@
         </div>
         <div class="form-group">
           <label for="sr-model">Model (blank = endpoint default)</label>
-          <input id="sr-model" bind:value={scenarioForm.model} placeholder="e.g. gemini-2.0-flash" />
+          <ModelSelect
+            id="sr-model"
+            bind:value={scenarioForm.model}
+            models={modelsFor(scenarioForm.endpoint_id)}
+            emptyLabel="Use endpoint default"
+            placeholder="e.g. gemini-2.0-flash"
+          />
         </div>
+      </div>
+      <div class="form-group">
+        <ParameterEditor
+          bind:params={scenarioForm.parameters}
+          title="Parameters for this rule"
+          hint="Applied to this rule's own summarization call. Overrides the endpoint's and the model's."
+          scopeNote="This rule inherits the endpoint's parameters."
+        />
       </div>
       <div class="form-group">
         <div style="display: flex; justify-content: space-between; align-items: center;">

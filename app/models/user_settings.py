@@ -56,6 +56,18 @@ class UserSettings(Base):
     context_window_override: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     debug_mode: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     default_map_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # One parameter set per LLM role, matching the three model fields above.
+    # These are the blanket layer: broader than the endpoint, narrower than
+    # whatever the client sent.
+    parameters_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]", server_default="[]"
+    )
+    verification_parameters_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]", server_default="[]"
+    )
+    summarization_parameters_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]", server_default="[]"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

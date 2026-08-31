@@ -44,16 +44,40 @@ def _run_source(body_json: dict[str, Any]) -> str:
     return "live"
 
 
+def original_client_params(body_json: dict[str, Any]) -> dict[str, Any]:
+    """The client's own top-level body keys, minus the ones the pipeline owns.
+
+    A replay that rebuilds the body as `{model, messages, stream}` drops whatever
+    sampling the client sent, so it stops reproducing the run it claims to. These
+    are captured before any stage writes to the body.
+
+    JSON-safe values only: the trace is serialized, and a `_gitv` key can hold a
+    live `FailoverEndpoint`.
+    """
+    return {
+        k: v
+        for k, v in body_json.items()
+        if k not in ("messages", "model", "stream")
+        and not k.startswith("_gitv")
+        and isinstance(v, (str, int, float, bool, list, dict, type(None)))
+    }
+
+
 def init_debug(body_json: dict[str, Any], tags: list) -> None:
     """Initialize the debug container on body_json.
 
     Stores original message snapshot, extracted tags, and the ``run`` block that
     ``debug_metrics`` fills with per-call token, latency and endpoint records.
+
+    ``original_params`` is additive: every reader reaches it through ``.get()``
+    with a default and nothing branches on its presence, so it does not need a
+    ``schema_version`` bump -- a schema 2 trace without it stays readable.
     """
     body_json["_gitv_debug"] = {
         "schema_version": SCHEMA_VERSION,
         "stages": [],
         "original_messages": json.dumps(body_json.get("messages", []), default=str),
+        "original_params": original_client_params(body_json),
         "tags": [t.get("raw", "") for t in tags] if tags else [],
         "run": {
             "started_at": datetime.now(UTC).isoformat(),

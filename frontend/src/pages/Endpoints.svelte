@@ -3,6 +3,8 @@
   import { onMount } from 'svelte'
   import { withScroll } from '../lib/scroll'
   import CollapsibleCard from '../lib/CollapsibleCard.svelte'
+  import ParameterEditor from '../lib/ParameterEditor.svelte'
+  import ModelSelect from '../lib/ModelSelect.svelte'
   import { CollapseController } from '../lib/collapse'
 
   let collapse = new CollapseController('endpoints', ['default-keys'])
@@ -49,7 +51,7 @@
   let showForm = false
   let editingId: string | null = null
 
-  let form = { name: '', base_url: '', api_key: '', api_base_path: '', provider: '', default_model: '', bypass_method: 'none', enabled: true, role_tag: 'default', priority: 1, custom_tag: '' }
+  let form: any = { name: '', base_url: '', api_key: '', api_base_path: '', provider: '', default_model: '', bypass_method: 'none', enabled: true, role_tag: 'default', priority: 1, custom_tag: '', parameters: [], models: [] }
   let showApiKey = false
   let visibleKeys: Record<string, boolean> = {}
   let copiedKeyId: string | null = null
@@ -89,6 +91,43 @@
     }
   }
 
+  // The curated model list is edited as part of the endpoint form and saved
+  // with it, matching how maps handle stages.
+  function addModel() {
+    form.models = [...form.models, { name: '', description: '', parameters: [] }]
+  }
+
+  function removeModel(idx: number) {
+    form.models = form.models.filter((_: any, i: number) => i !== idx)
+  }
+
+  let probing = false
+  let probeError = ''
+
+  // Populates the curated list from a live probe. The probe is a suggestion,
+  // not the list itself: names already present are kept, so a hand-entered
+  // model the provider does not advertise is never dropped.
+  async function fetchModels() {
+    if (!editingId) return
+    probing = true
+    probeError = ''
+    try {
+      const res = await api.listEndpointModels(editingId)
+      const existing = new Set(form.models.map((m: any) => m.name))
+      const added = (res.models || [])
+        .filter((n: string) => !existing.has(n))
+        .map((n: string) => ({ name: n, description: '', parameters: [] }))
+      if (!added.length) {
+        probeError = res.models?.length ? 'No new models found.' : 'The endpoint returned no models.'
+      }
+      form.models = [...form.models, ...added]
+    } catch (e: any) {
+      probeError = e.message
+    } finally {
+      probing = false
+    }
+  }
+
   async function load() {
     loading = true
     try {
@@ -100,13 +139,15 @@
   }
 
   function resetForm() {
-    form = { name: '', base_url: '', api_key: '', api_base_path: '', provider: '', default_model: '', bypass_method: 'none', enabled: true, role_tag: 'default', priority: 1, custom_tag: '' }
+    form = { name: '', base_url: '', api_key: '', api_base_path: '', provider: '', default_model: '', bypass_method: 'none', enabled: true, role_tag: 'default', priority: 1, custom_tag: '', parameters: [], models: [] }
     editingId = null
   }
 
   function startEdit(ep: any) {
     editingId = ep.id
-    form = { name: ep.name, base_url: ep.base_url, api_key: ep.api_key, api_base_path: ep.api_base_path || '', provider: ep.provider || '', default_model: ep.default_model || '', bypass_method: ep.bypass_method || 'none', enabled: ep.enabled, role_tag: ep.role_tag || 'default', priority: ep.priority || 1, custom_tag: ep.custom_tag || '' }
+    form = { name: ep.name, base_url: ep.base_url, api_key: ep.api_key, api_base_path: ep.api_base_path || '', provider: ep.provider || '', default_model: ep.default_model || '', bypass_method: ep.bypass_method || 'none', enabled: ep.enabled, role_tag: ep.role_tag || 'default', priority: ep.priority || 1, custom_tag: ep.custom_tag || '',
+      parameters: structuredClone(ep.parameters || []),
+      models: (ep.models || []).map((m: any) => ({ name: m.name, description: m.description || '', parameters: structuredClone(m.parameters || []) })) }
     showForm = true
   }
 
@@ -341,10 +382,73 @@
         </div>
         <div class="form-group">
           <label for="ep-model">Default Model <span style="color: var(--text-dim);">(used for diagnostics and as fallback)</span></label>
-          <input id="ep-model" autocomplete="off" spellcheck="false" bind:value={form.default_model} placeholder="e.g. gemini-2.0-flash" />
+          <ModelSelect
+            id="ep-model"
+            bind:value={form.default_model}
+            models={form.models.map((m: any) => m.name).filter(Boolean)}
+            emptyLabel="None"
+            placeholder="e.g. gemini-2.0-flash"
+          />
           <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
             Used when the client doesn't specify a model and for connectivity tests.
           </p>
+        </div>
+
+        <div class="form-group">
+          <div class="param-head">
+            <label>Models</label>
+            <div style="display: flex; gap: 8px;">
+              {#if editingId}
+                <button type="button" onclick={fetchModels} disabled={probing}>
+                  {probing ? 'Fetching…' : 'Fetch from provider'}
+                </button>
+              {/if}
+              <button type="button" onclick={addModel}>+ Add Model</button>
+            </div>
+          </div>
+          <p style="color: var(--text-dim); font-size: 11px; margin: 0 0 8px 0;">
+            Naming models here populates the model pickers everywhere else and gives
+            each one its own parameters. Optional — every model field still accepts
+            a name that is not listed.
+            {#if !editingId} Save the endpoint first to fetch models from the provider.{/if}
+          </p>
+          {#if probeError}<p style="color: var(--danger); font-size: 12px; margin: 0 0 8px 0;">{probeError}</p>{/if}
+          {#if form.models.length === 0}
+            <p style="color: var(--text-dim); font-size: 12px;">No models listed.</p>
+          {/if}
+          {#each form.models as m, midx}
+            <div class="model-row">
+              <div class="form-row">
+                <div style="flex: 2;">
+                  <label for="ep-m-name-{midx}">Model name</label>
+                  <input id="ep-m-name-{midx}" autocomplete="off" spellcheck="false" bind:value={m.name} placeholder="gpt-5" />
+                </div>
+                <div style="flex: 3;">
+                  <label for="ep-m-desc-{midx}">Description (optional)</label>
+                  <input id="ep-m-desc-{midx}" bind:value={m.description} placeholder="Flagship" />
+                </div>
+                <div style="flex: 0 0 auto; align-self: flex-end;">
+                  <button type="button" class="danger" onclick={() => removeModel(midx)}>Remove</button>
+                </div>
+              </div>
+              <div style="margin-top: 10px;">
+                <ParameterEditor
+                  bind:params={m.parameters}
+                  title="Parameters for this model"
+                  scopeNote="This model inherits the endpoint's parameters."
+                />
+              </div>
+            </div>
+          {/each}
+        </div>
+
+        <div class="form-group">
+          <ParameterEditor
+            bind:params={form.parameters}
+            title="Endpoint Parameters"
+            hint="Sent on every call routed through this endpoint. These override whatever the client sent, and are in turn overridden by a model, rule or map stage that sets the same name."
+            scopeNote="Whatever the client sends is passed through untouched."
+          />
         </div>
         <div class="form-group">
           <label for="ep-roletag">Role Tag</label>
@@ -419,3 +523,23 @@
     </div>
   </div>
 {/if}
+
+<style>
+  .param-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .param-head label {
+    margin: 0;
+  }
+  .model-row {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px;
+    margin-bottom: 10px;
+    background: var(--bg);
+  }
+</style>

@@ -240,6 +240,25 @@ export interface DebugComparison {
   diffs: Record<string, any>;
 }
 
+// One LLM parameter as the API carries it. The same shape at every scope that
+// can name a model -- endpoint, per-model, rule, map stage, user settings --
+// because the closest scope wins at request time.
+export interface LlmParameter {
+  name: string
+  type: 'string' | 'string[]' | 'number' | 'float' | 'integer' | 'boolean'
+  value: any
+  description: string
+  required: boolean
+  options: string[]
+}
+
+export interface EndpointModel {
+  id?: string
+  name: string
+  description?: string
+  parameters?: LlmParameter[]
+}
+
 export const api = {
   // Auth
   setup: (username: string, password: string) =>
@@ -281,7 +300,7 @@ export const api = {
 
   // Endpoints
   listEndpoints: () => request<{ endpoints: any[] }>('/api/endpoints'),
-  createEndpoint: (data: { name: string; base_url: string; api_key: string; api_base_path?: string; enabled?: boolean }) =>
+  createEndpoint: (data: { name: string; base_url: string; api_key: string; api_base_path?: string; enabled?: boolean; parameters?: LlmParameter[]; models?: EndpointModel[] }) =>
     request<any>('/api/endpoints', { method: 'POST', body: JSON.stringify(data) }),
   updateEndpoint: (id: string, data: any) =>
     request<any>(`/api/endpoints/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -291,7 +310,7 @@ export const api = {
     request<{ models: string[] }>(`/api/endpoints/${id}/models`),
 
   // Settings
-  getSettings: () => request<{ default_endpoint_id: string | null; default_model: string; preserve_thinking: boolean; gitv_status: boolean; simulated_streaming_speed: number }>('/api/settings'),
+  getSettings: () => request<{ default_endpoint_id: string | null; default_model: string; preserve_thinking: boolean; gitv_status: boolean; simulated_streaming_speed: number; parameters: LlmParameter[]; verification_parameters: LlmParameter[]; summarization_parameters: LlmParameter[] }>('/api/settings'),
   updateSettings: (data: any) =>
     request<any>('/api/settings', { method: 'PUT', body: JSON.stringify(data) }),
 

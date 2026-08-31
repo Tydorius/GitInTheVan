@@ -1,5 +1,7 @@
 <script lang="ts">
   import { api } from '../api'
+  import ParameterEditor from '../lib/ParameterEditor.svelte'
+  import ModelSelect from '../lib/ModelSelect.svelte'
   import { onMount } from 'svelte'
   import CodeEditor from '../lib/CodeEditor.svelte'
   import TagEditModal from '../lib/TagEditModal.svelte'
@@ -24,6 +26,15 @@
     resubmission_strategy: 'add_instructions',
     verification_endpoint_id: null as string | null,
     verification_model: '',
+    parameters: [] as any[],
+  }
+
+  // The curated model list of whichever endpoint is selected, so the model
+  // picker offers the right names. Falls back to free text when the endpoint
+  // has no list.
+  function modelsFor(endpointId: string | null): string[] {
+    const ep = endpoints.find((e: any) => e.id === endpointId)
+    return (ep?.models || []).map((m: any) => m.name).filter(Boolean)
   }
 
   let tagModal = { show: false, id: '', name: '', tag: '' }
@@ -61,13 +72,13 @@
   }
 
   function resetForm() {
-    form = { name: '', description: '', prompt: '', is_active: true, max_retries: 2, execution_order: 10, resubmission_strategy: 'add_instructions', verification_endpoint_id: null, verification_model: '' }
+    form = { name: '', description: '', prompt: '', is_active: true, max_retries: 2, execution_order: 10, resubmission_strategy: 'add_instructions', verification_endpoint_id: null, verification_model: '', parameters: [] }
     editingId = null
   }
 
   function startEdit(r: any) {
     editingId = r.id
-    form = { name: r.name, description: r.description, prompt: r.prompt, is_active: r.is_active, max_retries: r.max_retries, execution_order: r.execution_order, resubmission_strategy: r.resubmission_strategy, verification_endpoint_id: r.verification_endpoint_id || null, verification_model: r.verification_model || '' }
+    form = { name: r.name, description: r.description, prompt: r.prompt, is_active: r.is_active, max_retries: r.max_retries, execution_order: r.execution_order, resubmission_strategy: r.resubmission_strategy, verification_endpoint_id: r.verification_endpoint_id || null, verification_model: r.verification_model || '', parameters: structuredClone(r.parameters || []) }
     showForm = true
   }
 
@@ -255,8 +266,14 @@
       </select>
     </div>
     <div class="form-group">
-      <label>Verification Model</label>
-      <input bind:value={vSettings.verification_model} placeholder="Gemma-4-31B-it" />
+      <label for="v-set-model">Verification Model</label>
+      <ModelSelect
+        id="v-set-model"
+        bind:value={vSettings.verification_model}
+        models={modelsFor(vSettings.verification_endpoint_id)}
+        emptyLabel="None"
+        placeholder="Gemma-4-31B-it"
+      />
     </div>
     <button class="primary" onclick={saveSettings}>Save Settings</button>
   </div>
@@ -387,6 +404,12 @@
       <div style="margin-top: 16px;">
         {#if testResult.violation}
           <div class="error-msg">VIOLATION DETECTED: {testResult.reason} (severity: {testResult.severity})</div>
+        {:else if testResult.errored}
+          <!-- An unreachable judge approves by default. Saying "approved" here
+               is how a dead verification endpoint stayed invisible. -->
+          <div class="warn-msg">
+            RULE DID NOT RUN: {testResult.thinking || testResult.reason}
+          </div>
         {:else}
           <div class="success-msg">Response approved - no violations detected.</div>
         {/if}
@@ -443,9 +466,23 @@
             </select>
           </div>
           <div class="form-group">
-            <label>Verification Model Override</label>
-            <input bind:value={form.verification_model} placeholder="Leave blank for global" />
+            <label for="v-rule-model">Verification Model Override</label>
+            <ModelSelect
+              id="v-rule-model"
+              bind:value={form.verification_model}
+              models={modelsFor(form.verification_endpoint_id)}
+              emptyLabel="Use global setting"
+              placeholder="Leave blank for global"
+            />
           </div>
+        </div>
+        <div class="form-group">
+          <ParameterEditor
+            bind:params={form.parameters}
+            title="Parameters for this rule"
+            hint="Applied to this rule's own judge call only. These are the closest layer to the message, so they override the endpoint's and the model's."
+            scopeNote="This rule inherits the verification endpoint's parameters."
+          />
         </div>
         <div class="modal-actions">
           <button onclick={() => { showForm = false; resetForm(); }}>Cancel</button>

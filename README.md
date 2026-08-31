@@ -19,6 +19,7 @@ Licensed under Mozilla Public License 2.0.
 [Using with Wyvern Chat](#Using-with-Wyvern-Chat)  
 [Cantrips](#Cantrips)  
 [Verification](#Verification)  
+[Model Parameters](#Model-Parameters)  
 [Persistent Memory](#Persistent-Memory)  
 [Conversation Summarization](#Conversation-Summarization)  
 [Context Budgeting](#Context-Budgeting)  
@@ -69,6 +70,7 @@ I will stress that I am not going to replicate or 100% replace Lorebary's functi
 - **Cantrips** — Sandboxed JavaScript execution compatible with JanitorAI scripts, with per-chat persistent storage via `context.chat_data`. Four pipeline positions (Pre-Driver, Driver-Callable, Pre-Navigator, Post-Navigator). LLM instructions field for tool notifications. Includes built-in templates (dice roller, status tracker, day counter, weather system)
 - **Driver-Callable Tools** — Writing LLM can invoke cantrips as tools during generation via a notification-based, turn-tracked approach that works with any model. No OpenAI function-calling support required. Auto-disables when no tools are active. Infinite-loop prevention via turn budget
 - **Verification** — LLM-based response checking (Navigator) with configurable rules, automatic resubmission with retry limits, verification logs, and per-rule endpoint/model overrides
+- **Model Parameters** — Typed request parameters (`reasoning_effort`, `max_tokens`, anything your provider accepts) attached anywhere a model can be named: Settings, an endpoint, a specific model on that endpoint, a verification rule, a map stage, or a scenario rule. The closest one to the message wins, and anything nobody configures is passed through from the client untouched
 - **Persistent Memory** — Database-backed memory system using `<memstore>` tags. LLM responses are scanned for key/value pairs, stored per-conversation, and injected as a `[PERSISTENT MEMORY]` context block on subsequent requests. No zero-width character encoding — the database is the source of truth
 - **Expanded Memory Scopes** — Beyond per-chat memory, cantrips have access to two additional persistent stores: `context.user_data` (per-user global, shared across all chats and cantrips) and `context.cantrip_data` (per-user per-cantrip, persists across chats but isolated to one cantrip). Same get/set/keys/delete API as `chat_data`
 - **Conversation Summarization** — Automatically compresses long conversations when token count exceeds a configurable threshold. Older dialogue is summarized by a user-selected LLM and replaced with a `[CONVERSATION SUMMARY]` context block, while recent messages are always forwarded verbatim
@@ -90,7 +92,7 @@ I will stress that I am not going to replicate or 100% replace Lorebary's functi
 - **Maps** — Multi-stage LLM pipelines that chain multiple Driver passes (e.g., Writing LLM > Gamemaster LLM > Narrator LLM) into a single request. Each stage has its own lorebooks, cantrips, endpoint, model, driver-callable turns, and verification. Output modes (persist/sanitize/discard) control how stage output feeds the next stage. Sticky vs stage-only resource attachments. Activated via `<#map-tag#>` tags. Export/import as self-contained JSON with resource dedup options (keep_both/reuse/overwrite)
 - **Web UI** — Full management interface built with Svelte 5 including cantrip tester, verification tester, forbidden word scanner, code editor with syntax highlighting, jump-to-top/bottom navigation, and log viewer
 - **Multi-Database Support** — SQLite (default), PostgreSQL, and MariaDB/MySQL backends. SQLite for single-instance self-hosting; PostgreSQL or MariaDB for multi-instance horizontal scaling with a shared database server
-- **LiteLLM Provider Compatibility** — Optional provider selection on endpoints enables LiteLLM integration for automatic parameter translation, auth format handling, and response normalization across 100+ LLM providers (Gemini, OpenAI, Anthropic, OpenRouter, DeepSeek, xAI, and more). Endpoints without a provider set use raw HTTP passthrough (backward compatible)
+- **LiteLLM Provider Compatibility** — Optional provider selection on endpoints enables LiteLLM integration for automatic parameter translation, auth format handling, and response normalization across 100+ LLM providers (Gemini, OpenAI, Anthropic, OpenRouter, DeepSeek, xAI, and more). The setting applies to every call the endpoint is used for — the main request, a verification judge, a summarizer, a map stage — not just the main one. Endpoints without a provider set use raw HTTP passthrough (backward compatible)
 - **Context Budgeting** — Weighted token budget allocation across cantrips and lorebooks. Cantrips access their share via `context.budget` and can dynamically scale output detail (full/summary/bullets) based on remaining tokens. Configurable per-user budget percentage and context window override
 - **Memory Rules** — Taggable per-conversation summarization overrides. Rules can override the token threshold, keep-recent count, prompt, or disable summarization entirely for specific conversations. Activate via `<#memory-rule-tag#>` tags
 - **Debug Mode** — Stage-based pipeline timeline covering every transformation, plus the objects that acted on it: which cantrips ran (with their code, output and logs) and which did not, which lorebook entries matched and from where, which skills were injected, and each map stage's endpoint, output and verification. Records real token counts from the endpoint's usage response, per-call latency, and pipeline overhead — the time the proxy itself cost. Reasoning is kept in full. Streaming and non-streaming requests are both captured. Available as a tab under Dashboard, gated by the Debug Mode toggle in Settings
@@ -509,6 +511,8 @@ Endpoints support a custom **API Base Path** field. Most OpenAI-compatible APIs 
 
 Each endpoint can have a **Default Model** set, which is used for diagnostics tests and as a fallback when the client doesn't specify a model. The diagnostics pane on the Dashboard can query available models from the provider (for endpoints using LiteLLM) or accept a manually typed model name via the override checkbox.
 
+Endpoints also carry a **model list** and a set of **parameters** — see [Model Parameters](#Model-Parameters).
+
 ### Client Configuration
 
 Point any OpenAI-compatible client at:
@@ -714,6 +718,65 @@ Verification uses a separate LLM (the **Navigator**) to check the writing LLM's 
 4. Retries are limited (configurable per rule, default 2)
 
 **Note:** When verification is enabled, responses are buffered (non-streaming) to allow checking before returning to the client.
+
+## Model Parameters
+
+Naming a model says *which* model to call. Parameters say *how* to call it —
+`reasoning_effort`, `max_tokens`, `temperature`, or anything else your provider
+accepts.
+
+A parameter can be attached anywhere a model can be named, and the layers merge
+per key, with the layer closest to the message winning:
+
+| Layer | Where you set it |
+|---|---|
+| 1 (broadest) | Whatever your client sent |
+| 2 | Settings → Proxy Configuration, per role (default / verification / summarization) |
+| 3 | An endpoint, on the Endpoints page |
+| 4 | A specific model in that endpoint's model list |
+| 5 (closest) | The verification rule, map stage, or scenario rule making the call |
+
+So if your endpoint sets `reasoning_effort: max` and a cheap verification rule
+sets `reasoning_effort: low`, the writing call gets `max` and that rule's check
+gets `low`. A client that asked for `high` is overridden in both.
+
+**Anything you do not configure is passed through from your client untouched.**
+Configuring a name is what makes GitInTheVan override it.
+
+### Fields
+
+| Field | Meaning |
+|---|---|
+| **Name** | The key sent upstream, e.g. `reasoning_effort` |
+| **Type** | `string`, `string list`, `integer`, `float`, `number`, or `boolean`. The value is converted before sending, so an integer arrives as `128000`, not `"128000"` |
+| **Value** | What to send |
+| **Required** | Stops you saving the parameter with an empty value, and marks it in the UI. It does not change what is sent — every parameter you define is sent |
+| **Options** | Optional comma-separated list of allowed values. Setting it turns Value into a dropdown and rejects anything outside the list |
+| **Description** | Optional note to yourself |
+
+`messages`, `model` and `stream` cannot be used as parameter names. `model` has
+its own field at every scope, and `stream` is controlled by the pipeline —
+verification and driver-callable runs force it off, so overriding it would break
+the request.
+
+A parameter whose value cannot be converted to its type, or whose value is not
+in its own options list, is dropped with a log line rather than sent upstream.
+
+### Model lists
+
+Each endpoint can carry a list of the models it offers. On the Endpoints page,
+add them by hand or press **Fetch from provider** to seed the list from the
+endpoint's own model listing, then give each model its own parameters.
+
+The list populates the model dropdowns on Maps, Verification, Memory and
+Settings. It is entirely optional: every model field keeps an **Other…** option
+for typing a name that is not listed, and a model you use without listing simply
+contributes no parameters of its own.
+
+### Seeing what was applied
+
+Turn on Debug Mode and the timeline gains an **LLM Parameters** stage showing
+the resolved set and which layer supplied each value.
 
 ## Persistent Memory
 

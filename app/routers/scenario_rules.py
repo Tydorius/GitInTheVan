@@ -2,7 +2,7 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +12,7 @@ from app.models.scenario_rule import ScenarioRule
 from app.models.user import User
 from app.services.admin import get_admin_settings
 from app.services.content_guard import check_size, sanitize_and_log
+from app.services.llm_params import ParameterDef, params_from_api, params_to_api
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ class ScenarioRuleCreate(BaseModel):
     model: str = ""
     prompt: str = ""
     is_active: bool = True
+    parameters: list[ParameterDef] = Field(default_factory=list)
 
 
 class ScenarioRuleUpdate(BaseModel):
@@ -47,6 +49,7 @@ class ScenarioRuleUpdate(BaseModel):
     model: str | None = None
     prompt: str | None = None
     is_active: bool | None = None
+    parameters: list[ParameterDef] | None = None
 
 
 class ScenarioRuleResponse(BaseModel):
@@ -58,6 +61,7 @@ class ScenarioRuleResponse(BaseModel):
     model: str
     prompt: str
     is_active: bool
+    parameters: list[ParameterDef] = Field(default_factory=list)
     created_at: str
 
 
@@ -73,6 +77,7 @@ def _rule_to_response(rule: ScenarioRule) -> ScenarioRuleResponse:
         fire_position=rule.fire_position,
         endpoint_id=rule.endpoint_id,
         model=rule.model,
+        parameters=params_to_api(rule.parameters_json),
         prompt=rule.prompt,
         is_active=rule.is_active,
         created_at=rule.created_at.isoformat() if rule.created_at else "",
@@ -120,6 +125,7 @@ async def create_rule(
         fire_position=req.fire_position,
         endpoint_id=req.endpoint_id or None,
         model=req.model,
+        parameters_json=params_from_api(req.parameters, "scenario rule parameters"),
         prompt=req.prompt,
         is_active=req.is_active,
     )
@@ -171,6 +177,8 @@ async def update_rule(
         rule.endpoint_id = req.endpoint_id or None
     if req.model is not None:
         rule.model = req.model
+    if req.parameters is not None:
+        rule.parameters_json = params_from_api(req.parameters, "scenario rule parameters")
     if req.prompt is not None:
         admin_settings = await get_admin_settings()
         check_size(req.prompt, admin_settings.max_rule_size_kb * 1024, "Scenario rule prompt")

@@ -1,5 +1,5 @@
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -119,46 +119,49 @@ class TestBuildMessages:
 # Check response (mocked HTTP)
 # ============================================================================
 
+def _forward_returning(*results):
+    """Patch the shared forwarder with a queue of (payload, status) results.
+
+    The judge goes through `proxy._do_forward` rather than its own httpx client
+    as of Phase 24, so that is the seam. `_do_forward` is imported inside
+    `check_response`, so the patch target is where it is defined.
+    """
+    calls: list[dict] = []
+    queue = list(results)
+
+    async def fake(method, url, headers, body, timeout, **kwargs):
+        calls.append({"url": url, "headers": headers, "body": json.loads(body), **kwargs})
+        return queue.pop(0) if queue else ({}, 500)
+
+    return patch("app.services.proxy._do_forward", side_effect=fake), calls
+
+
 class TestCheckResponse:
     @pytest.mark.asyncio
     async def test_no_violation(self):
         rule = _mock_rule()
         endpoint = _mock_endpoint()
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = _mock_verification_response(violation=False)
-
-        with patch("app.services.verification.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.post.return_value = mock_resp
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client_cls.return_value = mock_client
-
+        patcher, _ = _forward_returning((_mock_verification_response(violation=False), 200))
+        with patcher:
             result = await check_response("Clean response", [rule], endpoint, "test-model")
 
         assert result.approved is True
         assert len(result.violations) == 0
+        assert result.errors == []
 
     @pytest.mark.asyncio
     async def test_violation_detected(self):
         rule = _mock_rule(prompt="The character must never mention being an AI")
         endpoint = _mock_endpoint()
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = _mock_verification_response(
-            violation=True, reason="Character broke fourth wall", severity="high"
-        )
-
-        with patch("app.services.verification.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.post.return_value = mock_resp
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client_cls.return_value = mock_client
-
+        patcher, _ = _forward_returning((
+            _mock_verification_response(
+                violation=True, reason="Character broke fourth wall", severity="high"
+            ),
+            200,
+        ))
+        with patcher:
             result = await check_response(
                 "I am an AI language model. How can I help?", [rule], endpoint, "test-model"
             )
@@ -169,48 +172,166 @@ class TestCheckResponse:
         assert result.violations[0].severity == "high"
 
     @pytest.mark.asyncio
+    async def test_the_judge_call_honours_the_endpoint_provider(self):
+        """Phase 24. Before this, `check_response` POSTed OpenAI-shaped JSON
+        straight at `base_url` no matter what provider the endpoint was set to,
+        so a Gemini endpoint worked as the driver and silently failed as a judge.
+        """
+        rule = _mock_rule()
+        endpoint = _mock_endpoint()
+        endpoint.provider = "gemini"
+
+        patcher, calls = _forward_returning((_mock_verification_response(), 200))
+        with patcher:
+            await check_response("Anything", [rule], endpoint, "gemini-2.0-flash")
+
+        assert len(calls) == 1
+        assert calls[0]["provider"] == "gemini"
+        assert calls[0]["base_url"] == "https://verify.test"
+        assert calls[0]["api_key"] == "sk-verify-key"
+        assert calls[0]["body"]["model"] == "gemini-2.0-flash"
+
+    @pytest.mark.asyncio
+    async def test_the_raw_path_is_unchanged_without_a_provider(self):
+        """The control case: an endpoint on raw passthrough must still send
+        exactly what it sent before, to the same URL."""
+        rule = _mock_rule()
+        endpoint = _mock_endpoint()
+
+        patcher, calls = _forward_returning((_mock_verification_response(), 200))
+        with patcher:
+            await check_response("Anything", [rule], endpoint, "judge-model")
+
+        assert calls[0]["provider"] == ""
+        assert calls[0]["url"] == "https://verify.test/api/chat/completions"
+        assert calls[0]["headers"]["Authorization"] == "Bearer sk-verify-key"
+        body = calls[0]["body"]
+        assert body["model"] == "judge-model"
+        assert body["max_tokens"] == 200
+        assert body["temperature"] == 0.1
+        assert body["stream"] is False
+
+    @pytest.mark.asyncio
     async def test_verification_endpoint_error_graceful(self):
         rule = _mock_rule()
         endpoint = _mock_endpoint()
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 500
-        mock_resp.text = "Internal error"
-
-        with patch("app.services.verification.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.post.return_value = mock_resp
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client_cls.return_value = mock_client
-
+        patcher, _ = _forward_returning(({"error": {"message": "Internal error"}}, 500))
+        with patcher:
             result = await check_response("Some response", [rule], endpoint, "test-model")
 
         assert result.approved is True
         assert len(result.violations) == 0
 
     @pytest.mark.asyncio
+    async def test_an_errored_judge_is_marked_rather_than_passing_silently(self):
+        """A judge that never ran approves by default. It must say so -- that
+        silence is why a broken verification endpoint went unnoticed."""
+        rule = _mock_rule(name="No Purple Prose")
+        endpoint = _mock_endpoint()
+
+        patcher, _ = _forward_returning(({"error": {"message": "not found"}}, 404))
+        with patcher:
+            result = await check_response("Some response", [rule], endpoint, "test-model")
+
+        assert result.approved is True
+        assert len(result.errors) == 1
+        judgment = result.errors[0]
+        assert judgment.errored is True
+        assert judgment.violation is False
+        assert judgment.thinking == (
+            "Verification resulted in a 404 error, so rule 'No Purple Prose' did not "
+            "process. The response was returned unchecked."
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_clean_pass_is_not_marked_errored(self):
+        rule = _mock_rule()
+        endpoint = _mock_endpoint()
+
+        patcher, _ = _forward_returning((_mock_verification_response(violation=False), 200))
+        with patcher:
+            result = await check_response("Clean", [rule], endpoint, "test-model")
+
+        assert result.errors == []
+        assert result.combined_error_note == ""
+
+    @pytest.mark.asyncio
+    async def test_the_judge_fails_over_to_the_next_candidate(self):
+        """Phase 24 gives the judge the failover the driver and map stages had."""
+        from app.services.routing import FailoverEndpoint
+
+        rule = _mock_rule()
+        endpoint = _mock_endpoint()
+        chain = [
+            FailoverEndpoint(
+                base_url="https://dead.test", api_key="k1", model="m1",
+                endpoint_id="ep-dead", endpoint_name="Dead",
+            ),
+            FailoverEndpoint(
+                base_url="https://alive.test", api_key="k2", model="m2",
+                endpoint_id="ep-alive", endpoint_name="Alive",
+            ),
+        ]
+
+        patcher, calls = _forward_returning(
+            ({"error": {"message": "down"}}, 502),
+            (
+                _mock_verification_response(
+                    violation=True, reason="Caught it", severity="low"
+                ),
+                200,
+            ),
+        )
+        with patcher:
+            result = await check_response(
+                "Test", [rule], endpoint, "model", rule_chains={rule.id: chain}
+            )
+
+        assert len(calls) == 2
+        assert calls[0]["base_url"] == "https://dead.test"
+        assert calls[1]["base_url"] == "https://alive.test"
+        assert result.approved is False
+        assert result.violations[0].reason == "Caught it"
+        assert result.errors == []
+
+    @pytest.mark.asyncio
+    async def test_an_exhausted_chain_errors_rather_than_passing(self):
+        from app.services.routing import FailoverEndpoint
+
+        rule = _mock_rule()
+        endpoint = _mock_endpoint()
+        chain = [
+            FailoverEndpoint(base_url="https://a.test", endpoint_name="A"),
+            FailoverEndpoint(base_url="https://b.test", endpoint_name="B"),
+        ]
+
+        patcher, calls = _forward_returning(({"error": {}}, 502), ({"error": {}}, 503))
+        with patcher:
+            result = await check_response(
+                "Test", [rule], endpoint, "model", rule_chains={rule.id: chain}
+            )
+
+        assert len(calls) == 2
+        assert result.approved is True
+        assert len(result.errors) == 1
+        assert "a 503 error" in result.errors[0].thinking
+
+    @pytest.mark.asyncio
     async def test_multiple_rules(self):
         rules = [_mock_rule(name="Rule 1"), _mock_rule(name="Rule 2")]
         endpoint = _mock_endpoint()
 
-        resp1 = MagicMock()
-        resp1.status_code = 200
-        resp1.json.return_value = _mock_verification_response(violation=False)
-
-        resp2 = MagicMock()
-        resp2.status_code = 200
-        resp2.json.return_value = _mock_verification_response(
-            violation=True, reason="Failed second rule", severity="medium"
+        patcher, _ = _forward_returning(
+            (_mock_verification_response(violation=False), 200),
+            (
+                _mock_verification_response(
+                    violation=True, reason="Failed second rule", severity="medium"
+                ),
+                200,
+            ),
         )
-
-        with patch("app.services.verification.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.post.side_effect = [resp1, resp2]
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client_cls.return_value = mock_client
-
+        with patcher:
             result = await check_response("Test", rules, endpoint, "model")
 
         assert result.approved is False
