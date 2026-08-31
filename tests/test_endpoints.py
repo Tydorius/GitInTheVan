@@ -347,3 +347,64 @@ async def test_model_probe_falls_back_to_the_curated_list(admin_client):
     resp = await client.get(f"/api/endpoints/{ep['id']}/models")
     assert resp.status_code == 200
     assert resp.json()["models"] == ["alpha", "zeta"]
+
+
+@pytest.mark.asyncio
+async def test_the_model_probe_respects_a_chat_completions_api_base_path(
+    admin_client, httpx_mock
+):
+    """The probe used to append `/models` to whatever `api_base_path` held.
+
+    For an OpenWebUI-style endpoint that is `/api/chat/completions`, so it asked
+    for `/api/chat/completions/models`, got the SPA's HTML back with a 200, and
+    failed to parse it -- "Fetch from provider" returned an empty list and gave
+    no indication anything had gone wrong. It must hit `/api/models`.
+    """
+    client, _, _ = admin_client
+    ep = (
+        await client.post(
+            "/api/endpoints",
+            json={
+                "name": "OpenWebUI",
+                "base_url": "https://owui.test",
+                "api_key": "sk-owui",
+                "api_base_path": "/api/chat/completions",
+            },
+        )
+    ).json()
+
+    httpx_mock.add_response(
+        url="https://owui.test/api/models",
+        json={"data": [{"id": "llama-3.3-70b"}, {"id": "qwen-2.5-coder"}]},
+    )
+
+    resp = await client.get(f"/api/endpoints/{ep['id']}/models")
+    assert resp.status_code == 200
+    assert resp.json()["models"] == ["llama-3.3-70b", "qwen-2.5-coder"]
+
+
+@pytest.mark.asyncio
+async def test_the_model_probe_leaves_a_plain_api_base_path_alone(
+    admin_client, httpx_mock
+):
+    """A path that is a prefix rather than a full chat route is unchanged."""
+    client, _, _ = admin_client
+    ep = (
+        await client.post(
+            "/api/endpoints",
+            json={
+                "name": "z.ai",
+                "base_url": "https://api.z.test",
+                "api_key": "sk-z",
+                "api_base_path": "/api/coding/paas/v4",
+            },
+        )
+    ).json()
+
+    httpx_mock.add_response(
+        url="https://api.z.test/api/coding/paas/v4/models",
+        json={"data": [{"id": "glm-4.6"}]},
+    )
+
+    resp = await client.get(f"/api/endpoints/{ep['id']}/models")
+    assert resp.json()["models"] == ["glm-4.6"]

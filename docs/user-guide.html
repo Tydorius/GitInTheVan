@@ -34,7 +34,16 @@ body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-se
 </tr>
 </tbody>
 </table>
-<hr />
+<hr>
+<blockquote>
+<p><strong>About the screenshots</strong></p>
+<p>Screenshots of the main pages were captured on <strong>2026-08-31 against 0.24.0</strong>.
+A few images of individual dialogs and panels still date from <strong>2026-07-08,
+against 0.16.x</strong> — those show the tool working the same way, but the
+surrounding UI may have moved on.</p>
+<p>Where a screenshot and the surrounding text disagree, <strong>the text is correct</strong>.</p>
+</blockquote>
+<hr>
 <h2 id="table-of-contents">Table of Contents</h2>
 <ol>
 <li><a href="#1-login-and-admin-setup">Login and Admin Setup</a></li>
@@ -43,7 +52,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-se
 <li><a href="#4-endpoints">Endpoints</a></li>
 <li><a href="#5-cantrips">Cantrips</a></li>
 <li><a href="#6-lorebooks">Lorebooks</a></li>
-<li><a href="#7-skills--samples">Skills &amp; Samples</a></li>
+<li><a href="#skills">Skills &amp; Samples</a></li>
 <li><a href="#8-verification">Verification</a></li>
 <li><a href="#9-memories">Memories</a></li>
 <li><a href="#10-command-tags">Command Tags</a></li>
@@ -52,10 +61,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-se
 <li><a href="#13-tags-and-groups">Tags and Groups</a></li>
 <li><a href="#14-settings">Settings</a></li>
 <li><a href="#15-admin">Admin</a></li>
+<li><a href="#16-model-parameters">Model Parameters</a></li>
+<li><a href="#17-debug-and-comparing-runs">Debug and Comparing Runs</a></li>
+<li><a href="#18-the-activation-hierarchy">The Activation Hierarchy</a></li>
 </ol>
-<hr />
+<hr>
+<p><a id="login"></a></p>
 <h2 id="1-login-and-admin-setup">1. Login and Admin Setup</h2>
-<p><img alt="Login Screen" src="media/gitv-login.png" /></p>
+<p><img alt="Login Screen" src="media/gitv-login.png"></p>
 <p>On first launch, the login page appears. If no admin account exists yet, click <strong>"First run? Setup admin"</strong> at the bottom to create the initial administrator account.</p>
 <ul>
 <li><strong>Username</strong>: Choose any username (e.g., <code>admin</code>)</li>
@@ -63,7 +76,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-se
 </ul>
 <p>After setup, log in with your new credentials. Your <strong>API key</strong> (prefixed with <code>gitv_</code>) is managed from the <strong>Endpoints</strong> page after logging in. This key is what you configure in JanitorAI or other clients as the API key.</p>
 <p>On subsequent visits, use the standard login form with your username and password.</p>
-<hr />
+<hr>
+<p><a id="https"></a></p>
 <h2 id="2-https-and-lan-access">2. HTTPS and LAN Access</h2>
 <p>GitInTheVan uses a self-signed SSL certificate to enable HTTPS, which is required when accessing the proxy from other devices on your network. Browsers block HTTP requests from HTTPS sites (like JanitorAI) — a restriction called <em>mixed content blocking</em>. HTTPS bypasses this restriction.</p>
 <h3 id="trusting-the-certificate">Trusting the Certificate</h3>
@@ -146,7 +160,9 @@ iOS requires installing the root CA certificate:
 <li>Set the API key to your <code>gitv_</code> key</li>
 </ol>
 <h3 id="configuring-wyvern-chat">Configuring Wyvern Chat</h3>
-<p>Wyvern Chat dispatches custom-provider requests <strong>from your browser</strong>, not through its server-side proxy. HTTPS is therefore mandatory — an <code>http://</code> LAN address is blocked as mixed content and cannot be made to work. Complete the certificate trust steps above first.</p>
+<p>Wyvern Chat dispatches custom-provider requests <strong>from your browser</strong>, not through its server-side proxy. HTTPS is
+therefore mandatory — an <code>http://</code> LAN address is blocked as mixed content and cannot be made to work. Complete the
+certificate trust steps above first.</p>
 <p>Follow these steps in order; several are counter-intuitive.</p>
 <ol>
 <li>Delete any existing GitInTheVan connections in Wyvern (do not edit them — see the note below)</li>
@@ -160,8 +176,12 @@ iOS requires installing the root CA certificate:
 </ol>
 <blockquote>
 <p><strong>Wyvern stale connection state (as of 2026-08-24)</strong></p>
-<p>Wyvern stores its browser-versus-proxy routing decision on the <em>connection</em> record and does not recompute it when the connection's provider is edited. A connection that was ever bound to a Browser-Only provider keeps that behaviour, and the Edit Provider dialog shows no sign of it — the settings look right while the connection behaves otherwise.</p>
-<p>In practice, <strong>editing an existing connection may silently have no effect.</strong> If a GitInTheVan connection misbehaves, delete it and create a new one instead of adjusting it in place.</p>
+<p>Wyvern stores its browser-versus-proxy routing decision on the <em>connection</em> record and does not recompute it when
+the connection's provider is edited. A connection that was ever bound to a Browser-Only provider keeps that
+behaviour, and the Edit Provider dialog shows no sign of it — the settings look right while the connection behaves
+otherwise.</p>
+<p>In practice, <strong>editing an existing connection may silently have no effect.</strong> If a GitInTheVan connection
+misbehaves, delete it and create a new one instead of adjusting it in place.</p>
 </blockquote>
 <h3 id="managing-certificates">Managing Certificates</h3>
 <p>Go to <strong>Admin</strong> → <strong>Network</strong> tab to:
@@ -170,14 +190,31 @@ iOS requires installing the root CA certificate:
 - Check whether HTTPS is active</p>
 <p>The deploy scripts automatically detect your LAN IP and include it in the certificate.</p>
 <h3 id="when-your-ip-address-changes">When Your IP Address Changes</h3>
-<p>A certificate is tied to the IP addresses it was issued for. If your machine&rsquo;s address changes &mdash; most often after a power cut or router reboot hands out new DHCP leases &mdash; the certificate no longer matches, and every device that connects over HTTPS will fail certificate validation. The server itself still starts normally, which is what makes this confusing to diagnose.</p>
-<p>Admins now see a red banner at the top of every page when this happens, naming both the address the certificate was issued for and the address the machine currently has.</p>
-<p><strong>The easiest fix is usually to put the machine back on its old address</strong>, using a static IP or a DHCP reservation in your router. The existing certificate then matches again and every device that already trusts it keeps working &mdash; nothing needs to be re-trusted.</p>
-<p>Regenerating from <strong>Admin</strong> &rarr; <strong>Network</strong> also works, but it costs you more: every device that connects over HTTPS has to accept the new certificate again, one at a time. Regenerating does not clear the banner until you restart the server, because the old certificate is still the one being served until then.</p>
-<p>If you cannot deal with it immediately, tick the acknowledgement checkbox in the banner and press <strong>Acknowledge</strong> to hide it. It stays hidden until the server restarts &mdash; so if the problem is still there next time you start up, you get reminded again rather than forgetting about it. If the address changes a second time, the banner returns even if you dismissed the first one.</p>
-<hr />
+<p>A certificate is tied to the IP addresses it was issued for. If your machine's
+address changes -- most often after a power cut or router reboot hands out new
+DHCP leases -- the certificate no longer matches, and every device that connects
+over HTTPS will fail certificate validation. The server itself still starts
+normally, which is what makes this confusing to diagnose.</p>
+<p>Admins now see a red banner at the top of every page when this happens, naming
+both the address the certificate was issued for and the address the machine
+currently has.</p>
+<p><strong>The easiest fix is usually to put the machine back on its old address</strong>, using
+a static IP or a DHCP reservation in your router. The existing certificate then
+matches again and every device that already trusts it keeps working -- nothing
+needs to be re-trusted.</p>
+<p>Regenerating from <strong>Admin</strong> → <strong>Network</strong> also works, but it costs you more:
+every device that connects over HTTPS has to accept the new certificate again,
+one at a time. Regenerating does not clear the banner until you restart the
+server, because the old certificate is still the one being served until then.</p>
+<p>If you cannot deal with it immediately, tick the acknowledgement checkbox in the
+banner and press <strong>Acknowledge</strong> to hide it. It stays hidden until the server
+restarts -- so if the problem is still there next time you start up, you get
+reminded again rather than forgetting about it. If the address changes a second
+time, the banner returns even if you dismissed the first one.</p>
+<hr>
+<p><a id="dashboard"></a></p>
 <h2 id="3-dashboard">3. Dashboard</h2>
-<p><img alt="Dashboard" src="media/gitv-dashboard.png" /></p>
+<p><img alt="Dashboard" src="media/gitv-dashboard.png"></p>
 <p>The dashboard provides a quick overview of your GitInTheVan instance:</p>
 <ul>
 <li><strong>Stat cards</strong>: Count of configured Endpoints, Cantrips, Lorebooks, and Verification Rules</li>
@@ -185,11 +222,15 @@ iOS requires installing the root CA certificate:
 <li><strong>Quick Start</strong>: Step-by-step links to configure and run your proxy</li>
 </ul>
 <p>The sidebar on the left navigates to all management pages. The logo is at the top and the logout button is at the bottom. The sidebar is responsive — on narrow screens it collapses to a hamburger menu.</p>
-<p><img alt="Dashboard Diagnostic Result" src="media/gitv-dashboard-diagnostic-result-example.png" /></p>
+<p><img alt="Dashboard Diagnostic Result" src="media/gitv-dashboard-diagnostic-result-example.png"></p>
 <p>The <strong>Diagnostics</strong> tool runs an automated check of your endpoints and configuration. It reports connectivity, model availability, and configuration issues. Run it whenever a connection is not working as expected.</p>
 <h3 id="debug-tab">Debug Tab</h3>
 <p><em>Available to all users. Enable Debug Mode in Settings first.</em></p>
-<p>The <strong>Debug</strong> tab (under Dashboard) provides full pipeline visibility for troubleshooting. When Debug Mode is enabled in Settings, GitInTheVan captures the last 20 exchanges with every pipeline stage preserved as a timeline.</p>
+<p>The <strong>Debug</strong> tab sits beside <strong>Overview</strong> at the top of the Dashboard. It
+captures recent requests with every pipeline stage preserved, plus token and
+latency accounting, run comparison, replay and sandboxes.</p>
+<p><strong>See <a href="#debug">Debug and Comparing Runs</a> for the full description.</strong> The summary
+below covers the timeline only.</p>
 <p>The left panel shows recent captured exchanges, newest first. Each entry shows the model, timestamp, stage count, and a verified badge.</p>
 <p>Select an exchange to see the <strong>Pipeline Timeline</strong>:</p>
 <ul>
@@ -200,14 +241,16 @@ iOS requires installing the root CA certificate:
 </ul>
 <p>Tags detected in the original request are shown at the top of the timeline.</p>
 <p>Use <strong>Clear All</strong> to wipe captured exchanges. Captures are automatically pruned to the most recent 20 per user.</p>
-<hr />
+<hr>
+<p><a id="endpoints"></a></p>
 <h2 id="4-endpoints">4. Endpoints</h2>
-<p><img alt="Endpoints List" src="media/gitv-endpoints.png" /></p>
+<p><img alt="Endpoints List" src="media/gitv-endpoints.png"></p>
 <p>The Endpoints page manages your LLM backend connections. Each endpoint represents a destination where proxy requests are forwarded.</p>
 <h3 id="endpoint-list">Endpoint List</h3>
-<p>Each endpoint card shows the <strong>name</strong>, <strong>enabled/disabled status</strong>, <strong>base URL</strong>, <strong>API base path</strong>, <strong>content bypass method</strong>, and a masked <strong>provider API key</strong>. <strong>Edit</strong> and <strong>Delete</strong> buttons are on each card.</p>
+<p>Each endpoint card shows the <strong>name</strong>, <strong>enabled/disabled status</strong>, <strong>base URL</strong>, <strong>API base path</strong>, a masked <strong>provider API key</strong>, the <strong>provider</strong> (or "Custom (passthrough)"), the <strong>content bypass method</strong>, and the endpoint's <strong>role tag and priority</strong>. <strong>Edit</strong> and <strong>Delete</strong> buttons are on each card, and <strong>Collapse All</strong> / <strong>Expand All</strong> fold the cards when you have many.</p>
 <h3 id="adding-an-endpoint">Adding an Endpoint</h3>
-<p><img alt="Edit Endpoint" src="media/gitv-endpoints-edit-endpoint-example.png" /></p>
+<p><img alt="Edit Endpoint, upper half" src="media/gitv-endpoints-edit-endpoint-1-top.png"></p>
+<p><img alt="Edit Endpoint, lower half" src="media/gitv-endpoints-edit-endpoint-2-bottom.png"></p>
 <p>Click <strong>"+ Add Endpoint"</strong> to open the endpoint form:</p>
 <ul>
 <li><strong>Name</strong>: A friendly label (e.g., "OpenWebUI", "OpenRouter")</li>
@@ -215,6 +258,12 @@ iOS requires installing the root CA certificate:
 <li><strong>API Key</strong>: Your provider's API key. Click the eye icon to toggle visibility</li>
 <li><strong>API Base Path</strong>: Most providers use <code>/v1</code> (leave blank). OpenWebUI and some others use <code>/api</code>. Auto-filled if you pasted a full URL above</li>
 <li><strong>Content Bypass</strong>: Per-endpoint content bypass encoding (None, Space Separation, Dot Separation, Character Replacement). See <a href="#content-bypass-per-endpoint">Content Bypass</a> below</li>
+<li><strong>Provider</strong>: Selects LiteLLM compatibility for this endpoint (Gemini, OpenAI, Anthropic, OpenRouter, DeepSeek, Ollama, xAI, or OpenAI-compatible). Leave it on <strong>Custom (raw passthrough)</strong> to forward raw HTTP, which is the default and what every pre-LiteLLM endpoint uses. The setting applies to <em>every</em> call this endpoint serves — the main request, a verification judge, a summarizer, a map stage</li>
+<li><strong>Default Model</strong>: Used for connectivity tests and as a fallback when the client does not name a model</li>
+<li><strong>Models</strong>: An optional curated list of the models this endpoint offers. Add them by hand or press <strong>Fetch from provider</strong>. The list feeds the model pickers on Verification, Maps, Memory and Settings, and gives each model somewhere to carry its own parameters. Every model field still accepts a name that is not listed</li>
+<li><strong>Endpoint Parameters</strong>: Request parameters sent on every call routed through this endpoint. See <a href="#model-parameters">Model Parameters</a></li>
+<li><strong>Role Tag</strong>: Endpoints sharing a tag form a failover chain</li>
+<li><strong>Priority</strong>: Position in that chain — 1 is tried first</li>
 <li><strong>Enabled</strong>: Toggle whether this endpoint is active</li>
 </ul>
 <h3 id="gitinthevan-api-keys">GitInTheVan API Keys</h3>
@@ -225,8 +274,25 @@ iOS requires installing the root CA certificate:
 <li><strong>Delete</strong>: Permanently revokes the key (it stops working immediately)</li>
 </ul>
 <p>Default keys (not mapped to a specific endpoint) route to your configured default endpoint. These are listed in a separate card below the endpoint cards.</p>
+<h3 id="failover-role-tags-and-priority">Failover, Role Tags and Priority</h3>
+<p>Endpoints that share a <strong>Role Tag</strong> form a failover chain. When a request is
+routed to one of them and it fails — any HTTP status other than 200, or a
+connection error — the next endpoint in the chain is tried, in <strong>Priority</strong>
+order (1 first). Only when every candidate has failed does the request return an
+error.</p>
+<p>There is deliberately no retryable/non-retryable distinction. Candidates may
+carry different models, keys and providers — a free OpenRouter key falling back
+to a paid endpoint is the case this exists for — so any failure is worth trying
+the next one.</p>
+<ul>
+<li><strong>Role Tag</strong>: <code>default</code> unless you change it. Tag two endpoints <code>driver</code> and
+  they back each other up. <strong>Custom Tag Name</strong> appears when you pick <code>custom</code>.</li>
+<li><strong>Priority</strong>: position in the chain. Ties break on creation order.</li>
+</ul>
+<p>The chain applies to the Driver call, to map stages, and — since 0.24.0 — to the
+verification judge and the verification retry.</p>
 <h3 id="content-bypass-per-endpoint">Content Bypass (Per-Endpoint)</h3>
-<p><img alt="Endpoint Content Bypass" src="media/gitv-endpoints-edit-endpoint-example.png" /></p>
+<p><img alt="Endpoint Content Bypass" src="media/gitv-endpoints-edit-endpoint-1-top.png"></p>
 <p>Content bypass encoding is configured per endpoint, so different providers can use different strategies. Available methods:</p>
 <table>
 <thead>
@@ -278,9 +344,10 @@ iOS requires installing the root CA certificate:
 </tr>
 </tbody>
 </table>
-<hr />
+<hr>
+<p><a id="cantrips"></a></p>
 <h2 id="5-cantrips">5. Cantrips</h2>
-<p><img alt="Cantrips List" src="media/gitv-cantrips.png" /></p>
+<p><img alt="Cantrips List" src="media/gitv-cantrips.png"></p>
 <p>Cantrips are sandboxed JavaScript snippets that modify request context at specific points in the pipeline. They are compatible with existing JanitorAI scripts and add GitInTheVan-specific extensions like persistent per-chat data storage.</p>
 <h3 id="pipeline-positions">Pipeline Positions</h3>
 <p>Cantrips can run at multiple positions in the request pipeline. Each cantrip has four independent checkboxes (not radio buttons — a cantrip can run at multiple positions):</p>
@@ -332,7 +399,7 @@ iOS requires installing the root CA certificate:
 - <strong>Edit</strong> / <strong>Delete</strong></p>
 <p>The card footer displays the active pipeline positions, execution order, and timeout.</p>
 <h3 id="cantrip-tester">Cantrip Tester</h3>
-<p><img alt="Cantrip Test Panel" src="media/gitv-cantrips-test-example.png" /></p>
+<p><img alt="Cantrip Test Panel" src="media/gitv-cantrips-test-example.png"></p>
 <p>The test panel lets you run a cantrip against sample context without forwarding anything to an LLM:</p>
 <ol>
 <li><strong>Select a cantrip</strong> from the dropdown</li>
@@ -447,9 +514,10 @@ if (!budget) {
     context.character.scenario += `\nThe weather is ${weather}.`;
 }
 </code></pre>
-<hr />
+<hr>
+<p><a id="lorebooks"></a></p>
 <h2 id="6-lorebooks">6. Lorebooks</h2>
-<p><img alt="Lorebooks List" src="media/gitv-lorebooks.png" /></p>
+<p><img alt="Lorebooks List" src="media/gitv-lorebooks.png"></p>
 <p>Lorebooks are JSON worldbook entries that inject context into requests based on keyword matching.</p>
 <h3 id="lorebook-list">Lorebook List</h3>
 <p>The table shows each lorebook with:
@@ -459,7 +527,7 @@ if (!budget) {
 - <strong>Visibility</strong>: Public or Private
 - <strong>Actions</strong>: Manage, Export (download JSON), Delete</p>
 <h3 id="importing-lorebooks">Importing Lorebooks</h3>
-<p><img alt="Import Lorebook" src="media/gitv-lorebooks-import-lorebook-example.png" /></p>
+<p><img alt="Import Lorebook" src="media/gitv-lorebooks-import-lorebook-example.png"></p>
 <p>Click <strong>"Import JSON"</strong> to import a lorebook from an external source:</p>
 <ul>
 <li><strong>Load from File</strong>: Click to open a file browser and select a <code>.json</code> file</li>
@@ -473,7 +541,7 @@ if (!budget) {
 - JanitorAI lorebook exports</p>
 <p>The import handles both array and dictionary-keyed entry formats, and maps common alternative field names automatically.</p>
 <h3 id="managing-entries">Managing Entries</h3>
-<p><img alt="Manage Lorebook" src="media/gitv-lorebooks-manage-lorebook-example.png" /></p>
+<p><img alt="Manage Lorebook" src="media/gitv-lorebooks-manage-lorebook-example.png"></p>
 <p>Click <strong>Manage</strong> on a lorebook to view and edit its entries:</p>
 <p>Each entry has:
 - <strong>Entry Name</strong>: A label for the entry
@@ -487,8 +555,10 @@ if (!budget) {
 - <strong>Disabled</strong>: Temporarily disable this entry without deleting it</p>
 <h3 id="lorebook-pipeline-positions">Lorebook Pipeline Positions</h3>
 <p>Lorebooks support the same four pipeline positions as cantrips (Pre-Driver, Driver-Callable, Pre-Navigator, Post-Navigator). Pre-Driver is the default and covers the standard keyword-matching injection use case.</p>
-<hr />
+<hr>
+<p><a id="skills"></a></p>
 <h2 id="7-skills-samples">7. Skills &amp; Samples</h2>
+<p><img alt="Skills and Samples" src="media/gitv-skills.png"></p>
 <p>Skills and Writing Samples are reusable instruction blocks that can be attached to specific endpoints. They allow you to define behavioral directives and style references that are automatically injected into requests.</p>
 <h3 id="skills-vs-writing-samples">Skills vs Writing Samples</h3>
 <p><strong>Skills</strong> are behavioral instructions injected into the system message alongside character definition and lorebooks. They shape <em>what</em> the model does:</p>
@@ -520,12 +590,13 @@ if (!budget) {
 <li>Each endpoint can have multiple skills and samples</li>
 </ol>
 <p>When a request comes through an endpoint, all attached skills are injected into the system message, then all attached samples are injected before the last user message.</p>
-<hr />
+<hr>
+<p><a id="verification"></a></p>
 <h2 id="8-verification">8. Verification</h2>
 <p>Verification uses a separate LLM (the <strong>Navigator</strong>) to check the writing LLM's (the <strong>Driver's</strong>) responses against configurable rules. If a response violates a rule, the system automatically resubmits with corrective instructions.</p>
 <p>The Verification page has five tabs: <strong>Rules</strong>, <strong>Settings</strong>, <strong>Logs</strong>, <strong>Forbidden Words</strong>, and <strong>Test</strong>.</p>
 <h3 id="rules-tab">Rules Tab</h3>
-<p><img alt="Verification Rules" src="media/gitv-verification-rules.png" /></p>
+<p><img alt="Verification Rules" src="media/gitv-verification-rules.png"></p>
 <p>Each rule contains:
 - <strong>Name</strong>: A label for the rule
 - <strong>Description</strong>: Optional notes
@@ -538,16 +609,16 @@ if (!budget) {
 - <strong>Verification Endpoint Override</strong>: Use a specific endpoint for this rule (leave as "Use global setting" for the default)
 - <strong>Verification Model Override</strong>: Use a specific model for this rule (leave blank for the global setting)</p>
 <p>Each rule card has an <strong>ON/OFF toggle</strong> to enable/disable without editing. Rules are taggable and activate via <code>&lt;#verify-tag#&gt;</code> in persona or message text.</p>
-<p><img alt="Edit Verification Rule" src="media/gitv-verification-rules-edit-rule-example.png" /></p>
+<p><img alt="Edit Verification Rule" src="media/gitv-verification-rules-edit-rule-example.png"></p>
 <h3 id="settings-tab">Settings Tab</h3>
-<p><img alt="Verification Settings" src="media/gitv-verification-settings.png" /></p>
+<p><img alt="Verification Settings" src="media/gitv-verification-settings.png"></p>
 <p>Configure the Navigator:
 - <strong>Verification Enabled</strong>: Master toggle for response verification
 - <strong>Verification Endpoint</strong>: Which endpoint to use for Navigator checks (can be the same or different from your Driver endpoint)
 - <strong>Verification Model</strong>: Which model to use for checking (a fast, instruction-following model is recommended)</p>
 <p><strong>Note:</strong> When verification is enabled, streaming requests are automatically converted to non-streaming to allow the full response to be checked before returning to the client.</p>
 <h3 id="logs-tab">Logs Tab</h3>
-<p><img alt="Verification Logs" src="media/gitv-verification-logs.png" /></p>
+<p><img alt="Verification Logs" src="media/gitv-verification-logs.png"></p>
 <p>The logs tab shows the history of verification checks:
 - <strong>Rule</strong>: Which rule was evaluated
 - <strong>Result</strong>: Approved or Rejected
@@ -557,7 +628,7 @@ if (!budget) {
 - <strong>Time</strong>: When the check occurred</p>
 <p>Use the <strong>Refresh</strong> button to update the list, or toggle <strong>Auto</strong> for automatic refresh every 15 seconds.</p>
 <h3 id="forbidden-words-tab">Forbidden Words Tab</h3>
-<p><img alt="Forbidden Words" src="media/gitv-verification-forbidden-words.png" /></p>
+<p><img alt="Forbidden Words" src="media/gitv-verification-forbidden-words.png"></p>
 <p>The Forbidden Words tab provides a fast, string-matching check that runs before the Navigator. This is more efficient than using an LLM for simple word/phrase filters.</p>
 <p><strong>How it works:</strong></p>
 <ol>
@@ -572,7 +643,7 @@ if (!budget) {
 - <strong>Case Sensitive</strong>: Whether to match case-sensitively (default: off, matching is case-insensitive)</p>
 <p>Add forbidden words or phrases via the input field. Each phrase is checked literally against the response text. Use the <strong>Test Scanner</strong> to paste any text and see which forbidden phrases would match, with positions and occurrence counts.</p>
 <h3 id="test-tab">Test Tab</h3>
-<p><img alt="Verification Test" src="media/gitv-verification-test.png" /></p>
+<p><img alt="Verification Test" src="media/gitv-verification-test.png"></p>
 <p>The test panel lets you check sample responses against a verification rule without sending traffic through the proxy:</p>
 <ol>
 <li>Enter or paste <strong>response content</strong> to evaluate</li>
@@ -581,9 +652,25 @@ if (!budget) {
 <li>Click <strong>Run Verification Check</strong></li>
 </ol>
 <p>The result shows whether the response was approved or rejected, along with the reason and severity. If the verification model returns thinking/reasoning output, it is displayed in a highlighted <strong>Model Thinking</strong> section. The raw LLM response is available in a collapsible <strong>Raw LLM Response</strong> section.</p>
-<hr />
+<hr>
+<h3 id="when-a-rule-does-not-run">When a Rule Does Not Run</h3>
+<p>If the verification endpoint cannot be reached, the check is <strong>skipped and the
+response is returned unchecked</strong>. That is deliberate — an endpoint outage must
+not block your reply — but it is reported rather than silently passing:</p>
+<blockquote>
+<p>Verification resulted in a 404 error, so rule 'No Purple Prose' did not
+process. The response was returned unchecked.</p>
+</blockquote>
+<p>The same sentence appears in three places: the run's Verification stage in
+Debug, the reason column on the <strong>Logs</strong> tab, and an amber banner on the
+<strong>Test</strong> tab. A rule that did not run never shows as approved.</p>
+<p>If you see this, check that the endpoint on <strong>Verification -&gt; Settings</strong> (or the
+rule's own override) is reachable, and that its <strong>Provider</strong> setting matches the
+API it actually speaks.</p>
+<hr>
+<p><a id="memories"></a></p>
 <h2 id="9-memories">9. Memories</h2>
-<p><img alt="Memories Page" src="media/gitv-memories.png" /></p>
+<p><img alt="Memories Page" src="media/gitv-memories.png"></p>
 <p>The Memories page shows persistent data and summarization overrides.</p>
 <h3 id="persistent-memory-flags">Persistent Memory (Flags)</h3>
 <p>Persistent memories are discrete key/value facts the LLM chooses to remember across turns:</p>
@@ -595,7 +682,7 @@ if (!budget) {
 </ol>
 <p>The memories table shows each memory's key, value, conversation, and last-updated time. Memories can be edited or deleted manually.</p>
 <h3 id="conversation-summaries">Conversation Summaries</h3>
-<p>When summarization is enabled (see <a href="#11-settings">Settings</a>), long conversations are automatically compressed. The summaries section shows:</p>
+<p>When summarization is enabled (see <a href="#settings">Settings</a>), long conversations are automatically compressed. The summaries section shows:</p>
 <ul>
 <li><strong>Chat</strong>: Internal conversation identifier</li>
 <li><strong>Messages</strong>: How many messages were compressed into the summary</li>
@@ -604,7 +691,7 @@ if (!budget) {
 </ul>
 <p>Click <strong>View</strong> to expand and read the full summary text. Click <strong>Delete</strong> to remove a summary (the conversation will be re-summarized next time it exceeds the threshold).</p>
 <h3 id="memory-rules">Memory Rules</h3>
-<p><img alt="Add Memory Rule" src="media/gitv-memories-add-rule.png" /></p>
+<p><img alt="Add Memory Rule" src="media/gitv-memories-add-rule.png"></p>
 <p>Memory Rules override summarization behavior for specific conversations. Rules are taggable — they activate via <code>&lt;#memory-rule-tag#&gt;</code> in persona or message text. A rule with no tag acts as the default fallback.</p>
 <p>Each rule can override:
 - <strong>Summarization Enabled</strong>: Turn summarization on or off for matching conversations
@@ -639,7 +726,8 @@ if (!budget) {
 <p>Use a fast, cheap model for low-threshold rules and a more capable model for high-threshold rules. Scenario summarization only sends the system message (never chat messages) to the summarization LLM.</p>
 </blockquote>
 <p>Scenario rules can be shared via content packs in the <code>scenario_rules/</code> folder.</p>
-<hr />
+<hr>
+<p><a id="command-tags"></a></p>
 <h2 id="10-command-tags">10. Command Tags</h2>
 <p>Command tags are inline directives placed in the user's message text that override pipeline behavior. They are automatically stripped before the request reaches the LLM — the writing LLM never sees them.</p>
 <h3 id="syntax">Syntax</h3>
@@ -707,9 +795,10 @@ Message 4: &quot;More&quot;                                    -&gt; Verificatio
 Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persistent cleared, GUI setting resumes
 </code></pre>
 <p>Persistent overrides are scoped per-conversation. Different chats have independent override state. Overrides appear as memory entries with the <code>__cmd_persist_</code> prefix on the Memories page.</p>
-<hr />
+<hr>
+<p><a id="maps"></a></p>
 <h2 id="11-maps">11. Maps</h2>
-<p><img alt="Maps List" src="media/gitv-maps.png" /></p>
+<p><img alt="Maps List" src="media/gitv-maps.png"></p>
 <p>Maps are workflow presets that chain multiple LLM stages into a single request. Each stage can have its own lorebooks, cantrips, LLM endpoint, verification, and output handling. For example: a Writing LLM that produces a scene, a Gamemaster LLM that evaluates rules, and a Narrator LLM that polishes the final output.</p>
 <p>When no map is active, the standard single-stage pipeline runs.</p>
 <h3 id="map-list">Map List</h3>
@@ -731,9 +820,9 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <li><strong>Public</strong>: Whether other users can see and use this map</li>
 <li><strong>Global LLM Instructions</strong>: Text shown to every LLM stage in the chain</li>
 </ul>
-<p><img alt="Map Editor - Settings" src="media/gitv-maps-edit-1.png" /></p>
+<p><img alt="Map Editor - Settings" src="media/gitv-maps-edit-1.png"></p>
 <p>Each subsequent card is a <strong>stage</strong>:</p>
-<p><img alt="Map Editor - Stage" src="media/gitv-maps-edit-2.png" /></p>
+<p><img alt="Map Editor - Stage" src="media/gitv-maps-edit-2.png"></p>
 <ul>
 <li><strong>Stage Name</strong>: A label for the stage</li>
 <li><strong>System Instructions</strong>: Instructions specific to this stage's LLM (prepended to its call)</li>
@@ -744,7 +833,7 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <li><strong>Attached Lorebooks</strong>: Lorebooks injected before this stage's LLM call</li>
 <li><strong>Attached Cantrips</strong>: Cantrips run before this stage's LLM call (with a <strong>Sticky</strong> option)</li>
 </ul>
-<p><img alt="Map Editor - Verification" src="media/gitv-maps-edit-3.png" /></p>
+<p><img alt="Map Editor - Verification" src="media/gitv-maps-edit-3.png"></p>
 <p>Each stage can optionally enable <strong>Verification</strong> with its own Navigator instructions, endpoint, model, and max retries. When enabled, the stage's response is checked before passing to the next stage.</p>
 <p><strong>"+ Add Stage"</strong> adds stages to the chain (up to the maximum). Use <strong>Remove Stage</strong> to delete a stage.</p>
 <h3 id="output-modes">Output Modes</h3>
@@ -778,7 +867,7 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <p>This lets a shared world-setting lorebook remain active across the whole chain while a stage-specific cantrip runs only once.</p>
 <h3 id="import-and-export">Import and Export</h3>
 <p>Maps export as a single JSON file containing all stages, resource contents, and configuration. Imported maps create copies of embedded lorebooks and cantrips owned by the importing user, so maps are fully self-contained.</p>
-<p><img alt="Map Import" src="media/gitv-maps-edit-4.png" /></p>
+<p><img alt="Map Import" src="media/gitv-maps-edit-4.png"></p>
 <p>When importing, choose a <strong>Resource Handling</strong> mode:</p>
 <table>
 <thead>
@@ -806,14 +895,15 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <p>Maps integrate with the content pack system. A <code>maps/</code> folder in a git repository is auto-discovered, and map files can be installed or forked like other resources. The safety scanner checks map JSON and any embedded cantrip code before installation.</p>
 <h3 id="example-map">Example Map</h3>
 <p>A complete example map — the Gambling Hall (a 3-stage casino game with driver-callable card dealing, money tracking, and personality assignment) — is included in <code>docs/examples/map/</code>. It contains individual cantrip/lorebook components with build instructions, plus a pre-exported <code>map_gambling_hall.json</code> you can import directly. See the <a href="examples/map/README.md">example map guide</a> for setup instructions.</p>
-<hr />
+<hr>
+<p><a id="content-packs"></a></p>
 <h2 id="12-content-packs">12. Content Packs</h2>
-<p><img alt="Content Packs" src="media/gitv-content-packs.png" /></p>
+<p><img alt="Content Packs" src="media/gitv-content-packs.png"></p>
 <p>The Content Packs page lets you browse and install resources from git repositories or local folders. GitInTheVan works with any standard git endpoint (GitHub, Gitea, GitLab) plus admin-linked local folders.</p>
 <p>The page has two tabs: <strong>Browse</strong> (link, browse, sync, and install from repos) and <strong>Create Pack</strong> (export your own resources as a git-ready pack).</p>
 <p><strong>WARNING</strong>: Content from external repositories is not verified by GitInTheVan. Download and install at your own risk.</p>
 <h3 id="linking-a-repository">Linking a Repository</h3>
-<p><img alt="Link Repository" src="media/gitv-content-packs-link-repository.png" /></p>
+<p><img alt="Link Repository" src="media/gitv-content-packs-link-repository.png"></p>
 <ol>
 <li>Click <strong>"+ Link Repository"</strong></li>
 <li>Enter a <strong>Name</strong> for the repo</li>
@@ -846,7 +936,7 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 - <code>README.md</code> with deployment and sharing instructions</p>
 <p>The README includes notes about NSFW-friendly platforms (Gitea, Forgejo) since some platforms like GitHub may not be suitable for adult content packs.</p>
 <h3 id="browsing-files">Browsing Files</h3>
-<p><img alt="Browse Files" src="media/gitv-content-packs-browse.png" /></p>
+<p><img alt="Browse Files" src="media/gitv-content-packs-browse.png"></p>
 <p>After linking or syncing, the browser shows all available files with:</p>
 <ul>
 <li><strong>Filter by Type</strong>: All, Cantrips, Lorebooks, Rules, Maps</li>
@@ -898,8 +988,10 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 </ul>
 <h3 id="syncing-repos">Syncing Repos</h3>
 <p>Click <strong>Sync</strong> on a repo to re-fetch the latest <code>descriptions.json</code> and file list. This checks for new files and updates.</p>
-<hr />
+<hr>
+<p><a id="tags-and-groups"></a></p>
 <h2 id="13-tags-and-groups">13. Tags and Groups</h2>
+<p><img alt="Tags and Groups" src="media/gitv-tags-and-groups.png"></p>
 <p>The Tags and Groups page provides centralized management of all your lorebook and cantrip tags, plus the ability to create group collections activated by a single tag.</p>
 <h3 id="groups-tab">Groups Tab</h3>
 <p>Groups let you activate multiple lorebooks and cantrips with a single tag. Instead of embedding five separate tags in your persona or scenario, create a group with tag <code>castlescene</code> and embed <code>&lt;#castlescene#&gt;</code>.</p>
@@ -924,16 +1016,18 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <li><strong>Tag</strong>: Click the edit icon to change the tag. Shows the full activation tag (e.g., <code>&lt;#lore-mytag#&gt;</code>)</li>
 <li><strong>Visibility</strong>: Toggle between Public and Private. Private tags only work for the owner. Public tags work for all users.</li>
 </ul>
-<hr />
+<hr>
+<p><a id="settings"></a></p>
 <h2 id="14-settings">14. Settings</h2>
-<p><img alt="Settings Page" src="media/gitv-settings.png" /></p>
+<p><img alt="Settings Page" src="media/gitv-settings.png"></p>
 <p>The Settings page configures your default proxy behavior, streaming UX, summarization, and pipeline features.</p>
 <h3 id="proxy-configuration">Proxy Configuration</h3>
 <ul>
 <li><strong>Default Endpoint</strong>: Which endpoint to use when no specific routing applies</li>
 <li><strong>Debug Mode</strong>: Capture pipeline stage data for the last 20 exchanges. View captured data on the Debug tab under Dashboard.</li>
 </ul>
-<p>Model configuration is now per-endpoint. Set the <strong>Default Model</strong> on each endpoint in the Endpoints page. The endpoint's model is used as a fallback when the client doesn't specify one.</p>
+<p>Model configuration is per-endpoint — there is no model override here. Set the <strong>Default Model</strong> on each endpoint in the Endpoints page; it is used as a fallback when the client doesn't specify one.</p>
+<p><strong>Default Parameters</strong> blocks appear here for each role — all requests, verification calls, and summarization calls. They are the broadest layer of the parameter system; anything set on an endpoint, a model, a rule or a map stage overrides them. See <a href="#model-parameters">Model Parameters</a>.</p>
 <h3 id="streaming-and-status">Streaming and Status</h3>
 <p>These settings affect how responses are delivered when verification is enabled. Since verification requires buffering the full response, these options control the streaming experience:</p>
 <ul>
@@ -942,7 +1036,7 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <li><strong>Simulated Streaming Speed</strong>: When verification buffers the response, simulate streaming output at this speed (tokens/min, 0 = instant)</li>
 </ul>
 <h3 id="conversation-summarization">Conversation Summarization</h3>
-<p><img alt="Summarization Settings" src="media/gitv-settings-2.png" /></p>
+<p><img alt="Summarization Settings" src="media/gitv-settings-2.png"></p>
 <p>Automatically compresses long conversations to reduce token usage while preserving narrative context:</p>
 <ul>
 <li><strong>Enable Summarization</strong>: Master toggle</li>
@@ -963,7 +1057,7 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <p>When enabled and a trailing assistant message is detected (the "prefill" pattern), GitInTheVan converts it to a system instruction for OpenAI-compatible providers that don't support native prefill. Anthropic and Google endpoints pass through as-is since they support prefill natively.</p>
 <p>Provider is auto-detected from the endpoint URL and model name.</p>
 <h3 id="context-budgeting">Context Budgeting</h3>
-<p><img alt="Context Budgeting" src="media/gitv-settings-3.png" /></p>
+<p><img alt="Context Budgeting" src="media/gitv-settings-3.png"></p>
 <p>Allocates a percentage of the model's context window for injected content (cantrips, lorebooks, memory). Cantrips can access their allocation via <code>context.budget</code> to dynamically scale their output.</p>
 <ul>
 <li><strong>Injection Budget (%)</strong>: Percentage of the context window reserved for injections (default 10). Set to 0 to disable budgeting entirely.</li>
@@ -1019,11 +1113,12 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 </tbody>
 </table>
 <p>Admin actions (user creation, deletion, password resets) are recorded in the audit log, viewable via the <strong>Admin</strong> page. Global caps for driver-callable turns and verification retries are also configured in the Admin page.</p>
-<hr />
+<hr>
+<p><a id="admin"></a></p>
 <h2 id="15-admin">15. Admin</h2>
 <p><em>Admin only. The Admin link in the sidebar is only visible to admin accounts.</em></p>
-<p><img alt="Admin" src="media/gitv-admin-global-caps.png" /></p>
-<p>The Admin page provides system-wide management with five tabs: <strong>Global Caps</strong>, <strong>Users</strong>, <strong>Update</strong>, <strong>Audit Logs</strong>, and <strong>Server Logs</strong>. Debug is available as a tab on the Dashboard. A red badge appears on the Admin sidebar button when an update is available.</p>
+<p><img alt="Admin" src="media/gitv-admin-global-caps.png"></p>
+<p>The Admin page provides system-wide management with seven tabs: <strong>Global Caps</strong>, <strong>Users</strong>, <strong>Update</strong>, <strong>Audit Logs</strong>, <strong>Server Logs</strong>, <strong>Network</strong>, and <strong>Backup</strong>. Debug is available as a tab on the Dashboard. A red badge appears on the Admin sidebar button when an update is available.</p>
 <h3 id="global-caps-tab">Global Caps Tab</h3>
 <p>Prevents users from causing internal denial-of-service by setting absurdly high turn or retry counts. The effective limit is the lower of the user's setting and the global cap — user preferences are not overwritten.</p>
 <ul>
@@ -1041,7 +1136,7 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <li>Click <strong>Reset to Default</strong> to clear the override</li>
 </ul>
 <h3 id="users-tab">Users Tab</h3>
-<p><img alt="Users" src="media/gitv-admin-users.png" /></p>
+<p><img alt="Users" src="media/gitv-admin-users.png"></p>
 <p>Full user management. Each user row shows:
 - <strong>Username</strong>
 - <strong>Role</strong>: Admin or User
@@ -1058,10 +1153,10 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <p>Admin users cannot be disabled or deleted.</p>
 <p>Click <strong>"+ Add User"</strong> and enter a username and password. After creation, the user's API key is shown once — save it immediately.</p>
 <h3 id="audit-logs-tab">Audit Logs Tab</h3>
-<p><img alt="Audit Logs" src="media/gitv-admin-audit-logs.png" /></p>
+<p><img alt="Audit Logs" src="media/gitv-admin-audit-logs.png"></p>
 <p>Read-only view of admin actions. Each entry shows the action type, target, details, and timestamp. Logs are auto-pruned to 1000 entries. Use <strong>Refresh</strong> or toggle <strong>Auto</strong> for automatic refresh every 15 seconds.</p>
 <h3 id="server-logs-tab">Server Logs Tab</h3>
-<p><img alt="Server Logs" src="media/gitv-admin-server-logs.png" /></p>
+<p><img alt="Server Logs" src="media/gitv-admin-server-logs.png"></p>
 <p>Read-only view of recent server log output (last 200 lines). Logs are read from the file configured by <code>GITV_LOG_FILE</code> (auto-creates <code>data/logs/gitinthevan.log</code> if unset). Use <strong>Refresh</strong> or toggle <strong>Auto</strong> for automatic refresh every 15 seconds.</p>
 <h3 id="update-tab">Update Tab</h3>
 <p>The Update tab checks for new releases from the official GitHub repository. It automatically checks on page load and every 5 minutes.</p>
@@ -1074,6 +1169,286 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <li>Docker/container update instructions are also provided</li>
 </ul>
 <p>When you're up to date, a green confirmation banner is shown with the current version.</p>
-<p>The platform-specific update scripts (<code>scripts/update-windows.bat</code>, <code>scripts/update-macos.sh</code>, <code>scripts/update-linux.sh</code>) handle stopping the server, backing up the database, reinstalling dependencies, rebuilding the frontend, and restarting the server.</p>
+<p>The platform-specific update scripts (<code>scripts/update-windows.bat</code>, <code>scripts/update-macos.sh</code>, <code>scripts/update-linux.sh</code>) handle:</p>
+<ol>
+<li>Stopping the running server</li>
+<li>Backing up the database to a timestamped file</li>
+<li>Reinstalling Python dependencies</li>
+<li>Rebuilding the frontend</li>
+<li>Starting the server</li>
+</ol>
+<h3 id="network-tab">Network Tab</h3>
+<p><img alt="Admin Network" src="media/gitv-admin-network.png"></p>
+<p>Regenerates the HTTPS certificate used for LAN access.</p>
+<p>GitInTheVan issues its own certificate covering the hostnames and addresses it
+knew about when it was created. If the machine's LAN address changes — a new
+DHCP lease, a second network interface, a move between networks — the
+certificate no longer matches and clients refuse to connect. An admin banner
+warns when that drift is detected.</p>
+<ul>
+<li><strong>Include IP addresses in certificate</strong>: comma-separated extras to add as
+  subject alternative names, for devices that reach the server by address rather
+  than name.</li>
+<li>Regenerating replaces the certificate immediately. <strong>Every device that trusted
+  the old one has to trust the new one</strong>, so plan it for when you can revisit
+  each client.</li>
+</ul>
+<h3 id="backup-tab">Backup Tab</h3>
+<p><img alt="Admin Backup" src="media/gitv-admin-backup.png"></p>
+<p>Scheduled database backups, and restore.</p>
+<ul>
+<li><strong>Enable scheduled backups</strong>, with <strong>Days</strong> (comma-separated, e.g.
+  <code>mon,wed,fri</code>; blank means every day), <strong>Time</strong> (24h, UTC) and <strong>Retention
+  Count</strong> — how many to keep before the oldest is pruned.</li>
+<li>The <strong>Backups</strong> list shows what exists, with a restore action on each.</li>
+</ul>
+<p><strong>Restore replaces the entire database.</strong> It is the whole-system counterpart to
+per-object restore, and everything created since that backup is lost. The
+confirmation step is there because there is no undo.</p>
+<hr>
+<p><a id="model-parameters"></a></p>
+<h2 id="16-model-parameters">16. Model Parameters</h2>
+<p>Naming a model says <em>which</em> model to call. Parameters say <em>how</em> to call it —
+<code>reasoning_effort</code>, <code>max_tokens</code>, <code>temperature</code>, or anything else your provider
+accepts.</p>
+<p>A parameter can be attached anywhere a model can be named, and the layers merge
+per key, with the layer closest to the message winning:</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Where you set it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1 (broadest)</td>
+<td>Whatever your client sent</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Settings</strong> → per role (default / verification / summarization)</td>
+</tr>
+<tr>
+<td>3</td>
+<td>An endpoint, on the <strong>Endpoints</strong> page</td>
+</tr>
+<tr>
+<td>4</td>
+<td>A specific model in that endpoint's model list</td>
+</tr>
+<tr>
+<td>5 (closest)</td>
+<td>The verification rule, map stage, or scenario rule making the call</td>
+</tr>
+</tbody>
+</table>
+<p>So if your endpoint sets <code>reasoning_effort: max</code> and a cheap verification rule
+sets <code>reasoning_effort: low</code>, the writing call gets <code>max</code> and that rule's check
+gets <code>low</code>. A client that asked for <code>high</code> is overridden in both.</p>
+<p><strong>Anything you do not configure is passed through from your client untouched.</strong>
+Configuring a name is what makes GitInTheVan override it.</p>
+<h3 id="parameter-fields">Parameter Fields</h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Name</strong></td>
+<td>The key sent upstream, e.g. <code>reasoning_effort</code></td>
+</tr>
+<tr>
+<td><strong>Type</strong></td>
+<td><code>string</code>, <code>string list</code>, <code>integer</code>, <code>float</code>, <code>number</code>, or <code>boolean</code>. The value is converted before sending, so an integer arrives as <code>128000</code>, not <code>"128000"</code></td>
+</tr>
+<tr>
+<td><strong>Value</strong></td>
+<td>What to send</td>
+</tr>
+<tr>
+<td><strong>Required</strong></td>
+<td>Stops you saving the parameter with an empty value, and marks it in the UI. It does not change what is sent — every parameter you define is sent</td>
+</tr>
+<tr>
+<td><strong>Options</strong></td>
+<td>Optional comma-separated list of allowed values. Setting it turns Value into a dropdown and rejects anything outside the list</td>
+</tr>
+<tr>
+<td><strong>Description</strong></td>
+<td>Optional note to yourself</td>
+</tr>
+</tbody>
+</table>
+<p><code>messages</code>, <code>model</code> and <code>stream</code> cannot be used as parameter names. <code>model</code> has
+its own field at every scope, and <code>stream</code> is controlled by the pipeline —
+verification and driver-callable runs force it off, so overriding it would break
+the request.</p>
+<p>A parameter whose value cannot be converted to its type, or whose value is not in
+its own options list, is dropped with a log line rather than sent upstream. A bad
+parameter never fails the request.</p>
+<h3 id="where-to-set-them">Where to set them</h3>
+<table>
+<thead>
+<tr>
+<th>Scope</th>
+<th>Where</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Every request</td>
+<td>Settings → Proxy Configuration → <em>Default Parameters (all requests)</em></td>
+</tr>
+<tr>
+<td>Every verification check</td>
+<td>Settings → <em>Default Parameters (verification calls)</em></td>
+</tr>
+<tr>
+<td>Every summarization call</td>
+<td>Settings → Conversation Summarization → <em>Default Parameters (summarization calls)</em></td>
+</tr>
+<tr>
+<td>One endpoint</td>
+<td>Endpoints → Edit → <em>Endpoint Parameters</em></td>
+</tr>
+<tr>
+<td>One model on an endpoint</td>
+<td>Endpoints → Edit → <em>Models</em> → the model's own parameters</td>
+</tr>
+<tr>
+<td>One verification rule</td>
+<td>Verification → Rules → Edit → <em>Parameters for this rule</em></td>
+</tr>
+<tr>
+<td>One map stage</td>
+<td>Maps → Edit → the stage's parameters (generation and verification are separate)</td>
+</tr>
+<tr>
+<td>One scenario rule</td>
+<td>Memory → Scenario Summarization Rules</td>
+</tr>
+</tbody>
+</table>
+<h3 id="model-lists">Model lists</h3>
+<p><img alt="Per-model parameters on an endpoint" src="media/gitv-endpoints-models.png"></p>
+<p>Each endpoint can carry a list of the models it offers. On the Endpoints page,
+add them by hand or press <strong>Fetch from provider</strong> to seed the list from the
+endpoint's own model listing, then give each model its own parameters.</p>
+<p>The list populates the model dropdowns on Maps, Verification, Memory and
+Settings. It is entirely optional: every model field keeps an escape hatch for
+typing a name that is not listed, and a model you use without listing simply
+contributes no parameters of its own.</p>
+<h3 id="seeing-what-was-applied">Seeing what was applied</h3>
+<p>Turn on Debug Mode and the pipeline timeline gains an <strong>LLM Parameters</strong> stage
+showing the resolved set and which layer supplied each value. That is the fastest
+way to answer "why did this call get <code>temperature: 0.1</code>?".</p>
+<hr>
+<p><a id="debug"></a></p>
+<h2 id="17-debug-and-comparing-runs">17. Debug and Comparing Runs</h2>
+<p><em>Available to all users. Enable </em><em>Debug Mode</em><em> in Settings first, then send a
+message through the proxy.</em></p>
+<p>The <strong>Debug</strong> tab sits beside <strong>Overview</strong> at the top of the Dashboard. It is a
+passive tap: it records what the pipeline did, and changes nothing about what it
+does. Streaming and non-streaming requests are both captured.</p>
+<p><img alt="Debug run detail" src="media/gitv-debug-run.png"></p>
+<h3 id="recent-runs">Recent Runs</h3>
+<p>Newest first, each showing the model, timestamp, stage count, token total and
+wall-clock time. Runs are pruned to a limit set by your administrator, so a run
+you want to keep needs <strong>Save</strong> — saved runs are exempt from pruning and are
+what the save-slot counter at the top refers to. <strong>Rename</strong> gives a run a label
+you will recognise later; <strong>Delete</strong> removes one; <strong>Clear All</strong> empties the list.</p>
+<p>A run close to being pruned is marked <em>near eviction — save it to keep it</em>.</p>
+<h3 id="run-detail">Run detail</h3>
+<p><strong>Metrics.</strong> Tokens (split into prompt and completion), how many tokens the
+pipeline injected, total time, pipeline overhead — the share of the wall clock
+not spent waiting on an LLM — tokens per second, and the number of upstream LLM
+calls.</p>
+<p>Token counts come from the provider's own <code>usage</code> object where one is returned,
+and from an estimate where it is not. The two are never mixed silently: a run
+whose calls disagree is badged so a comparison cannot quietly compare a
+measurement against a guess.</p>
+<p><strong>Upstream calls.</strong> One row per call, labelled by purpose — <code>MAIN</code> for the
+Driver, <code>VERIFICATION_JUDGE</code>, <code>SUMMARIZER</code>, <code>MAP_STAGE</code> — with the endpoint,
+model, latency and token split. Failed failover attempts appear here too, since
+a run that tried two endpoints spent both latencies.</p>
+<p><strong>Cantrips.</strong> Every cantrip considered, whether it ran, and if not, why — most
+often that its tag was not present in the request.</p>
+<p><strong>Pipeline timeline.</strong> Each stage in order, with a <strong>changed</strong> badge when it
+modified the messages. Expand one for the before/after message snapshots, the
+metadata behind it (matched keywords, memory keys, budget allocation, cantrip
+console output, tool calls, resolved LLM parameters and which layer supplied
+each), and the setting that controls it.</p>
+<h3 id="comparing-runs">Comparing runs</h3>
+<p><img alt="Comparing runs" src="media/gitv-debug-compare.png"></p>
+<p><strong>Compare runs</strong> puts up to four side by side. One is the <strong>baseline</strong> — set it
+with the radio button — and the others are expressed as differences from it:
+token and timing deltas with direction and percentage, and a word-level diff of
+the response text.</p>
+<p>This is the loop the feature exists for: change a cantrip or a parameter, replay,
+and read what actually moved.</p>
+<p>Differences in model, endpoint or provider are called out explicitly, because a
+run served by a different endpoint is not really comparable to the baseline.</p>
+<h3 id="replay">Replay</h3>
+<p><strong>Replay</strong> re-sends a run's original messages through the <em>current</em>
+configuration and links the result back to the run it came from. It is a
+one-shot "same input, today's config" check that writes nothing.</p>
+<p>Replays go through the real pipeline — the same code path a client hits — because
+a replay that took a shortcut would stop being evidence.</p>
+<h3 id="sandbox-copies">Sandbox copies</h3>
+<p><strong>Create sandbox copy</strong> forks a run into something you can iterate on. The fork
+copies the request <em>and</em> the conversation state it read — memories, chat data,
+summary — into a conversation of its own, so repeated runs accumulate there and
+the original thread is never touched.</p>
+<p>From a sandbox you can run it, edit the prompt, reset it to the state it was
+forked from, or delete it and its state entirely.</p>
+<p><strong>Nothing is sent back to the service the original request came from.</strong> A
+sandbox run starts inside GitInTheVan and its response is displayed here, so a
+chat platform that is not expecting a reply never receives one.</p>
+<p>Sandboxes complement replay rather than replacing it: replay is one-shot and
+writes nothing, a sandbox is a scenario you keep.</p>
+<h3 id="exporting">Exporting</h3>
+<p><strong>Export .md</strong> and <strong>Export .json</strong> save a run — or a whole comparison — to a
+file. The JSON export is the full trace, which is what to attach to a bug report.</p>
+<hr>
+<p><a id="activation"></a></p>
+<h2 id="18-the-activation-hierarchy">18. The Activation Hierarchy</h2>
+<p>Five kinds of resource — lorebooks, cantrips, verification rules, maps and memory
+rules — all answer the same question: <em>is this on for this request?</em> They answer
+it the same way.</p>
+<ol>
+<li><strong>Off is the default.</strong> A resource participates only if something turns it on.</li>
+<li><strong>Activation is a union. Sources add, never subtract.</strong> There is deliberately
+   no way to express "off", so no source can countermand another.</li>
+<li><strong>Proximity wins.</strong> A tag in the system prompt, the persona or the message
+   text activates the resource <strong>regardless of its Active flag</strong>. The closer a
+   source is to the message, the more authority it has.</li>
+<li><strong>Active is the blanket source</strong>, used when no tag has spoken. Active means
+   "apply to everything", so an Active resource runs even when the request
+   carries unrelated tags.</li>
+</ol>
+<p>So a resource switched off in the UI still runs if a tag names it, and that is
+correct — you asked for it by name, in the message.</p>
+<h3 id="maps-and-memory-rules-are-chosen-not-stacked">Maps and memory rules are chosen, not stacked</h3>
+<p>Exactly one map and one memory rule can win, so rule 4 works differently for
+them: Active cannot also mean "apply to everything", because blanket-running a
+multi-stage map would silently multiply what every request costs.</p>
+<p>They match on <strong>their own tag</strong> only, plus one explicit default — the <strong>Default
+Map</strong> in Settings, or the untagged default memory rule. Rules 1-3 apply to them
+unchanged.</p>
+<h3 id="tag-format">Tag format</h3>
+<p>Tags are written inline and stripped before the request is forwarded:</p>
+<pre><code>&lt;#lore-worldbuilding#&gt;  &lt;#cantrip-dice#&gt;  &lt;#verify-tone#&gt;
+&lt;#map-poker#&gt;           &lt;#memory-rule-longform#&gt;
+&lt;#taggroup-mygame#&gt;
+</code></pre>
+<p>A <strong>tag group</strong> activates several resources at once — see
+<a href="#tags-and-groups">Tags and Groups</a>.</p>
+<h3 id="command-tags-are-separate">Command tags are separate</h3>
+<p><code>&lt;#gitv-...#&gt;</code> command tags control the pipeline for one request rather than
+activating a resource. They are covered in <a href="#command-tags">Command Tags</a>.</p>
 </body>
 </html>

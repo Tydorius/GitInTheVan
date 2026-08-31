@@ -12,6 +12,17 @@ GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:
 
 ---
 
+> **About the screenshots**
+>
+> Screenshots of the main pages were captured on **2026-08-31 against 0.24.0**.
+> A few images of individual dialogs and panels still date from **2026-07-08,
+> against 0.16.x** — those show the tool working the same way, but the
+> surrounding UI may have moved on.
+>
+> Where a screenshot and the surrounding text disagree, **the text is correct**.
+
+---
+
 ## Table of Contents
 
 1. [Login and Admin Setup](#1-login-and-admin-setup)
@@ -20,7 +31,7 @@ GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:
 4. [Endpoints](#4-endpoints)
 5. [Cantrips](#5-cantrips)
 6. [Lorebooks](#6-lorebooks)
-7. [Skills & Samples](#7-skills--samples)
+7. [Skills & Samples](#skills)
 8. [Verification](#8-verification)
 9. [Memories](#9-memories)
 10. [Command Tags](#10-command-tags)
@@ -29,8 +40,13 @@ GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:
 13. [Tags and Groups](#13-tags-and-groups)
 14. [Settings](#14-settings)
 15. [Admin](#15-admin)
+16. [Model Parameters](#16-model-parameters)
+17. [Debug and Comparing Runs](#17-debug-and-comparing-runs)
+18. [The Activation Hierarchy](#18-the-activation-hierarchy)
 
 ---
+
+<a id="login"></a>
 
 ## 1. Login and Admin Setup
 
@@ -46,6 +62,8 @@ After setup, log in with your new credentials. Your **API key** (prefixed with `
 On subsequent visits, use the standard login form with your username and password.
 
 ---
+
+<a id="https"></a>
 
 ## 2. HTTPS and LAN Access
 
@@ -213,6 +231,8 @@ time, the banner returns even if you dismissed the first one.
 
 ---
 
+<a id="dashboard"></a>
+
 ## 3. Dashboard
 
 ![Dashboard](media/gitv-dashboard.png)
@@ -233,7 +253,12 @@ The **Diagnostics** tool runs an automated check of your endpoints and configura
 
 *Available to all users. Enable Debug Mode in Settings first.*
 
-The **Debug** tab (under Dashboard) provides full pipeline visibility for troubleshooting. When Debug Mode is enabled in Settings, GitInTheVan captures the last 20 exchanges with every pipeline stage preserved as a timeline.
+The **Debug** tab sits beside **Overview** at the top of the Dashboard. It
+captures recent requests with every pipeline stage preserved, plus token and
+latency accounting, run comparison, replay and sandboxes.
+
+**See [Debug and Comparing Runs](#debug) for the full description.** The summary
+below covers the timeline only.
 
 The left panel shows recent captured exchanges, newest first. Each entry shows the model, timestamp, stage count, and a verified badge.
 
@@ -250,6 +275,8 @@ Use **Clear All** to wipe captured exchanges. Captures are automatically pruned 
 
 ---
 
+<a id="endpoints"></a>
+
 ## 4. Endpoints
 
 ![Endpoints List](media/gitv-endpoints.png)
@@ -258,11 +285,13 @@ The Endpoints page manages your LLM backend connections. Each endpoint represent
 
 ### Endpoint List
 
-Each endpoint card shows the **name**, **enabled/disabled status**, **base URL**, **API base path**, **content bypass method**, and a masked **provider API key**. **Edit** and **Delete** buttons are on each card.
+Each endpoint card shows the **name**, **enabled/disabled status**, **base URL**, **API base path**, a masked **provider API key**, the **provider** (or "Custom (passthrough)"), the **content bypass method**, and the endpoint's **role tag and priority**. **Edit** and **Delete** buttons are on each card, and **Collapse All** / **Expand All** fold the cards when you have many.
 
 ### Adding an Endpoint
 
-![Edit Endpoint](media/gitv-endpoints-edit-endpoint-example.png)
+![Edit Endpoint, upper half](media/gitv-endpoints-edit-endpoint-1-top.png)
+
+![Edit Endpoint, lower half](media/gitv-endpoints-edit-endpoint-2-bottom.png)
 
 Click **"+ Add Endpoint"** to open the endpoint form:
 
@@ -271,6 +300,12 @@ Click **"+ Add Endpoint"** to open the endpoint form:
 - **API Key**: Your provider's API key. Click the eye icon to toggle visibility
 - **API Base Path**: Most providers use `/v1` (leave blank). OpenWebUI and some others use `/api`. Auto-filled if you pasted a full URL above
 - **Content Bypass**: Per-endpoint content bypass encoding (None, Space Separation, Dot Separation, Character Replacement). See [Content Bypass](#content-bypass-per-endpoint) below
+- **Provider**: Selects LiteLLM compatibility for this endpoint (Gemini, OpenAI, Anthropic, OpenRouter, DeepSeek, Ollama, xAI, or OpenAI-compatible). Leave it on **Custom (raw passthrough)** to forward raw HTTP, which is the default and what every pre-LiteLLM endpoint uses. The setting applies to *every* call this endpoint serves — the main request, a verification judge, a summarizer, a map stage
+- **Default Model**: Used for connectivity tests and as a fallback when the client does not name a model
+- **Models**: An optional curated list of the models this endpoint offers. Add them by hand or press **Fetch from provider**. The list feeds the model pickers on Verification, Maps, Memory and Settings, and gives each model somewhere to carry its own parameters. Every model field still accepts a name that is not listed
+- **Endpoint Parameters**: Request parameters sent on every call routed through this endpoint. See [Model Parameters](#model-parameters)
+- **Role Tag**: Endpoints sharing a tag form a failover chain
+- **Priority**: Position in that chain — 1 is tried first
 - **Enabled**: Toggle whether this endpoint is active
 
 ### GitInTheVan API Keys
@@ -283,9 +318,29 @@ Each endpoint card displays its associated `gitv_` API keys. These are the keys 
 
 Default keys (not mapped to a specific endpoint) route to your configured default endpoint. These are listed in a separate card below the endpoint cards.
 
+### Failover, Role Tags and Priority
+
+Endpoints that share a **Role Tag** form a failover chain. When a request is
+routed to one of them and it fails — any HTTP status other than 200, or a
+connection error — the next endpoint in the chain is tried, in **Priority**
+order (1 first). Only when every candidate has failed does the request return an
+error.
+
+There is deliberately no retryable/non-retryable distinction. Candidates may
+carry different models, keys and providers — a free OpenRouter key falling back
+to a paid endpoint is the case this exists for — so any failure is worth trying
+the next one.
+
+- **Role Tag**: `default` unless you change it. Tag two endpoints `driver` and
+  they back each other up. **Custom Tag Name** appears when you pick `custom`.
+- **Priority**: position in the chain. Ties break on creation order.
+
+The chain applies to the Driver call, to map stages, and — since 0.24.0 — to the
+verification judge and the verification retry.
+
 ### Content Bypass (Per-Endpoint)
 
-![Endpoint Content Bypass](media/gitv-endpoints-edit-endpoint-example.png)
+![Endpoint Content Bypass](media/gitv-endpoints-edit-endpoint-1-top.png)
 
 Content bypass encoding is configured per endpoint, so different providers can use different strategies. Available methods:
 
@@ -308,6 +363,8 @@ The API base path determines how URLs are constructed when forwarding requests:
 | OpenWebUI | `/api` | `https://your-provider.com/api/chat/completions` |
 
 ---
+
+<a id="cantrips"></a>
 
 ## 5. Cantrips
 
@@ -507,6 +564,8 @@ if (context.response) {
 
 ---
 
+<a id="lorebooks"></a>
+
 ## 6. Lorebooks
 
 ![Lorebooks List](media/gitv-lorebooks.png)
@@ -563,7 +622,11 @@ Lorebooks support the same four pipeline positions as cantrips (Pre-Driver, Driv
 
 ---
 
+<a id="skills"></a>
+
 ## 7. Skills & Samples
+
+![Skills and Samples](media/gitv-skills.png)
 
 Skills and Writing Samples are reusable instruction blocks that can be attached to specific endpoints. They allow you to define behavioral directives and style references that are automatically injected into requests.
 
@@ -602,6 +665,8 @@ Samples are wrapped in `<writing_sample>` tags and inserted as a system message 
 When a request comes through an endpoint, all attached skills are injected into the system message, then all attached samples are injected before the last user message.
 
 ---
+
+<a id="verification"></a>
 
 ## 8. Verification
 
@@ -689,6 +754,27 @@ The result shows whether the response was approved or rejected, along with the r
 
 ---
 
+### When a Rule Does Not Run
+
+If the verification endpoint cannot be reached, the check is **skipped and the
+response is returned unchecked**. That is deliberate — an endpoint outage must
+not block your reply — but it is reported rather than silently passing:
+
+> Verification resulted in a 404 error, so rule 'No Purple Prose' did not
+> process. The response was returned unchecked.
+
+The same sentence appears in three places: the run's Verification stage in
+Debug, the reason column on the **Logs** tab, and an amber banner on the
+**Test** tab. A rule that did not run never shows as approved.
+
+If you see this, check that the endpoint on **Verification -> Settings** (or the
+rule's own override) is reachable, and that its **Provider** setting matches the
+API it actually speaks.
+
+---
+
+<a id="memories"></a>
+
 ## 9. Memories
 
 ![Memories Page](media/gitv-memories.png)
@@ -710,7 +796,7 @@ The memories table shows each memory's key, value, conversation, and last-update
 
 ### Conversation Summaries
 
-When summarization is enabled (see [Settings](#11-settings)), long conversations are automatically compressed. The summaries section shows:
+When summarization is enabled (see [Settings](#settings)), long conversations are automatically compressed. The summaries section shows:
 
 - **Chat**: Internal conversation identifier
 - **Messages**: How many messages were compressed into the summary
@@ -768,6 +854,8 @@ Scenario rules can be shared via content packs in the `scenario_rules/` folder.
 
 ---
 
+<a id="command-tags"></a>
+
 ## 10. Command Tags
 
 Command tags are inline directives placed in the user's message text that override pipeline behavior. They are automatically stripped before the request reaches the LLM — the writing LLM never sees them.
@@ -815,6 +903,8 @@ Message 5: "Done <VERIFY:reset>"                     -> Persistent cleared, GUI 
 Persistent overrides are scoped per-conversation. Different chats have independent override state. Overrides appear as memory entries with the `__cmd_persist_` prefix on the Memories page.
 
 ---
+
+<a id="maps"></a>
 
 ## 11. Maps
 
@@ -911,6 +1001,8 @@ A complete example map — the Gambling Hall (a 3-stage casino game with driver-
 
 ---
 
+<a id="content-packs"></a>
+
 ## 12. Content Packs
 
 ![Content Packs](media/gitv-content-packs.png)
@@ -1006,7 +1098,11 @@ Click **Sync** on a repo to re-fetch the latest `descriptions.json` and file lis
 
 ---
 
+<a id="tags-and-groups"></a>
+
 ## 13. Tags and Groups
+
+![Tags and Groups](media/gitv-tags-and-groups.png)
 
 The Tags and Groups page provides centralized management of all your lorebook and cantrip tags, plus the ability to create group collections activated by a single tag.
 
@@ -1038,6 +1134,8 @@ The Tags tab shows all your lorebooks and cantrips in one table with their tags 
 
 ---
 
+<a id="settings"></a>
+
 ## 14. Settings
 
 ![Settings Page](media/gitv-settings.png)
@@ -1049,7 +1147,9 @@ The Settings page configures your default proxy behavior, streaming UX, summariz
 - **Default Endpoint**: Which endpoint to use when no specific routing applies
 - **Debug Mode**: Capture pipeline stage data for the last 20 exchanges. View captured data on the Debug tab under Dashboard.
 
-Model configuration is now per-endpoint. Set the **Default Model** on each endpoint in the Endpoints page. The endpoint's model is used as a fallback when the client doesn't specify one.
+Model configuration is per-endpoint — there is no model override here. Set the **Default Model** on each endpoint in the Endpoints page; it is used as a fallback when the client doesn't specify one.
+
+**Default Parameters** blocks appear here for each role — all requests, verification calls, and summarization calls. They are the broadest layer of the parameter system; anything set on an endpoint, a model, a rule or a map stage overrides them. See [Model Parameters](#model-parameters).
 
 ### Streaming and Status
 
@@ -1117,13 +1217,15 @@ Admin actions (user creation, deletion, password resets) are recorded in the aud
 
 ---
 
+<a id="admin"></a>
+
 ## 15. Admin
 
 *Admin only. The Admin link in the sidebar is only visible to admin accounts.*
 
 ![Admin](media/gitv-admin-global-caps.png)
 
-The Admin page provides system-wide management with five tabs: **Global Caps**, **Users**, **Update**, **Audit Logs**, and **Server Logs**. Debug is available as a tab on the Dashboard. A red badge appears on the Admin sidebar button when an update is available.
+The Admin page provides system-wide management with seven tabs: **Global Caps**, **Users**, **Update**, **Audit Logs**, **Server Logs**, **Network**, and **Backup**. Debug is available as a tab on the Dashboard. A red badge appears on the Admin sidebar button when an update is available.
 
 ### Global Caps Tab
 
@@ -1198,3 +1300,265 @@ The platform-specific update scripts (`scripts/update-windows.bat`, `scripts/upd
 3. Reinstalling Python dependencies
 4. Rebuilding the frontend
 5. Starting the server
+
+### Network Tab
+
+![Admin Network](media/gitv-admin-network.png)
+
+Regenerates the HTTPS certificate used for LAN access.
+
+GitInTheVan issues its own certificate covering the hostnames and addresses it
+knew about when it was created. If the machine's LAN address changes — a new
+DHCP lease, a second network interface, a move between networks — the
+certificate no longer matches and clients refuse to connect. An admin banner
+warns when that drift is detected.
+
+- **Include IP addresses in certificate**: comma-separated extras to add as
+  subject alternative names, for devices that reach the server by address rather
+  than name.
+- Regenerating replaces the certificate immediately. **Every device that trusted
+  the old one has to trust the new one**, so plan it for when you can revisit
+  each client.
+
+### Backup Tab
+
+![Admin Backup](media/gitv-admin-backup.png)
+
+Scheduled database backups, and restore.
+
+- **Enable scheduled backups**, with **Days** (comma-separated, e.g.
+  `mon,wed,fri`; blank means every day), **Time** (24h, UTC) and **Retention
+  Count** — how many to keep before the oldest is pruned.
+- The **Backups** list shows what exists, with a restore action on each.
+
+**Restore replaces the entire database.** It is the whole-system counterpart to
+per-object restore, and everything created since that backup is lost. The
+confirmation step is there because there is no undo.
+
+---
+
+<a id="model-parameters"></a>
+
+## 16. Model Parameters
+
+Naming a model says *which* model to call. Parameters say *how* to call it —
+`reasoning_effort`, `max_tokens`, `temperature`, or anything else your provider
+accepts.
+
+A parameter can be attached anywhere a model can be named, and the layers merge
+per key, with the layer closest to the message winning:
+
+| Layer | Where you set it |
+|-------|------------------|
+| 1 (broadest) | Whatever your client sent |
+| 2 | **Settings** → per role (default / verification / summarization) |
+| 3 | An endpoint, on the **Endpoints** page |
+| 4 | A specific model in that endpoint's model list |
+| 5 (closest) | The verification rule, map stage, or scenario rule making the call |
+
+So if your endpoint sets `reasoning_effort: max` and a cheap verification rule
+sets `reasoning_effort: low`, the writing call gets `max` and that rule's check
+gets `low`. A client that asked for `high` is overridden in both.
+
+**Anything you do not configure is passed through from your client untouched.**
+Configuring a name is what makes GitInTheVan override it.
+
+### Parameter Fields
+
+| Field | Meaning |
+|-------|---------|
+| **Name** | The key sent upstream, e.g. `reasoning_effort` |
+| **Type** | `string`, `string list`, `integer`, `float`, `number`, or `boolean`. The value is converted before sending, so an integer arrives as `128000`, not `"128000"` |
+| **Value** | What to send |
+| **Required** | Stops you saving the parameter with an empty value, and marks it in the UI. It does not change what is sent — every parameter you define is sent |
+| **Options** | Optional comma-separated list of allowed values. Setting it turns Value into a dropdown and rejects anything outside the list |
+| **Description** | Optional note to yourself |
+
+`messages`, `model` and `stream` cannot be used as parameter names. `model` has
+its own field at every scope, and `stream` is controlled by the pipeline —
+verification and driver-callable runs force it off, so overriding it would break
+the request.
+
+A parameter whose value cannot be converted to its type, or whose value is not in
+its own options list, is dropped with a log line rather than sent upstream. A bad
+parameter never fails the request.
+
+### Where to set them
+
+| Scope | Where |
+|-------|-------|
+| Every request | Settings → Proxy Configuration → *Default Parameters (all requests)* |
+| Every verification check | Settings → *Default Parameters (verification calls)* |
+| Every summarization call | Settings → Conversation Summarization → *Default Parameters (summarization calls)* |
+| One endpoint | Endpoints → Edit → *Endpoint Parameters* |
+| One model on an endpoint | Endpoints → Edit → *Models* → the model's own parameters |
+| One verification rule | Verification → Rules → Edit → *Parameters for this rule* |
+| One map stage | Maps → Edit → the stage's parameters (generation and verification are separate) |
+| One scenario rule | Memory → Scenario Summarization Rules |
+
+### Model lists
+
+![Per-model parameters on an endpoint](media/gitv-endpoints-models.png)
+
+Each endpoint can carry a list of the models it offers. On the Endpoints page,
+add them by hand or press **Fetch from provider** to seed the list from the
+endpoint's own model listing, then give each model its own parameters.
+
+The list populates the model dropdowns on Maps, Verification, Memory and
+Settings. It is entirely optional: every model field keeps an escape hatch for
+typing a name that is not listed, and a model you use without listing simply
+contributes no parameters of its own.
+
+### Seeing what was applied
+
+Turn on Debug Mode and the pipeline timeline gains an **LLM Parameters** stage
+showing the resolved set and which layer supplied each value. That is the fastest
+way to answer "why did this call get `temperature: 0.1`?".
+
+---
+
+<a id="debug"></a>
+
+## 17. Debug and Comparing Runs
+
+*Available to all users. Enable **Debug Mode** in Settings first, then send a
+message through the proxy.*
+
+The **Debug** tab sits beside **Overview** at the top of the Dashboard. It is a
+passive tap: it records what the pipeline did, and changes nothing about what it
+does. Streaming and non-streaming requests are both captured.
+
+![Debug run detail](media/gitv-debug-run.png)
+
+### Recent Runs
+
+Newest first, each showing the model, timestamp, stage count, token total and
+wall-clock time. Runs are pruned to a limit set by your administrator, so a run
+you want to keep needs **Save** — saved runs are exempt from pruning and are
+what the save-slot counter at the top refers to. **Rename** gives a run a label
+you will recognise later; **Delete** removes one; **Clear All** empties the list.
+
+A run close to being pruned is marked *near eviction — save it to keep it*.
+
+### Run detail
+
+**Metrics.** Tokens (split into prompt and completion), how many tokens the
+pipeline injected, total time, pipeline overhead — the share of the wall clock
+not spent waiting on an LLM — tokens per second, and the number of upstream LLM
+calls.
+
+Token counts come from the provider's own `usage` object where one is returned,
+and from an estimate where it is not. The two are never mixed silently: a run
+whose calls disagree is badged so a comparison cannot quietly compare a
+measurement against a guess.
+
+**Upstream calls.** One row per call, labelled by purpose — `MAIN` for the
+Driver, `VERIFICATION_JUDGE`, `SUMMARIZER`, `MAP_STAGE` — with the endpoint,
+model, latency and token split. Failed failover attempts appear here too, since
+a run that tried two endpoints spent both latencies.
+
+**Cantrips.** Every cantrip considered, whether it ran, and if not, why — most
+often that its tag was not present in the request.
+
+**Pipeline timeline.** Each stage in order, with a **changed** badge when it
+modified the messages. Expand one for the before/after message snapshots, the
+metadata behind it (matched keywords, memory keys, budget allocation, cantrip
+console output, tool calls, resolved LLM parameters and which layer supplied
+each), and the setting that controls it.
+
+### Comparing runs
+
+![Comparing runs](media/gitv-debug-compare.png)
+
+**Compare runs** puts up to four side by side. One is the **baseline** — set it
+with the radio button — and the others are expressed as differences from it:
+token and timing deltas with direction and percentage, and a word-level diff of
+the response text.
+
+This is the loop the feature exists for: change a cantrip or a parameter, replay,
+and read what actually moved.
+
+Differences in model, endpoint or provider are called out explicitly, because a
+run served by a different endpoint is not really comparable to the baseline.
+
+### Replay
+
+**Replay** re-sends a run's original messages through the *current*
+configuration and links the result back to the run it came from. It is a
+one-shot "same input, today's config" check that writes nothing.
+
+Replays go through the real pipeline — the same code path a client hits — because
+a replay that took a shortcut would stop being evidence.
+
+### Sandbox copies
+
+**Create sandbox copy** forks a run into something you can iterate on. The fork
+copies the request *and* the conversation state it read — memories, chat data,
+summary — into a conversation of its own, so repeated runs accumulate there and
+the original thread is never touched.
+
+From a sandbox you can run it, edit the prompt, reset it to the state it was
+forked from, or delete it and its state entirely.
+
+**Nothing is sent back to the service the original request came from.** A
+sandbox run starts inside GitInTheVan and its response is displayed here, so a
+chat platform that is not expecting a reply never receives one.
+
+Sandboxes complement replay rather than replacing it: replay is one-shot and
+writes nothing, a sandbox is a scenario you keep.
+
+### Exporting
+
+**Export .md** and **Export .json** save a run — or a whole comparison — to a
+file. The JSON export is the full trace, which is what to attach to a bug report.
+
+---
+
+<a id="activation"></a>
+
+## 18. The Activation Hierarchy
+
+Five kinds of resource — lorebooks, cantrips, verification rules, maps and memory
+rules — all answer the same question: *is this on for this request?* They answer
+it the same way.
+
+1. **Off is the default.** A resource participates only if something turns it on.
+2. **Activation is a union. Sources add, never subtract.** There is deliberately
+   no way to express "off", so no source can countermand another.
+3. **Proximity wins.** A tag in the system prompt, the persona or the message
+   text activates the resource **regardless of its Active flag**. The closer a
+   source is to the message, the more authority it has.
+4. **Active is the blanket source**, used when no tag has spoken. Active means
+   "apply to everything", so an Active resource runs even when the request
+   carries unrelated tags.
+
+So a resource switched off in the UI still runs if a tag names it, and that is
+correct — you asked for it by name, in the message.
+
+### Maps and memory rules are chosen, not stacked
+
+Exactly one map and one memory rule can win, so rule 4 works differently for
+them: Active cannot also mean "apply to everything", because blanket-running a
+multi-stage map would silently multiply what every request costs.
+
+They match on **their own tag** only, plus one explicit default — the **Default
+Map** in Settings, or the untagged default memory rule. Rules 1-3 apply to them
+unchanged.
+
+### Tag format
+
+Tags are written inline and stripped before the request is forwarded:
+
+```
+<#lore-worldbuilding#>  <#cantrip-dice#>  <#verify-tone#>
+<#map-poker#>           <#memory-rule-longform#>
+<#taggroup-mygame#>
+```
+
+A **tag group** activates several resources at once — see
+[Tags and Groups](#tags-and-groups).
+
+### Command tags are separate
+
+`<#gitv-...#>` command tags control the pipeline for one request rather than
+activating a resource. They are covered in [Command Tags](#command-tags).

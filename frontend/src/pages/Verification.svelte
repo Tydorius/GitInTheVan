@@ -413,7 +413,9 @@
         {:else}
           <div class="success-msg">Response approved - no violations detected.</div>
         {/if}
-        {#if testResult.thinking}
+        <!-- On an errored check the note already reads in the banner above, and
+             no model ran, so there is no thinking to show. -->
+        {#if testResult.thinking && !testResult.errored}
           <div style="margin-top: 12px;">
             <h4 style="font-size: 12px; color: var(--text-dim); margin-bottom: 8px;">Model Thinking</h4>
             <div style="background: var(--bg-elevated); padding: 12px; border-radius: 4px; white-space: pre-wrap; font-size: 12px; max-height: 300px; overflow-y: auto; font-family: monospace; border-left: 3px solid var(--accent);">

@@ -335,8 +335,17 @@ async def list_endpoint_models(
         try:
             import httpx
 
-            api_base = endpoint.api_base_path or "/v1"
-            models_url = f"{endpoint.base_url}{api_base}/models"
+            from app.services.proxy import _build_upstream_url
+
+            # Built by hand this used to be `{base_url}{api_base_path}/models`,
+            # which appends to the *chat* path when api_base_path ends in
+            # `/chat/completions` -- an OpenWebUI endpoint was probed at
+            # `/api/chat/completions/models`, got the SPA's HTML back with a 200,
+            # and failed to parse. "Fetch from provider" returned nothing and
+            # said nothing. `_build_upstream_url` already handles this shape.
+            models_url = _build_upstream_url(
+                endpoint.base_url, "/v1/models", endpoint.api_base_path or ""
+            )
             headers = {"Authorization": f"Bearer {endpoint.api_key}"}
             timeout = httpx.Timeout(15.0, connect=10.0)
             async with httpx.AsyncClient(timeout=timeout) as client:
