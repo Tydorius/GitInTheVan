@@ -50,6 +50,7 @@ class AdminSettingsResponse(BaseModel):
     max_assistant_tool_calls_per_turn: int
     max_assistant_conversations: int
     max_assistant_tool_result_kb: int
+    max_snapshots_per_object: int
 
 
 class AdminSettingsUpdate(BaseModel):
@@ -79,6 +80,7 @@ class AdminSettingsUpdate(BaseModel):
     max_assistant_tool_calls_per_turn: int | None = None
     max_assistant_conversations: int | None = None
     max_assistant_tool_result_kb: int | None = None
+    max_snapshots_per_object: int | None = None
 
 
 def _settings_response(s: AdminSettings, effective: str) -> AdminSettingsResponse:
@@ -116,6 +118,7 @@ def _settings_response(s: AdminSettings, effective: str) -> AdminSettingsRespons
         max_assistant_tool_calls_per_turn=s.max_assistant_tool_calls_per_turn,
         max_assistant_conversations=s.max_assistant_conversations,
         max_assistant_tool_result_kb=s.max_assistant_tool_result_kb,
+        max_snapshots_per_object=s.max_snapshots_per_object,
     )
 
 
@@ -220,6 +223,8 @@ async def update_settings(
         updates["max_assistant_conversations"] = max(1, req.max_assistant_conversations)
     if req.max_assistant_tool_result_kb is not None:
         updates["max_assistant_tool_result_kb"] = max(1, req.max_assistant_tool_result_kb)
+    if req.max_snapshots_per_object is not None:
+        updates["max_snapshots_per_object"] = max(1, req.max_snapshots_per_object)
 
     s = await update_admin_settings(updates)
     from app.services.admin import get_effective_log_level

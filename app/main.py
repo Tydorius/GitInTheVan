@@ -29,6 +29,7 @@ from app.routers.proxy import router as proxy_router
 from app.routers.scenario_rules import router as scenario_rules_router
 from app.routers.settings import router as settings_router
 from app.routers.skills import router as skills_router
+from app.routers.snapshots import router as snapshots_router
 from app.routers.summarization import router as summarization_router
 from app.routers.tag_groups import router as tag_groups_router
 from app.routers.users import router as users_router
@@ -201,6 +202,7 @@ app.include_router(verification_router)
 app.include_router(summarization_router)
 app.include_router(forbidden_words_router)
 app.include_router(skills_router)
+app.include_router(snapshots_router)
 app.include_router(scenario_rules_router)
 app.include_router(tag_groups_router)
 app.include_router(packs_router)

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from '../api'
+  import SnapshotHistoryModal from '../lib/SnapshotHistoryModal.svelte'
   import { onMount } from 'svelte'
   import { routeParams } from '../stores'
   import { downloadJson } from '../lib/download'
@@ -324,6 +325,19 @@
 
   // A link clicked while this page is already open changes only the hash.
   $: if ($routeParams.params.id && lorebooks.length) openFromRoute()
+
+  // Version history (Phase 25). One modal serves every type that keeps history.
+  let historyShow = false
+  let historyType = 'lorebook'
+  let historyId = ''
+  let historyName = ''
+
+  function openHistory(item: any, type: string = 'lorebook') {
+    historyType = type
+    historyId = item.id
+    historyName = item.name || ''
+    historyShow = true
+  }
 </script>
 
 <div class="page-header">
@@ -371,6 +385,7 @@
             <td>
               <button onclick={() => openLorebook(lb)}>Manage</button>
               <button onclick={() => handleExport(lb.id)}>Export</button>
+              <button onclick={() => openHistory(lb)}>History</button>
               <button class="danger" onclick={() => handleDelete(lb.id)}>Delete</button>
             </td>
           </tr>
@@ -582,3 +597,11 @@
     </div>
   </div>
 {/if}
+
+<SnapshotHistoryModal
+  bind:show={historyShow}
+  resourceType={historyType}
+  resourceId={historyId}
+  resourceName={historyName}
+  onRestored={() => withScroll(load)}
+/>

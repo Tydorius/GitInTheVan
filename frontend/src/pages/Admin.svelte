@@ -47,6 +47,7 @@
     max_lorebook_size_kb: 500,
     max_saved_debug_runs: 10,
     max_debug_exchange_kb: 512,
+    max_snapshots_per_object: 20,
     url_blocklist: '',
     runtime_log_level: '',
     assistant_enabled: true,
@@ -107,6 +108,7 @@
         max_lorebook_size_kb: adminSettings.max_lorebook_size_kb,
         max_saved_debug_runs: adminSettings.max_saved_debug_runs,
         max_debug_exchange_kb: adminSettings.max_debug_exchange_kb,
+        max_snapshots_per_object: adminSettings.max_snapshots_per_object,
         url_blocklist: adminSettings.url_blocklist || '',
         runtime_log_level: adminSettings.runtime_log_level || '',
         assistant_enabled: adminSettings.assistant_enabled,
@@ -528,6 +530,10 @@
       <div class="form-group">
         <label for="cap-debug-kb">Max Size Per Run (KB)</label>
         <input id="cap-debug-kb" type="number" bind:value={capsForm.max_debug_exchange_kb} min="1" />
+      </div>
+      <div class="form-group">
+        <label for="cap-snapshots">Max Snapshots Per Object</label>
+        <input id="cap-snapshots" type="number" bind:value={capsForm.max_snapshots_per_object} min="1" />
       </div>
     </div>
     <p style="color: var(--text-dim); font-size: 12px;">
