@@ -1,12 +1,19 @@
 <script lang="ts">
   import { api } from '../api'
   import { onMount, onDestroy } from 'svelte'
+  import { routeParams } from '../stores'
   import { downloadFromApi } from '../lib/download'
   import CollapsibleCard from '../lib/CollapsibleCard.svelte'
   import { CollapseController } from '../lib/collapse'
 
   let tab = 'caps'
-  let collapse = new CollapseController('admin', ['caps-limits', 'caps-sizes', 'caps-debug', 'caps-blocklist', 'caps-logging', 'caps-banner', 'logs-viewer', 'network-ssl', 'update-panel', 'backup-schedule', 'backup-list'])
+  const ADMIN_TABS = ['caps', 'users', 'update', 'audit', 'logs', 'network', 'backup']
+
+  // `?tab=backup` etc. opens a sub-tab directly. Unknown values are ignored.
+  $: if (ADMIN_TABS.includes($routeParams.params.tab)) {
+    tab = $routeParams.params.tab
+  }
+  let collapse = new CollapseController('admin', ['caps-limits', 'caps-sizes', 'caps-debug', 'caps-blocklist', 'caps-assistant', 'caps-logging', 'caps-banner', 'logs-viewer', 'network-ssl', 'update-panel', 'backup-schedule', 'backup-list'])
   let loading = true
   let error = ''
   let saved = false
@@ -40,8 +47,15 @@
     max_lorebook_size_kb: 500,
     max_saved_debug_runs: 10,
     max_debug_exchange_kb: 512,
+    max_snapshots_per_object: 20,
     url_blocklist: '',
     runtime_log_level: '',
+    assistant_enabled: true,
+    assistant_admin_reads_enabled: false,
+    assistant_packs_enabled: false,
+    max_assistant_tool_calls_per_turn: 16,
+    max_assistant_conversations: 20,
+    max_assistant_tool_result_kb: 32,
   }
 
   let auditAutoRefresh = false
@@ -94,8 +108,15 @@
         max_lorebook_size_kb: adminSettings.max_lorebook_size_kb,
         max_saved_debug_runs: adminSettings.max_saved_debug_runs,
         max_debug_exchange_kb: adminSettings.max_debug_exchange_kb,
+        max_snapshots_per_object: adminSettings.max_snapshots_per_object,
         url_blocklist: adminSettings.url_blocklist || '',
         runtime_log_level: adminSettings.runtime_log_level || '',
+        assistant_enabled: adminSettings.assistant_enabled,
+        assistant_admin_reads_enabled: adminSettings.assistant_admin_reads_enabled,
+        assistant_packs_enabled: adminSettings.assistant_packs_enabled,
+        max_assistant_tool_calls_per_turn: adminSettings.max_assistant_tool_calls_per_turn,
+        max_assistant_conversations: adminSettings.max_assistant_conversations,
+        max_assistant_tool_result_kb: adminSettings.max_assistant_tool_result_kb,
       }
       logLevelInput = adminSettings.runtime_log_level || ''
       bannerInput = adminSettings.site_banner || ''
@@ -510,6 +531,10 @@
         <label for="cap-debug-kb">Max Size Per Run (KB)</label>
         <input id="cap-debug-kb" type="number" bind:value={capsForm.max_debug_exchange_kb} min="1" />
       </div>
+      <div class="form-group">
+        <label for="cap-snapshots">Max Snapshots Per Object</label>
+        <input id="cap-snapshots" type="number" bind:value={capsForm.max_snapshots_per_object} min="1" />
+      </div>
     </div>
     <p style="color: var(--text-dim); font-size: 12px;">
       A run larger than the size limit keeps its reasoning, cantrip output and metrics;
@@ -528,6 +553,53 @@
       <label for="cap-blocklist">Blocked Domains</label>
       <input id="cap-blocklist" type="text" bind:value={capsForm.url_blocklist}
              placeholder="evil.example, tracker.example.net" />
+    </div>
+    <button class="primary" onclick={saveCaps}>Save</button>
+  </CollapsibleCard>
+
+  <CollapsibleCard title="Assistant" cardKey="caps-assistant" {collapse}>
+    <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 16px;">
+      Server-wide switches and limits for the Assistant Pane. Per-user endpoint/model choice is
+      in each user's own Settings; per-tool permissions are in Assistant Security.
+    </p>
+    <div class="form-group">
+      <label for="cap-assistant-enabled">
+        <input id="cap-assistant-enabled" type="checkbox" bind:checked={capsForm.assistant_enabled} style="width: auto; margin-right: 6px;" />
+        Enable the Assistant Pane
+      </label>
+    </div>
+    <div class="form-group">
+      <label for="cap-assistant-admin-reads">
+        <input id="cap-assistant-admin-reads" type="checkbox" bind:checked={capsForm.assistant_admin_reads_enabled} style="width: auto; margin-right: 6px;" />
+        Allow the assistant to read server logs and schema state (admins only)
+      </label>
+    </div>
+    <div class="form-group">
+      <label for="cap-assistant-packs">
+        <input id="cap-assistant-packs" type="checkbox" bind:checked={capsForm.assistant_packs_enabled} style="width: auto; margin-right: 6px;" />
+        Allow the assistant to link repos and install content packs
+      </label>
+      <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+        Off by default. The assistant has no web search of its own, so a repo name it suggests
+        could be hallucinated -- exactly the shape of a slopsquatted package.
+      </p>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="cap-assistant-turn">Max Tool Calls Per Turn</label>
+        <input id="cap-assistant-turn" type="number" bind:value={capsForm.max_assistant_tool_calls_per_turn} min="1" />
+        <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+          When hit, the turn ends and the pane shows Continue instead of looping unattended.
+        </p>
+      </div>
+      <div class="form-group">
+        <label for="cap-assistant-convos">Max Conversations (unsaved, per user)</label>
+        <input id="cap-assistant-convos" type="number" bind:value={capsForm.max_assistant_conversations} min="1" />
+      </div>
+      <div class="form-group">
+        <label for="cap-assistant-result">Max Tool Result Size (KB)</label>
+        <input id="cap-assistant-result" type="number" bind:value={capsForm.max_assistant_tool_result_kb} min="1" />
+      </div>
     </div>
     <button class="primary" onclick={saveCaps}>Save</button>
   </CollapsibleCard>

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from '../api'
+  import SnapshotHistoryModal from '../lib/SnapshotHistoryModal.svelte'
   import { onMount } from 'svelte'
   import { routeParams } from '../stores'
   import CodeEditor from '../lib/CodeEditor.svelte'
@@ -209,6 +210,19 @@
 
   // A link clicked while this page is already open changes only the hash.
   $: if ($routeParams.params.id && cantrips.length) openFromRoute()
+
+  // Version history (Phase 25). One modal serves every type that keeps history.
+  let historyShow = false
+  let historyType = 'cantrip'
+  let historyId = ''
+  let historyName = ''
+
+  function openHistory(item: any, type: string = 'cantrip') {
+    historyType = type
+    historyId = item.id
+    historyName = item.name || ''
+    historyShow = true
+  }
 </script>
 
 <div class="page-header">
@@ -331,6 +345,7 @@
           >{s.is_active ? 'ON' : 'OFF'}</button>
           <button onclick={() => openTest(s.id)}>Test</button>
           <button onclick={() => startEdit(s)}>Edit</button>
+          <button onclick={() => openHistory(s)}>History</button>
           <button class="danger" onclick={() => handleDelete(s.id)}>Delete</button>
           <button onclick={() => toggleCard(`cantrip-${s.id}`)} style="padding: 2px 4px; font-size: 14px; border: none; background: none; cursor: pointer;" title={(collapsedCards[`cantrip-${s.id}`] ?? false) ? 'Expand' : 'Collapse'}>
             {(collapsedCards[`cantrip-${s.id}`] ?? false) ? '▶' : '▼'}
@@ -453,3 +468,11 @@
     </div>
   </div>
 {/if}
+
+<SnapshotHistoryModal
+  bind:show={historyShow}
+  resourceType={historyType}
+  resourceId={historyId}
+  resourceName={historyName}
+  onRestored={() => withScroll(load)}
+/>

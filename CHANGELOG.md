@@ -2,6 +2,165 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.26.0] - 2026-09-02
+
+A way back. Every change to a cantrip, lorebook, skill, sample, verification
+rule, memory rule or scenario rule now stores the version it replaced, and any
+stored version can be restored as a copy or over the live object.
+
+### Added
+
+- **Per-object snapshots and restore.** A **History** button on every object
+  that keeps versions, listing what was stored and diffing any version against
+  what you have now, with **Restore as a copy** and **Restore over this**.
+
+  - Versions are stored automatically, immediately before every update and
+    every delete. There is nothing to remember to switch on.
+  - **The capture lives in the routers, not in any one caller.** The Assistant
+    Pane executes its tools through those same routes, so an assistant write
+    gets an undo with no assistant-specific code, and so does an edit made by
+    hand in the UI. That is what makes the assistant's Normal default
+    defensible: before this, an approved write was previewed but unrecoverable.
+  - **Restoring over an object snapshots what it replaces first**, so a restore
+    is itself undoable. A mis-clicked restore is one click from being reversed.
+  - **Restore as a copy works on an object that has been deleted.** Snapshots
+    carry no foreign key to the resource, deliberately: a cascade would delete
+    exactly the version a user needs after a mistaken delete.
+  - Repeated saves that change nothing store one version, not one per save.
+    Automatic versions are trimmed to a new admin cap,
+    `max_snapshots_per_object` (default 20); versions saved by name are pinned
+    and never pruned, the model saved debug runs already use.
+  - Six assistant tools under a new **Snapshots** group, with
+    `restore_snapshot_in_place` tiered DESTRUCTIVE so Normal asks first and
+    shows the diff.
+  - `resource_snapshots` (migration 051), `max_snapshots_per_object` on
+    `admin_settings` (052), `app/services/snapshots.py`, `app/routers/snapshots.py`,
+    `frontend/src/lib/SnapshotHistoryModal.svelte`, guide section 20.
+
+  Maps are not covered: a map is three tables with foreign keys to endpoints and
+  cantrips, so its restore has dangling-reference cases the others do not.
+  Forbidden words and tag groups are not covered either.
+
+### Notes
+
+- **The serializer reads `__table__.columns` rather than a field list.** Every
+  existing resource-to-dict function in the codebase -- `_content_of_row` and
+  `serialize_map_to_export` in `map_transfer.py`, `_serialize_resource` in
+  `routers/packs.py` -- is *export*-shaped and drops `tag`, `is_active`,
+  `is_public`, `budget_weight` and the `run_*` routing flags, because a
+  published resource does not carry a local install's wiring. Restoring through
+  one of those would produce an object that looks right and behaves
+  differently. Introspection also means a column added in a later phase is
+  captured without anyone remembering to add it, and a test asserts that only
+  identity and bookkeeping columns are ever left out.
+- **Snapshots are keyed by a hash of the stored JSON, not by
+  `resource_identity.content_hash`.** That function deliberately ignores
+  description, tag and the activation flags, because re-tagging a cantrip is
+  not a new cantrip for *deduplication*. For version history it is exactly a new
+  version.
+- **Restore is a content write.** Both restore routes run the same size limits,
+  sanitizer and safety scanner as create and update, on the same terms: size is
+  a hard refusal, scanner findings are logged to the audit trail. A stored
+  version is not trusted input just because this install wrote it -- if an
+  admin has since lowered a limit, the restore is refused and says so.
+- **A restore that cannot put something back says which.** Restoring as a copy
+  always clears the copy's tag, because a tag activates exactly one resource;
+  restoring in place keeps the current tag if the stored one now belongs to
+  something else. Both report it rather than restoring quietly and differently.
+- **`capture()` adds without flushing, deliberately.** Several of these handlers
+  call `get_admin_settings()` between the capture and their commit, which opens
+  a session of its own; on SQLite that session shares one connection through
+  StaticPool, so closing it rolls back anything flushed but not committed. The
+  first version of this feature lost every snapshot it took to exactly that. The
+  snapshot's id is assigned in Python rather than at flush time so callers can
+  still identify the row, and the module reads admin caps through the caller's
+  own session for the same reason.
+
+### Known gaps recorded
+
+- `maps.py` and `tag_groups.py` run no `content_guard` checks on any path --
+  no size limit, no sanitizer, no scanner, on neither create nor update. Every
+  other content router does. This predates this release.
+- Snapshot screenshots are outstanding, as are the Assistant Pane's from 0.25.0.
+  Both guide sections carry a dated "screenshots pending" note.
+
+## [0.25.0] - 2026-09-02
+
+An assistant that lives in the app, runs on the user's own endpoint, and can
+only ever do what the user has allowed it to do.
+
+### Added
+
+- **The Assistant Pane.** A persistent right-hand pane where one of the user's
+  own configured endpoints acts as an assistant over GitInTheVan itself: it can
+  read and change the user's own resources, navigate to the page or object
+  under discussion, answer from the shipped documentation, and run live checks
+  against the install. It collapses to a rail when not in use.
+- **Assistant engine.** `app/services/assistant/` (registry, schema,
+  permissions, executor, llm, compaction, prompt, docs, store, selfcheck,
+  admin_reads, loop) plus the `/api/assistant` router with two SSE routes.
+
+  The engine behind it: `app/services/assistant/` (registry, schema, permissions,
+  executor, llm, compaction, prompt, docs, store, loop) plus the
+  `/api/assistant` router with two SSE routes. The pane's UI arrives in 26c;
+  the backend is complete and drivable with curl today.
+
+  - An explicit allow-list registry of 118 tools over the user-scoped
+    management API, grouped by the page they belong to, each carrying a risk
+    tier (read / write / destructive / external cost). Anything not listed does
+    not exist to the assistant.
+  - Page-grouped permission modes (Deny / Always Ask / Normal / Always Allow,
+    plus Inherit per tool). Deny is absolute. Content-only yolo collapses
+    Normal's asks for content groups and never for configuration.
+  - A hard boundary that is mechanical rather than prompted: no tool may sit on
+    `/api/admin`, `/api/users`, `/api/auth`, `/api/api-keys` or
+    `/api/assistant`, nor on `POST /api/packs/repos/local`.
+    `tests/test_assistant_boundary.py` walks `app.routes` and fails if one
+    does, including a vacuity check that the walk can fail.
+  - Tools execute in-process against the app with the caller's own JWT, so
+    ownership, validation and content guards apply unchanged. Endpoint reads
+    carry a mandatory `api_key` projection and every result is scrubbed of the
+    user's live keys and truncated to the admin's limit.
+  - Automatic context compaction: old tool results are elided in the outbound
+    copy, and only if that is not enough is a rolling summary taken through the
+    user's own endpoint. A failed summary degrades to elision alone and says so
+    rather than silently sending a thinner context.
+  - Conversations rotate the oldest unsaved one rather than refusing a new
+    one, with the evicted title reported so the pane can name it.
+
+- **Self-checks, in place of a test runner.** Live checks modelled on what the
+  test suite verifies, runnable from the pane on a real install: an activation
+  dry run that answers "why did this not fire?" across every resource type, a
+  lorebook match dry run (the first one in the product), a parameter-layer
+  explainer, a configuration linter, a routing and failover report, a Deno
+  sandbox smoke test, and probes for an endpoint, the verification judge, the
+  summarizer and a map.
+- **Admin reads, opt-in and read-only.** With `assistant_admin_reads_enabled`
+  on, an admin's assistant can read a schema-drift report, redacted server
+  logs, and an install health check (signing key, backups, TLS, `.env` drift,
+  update chain, self-reachability). Never a write, and never through
+  `/api/admin`.
+- **Assistant Security page** with the permission grid, and an Assistant card
+  in Settings for the endpoint, model and parameters.
+
+### Fixed
+
+- **Client-sent `tools` were dropped on every provider endpoint.**
+  `LITELLM_NATIVE_PARAMS` did not list `tools`, `tool_choice` or
+  `parallel_tool_calls`, so native function calling reached a raw passthrough
+  endpoint intact and vanished the moment the endpoint had a provider set --
+  the same class of silent loss as `reasoning_effort` before 0.24.0.
+- **A disabled account's token kept working.** `get_current_user` never checked
+  `is_disabled`, so a token minted before an admin disabled the account stayed
+  valid on the management API until it expired, up to 24 hours.
+- **The diagnostics connectivity check could not report an unexpected status.**
+  The direct-endpoint branch referenced an unbound `status_code`, so any status
+  outside the handled set was reported as an internal name error instead of the
+  status the endpoint actually returned.
+- `rate_limit_middleware` now skips requests carrying the `gitv_internal` ASGI
+  scope flag, which only the assistant's in-process executor can set. Without
+  it one assistant turn could rate-limit the user's own browser.
+
 ## [0.24.0] - 2026-08-31
 
 Every place that can name a model can now say how to call it -- and every call

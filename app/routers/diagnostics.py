@@ -304,7 +304,7 @@ async def run_audit(
                         check="Endpoint Connectivity (Direct)",
                         passed=True,
                         message=f"Endpoint returned {resp.status_code}",
-                        detail=f"Connection and auth verified. Status {status_code} may indicate the test model '{test_model}' is not valid for this endpoint." if test_model == "test" else "Connection and auth verified.",
+                        detail=f"Connection and auth verified. Status {resp.status_code} may indicate the test model '{test_model}' is not valid for this endpoint." if test_model == "test" else "Connection and auth verified.",
                     ))
         except Exception as e:
             results.append(DiagnosticResult(

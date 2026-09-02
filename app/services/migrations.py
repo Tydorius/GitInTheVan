@@ -854,6 +854,171 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             """,
         },
     ),
+    # Phase 26a. The Assistant Pane's only state: every message, tool call and
+    # pending confirmation is committed to this row before its SSE event is
+    # emitted. See app.models.assistant_conversation.AssistantConversation.
+    (
+        "049_create_assistant_conversations",
+        {
+            "sqlite": """
+            CREATE TABLE IF NOT EXISTS assistant_conversations (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                title VARCHAR(200) DEFAULT '' NOT NULL,
+                messages_json TEXT DEFAULT '[]' NOT NULL,
+                compaction_json TEXT DEFAULT '' NOT NULL,
+                pending_json TEXT DEFAULT '' NOT NULL,
+                session_allows_json TEXT DEFAULT '[]' NOT NULL,
+                last_route VARCHAR(512) DEFAULT '' NOT NULL,
+                yolo BOOLEAN DEFAULT 0 NOT NULL,
+                saved BOOLEAN DEFAULT 0 NOT NULL,
+                prompt_tokens INTEGER DEFAULT 0 NOT NULL,
+                completion_tokens INTEGER DEFAULT 0 NOT NULL,
+                llm_calls INTEGER DEFAULT 0 NOT NULL,
+                tool_calls INTEGER DEFAULT 0 NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS ix_assistant_conversations_user_id
+                ON assistant_conversations (user_id);
+            """,
+            "postgresql": """
+            CREATE TABLE IF NOT EXISTS assistant_conversations (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                title VARCHAR(200) DEFAULT '' NOT NULL,
+                messages_json TEXT DEFAULT '[]' NOT NULL,
+                compaction_json TEXT DEFAULT '' NOT NULL,
+                pending_json TEXT DEFAULT '' NOT NULL,
+                session_allows_json TEXT DEFAULT '[]' NOT NULL,
+                last_route VARCHAR(512) DEFAULT '' NOT NULL,
+                yolo BOOLEAN DEFAULT FALSE NOT NULL,
+                saved BOOLEAN DEFAULT FALSE NOT NULL,
+                prompt_tokens INTEGER DEFAULT 0 NOT NULL,
+                completion_tokens INTEGER DEFAULT 0 NOT NULL,
+                llm_calls INTEGER DEFAULT 0 NOT NULL,
+                tool_calls INTEGER DEFAULT 0 NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS ix_assistant_conversations_user_id
+                ON assistant_conversations (user_id);
+            """,
+            "mysql": """
+            CREATE TABLE IF NOT EXISTS assistant_conversations (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL,
+                title VARCHAR(200) DEFAULT '' NOT NULL,
+                messages_json TEXT NOT NULL,
+                compaction_json TEXT NOT NULL,
+                pending_json TEXT NOT NULL,
+                session_allows_json TEXT NOT NULL,
+                last_route VARCHAR(512) DEFAULT '' NOT NULL,
+                yolo BOOLEAN DEFAULT 0 NOT NULL,
+                saved BOOLEAN DEFAULT 0 NOT NULL,
+                prompt_tokens INTEGER DEFAULT 0 NOT NULL,
+                completion_tokens INTEGER DEFAULT 0 NOT NULL,
+                llm_calls INTEGER DEFAULT 0 NOT NULL,
+                tool_calls INTEGER DEFAULT 0 NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            CREATE INDEX ix_assistant_conversations_user_id ON assistant_conversations (user_id);
+            """,
+        },
+    ),
+    # Phase 26a. Assistant endpoint/model/permission choice per user, and the
+    # admin caps/flags that gate the pane. Written as plain strings, matching
+    # the existing precedent for ALTER TABLE ADD COLUMN of these same shapes
+    # (BOOLEAN DEFAULT 0 NOT NULL: 039; TEXT DEFAULT '...' NOT NULL: 047).
+    (
+        "050_assistant_settings",
+        """
+        ALTER TABLE user_settings ADD COLUMN assistant_endpoint_id VARCHAR(36);
+        ALTER TABLE user_settings ADD COLUMN assistant_model VARCHAR(128) DEFAULT '' NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN assistant_parameters_json TEXT DEFAULT '[]' NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN assistant_permissions_json TEXT DEFAULT '{}' NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN assistant_context_tokens INTEGER DEFAULT 64000 NOT NULL;
+        ALTER TABLE admin_settings ADD COLUMN assistant_enabled BOOLEAN DEFAULT 1 NOT NULL;
+        ALTER TABLE admin_settings ADD COLUMN assistant_admin_reads_enabled BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE admin_settings ADD COLUMN assistant_packs_enabled BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE admin_settings ADD COLUMN max_assistant_tool_calls_per_turn INTEGER DEFAULT 16 NOT NULL;
+        ALTER TABLE admin_settings ADD COLUMN max_assistant_conversations INTEGER DEFAULT 20 NOT NULL;
+        ALTER TABLE admin_settings ADD COLUMN max_assistant_tool_result_kb INTEGER DEFAULT 32 NOT NULL;
+        """,
+    ),
+    # Phase 25. Per-object version history.  resource_id carries no foreign key
+    # on purpose: the snapshot taken immediately before a delete is the one the
+    # user needs afterwards, so it has to outlive the row it describes.
+    # See app.models.resource_snapshot.ResourceSnapshot.
+    (
+        "051_create_resource_snapshots",
+        {
+            "sqlite": """
+            CREATE TABLE IF NOT EXISTS resource_snapshots (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                resource_type VARCHAR(32) DEFAULT '' NOT NULL,
+                resource_id VARCHAR(36) DEFAULT '' NOT NULL,
+                resource_name VARCHAR(128) DEFAULT '' NOT NULL,
+                content_hash VARCHAR(71) DEFAULT '' NOT NULL,
+                content_json TEXT DEFAULT '{}' NOT NULL,
+                source VARCHAR(16) DEFAULT 'pre_edit' NOT NULL,
+                label VARCHAR(128) DEFAULT '' NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS ix_resource_snapshots_user_id
+                ON resource_snapshots (user_id);
+            CREATE INDEX IF NOT EXISTS ix_resource_snapshots_resource_id
+                ON resource_snapshots (resource_id);
+            """,
+            "postgresql": """
+            CREATE TABLE IF NOT EXISTS resource_snapshots (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                resource_type VARCHAR(32) DEFAULT '' NOT NULL,
+                resource_id VARCHAR(36) DEFAULT '' NOT NULL,
+                resource_name VARCHAR(128) DEFAULT '' NOT NULL,
+                content_hash VARCHAR(71) DEFAULT '' NOT NULL,
+                content_json TEXT DEFAULT '{}' NOT NULL,
+                source VARCHAR(16) DEFAULT 'pre_edit' NOT NULL,
+                label VARCHAR(128) DEFAULT '' NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS ix_resource_snapshots_user_id
+                ON resource_snapshots (user_id);
+            CREATE INDEX IF NOT EXISTS ix_resource_snapshots_resource_id
+                ON resource_snapshots (resource_id);
+            """,
+            "mysql": """
+            CREATE TABLE IF NOT EXISTS resource_snapshots (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL,
+                resource_type VARCHAR(32) DEFAULT '' NOT NULL,
+                resource_id VARCHAR(36) DEFAULT '' NOT NULL,
+                resource_name VARCHAR(128) DEFAULT '' NOT NULL,
+                content_hash VARCHAR(71) DEFAULT '' NOT NULL,
+                content_json TEXT NOT NULL,
+                source VARCHAR(16) DEFAULT 'pre_edit' NOT NULL,
+                label VARCHAR(128) DEFAULT '' NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            CREATE INDEX ix_resource_snapshots_user_id ON resource_snapshots (user_id);
+            CREATE INDEX ix_resource_snapshots_resource_id ON resource_snapshots (resource_id);
+            """,
+        },
+    ),
+    # Phase 25. How many snapshots one object keeps before the oldest pre_edit
+    # ones are pruned.  Manual snapshots are never pruned, so this is a floor on
+    # automatic history, not a hard ceiling on the table.
+    (
+        "052_snapshot_caps",
+        """
+        ALTER TABLE admin_settings ADD COLUMN max_snapshots_per_object INTEGER DEFAULT 20 NOT NULL;
+        """,
+    ),
 ]
 
 

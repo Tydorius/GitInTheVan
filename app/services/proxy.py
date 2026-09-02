@@ -37,11 +37,15 @@ SKIP_HEADERS = {"host", "authorization", "content-length", "transfer-encoding"}
 #
 # `reasoning_effort` and `max_completion_tokens` were absent until Phase 23,
 # which is why a client that sent either lost it on every provider endpoint.
+# `tools`, `tool_choice` and `parallel_tool_calls` were absent until Phase 26a,
+# the same class of bug: a client-sent tool definition was silently dropped on
+# every provider endpoint, so native function calling never reached the model.
 LITELLM_NATIVE_PARAMS: frozenset[str] = frozenset({
     "temperature", "max_tokens", "top_p", "top_k", "stream",
     "stop", "frequency_penalty", "presence_penalty", "seed",
     "n", "logprobs", "user",
     "reasoning_effort", "max_completion_tokens", "response_format", "thinking",
+    "tools", "tool_choice", "parallel_tool_calls",
 })
 
 

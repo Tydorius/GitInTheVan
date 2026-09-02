@@ -1,13 +1,17 @@
 <script lang="ts">
   import { api } from '../api'
+  import SnapshotHistoryModal from '../lib/SnapshotHistoryModal.svelte'
   import ParameterEditor from '../lib/ParameterEditor.svelte'
   import ModelSelect from '../lib/ModelSelect.svelte'
   import { onMount } from 'svelte'
+  import { routeParams } from '../stores'
   import CodeEditor from '../lib/CodeEditor.svelte'
   import TagEditModal from '../lib/TagEditModal.svelte'
   import { withScroll } from '../lib/scroll'
   import CollapsibleCard from '../lib/CollapsibleCard.svelte'
   import { CollapseController } from '../lib/collapse'
+
+  const VERIFICATION_TABS = ['rules', 'settings', 'logs', 'forbidden', 'test']
 
   let collapse = new CollapseController('verification', ['settings', 'forbidden', 'forbidden-list', 'forbidden-test', 'tester'])
 
@@ -185,7 +189,43 @@
 
   $: if (tab === 'logs') refreshLogs()
 
-  onMount(load)
+  /**
+   * Open the object named by `#/...?id=`, and switch to a sub-tab named by
+   * `?tab=`. Links from Debug, Compare and the Packs page carry an id; the
+   * query used to be stripped before any page saw it, so those links landed
+   * here with nothing selected.
+   */
+  function openFromRoute() {
+    const id = $routeParams.params.id
+    if (!id) return
+    const match = rules.find((item: any) => item.id === id)
+    if (match) { tab = 'rules'; startEdit(match) }
+  }
+
+  $: if (VERIFICATION_TABS.includes($routeParams.params.tab)) {
+    tab = $routeParams.params.tab
+  }
+
+  onMount(async () => {
+    await load()
+    openFromRoute()
+  })
+
+  // A link clicked while this page is already open changes only the hash.
+  $: if ($routeParams.params.id && rules.length) openFromRoute()
+
+  // Version history (Phase 25). One modal serves every type that keeps history.
+  let historyShow = false
+  let historyType = 'verification_rule'
+  let historyId = ''
+  let historyName = ''
+
+  function openHistory(item: any, type: string = 'verification_rule') {
+    historyType = type
+    historyId = item.id
+    historyName = item.name || ''
+    historyShow = true
+  }
 </script>
 
 <div class="page-header">
@@ -237,6 +277,7 @@
                 class={r.is_active ? 'primary' : ''}
               >{r.is_active ? 'ON' : 'OFF'}</button>
               <button onclick={() => startEdit(r)}>Edit</button>
+              <button onclick={() => openHistory(r)}>History</button>
               <button class="danger" onclick={() => handleDelete(r.id)}>Delete</button>
             </div>
           </div>
@@ -502,4 +543,12 @@
   currentTag={tagModal.tag}
   bind:errorMsg={tagError}
   onSave={saveTag}
+/>
+
+<SnapshotHistoryModal
+  bind:show={historyShow}
+  resourceType={historyType}
+  resourceId={historyId}
+  resourceName={historyName}
+  onRestored={() => withScroll(load)}
 />

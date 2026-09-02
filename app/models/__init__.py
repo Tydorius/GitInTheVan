@@ -1,5 +1,6 @@
 from app.models.admin_settings import AdminSettings
 from app.models.api_key import ApiKey
+from app.models.assistant_conversation import AssistantConversation
 from app.models.audit_log import AuditLog
 from app.models.backup_run import BackupRun
 from app.models.base import Base
@@ -18,6 +19,7 @@ from app.models.lorebook_entry import LorebookEntry
 from app.models.map import Map, MapStage, MapStageResource
 from app.models.memory import Memory
 from app.models.memory_rule import MemoryRule
+from app.models.resource_snapshot import ResourceSnapshot
 from app.models.scenario_rule import ScenarioRule
 from app.models.skill import EndpointSkill, Skill
 from app.models.tag_group import TagGroup, TagGroupMember
@@ -34,6 +36,7 @@ __all__ = [
     "UserSettings",
     "AdminSettings",
     "ApiKey",
+    "AssistantConversation",
     "AuditLog",
     "BackupRun",
     "Lorebook",
@@ -53,6 +56,7 @@ __all__ = [
     "MapStageResource",
     "Memory",
     "MemoryRule",
+    "ResourceSnapshot",
     "UserData",
     "VerificationRule",
     "VerificationLog",

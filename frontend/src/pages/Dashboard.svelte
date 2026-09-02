@@ -1,11 +1,17 @@
 <script lang="ts">
   import { api } from '../api'
   import { onMount } from 'svelte'
+  import { routeParams } from '../stores'
   import Debug from './Debug.svelte'
   import CollapsibleCard from '../lib/CollapsibleCard.svelte'
   import { CollapseController } from '../lib/collapse'
 
   let activeTab = 'overview'
+
+  // `?tab=debug` opens the Debug sub-tab directly. Unknown values are ignored.
+  $: if ($routeParams.params.tab === 'overview' || $routeParams.params.tab === 'debug') {
+    activeTab = $routeParams.params.tab
+  }
   let collapse = new CollapseController('dashboard', ['quickstart'])
 
   let stats = { endpoints: 0, cantrips: 0, lorebooks: 0, rules: 0 }

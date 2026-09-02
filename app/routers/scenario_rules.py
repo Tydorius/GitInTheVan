@@ -10,6 +10,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.scenario_rule import ScenarioRule
 from app.models.user import User
+from app.services import snapshots
 from app.services.admin import get_admin_settings
 from app.services.content_guard import check_size, sanitize_and_log
 from app.services.llm_params import ParameterDef, params_from_api, params_to_api
@@ -165,6 +166,8 @@ async def update_rule(
     if rule is None:
         raise HTTPException(status_code=404, detail="Rule not found")
 
+    await snapshots.capture(db, current_user.id, "scenario_rule", rule_id)
+
     if req.name is not None:
         rule.name = req.name
     if req.token_threshold is not None:
@@ -203,6 +206,8 @@ async def delete_rule(
     rule = result.scalar_one_or_none()
     if rule is None:
         raise HTTPException(status_code=404, detail="Rule not found")
+
+    await snapshots.capture(db, current_user.id, "scenario_rule", rule_id)
 
     await db.delete(rule)
     await db.commit()

@@ -1,5 +1,6 @@
 import json
 
+import httpx
 import pytest
 
 from app.config import Settings
@@ -238,3 +239,50 @@ async def test_v1beta_generic_route_forwarding(client, httpx_mock):
     assert response.status_code == 200
     data = response.json()
     assert data["data"][0]["id"] == "gemini-model"
+
+
+class TestLiteLLMToolsPassthrough:
+    """`tools`/`tool_choice`/`parallel_tool_calls` were absent from
+    `LITELLM_NATIVE_PARAMS`, so a client that sent them to a provider endpoint
+    lost them silently -- the same class of bug as the pre-0.24
+    `reasoning_effort` loss (see tests/test_llm_params_pipeline.py). Mocks only
+    `litellm.acompletion`, the outer boundary of the provider path."""
+
+    @pytest.mark.asyncio
+    async def test_client_tools_reach_litellm(self, monkeypatch):
+        from app.services.proxy import _do_forward_litellm
+
+        captured: dict = {}
+
+        async def fake_acompletion(**kwargs):
+            captured.update(kwargs)
+
+            class _Resp:
+                def model_dump(self):
+                    return _mock_response()
+
+            return _Resp()
+
+        import litellm
+
+        monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+
+        tools = [{
+            "type": "function",
+            "function": {"name": "get_weather", "parameters": {"type": "object", "properties": {}}},
+        }]
+        body = json.dumps({
+            "model": "m",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": tools,
+            "tool_choice": "auto",
+            "parallel_tool_calls": False,
+        }).encode()
+
+        _, status = await _do_forward_litellm(
+            body, "openai", "http://x.test", "sk", httpx.Timeout(10.0)
+        )
+        assert status == 200
+        assert captured["tools"] == tools
+        assert captured["tool_choice"] == "auto"
+        assert captured["parallel_tool_calls"] is False

@@ -125,3 +125,73 @@ class TestBackupApi:
         assert data["backup_schedule_days"] == "mon,wed,fri"
         assert data["backup_schedule_time"] == "04:30"
         assert data["backup_retention_count"] == 14
+
+
+@pytest.mark.asyncio
+class TestAssistantAdminSettings:
+    """Phase 26a: admin caps/flags gating the Assistant Pane."""
+
+    async def test_admin_settings_expose_assistant_defaults(self, admin_client):
+        client, _, _ = admin_client
+        resp = await client.get("/api/admin/settings")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["assistant_enabled"] is True
+        assert data["assistant_admin_reads_enabled"] is False
+        assert data["assistant_packs_enabled"] is False
+        assert data["max_assistant_tool_calls_per_turn"] == 16
+        assert data["max_assistant_conversations"] == 20
+        assert data["max_assistant_tool_result_kb"] == 32
+
+    async def test_admin_can_update_assistant_settings(self, admin_client):
+        client, _, _ = admin_client
+        resp = await client.put(
+            "/api/admin/settings",
+            json={
+                "assistant_enabled": False,
+                "assistant_admin_reads_enabled": True,
+                "assistant_packs_enabled": True,
+                "max_assistant_tool_calls_per_turn": 8,
+                "max_assistant_conversations": 5,
+                "max_assistant_tool_result_kb": 64,
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["assistant_enabled"] is False
+        assert data["assistant_admin_reads_enabled"] is True
+        assert data["assistant_packs_enabled"] is True
+        assert data["max_assistant_tool_calls_per_turn"] == 8
+        assert data["max_assistant_conversations"] == 5
+        assert data["max_assistant_tool_result_kb"] == 64
+
+        # GET reflects the same values PUT returned -- both go through the
+        # shared _settings_response projection.
+        get_resp = await client.get("/api/admin/settings")
+        assert get_resp.json()["max_assistant_conversations"] == 5
+
+    async def test_non_admin_cannot_update_assistant_settings(self, admin_client):
+        """A 401 is not a 403 -- use a logged-in non-admin, and confirm the
+        request is genuinely authenticated first (see the testing standards)."""
+        client, _, _ = admin_client
+        created = await client.post(
+            "/api/users", json={"username": "assistant-member", "password": "memberpass123"}
+        )
+        assert created.status_code == 201
+
+        client.headers.pop("Authorization", None)
+        login = await client.post(
+            "/api/auth/login",
+            json={"username": "assistant-member", "password": "memberpass123"},
+        )
+        assert login.status_code == 200
+        client.headers["Authorization"] = f"Bearer {login.json()['access_token']}"
+
+        me = await client.get("/api/auth/me")
+        assert me.status_code == 200
+        assert me.json()["is_admin"] is False
+
+        resp = await client.put(
+            "/api/admin/settings", json={"assistant_enabled": False}
+        )
+        assert resp.status_code == 403

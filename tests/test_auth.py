@@ -141,3 +141,48 @@ class TestAdminAuthorization:
 
         assert len(mine) == 1
         assert all(log["user_id"] == me for log in mine), "audit logs leaked across users"
+
+
+@pytest.mark.asyncio
+class TestDisabledUserRejected:
+    """A JWT minted before an account is disabled must stop working the moment
+    `is_disabled` flips -- otherwise a disabled user stays authenticated for
+    the full token lifetime (see Phase 26 Design, Security summary)."""
+
+    async def test_token_stops_working_once_disabled(self, admin_client):
+        admin, _, _ = admin_client
+        created = await admin.post(
+            "/api/users", json={"username": "disableme", "password": "disablepass123"}
+        )
+        assert created.status_code == 201
+        user_id = created.json()["id"]
+
+        admin.headers.pop("Authorization", None)
+        login = await admin.post(
+            "/api/auth/login", json={"username": "disableme", "password": "disablepass123"}
+        )
+        assert login.status_code == 200
+        token = login.json()["access_token"]
+
+        # Confirm the token is genuinely authenticated before disabling -- a 401
+        # here would prove nothing about the disabled-user path.
+        admin.headers["Authorization"] = f"Bearer {token}"
+        still_ok = await admin.get("/api/settings")
+        assert still_ok.status_code == 200
+
+        # Log back in as admin to disable the other user, then re-use the
+        # member's original token unchanged.
+        admin.headers.pop("Authorization", None)
+        admin_login = await admin.post(
+            "/api/auth/login", json={"username": "admin", "password": "adminpass123"}
+        )
+        assert admin_login.status_code == 200
+        admin.headers["Authorization"] = f"Bearer {admin_login.json()['access_token']}"
+        disable = await admin.put(f"/api/users/{user_id}", json={"is_disabled": True})
+        assert disable.status_code == 200
+        assert disable.json()["is_disabled"] is True
+
+        admin.headers["Authorization"] = f"Bearer {token}"
+        rejected = await admin.get("/api/settings")
+        assert rejected.status_code == 401
+        assert rejected.json()["detail"] == "Account disabled"

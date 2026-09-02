@@ -32,6 +32,13 @@ class AdminSettings(Base):
     backup_schedule_time: Mapped[str] = mapped_column(String(8), default="03:00", server_default="03:00", nullable=False)
     backup_retention_count: Mapped[int] = mapped_column(Integer, default=7, server_default="7", nullable=False)
     backup_dir: Mapped[str] = mapped_column(String(512), default="", server_default="", nullable=False)
+    assistant_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
+    assistant_admin_reads_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+    assistant_packs_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+    max_assistant_tool_calls_per_turn: Mapped[int] = mapped_column(Integer, default=16, server_default="16", nullable=False)
+    max_assistant_conversations: Mapped[int] = mapped_column(Integer, default=20, server_default="20", nullable=False)
+    max_assistant_tool_result_kb: Mapped[int] = mapped_column(Integer, default=32, server_default="32", nullable=False)
+    max_snapshots_per_object: Mapped[int] = mapped_column(Integer, default=20, server_default="20", nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=text("CURRENT_TIMESTAMP"), nullable=False,
         onupdate=lambda: datetime.now(UTC),

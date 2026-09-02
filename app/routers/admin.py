@@ -44,6 +44,13 @@ class AdminSettingsResponse(BaseModel):
     backup_schedule_time: str
     backup_retention_count: int
     backup_dir: str
+    assistant_enabled: bool
+    assistant_admin_reads_enabled: bool
+    assistant_packs_enabled: bool
+    max_assistant_tool_calls_per_turn: int
+    max_assistant_conversations: int
+    max_assistant_tool_result_kb: int
+    max_snapshots_per_object: int
 
 
 class AdminSettingsUpdate(BaseModel):
@@ -67,6 +74,13 @@ class AdminSettingsUpdate(BaseModel):
     backup_schedule_time: str | None = None
     backup_retention_count: int | None = None
     backup_dir: str | None = None
+    assistant_enabled: bool | None = None
+    assistant_admin_reads_enabled: bool | None = None
+    assistant_packs_enabled: bool | None = None
+    max_assistant_tool_calls_per_turn: int | None = None
+    max_assistant_conversations: int | None = None
+    max_assistant_tool_result_kb: int | None = None
+    max_snapshots_per_object: int | None = None
 
 
 def _settings_response(s: AdminSettings, effective: str) -> AdminSettingsResponse:
@@ -98,6 +112,13 @@ def _settings_response(s: AdminSettings, effective: str) -> AdminSettingsRespons
         backup_schedule_time=s.backup_schedule_time,
         backup_retention_count=s.backup_retention_count,
         backup_dir=s.backup_dir,
+        assistant_enabled=s.assistant_enabled,
+        assistant_admin_reads_enabled=s.assistant_admin_reads_enabled,
+        assistant_packs_enabled=s.assistant_packs_enabled,
+        max_assistant_tool_calls_per_turn=s.max_assistant_tool_calls_per_turn,
+        max_assistant_conversations=s.max_assistant_conversations,
+        max_assistant_tool_result_kb=s.max_assistant_tool_result_kb,
+        max_snapshots_per_object=s.max_snapshots_per_object,
     )
 
 
@@ -190,6 +211,20 @@ async def update_settings(
         updates["backup_retention_count"] = max(0, req.backup_retention_count)
     if req.backup_dir is not None:
         updates["backup_dir"] = req.backup_dir
+    if req.assistant_enabled is not None:
+        updates["assistant_enabled"] = req.assistant_enabled
+    if req.assistant_admin_reads_enabled is not None:
+        updates["assistant_admin_reads_enabled"] = req.assistant_admin_reads_enabled
+    if req.assistant_packs_enabled is not None:
+        updates["assistant_packs_enabled"] = req.assistant_packs_enabled
+    if req.max_assistant_tool_calls_per_turn is not None:
+        updates["max_assistant_tool_calls_per_turn"] = max(1, req.max_assistant_tool_calls_per_turn)
+    if req.max_assistant_conversations is not None:
+        updates["max_assistant_conversations"] = max(1, req.max_assistant_conversations)
+    if req.max_assistant_tool_result_kb is not None:
+        updates["max_assistant_tool_result_kb"] = max(1, req.max_assistant_tool_result_kb)
+    if req.max_snapshots_per_object is not None:
+        updates["max_snapshots_per_object"] = max(1, req.max_snapshots_per_object)
 
     s = await update_admin_settings(updates)
     from app.services.admin import get_effective_log_level

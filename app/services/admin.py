@@ -26,7 +26,7 @@ async def get_admin_settings() -> AdminSettings:
         return settings
 
 
-async def get_caps() -> dict[str, int]:
+async def get_caps() -> dict[str, int | bool]:
     """Get the effective global caps."""
     s = await get_admin_settings()
     return {
@@ -37,6 +37,12 @@ async def get_caps() -> dict[str, int]:
         "rate_limit_api_per_min": s.rate_limit_api_per_min,
         "max_saved_debug_runs": s.max_saved_debug_runs,
         "max_debug_exchange_kb": s.max_debug_exchange_kb,
+        "assistant_enabled": s.assistant_enabled,
+        "assistant_admin_reads_enabled": s.assistant_admin_reads_enabled,
+        "assistant_packs_enabled": s.assistant_packs_enabled,
+        "max_assistant_tool_calls_per_turn": s.max_assistant_tool_calls_per_turn,
+        "max_assistant_conversations": s.max_assistant_conversations,
+        "max_assistant_tool_result_kb": s.max_assistant_tool_result_kb,
     }
 
 

@@ -1,11 +1,17 @@
 <script lang="ts">
   import { api } from '../api'
   import { onMount } from 'svelte'
+  import { routeParams } from '../stores'
   import TagEditModal from '../lib/TagEditModal.svelte'
   import { withScroll } from '../lib/scroll'
 
   type Tab = 'groups' | 'tags'
   let tab: Tab = 'groups'
+
+  // `?tab=tags` opens the Tags sub-tab directly. Unknown values are ignored.
+  $: if ($routeParams.params.tab === 'groups' || $routeParams.params.tab === 'tags') {
+    tab = $routeParams.params.tab
+  }
 
   // Groups state
   let groups: any[] = []

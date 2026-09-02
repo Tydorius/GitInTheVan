@@ -10,6 +10,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.memory_rule import MemoryRule
 from app.models.user import User
+from app.services import snapshots
 from app.services.admin import get_admin_settings
 from app.services.content_guard import check_size, sanitize_and_log
 
@@ -186,6 +187,8 @@ async def update_rule(
     if rule is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory rule not found")
 
+    await snapshots.capture(db, current_user.id, "memory_rule", rule_id)
+
     if req.tag is not None and req.tag != rule.tag:
         await _check_tag_unique(db, req.tag, current_user.id, rule_id)
         rule.tag = req.tag
@@ -225,5 +228,7 @@ async def delete_rule(
     rule = result.scalar_one_or_none()
     if rule is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory rule not found")
+
+    await snapshots.capture(db, current_user.id, "memory_rule", rule_id)
     await db.delete(rule)
     await db.commit()
