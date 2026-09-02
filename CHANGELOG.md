@@ -2,6 +2,83 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.25.0] - 2026-09-02
+
+An assistant that lives in the app, runs on the user's own endpoint, and can
+only ever do what the user has allowed it to do.
+
+### Added
+
+- **The Assistant Pane.** A persistent right-hand pane where one of the user's
+  own configured endpoints acts as an assistant over GitInTheVan itself: it can
+  read and change the user's own resources, navigate to the page or object
+  under discussion, answer from the shipped documentation, and run live checks
+  against the install. It collapses to a rail when not in use.
+- **Assistant engine.** `app/services/assistant/` (registry, schema,
+  permissions, executor, llm, compaction, prompt, docs, store, selfcheck,
+  admin_reads, loop) plus the `/api/assistant` router with two SSE routes.
+
+  The engine behind it: `app/services/assistant/` (registry, schema, permissions,
+  executor, llm, compaction, prompt, docs, store, loop) plus the
+  `/api/assistant` router with two SSE routes. The pane's UI arrives in 26c;
+  the backend is complete and drivable with curl today.
+
+  - An explicit allow-list registry of 118 tools over the user-scoped
+    management API, grouped by the page they belong to, each carrying a risk
+    tier (read / write / destructive / external cost). Anything not listed does
+    not exist to the assistant.
+  - Page-grouped permission modes (Deny / Always Ask / Normal / Always Allow,
+    plus Inherit per tool). Deny is absolute. Content-only yolo collapses
+    Normal's asks for content groups and never for configuration.
+  - A hard boundary that is mechanical rather than prompted: no tool may sit on
+    `/api/admin`, `/api/users`, `/api/auth`, `/api/api-keys` or
+    `/api/assistant`, nor on `POST /api/packs/repos/local`.
+    `tests/test_assistant_boundary.py` walks `app.routes` and fails if one
+    does, including a vacuity check that the walk can fail.
+  - Tools execute in-process against the app with the caller's own JWT, so
+    ownership, validation and content guards apply unchanged. Endpoint reads
+    carry a mandatory `api_key` projection and every result is scrubbed of the
+    user's live keys and truncated to the admin's limit.
+  - Automatic context compaction: old tool results are elided in the outbound
+    copy, and only if that is not enough is a rolling summary taken through the
+    user's own endpoint. A failed summary degrades to elision alone and says so
+    rather than silently sending a thinner context.
+  - Conversations rotate the oldest unsaved one rather than refusing a new
+    one, with the evicted title reported so the pane can name it.
+
+- **Self-checks, in place of a test runner.** Live checks modelled on what the
+  test suite verifies, runnable from the pane on a real install: an activation
+  dry run that answers "why did this not fire?" across every resource type, a
+  lorebook match dry run (the first one in the product), a parameter-layer
+  explainer, a configuration linter, a routing and failover report, a Deno
+  sandbox smoke test, and probes for an endpoint, the verification judge, the
+  summarizer and a map.
+- **Admin reads, opt-in and read-only.** With `assistant_admin_reads_enabled`
+  on, an admin's assistant can read a schema-drift report, redacted server
+  logs, and an install health check (signing key, backups, TLS, `.env` drift,
+  update chain, self-reachability). Never a write, and never through
+  `/api/admin`.
+- **Assistant Security page** with the permission grid, and an Assistant card
+  in Settings for the endpoint, model and parameters.
+
+### Fixed
+
+- **Client-sent `tools` were dropped on every provider endpoint.**
+  `LITELLM_NATIVE_PARAMS` did not list `tools`, `tool_choice` or
+  `parallel_tool_calls`, so native function calling reached a raw passthrough
+  endpoint intact and vanished the moment the endpoint had a provider set --
+  the same class of silent loss as `reasoning_effort` before 0.24.0.
+- **A disabled account's token kept working.** `get_current_user` never checked
+  `is_disabled`, so a token minted before an admin disabled the account stayed
+  valid on the management API until it expired, up to 24 hours.
+- **The diagnostics connectivity check could not report an unexpected status.**
+  The direct-endpoint branch referenced an unbound `status_code`, so any status
+  outside the handled set was reported as an internal name error instead of the
+  status the endpoint actually returned.
+- `rate_limit_middleware` now skips requests carrying the `gitv_internal` ASGI
+  scope flag, which only the assistant's in-process executor can set. Without
+  it one assistant turn could rate-limit the user's own browser.
+
 ## [0.24.0] - 2026-08-31
 
 Every place that can name a model can now say how to call it -- and every call

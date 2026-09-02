@@ -30,6 +30,32 @@
     summarization_keep_recent: 6,
     summarization_prompt: '',
   }
+  // Assistant Pane (Phase 26): the user's own endpoint acting as an in-app
+  // assistant. Separate from the driver/verification/summarization roles above
+  // -- it lives under /api/assistant, never /api/settings, so the assistant's
+  // own config route cannot be reached by anything that writes to `settings`.
+  let assistantForm = { endpoint_id: '' as string | null, model: '', context_tokens: 64000 }
+  let assistantParams: any[] = []
+  let assistantEnabled = true
+  let assistantSaved = false
+  let assistantError = ''
+
+  $: assistantEndpoint = endpoints.find((e: any) => e.id === assistantForm.endpoint_id)
+  $: assistantNotToolUse = !!assistantForm.endpoint_id && assistantEndpoint && assistantEndpoint.role_tag !== 'tool_use'
+
+  async function saveAssistant() {
+    assistantError = ''; assistantSaved = false
+    try {
+      await api.updateAssistantConfig({
+        endpoint_id: assistantForm.endpoint_id || null,
+        model: assistantForm.model,
+        parameters: assistantParams,
+        context_tokens: assistantForm.context_tokens,
+      })
+      assistantSaved = true
+    } catch (e: any) { assistantError = e.message }
+  }
+
   let driverCallableTurns = 1
   let bypassMethod = 'none'
   let prefillEnabled = false
@@ -47,7 +73,7 @@
   let regenerating = false
   let newKeyNotice = false
 
-  let collapse = new CollapseController('settings', ['proxy', 'streaming', 'summarization', 'driver', 'prefill', 'budget'])
+  let collapse = new CollapseController('settings', ['proxy', 'streaming', 'summarization', 'assistant', 'driver', 'prefill', 'budget'])
 
   async function load() {
     try {
@@ -83,6 +109,17 @@
           defaultMapId = (s as any).default_map_id ?? null
         }
       } catch {}
+
+      try {
+        const ac = await api.getAssistantConfig()
+        assistantForm = { endpoint_id: ac.endpoint_id || '', model: ac.model || '', context_tokens: ac.context_tokens || 64000 }
+        assistantParams = structuredClone(ac.parameters || [])
+        assistantEnabled = ac.enabled
+      } catch {
+        // Admin-disabled, or the assistant router is unavailable -- the card
+        // still renders so the user can see why nothing loaded.
+        assistantEnabled = false
+      }
 
     } catch (e: any) { error = e.message }
     finally { }
@@ -289,6 +326,64 @@
     </p>
   </div>
   <button class="primary" onclick={saveSummarization}>Save Summarization Settings</button>
+</CollapsibleCard>
+
+<CollapsibleCard title="Assistant" cardKey="assistant" {collapse}>
+  <p style="color: var(--text-dim); font-size: 12px; margin-top: 12px; margin-bottom: 16px;">
+    Which of your own endpoints powers the Assistant Pane, and the model and parameters it uses.
+    Permissions for what it may do are configured separately on the
+    <a href="#/assistant-security">Assistant Security</a> page. See the
+    <a class="help-link" href="/help/user-guide.html#assistant" target="_blank" title="Open documentation">?</a>
+    guide for how the pane, its permission modes and its soft limits work.
+  </p>
+  {#if !assistantEnabled}
+    <div class="warn-msg">The assistant is turned off for this server. An admin can enable it in Admin &rarr; Global Caps.</div>
+  {/if}
+  {#if assistantError}<div class="error-msg">{assistantError}</div>{/if}
+  {#if assistantSaved}<div class="success-msg">Assistant settings saved.</div>{/if}
+  <div class="form-group">
+    <label for="assistant-ep">Assistant Endpoint</label>
+    <select id="assistant-ep" bind:value={assistantForm.endpoint_id}>
+      <option value="">None</option>
+      {#each endpoints as ep}
+        <option value={ep.id}>{ep.name}{ep.role_tag === 'tool_use' ? ' (tool_use)' : ''}</option>
+      {/each}
+    </select>
+    {#if assistantNotToolUse}
+      <p style="color: var(--warn); font-size: 11px; margin-top: 4px;">
+        This endpoint is not tagged <code>tool_use</code>. It will still be offered to the model, but
+        native tool calling may not work well if the tag is more than just missing.
+      </p>
+    {/if}
+  </div>
+  <div class="form-group">
+    <label for="assistant-model">Model</label>
+    <ModelSelect
+      id="assistant-model"
+      bind:value={assistantForm.model}
+      models={modelsFor(assistantForm.endpoint_id)}
+      emptyLabel="Use endpoint default"
+      placeholder="Leave blank to use endpoint default"
+    />
+  </div>
+  <div class="form-group">
+    <label for="assistant-context">Working Context (tokens)</label>
+    <input id="assistant-context" type="number" min="1000" step="1000" bind:value={assistantForm.context_tokens} style="width: 140px;" />
+    <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+      Above 80% of this, the pane automatically compacts older tool results and, if still over,
+      rolls the older half of the conversation into a summary. Set this to comfortably under the
+      model's real context window.
+    </p>
+  </div>
+  <div class="form-group">
+    <ParameterEditor
+      bind:params={assistantParams}
+      title="Assistant Parameters"
+      hint="Sent on assistant calls only. Does not affect the Driver, verification or summarization."
+      scopeNote="No assistant-specific parameters are set."
+    />
+  </div>
+  <button class="primary" onclick={saveAssistant}>Save Assistant Settings</button>
 </CollapsibleCard>
 
 <CollapsibleCard title="Driver-Callable Tools" cardKey="driver" {collapse}>

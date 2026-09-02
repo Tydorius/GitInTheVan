@@ -3,6 +3,7 @@
   import ParameterEditor from '../lib/ParameterEditor.svelte'
   import ModelSelect from '../lib/ModelSelect.svelte'
   import { onMount } from 'svelte'
+  import { routeParams } from '../stores'
   import { withScroll } from '../lib/scroll'
   import CollapsibleCard from '../lib/CollapsibleCard.svelte'
   import { CollapseController } from '../lib/collapse'
@@ -180,7 +181,29 @@
     return ep?.name || id.slice(0, 8)
   }
 
-  onMount(load)
+  /**
+   * Open the object named by `#/memories?id=`. This page has no sub-tabs, so
+   * only `id` is handled -- it names a memory rule or, failing that, a
+   * scenario rule, and opens that rule's editor. The query used to be
+   * stripped before any page saw it, so such links landed here with nothing
+   * selected.
+   */
+  function openFromRoute() {
+    const id = $routeParams.params.id
+    if (!id) return
+    const rule = memoryRules.find((r: any) => r.id === id)
+    if (rule) { startEditRule(rule); return }
+    const scenarioRule = scenarioRules.find((r: any) => r.id === id)
+    if (scenarioRule) startEditScenarioRule(scenarioRule)
+  }
+
+  onMount(async () => {
+    await load()
+    openFromRoute()
+  })
+
+  // A link clicked while this page is already open changes only the hash.
+  $: if ($routeParams.params.id && (memoryRules.length || scenarioRules.length)) openFromRoute()
 </script>
 
 <div class="page-header">

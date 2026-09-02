@@ -3,6 +3,11 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.services.admin as _admin_module
+import app.services.assistant.admin_reads as _assistant_admin_reads_module
+import app.services.assistant.llm as _assistant_llm_module
+import app.services.assistant.loop as _assistant_loop_module
+import app.services.assistant.selfcheck as _assistant_selfcheck_module
+import app.services.assistant.store as _assistant_store_module
 import app.services.backup as _backup_module
 import app.services.budget as _budget_module
 import app.services.bypass as _bypass_module
@@ -35,6 +40,11 @@ TestSessionLocal = async_sessionmaker(test_engine, class_=AsyncSession, expire_o
 # directions, so adding a service means adding a single line here.
 _SESSION_MODULES = [
     _admin_module,
+    _assistant_admin_reads_module,
+    _assistant_llm_module,
+    _assistant_loop_module,
+    _assistant_selfcheck_module,
+    _assistant_store_module,
     _backup_module,
     _budget_module,
     _bypass_module,

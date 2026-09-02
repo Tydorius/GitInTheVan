@@ -12,6 +12,7 @@ from app.config import settings
 from app.database import init_db
 from app.routers.admin import router as admin_router
 from app.routers.api_keys import router as api_keys_router
+from app.routers.assistant import router as assistant_router
 from app.routers.audit import router as audit_router
 from app.routers.auth import router as auth_router
 from app.routers.cantrips import router as cantrips_router
@@ -163,6 +164,12 @@ async def request_size_limit(request: Request, call_next):
 async def rate_limit_middleware(request: Request, call_next):
     from app.services.rate_limiter import check_api_rate_limit, check_proxy_rate_limit
 
+    # In-process assistant tool calls carry an ASGI scope flag no HTTP client
+    # can set. They are already bounded by the per-turn tool cap, and counting
+    # them would let one assistant turn rate-limit the user's own browser.
+    if request.scope.get("gitv_internal"):
+        return await call_next(request)
+
     path = request.url.path
     if path.startswith("/api/"):
         try:
@@ -198,6 +205,7 @@ app.include_router(scenario_rules_router)
 app.include_router(tag_groups_router)
 app.include_router(packs_router)
 app.include_router(audit_router)
+app.include_router(assistant_router)
 app.include_router(admin_router)
 
 

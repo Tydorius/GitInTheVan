@@ -17,6 +17,9 @@
   import Settings from './pages/Settings.svelte'
   import Admin from './pages/Admin.svelte'
   import Compare from './pages/Compare.svelte'
+  import AssistantSecurity from './pages/AssistantSecurity.svelte'
+  import AssistantPane from './lib/assistant/AssistantPane.svelte'
+  import { assistantEnabled, loadConfig as loadAssistantConfig } from './lib/assistant/store'
 
   const navItems = [
     { path: '/', label: 'Dashboard', icon: '◧' },
@@ -30,6 +33,7 @@
     { path: '/maps', label: 'Maps', icon: '🗺' },
     { path: '/packs', label: 'Content Packs', icon: '📦' },
     { path: '/settings', label: 'Settings', icon: '⚙' },
+    { path: '/assistant-security', label: 'Assistant Security', icon: '🛡' },
     { path: '/admin', label: 'Admin', icon: '🛡', admin: true },
   ]
 
@@ -38,6 +42,17 @@
   let latestVersion = ''
   let certAckChecked = false
   let certAckBusy = false
+  let assistantConfigRequested = false
+
+  // Login.svelte sets isAuthenticated directly rather than going through
+  // initializeAuth(), so a fresh login (no page reload) needs its own trigger
+  // in addition to the onMount call below -- guarded so both paths only ever
+  // fetch once.
+  function maybeLoadAssistantConfig() {
+    if (assistantConfigRequested || !$isAuthenticated) return
+    assistantConfigRequested = true
+    loadAssistantConfig()
+  }
 
   async function checkForUpdates() {
     if (!$isAdmin) return
@@ -64,13 +79,16 @@
     danger: '#dc2626',
   }
 
-  onMount(() => {
-    initializeAuth()
+  onMount(async () => {
+    await initializeAuth()
+    maybeLoadAssistantConfig()
     loadSiteBanner()
     setTimeout(checkForUpdates, 3000)
     setInterval(checkForUpdates, 300000)
     setInterval(loadCertIpWarning, 300000)
   })
+
+  $: if ($isAuthenticated) maybeLoadAssistantConfig()
   function handleLogout() {
     logout()
   }
@@ -171,6 +189,8 @@
         <Packs />
       {:else if page === '/settings'}
         <Settings />
+      {:else if page === '/assistant-security'}
+        <AssistantSecurity />
       {:else if page === '/admin'}
         <Admin />
       {:else if page === '/debug/compare'}
@@ -179,5 +199,9 @@
         <Dashboard />
       {/if}
     </main>
+
+    {#if $assistantEnabled}
+      <AssistantPane />
+    {/if}
   </div>
 {/if}

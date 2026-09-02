@@ -108,6 +108,12 @@
 
   // A link clicked while this page is already open changes only the hash.
   $: if ($routeParams.params.id && skills.length) openFromRoute()
+
+  // `?tab=sample` selects the Writing Samples sub-tab. Unknown values are
+  // ignored rather than left to fall through to whatever `tab` happened to be.
+  $: if ($routeParams.params.tab === 'skill' || $routeParams.params.tab === 'sample') {
+    tab = $routeParams.params.tab
+  }
 </script>
 
 <div class="page-header">

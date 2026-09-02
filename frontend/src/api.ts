@@ -259,6 +259,77 @@ export interface EndpointModel {
   parameters?: LlmParameter[]
 }
 
+// Assistant Pane (Phase 26). The backend router (app/routers/assistant.py) is
+// being written concurrently -- these shapes follow Planning/project-plan.md
+// > "Phase 26 Design: Assistant Pane" > Architecture/Data model/Modules.
+// Anything not spelled out exactly there (list-wrapper key names, save/fork
+// return shapes, /catalog's shape) is a best-effort guess following this
+// codebase's existing `{plural: [...]}` list convention -- see the 26c report.
+
+export interface AssistantConfig {
+  endpoint_id: string | null
+  model: string
+  parameters: LlmParameter[]
+  context_tokens: number
+  enabled: boolean
+  endpoint_role_tag: string
+  endpoint_name: string
+}
+
+export type AssistantMode = 'deny' | 'always_ask' | 'normal' | 'always_allow'
+export type AssistantToolMode = AssistantMode | 'inherit'
+export type AssistantRisk = 'read' | 'write' | 'destructive' | 'external_cost'
+
+export interface AssistantToolPermission {
+  name: string
+  summary: string
+  risk: AssistantRisk
+  mode: AssistantToolMode
+  effective: AssistantMode
+}
+
+export interface AssistantGroupPermission {
+  key: string
+  label: string
+  page: string
+  category: 'content' | 'configuration' | 'admin'
+  default_mode: AssistantMode
+  disabled_by_admin: boolean
+  mode: AssistantMode | ''
+  tools: AssistantToolPermission[]
+}
+
+export interface AssistantPermissions {
+  groups: AssistantGroupPermission[]
+}
+
+export interface AssistantConversationSummary {
+  id: string
+  title: string
+  saved: boolean
+  updated_at: string
+  prompt_tokens: number
+  completion_tokens: number
+  llm_calls: number
+  tool_calls: number
+}
+
+/** Full conversation: `GET /conversations/{id}`. `messages` is OpenAI-format
+ * (incl. `tool_calls` / `tool` roles), same shape stored in `messages_json`. */
+export interface AssistantConversation {
+  id: string
+  title: string
+  saved: boolean
+  yolo: boolean
+  messages: any[]
+  compaction: { summary: string; through_index: number } | null
+  pending: any | null
+  prompt_tokens: number
+  completion_tokens: number
+  llm_calls: number
+  tool_calls: number
+}
+
 export const api = {
   // Auth
   setup: (username: string, password: string) =>
@@ -617,6 +688,35 @@ export const api = {
   // Tags - browse public tagged resources
   listPublicLorebooks: () => request<{ lorebooks: any[] }>('/api/lorebooks/public'),
   listPublicCantrips: () => request<{ cantrips: any[] }>('/api/cantrips/public'),
+
+  // Assistant Pane
+  getAssistantConfig: () => request<AssistantConfig>('/api/assistant/config'),
+  updateAssistantConfig: (data: { endpoint_id?: string | null; model?: string; parameters?: LlmParameter[]; context_tokens?: number }) =>
+    request<AssistantConfig>('/api/assistant/config', { method: 'PUT', body: JSON.stringify(data) }),
+  getAssistantPermissions: () => request<AssistantPermissions>('/api/assistant/permissions'),
+  updateAssistantPermissions: (data: { groups: Record<string, AssistantMode>; tools: Record<string, AssistantToolMode> }) =>
+    request<AssistantPermissions>('/api/assistant/permissions', { method: 'PUT', body: JSON.stringify(data) }),
+  // Shape beyond "compact catalog" is not pinned down anywhere in the design doc;
+  // nothing in this sub-phase's UI consumes it yet.
+  getAssistantCatalog: () => request<any>('/api/assistant/catalog'),
+  listAssistantConversations: () =>
+    request<{ conversations: AssistantConversationSummary[] }>('/api/assistant/conversations'),
+  createAssistantConversation: () =>
+    request<AssistantConversationSummary & { rotated_title: string | null }>(
+      '/api/assistant/conversations', { method: 'POST' },
+    ),
+  getAssistantConversation: (id: string) =>
+    request<AssistantConversation>(`/api/assistant/conversations/${id}`),
+  patchAssistantConversation: (id: string, data: { title?: string; yolo?: boolean }) =>
+    request<AssistantConversation>(`/api/assistant/conversations/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteAssistantConversation: (id: string) =>
+    request<void>(`/api/assistant/conversations/${id}`, { method: 'DELETE' }),
+  saveAssistantConversation: (id: string) =>
+    request<AssistantConversation>(`/api/assistant/conversations/${id}/save`, { method: 'POST' }),
+  unsaveAssistantConversation: (id: string) =>
+    request<AssistantConversation>(`/api/assistant/conversations/${id}/save`, { method: 'DELETE' }),
+  forkAssistantConversation: (id: string) =>
+    request<AssistantConversationSummary & { rotated_title?: string | null }>(`/api/assistant/conversations/${id}/fork`, { method: 'POST', body: JSON.stringify({}) }),
 
   // Tag Groups
   listTagGroups: () => request<{ groups: any[] }>('/api/tag-groups'),

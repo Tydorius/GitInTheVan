@@ -48,7 +48,15 @@ export function buildRoute(page: string, params: Record<string, string | number 
   return query ? `#${page}?${query}` : `#${page}`
 }
 
-/** Route map for linking to an object by resource type. */
+/**
+ * Route map for linking to an object by resource type.
+ *
+ * `tab` is a reserved query param, not a resource type: several pages (Admin,
+ * Dashboard, Packs, Skills, TagGroups, Verification) read `?tab=` to select a
+ * sub-tab on load, independent of any `id`. A page ignores an unrecognised
+ * `tab` value rather than raising, so an old or mistyped link just lands on
+ * that page's default tab.
+ */
 const TYPE_ROUTES: Record<string, string> = {
   cantrip: '/cantrips',
   lorebook: '/lorebooks',
@@ -59,6 +67,8 @@ const TYPE_ROUTES: Record<string, string> = {
   map_stage: '/maps',
   verification_rule: '/verification',
   memory_rule: '/memories',
+  endpoint: '/endpoints',
+  debug_run: '/',
 }
 
 /**

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, getToken } from '../api'
   import { onMount } from 'svelte'
-  import { isAdmin } from '../stores'
+  import { isAdmin, routeParams } from '../stores'
   import { downloadBlob } from '../lib/download'
 
   let repos: any[] = []
@@ -20,6 +20,11 @@
   let localLinking = false
 
   let packTab = 'browse'
+
+  // `?tab=create` opens the Create Pack sub-tab directly. Unknown values ignored.
+  $: if ($routeParams.params.tab === 'browse' || $routeParams.params.tab === 'create') {
+    packTab = $routeParams.params.tab
+  }
   let allResources: any[] = []
   let selectedResources: Record<string, boolean> = {}
   let packMeta = { pack_name: '', pack_author: '', pack_description: '' }
@@ -301,7 +306,10 @@
     return installed.some(i => i.file_path === filePath)
   }
 
-  onMount(load)
+  onMount(async () => {
+    await load()
+    if (packTab === 'create') await loadAllResources()
+  })
 </script>
 
 <div class="page-header">

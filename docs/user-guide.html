@@ -60,10 +60,11 @@ surrounding UI may have moved on.</p>
 <li><a href="#12-content-packs">Content Packs</a></li>
 <li><a href="#13-tags-and-groups">Tags and Groups</a></li>
 <li><a href="#14-settings">Settings</a></li>
-<li><a href="#15-admin">Admin</a></li>
-<li><a href="#16-model-parameters">Model Parameters</a></li>
-<li><a href="#17-debug-and-comparing-runs">Debug and Comparing Runs</a></li>
-<li><a href="#18-the-activation-hierarchy">The Activation Hierarchy</a></li>
+<li><a href="#assistant">Assistant</a></li>
+<li><a href="#16-admin">Admin</a></li>
+<li><a href="#17-model-parameters">Model Parameters</a></li>
+<li><a href="#18-debug-and-comparing-runs">Debug and Comparing Runs</a></li>
+<li><a href="#19-the-activation-hierarchy">The Activation Hierarchy</a></li>
 </ol>
 <hr>
 <p><a id="login"></a></p>
@@ -1114,8 +1115,115 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 </table>
 <p>Admin actions (user creation, deletion, password resets) are recorded in the audit log, viewable via the <strong>Admin</strong> page. Global caps for driver-callable turns and verification retries are also configured in the Admin page.</p>
 <hr>
+<p><a id="assistant"></a></p>
+<h2 id="15-assistant">15. Assistant</h2>
+<p><em>Screenshots pending (2026-09-02) — the pane shipped this section before a capture pass.</em></p>
+<p>The Assistant Pane is a persistent panel on the right edge of the management UI where one of
+your own configured endpoints acts as an assistant for GitInTheVan itself. It can read and
+change your cantrips, lorebooks, maps, verification rules, memory rules, tags, skills, and
+settings; navigate you to the right page; and explain why a resource did or did not fire. It
+runs as native tool calls against the same API this UI uses — nothing about it is a separate
+integration.</p>
+<p>Collapsed, it is a slim rail on the right edge with a small badge when it needs your attention.
+Click the rail (or the floating button on narrow screens) to open it, pick or start a
+conversation, and type. Enter sends; Shift+Enter inserts a newline.</p>
+<h3 id="choosing-an-endpoint">Choosing an endpoint</h3>
+<p>Pick the assistant's endpoint and model on the <strong>Settings</strong> page, in the <strong>Assistant</strong> card —
+this is separate from the Driver, verification and summarization endpoints, and has its own
+parameter layer. Endpoints tagged <code>tool_use</code> (set on the Endpoints page) are marked as such in
+the picker. Native tool calling depends on the model actually supporting it; if the chosen
+endpoint is not tagged <code>tool_use</code>, the pane shows a one-line warning on a new conversation. This
+is advisory, not a block — a model can support tools without the tag having been set, and the
+warning just flags where to look first if tool calls come back garbled.</p>
+<h3 id="permission-modes">Permission modes</h3>
+<p>Tools are grouped by the UI page they act on (Cantrips, Lorebooks, Verification, Settings, and
+so on), and every group and tool has one of four modes on the <strong>Assistant Security</strong> page:</p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Deny</strong></td>
+<td>The tool does not exist to the assistant. It is left out of what the model is offered, and the system prompt lists it as forbidden along with the page where you can turn it back on, so the model does not waste a turn trying.</td>
+</tr>
+<tr>
+<td><strong>Always Ask</strong></td>
+<td>Every call to this tool shows a confirmation card, even under yolo.</td>
+</tr>
+<tr>
+<td><strong>Normal</strong></td>
+<td>The tool's built-in default: a read runs immediately; a write, a delete, or anything that spends tokens on an upstream call asks first.</td>
+</tr>
+<tr>
+<td><strong>Always Allow</strong></td>
+<td>Runs immediately, no confirmation.</td>
+</tr>
+</tbody>
+</table>
+<p>A tool left on <strong>Inherit</strong> (the default) takes its group's mode. Setting a tool explicitly always
+wins over its group — including un-denying a single tool inside an otherwise Denied group, or
+locking down one tool inside an otherwise Normal group. <strong>Deny is absolute</strong> at whatever level it
+applies: nothing — not Allow for session, not yolo — overrides a tool whose effective mode is
+Deny. Each group has a <strong>Reset children to Inherit</strong> button to clear per-tool overrides in bulk.</p>
+<p>When a tool asks, the confirmation card shows the tool name, its risk tier, the arguments it
+would run with, and — for anything that would change an existing value — a line diff against
+what is there now. Three choices: <strong>Approve once</strong>, <strong>Allow for session</strong> (skips future asks for
+that exact tool for the rest of this conversation only), or <strong>Reject</strong>, optionally with a note
+the model sees so it can correct course.</p>
+<h3 id="yolo">Yolo</h3>
+<p>Each conversation has its own <strong>Yolo</strong> toggle, labelled in red because it changes what gets
+asked. It collapses Normal's asks, but only for tools whose group is in the <strong>content</strong> category
+(cantrips, lorebooks, skills, tags, verification, memories, maps, debug, self-checks, docs,
+navigation) — configuration tools (endpoints, settings, packs, diagnostics) and admin tools
+always ask under Normal regardless of yolo. An explicit Always Ask still asks under yolo too.
+There is no yolo "kill switch" — see Runaway protection below for what actually bounds it.</p>
+<h3 id="the-hard-boundary">The hard boundary</h3>
+<p>Regardless of permissions or yolo, the assistant cannot reach anything under admin accounts,
+user management, authentication, or API keys, and it cannot change its own configuration or
+permissions. This is not a setting you can turn off — the routes it is allowed to call are an
+explicit allow-list; anything not on that list does not exist to it, the same way a page you
+never link to does not exist to a visitor. Content packs (linking repos, installing files) are
+off by default too, gated behind an admin flag, since the assistant has no web search of its own
+and a repository name it suggests could simply be invented.</p>
+<h3 id="soft-limits">Soft limits</h3>
+<p>No conversation limit is ever a hard wall:</p>
+<ul>
+<li><strong>Compaction happens automatically.</strong> As a conversation grows, the pane summarizes older tool
+  results and, if needed, rolls the older half of the transcript into a rolling summary through
+  the assistant's own endpoint. A thin <strong>"Context compacted"</strong> divider marks where this happened;
+  the full transcript is still there underneath, just condensed for what gets sent to the model.</li>
+<li><strong>Rotation, not refusal, for the conversation count.</strong> Past the configured limit, the oldest
+  conversation you have not saved is quietly removed to make room for a new one, and the pane
+  tells you which one and its title. Click <strong>Save</strong> (the star) on anything worth keeping to
+  exempt it from rotation. <strong>Download</strong> (JSON or Markdown) and <strong>Delete</strong> are available from the
+  picker at any time, and <strong>New from summary</strong> starts a fresh conversation seeded with a summary
+  of the current one.</li>
+</ul>
+<h3 id="runaway-protection">Runaway protection</h3>
+<p>Rather than a yolo kill switch, an admin-configured cap on tool calls per turn ends a turn
+outright when it is hit — the pane shows a <strong>Continue</strong> button, which starts a fresh turn with a
+fresh counter. This means a person in the chair can keep going as long as they keep clicking
+Continue, but nothing can loop unattended past the cap.</p>
+<h3 id="admin-controls">Admin controls</h3>
+<p>Admins configure the assistant's availability and limits in <strong>Admin → Global Caps</strong>: whether the
+pane is enabled at all; whether it may read server logs and schema state (off by default, and
+read-only even when on); whether it may link repos and install content packs (also off by
+default); the per-turn tool-call cap; the per-user conversation limit; and the maximum size of a
+single tool result before it is truncated.</p>
+<h3 id="security">Security</h3>
+<p><a id="assistant-security"></a></p>
+<p>The <strong>Assistant Security</strong> page is where every tool's permission mode lives — one card per group,
+each with its own mode selector, a link to the page it acts on, and a table of its tools with
+their own mode and a computed <strong>Effective</strong> column showing what actually applies once group and
+tool settings are combined. Changes here take effect on the assistant's next tool call; nothing
+needs a restart.</p>
+<hr>
 <p><a id="admin"></a></p>
-<h2 id="15-admin">15. Admin</h2>
+<h2 id="16-admin">16. Admin</h2>
 <p><em>Admin only. The Admin link in the sidebar is only visible to admin accounts.</em></p>
 <p><img alt="Admin" src="media/gitv-admin-global-caps.png"></p>
 <p>The Admin page provides system-wide management with seven tabs: <strong>Global Caps</strong>, <strong>Users</strong>, <strong>Update</strong>, <strong>Audit Logs</strong>, <strong>Server Logs</strong>, <strong>Network</strong>, and <strong>Backup</strong>. Debug is available as a tab on the Dashboard. A red badge appears on the Admin sidebar button when an update is available.</p>
@@ -1207,7 +1315,7 @@ per-object restore, and everything created since that backup is lost. The
 confirmation step is there because there is no undo.</p>
 <hr>
 <p><a id="model-parameters"></a></p>
-<h2 id="16-model-parameters">16. Model Parameters</h2>
+<h2 id="17-model-parameters">17. Model Parameters</h2>
 <p>Naming a model says <em>which</em> model to call. Parameters say <em>how</em> to call it —
 <code>reasoning_effort</code>, <code>max_tokens</code>, <code>temperature</code>, or anything else your provider
 accepts.</p>
@@ -1348,7 +1456,7 @@ showing the resolved set and which layer supplied each value. That is the fastes
 way to answer "why did this call get <code>temperature: 0.1</code>?".</p>
 <hr>
 <p><a id="debug"></a></p>
-<h2 id="17-debug-and-comparing-runs">17. Debug and Comparing Runs</h2>
+<h2 id="18-debug-and-comparing-runs">18. Debug and Comparing Runs</h2>
 <p><em>Available to all users. Enable </em><em>Debug Mode</em><em> in Settings first, then send a
 message through the proxy.</em></p>
 <p>The <strong>Debug</strong> tab sits beside <strong>Overview</strong> at the top of the Dashboard. It is a
@@ -1415,7 +1523,7 @@ writes nothing, a sandbox is a scenario you keep.</p>
 file. The JSON export is the full trace, which is what to attach to a bug report.</p>
 <hr>
 <p><a id="activation"></a></p>
-<h2 id="18-the-activation-hierarchy">18. The Activation Hierarchy</h2>
+<h2 id="19-the-activation-hierarchy">19. The Activation Hierarchy</h2>
 <p>Five kinds of resource — lorebooks, cantrips, verification rules, maps and memory
 rules — all answer the same question: <em>is this on for this request?</em> They answer
 it the same way.</p>
