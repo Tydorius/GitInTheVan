@@ -97,6 +97,22 @@ async def test_get_settings_default(admin_client):
 
 
 @pytest.mark.asyncio
+async def test_settings_does_not_expose_assistant_fields(admin_client):
+    """Phase 26a: assistant_* user_settings columns exist on the model but are
+    deliberately not fields of SettingsResponse -- they will be exposed by a
+    separate `/api/assistant/*` router in a later sub-phase (see Phase 26
+    Design, "Hard boundary": assistant config is not a field of
+    `/api/settings`, so `update_settings` cannot touch it)."""
+    client, _, _ = admin_client
+    resp = await client.get("/api/settings")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert not any(key.startswith("assistant_") for key in data), (
+        f"/api/settings leaked assistant fields: {sorted(data)}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_update_settings(admin_client):
     client, _, _ = admin_client
 

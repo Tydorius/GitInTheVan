@@ -280,6 +280,64 @@ class TestParameterColumnUpgradePath:
             assert result.scalar() == "[]"
 
 
+class TestAssistantConversationsUpgradePath:
+    """`assistant_conversations` (049) is a whole new table, so -- unlike
+    `TestParameterColumnUpgradePath` above, which reconstructs a pre-047
+    schema by dropping columns -- there is no earlier DDL to reconstruct: the
+    table simply does not exist before this migration runs. `fresh_sqlite_engine`
+    already builds it via `create_all` (the model is registered on
+    `Base.metadata`), so the pre-upgrade state is produced by dropping it back
+    out, exactly the same technique `TestParameterColumnUpgradePath` uses for
+    `endpoint_models` (048)."""
+
+    async def test_table_is_absent_before_migrating(self, fresh_sqlite_engine):
+        """Vacuity check: prove the fixture really reproduces a pre-026a
+        install before trusting the assertions that follow."""
+        async with fresh_sqlite_engine.begin() as conn:
+            await conn.execute(text("DROP TABLE assistant_conversations;"))
+            result = await conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table' "
+                     "AND name='assistant_conversations';")
+            )
+            assert result.fetchone() is None
+
+    async def test_table_arrives_and_is_usable_through_the_orm(self, fresh_sqlite_engine):
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+
+        from app.models.assistant_conversation import AssistantConversation
+        from app.models.user import User
+
+        async with fresh_sqlite_engine.begin() as conn:
+            await conn.execute(text("DROP TABLE assistant_conversations;"))
+
+        await run_migrations(fresh_sqlite_engine)
+
+        async with fresh_sqlite_engine.begin() as conn:
+            result = await conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table' "
+                     "AND name='assistant_conversations';")
+            )
+            assert result.fetchone() is not None, (
+                "assistant_conversations is missing after migration 049"
+            )
+
+        session_factory = async_sessionmaker(fresh_sqlite_engine, expire_on_commit=False)
+        async with session_factory() as db:
+            user = User(username="u-assistant", password_hash="x", gitv_api_key="k")
+            db.add(user)
+            await db.flush()
+            convo = AssistantConversation(user_id=user.id, title="Test convo")
+            db.add(convo)
+            await db.commit()
+
+            fetched = await db.get(AssistantConversation, convo.id)
+            assert fetched is not None
+            assert fetched.title == "Test convo"
+            assert fetched.messages_json == "[]"
+            assert fetched.yolo is False
+            assert fetched.saved is False
+
+
 class TestMigrationCoverage:
     """Guard against the 0.18.0 skills.budget_weight class of bug.
 
@@ -352,7 +410,7 @@ class TestAdvisoryLock:
 
     async def test_migration_count(self):
         """Sanity check: verify we have the expected number of migrations."""
-        assert len(MIGRATIONS) == 48
+        assert len(MIGRATIONS) == 50
 
     async def test_all_migrations_have_unique_names(self):
         names = [name for name, _ in MIGRATIONS]

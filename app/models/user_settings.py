@@ -68,6 +68,25 @@ class UserSettings(Base):
     summarization_parameters_json: Mapped[str] = mapped_column(
         Text, nullable=False, default="[]", server_default="[]"
     )
+    # Phase 26: the Assistant Pane's own endpoint/model choice. A dedicated
+    # parameter layer (rule 20: any scope that can name a model carries one)
+    # and permission overrides (`{"groups":{..},"tools":{..}}`; absence means
+    # Inherit). assistant_context_tokens is the working context the compactor
+    # keeps the conversation under -- a user setting because it depends on the
+    # model chosen, not a global admin cap.
+    assistant_endpoint_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("endpoints.id", ondelete="SET NULL"), nullable=True
+    )
+    assistant_model: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    assistant_parameters_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]", server_default="[]"
+    )
+    assistant_permissions_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="{}", server_default="{}"
+    )
+    assistant_context_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=64000, server_default="64000"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
@@ -76,3 +95,4 @@ class UserSettings(Base):
     default_endpoint: Mapped[Endpoint | None] = relationship(foreign_keys=[default_endpoint_id])
     verification_endpoint: Mapped[Endpoint | None] = relationship(foreign_keys=[verification_endpoint_id])
     summarization_endpoint: Mapped[Endpoint | None] = relationship(foreign_keys=[summarization_endpoint_id])
+    assistant_endpoint: Mapped[Endpoint | None] = relationship(foreign_keys=[assistant_endpoint_id])

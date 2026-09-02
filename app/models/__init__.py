@@ -1,5 +1,6 @@
 from app.models.admin_settings import AdminSettings
 from app.models.api_key import ApiKey
+from app.models.assistant_conversation import AssistantConversation
 from app.models.audit_log import AuditLog
 from app.models.backup_run import BackupRun
 from app.models.base import Base
@@ -34,6 +35,7 @@ __all__ = [
     "UserSettings",
     "AdminSettings",
     "ApiKey",
+    "AssistantConversation",
     "AuditLog",
     "BackupRun",
     "Lorebook",
