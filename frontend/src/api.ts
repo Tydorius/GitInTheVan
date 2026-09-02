@@ -718,6 +718,48 @@ export const api = {
   forkAssistantConversation: (id: string) =>
     request<AssistantConversationSummary & { rotated_title?: string | null }>(`/api/assistant/conversations/${id}/fork`, { method: 'POST', body: JSON.stringify({}) }),
 
+  // Snapshots
+  //
+  // Deliberately generic. Six types keep version history and every one of them
+  // uses the same three routes, so a per-type method set would be 24 wrappers
+  // over one API.
+  listSnapshots: (resourceType: string, resourceId: string) =>
+    request<{ snapshots: any[] }>(
+      `/api/snapshots?resource_type=${encodeURIComponent(resourceType)}&resource_id=${encodeURIComponent(resourceId)}`,
+    ),
+  getSnapshot: (id: string) => request<any>(`/api/snapshots/${id}`),
+  createSnapshot: (resourceType: string, resourceId: string, label: string = '') =>
+    request<any>('/api/snapshots', {
+      method: 'POST',
+      body: JSON.stringify({ resource_type: resourceType, resource_id: resourceId, label }),
+    }),
+  restoreSnapshotAsNew: (id: string, name: string = '') =>
+    request<{ resource_type: string; resource_id: string; name: string; created: boolean; notes: string[] }>(
+      `/api/snapshots/${id}/restore-as-new`,
+      { method: 'POST', body: JSON.stringify({ name }) },
+    ),
+  restoreSnapshotInPlace: (id: string) =>
+    request<{ resource_type: string; resource_id: string; name: string; created: boolean; notes: string[] }>(
+      `/api/snapshots/${id}/restore-in-place`,
+      { method: 'POST' },
+    ),
+  deleteSnapshot: (id: string) => request<void>(`/api/snapshots/${id}`, { method: 'DELETE' }),
+  /** The live object a snapshot belongs to, for the history panel's diff. */
+  getResourceForSnapshot: (resourceType: string, resourceId: string) => {
+    const routes: Record<string, string> = {
+      cantrip: '/api/cantrips',
+      lorebook: '/api/lorebooks',
+      skill: '/api/skills',
+      sample: '/api/skills',
+      verification_rule: '/api/verification/rules',
+      memory_rule: '/api/memory-rules',
+      scenario_rule: '/api/scenario-rules',
+    }
+    const base = routes[resourceType]
+    if (!base) return Promise.resolve(null)
+    return request<any>(`${base}/${resourceId}`).catch(() => null)
+  },
+
   // Tag Groups
   listTagGroups: () => request<{ groups: any[] }>('/api/tag-groups'),
   createTagGroup: (data: { name: string; tag?: string; is_active?: boolean; members?: any[] }) =>

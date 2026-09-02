@@ -2,6 +2,88 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.26.0] - 2026-09-02
+
+A way back. Every change to a cantrip, lorebook, skill, sample, verification
+rule, memory rule or scenario rule now stores the version it replaced, and any
+stored version can be restored as a copy or over the live object.
+
+### Added
+
+- **Per-object snapshots and restore.** A **History** button on every object
+  that keeps versions, listing what was stored and diffing any version against
+  what you have now, with **Restore as a copy** and **Restore over this**.
+
+  - Versions are stored automatically, immediately before every update and
+    every delete. There is nothing to remember to switch on.
+  - **The capture lives in the routers, not in any one caller.** The Assistant
+    Pane executes its tools through those same routes, so an assistant write
+    gets an undo with no assistant-specific code, and so does an edit made by
+    hand in the UI. That is what makes the assistant's Normal default
+    defensible: before this, an approved write was previewed but unrecoverable.
+  - **Restoring over an object snapshots what it replaces first**, so a restore
+    is itself undoable. A mis-clicked restore is one click from being reversed.
+  - **Restore as a copy works on an object that has been deleted.** Snapshots
+    carry no foreign key to the resource, deliberately: a cascade would delete
+    exactly the version a user needs after a mistaken delete.
+  - Repeated saves that change nothing store one version, not one per save.
+    Automatic versions are trimmed to a new admin cap,
+    `max_snapshots_per_object` (default 20); versions saved by name are pinned
+    and never pruned, the model saved debug runs already use.
+  - Six assistant tools under a new **Snapshots** group, with
+    `restore_snapshot_in_place` tiered DESTRUCTIVE so Normal asks first and
+    shows the diff.
+  - `resource_snapshots` (migration 051), `max_snapshots_per_object` on
+    `admin_settings` (052), `app/services/snapshots.py`, `app/routers/snapshots.py`,
+    `frontend/src/lib/SnapshotHistoryModal.svelte`, guide section 20.
+
+  Maps are not covered: a map is three tables with foreign keys to endpoints and
+  cantrips, so its restore has dangling-reference cases the others do not.
+  Forbidden words and tag groups are not covered either.
+
+### Notes
+
+- **The serializer reads `__table__.columns` rather than a field list.** Every
+  existing resource-to-dict function in the codebase -- `_content_of_row` and
+  `serialize_map_to_export` in `map_transfer.py`, `_serialize_resource` in
+  `routers/packs.py` -- is *export*-shaped and drops `tag`, `is_active`,
+  `is_public`, `budget_weight` and the `run_*` routing flags, because a
+  published resource does not carry a local install's wiring. Restoring through
+  one of those would produce an object that looks right and behaves
+  differently. Introspection also means a column added in a later phase is
+  captured without anyone remembering to add it, and a test asserts that only
+  identity and bookkeeping columns are ever left out.
+- **Snapshots are keyed by a hash of the stored JSON, not by
+  `resource_identity.content_hash`.** That function deliberately ignores
+  description, tag and the activation flags, because re-tagging a cantrip is
+  not a new cantrip for *deduplication*. For version history it is exactly a new
+  version.
+- **Restore is a content write.** Both restore routes run the same size limits,
+  sanitizer and safety scanner as create and update, on the same terms: size is
+  a hard refusal, scanner findings are logged to the audit trail. A stored
+  version is not trusted input just because this install wrote it -- if an
+  admin has since lowered a limit, the restore is refused and says so.
+- **A restore that cannot put something back says which.** Restoring as a copy
+  always clears the copy's tag, because a tag activates exactly one resource;
+  restoring in place keeps the current tag if the stored one now belongs to
+  something else. Both report it rather than restoring quietly and differently.
+- **`capture()` adds without flushing, deliberately.** Several of these handlers
+  call `get_admin_settings()` between the capture and their commit, which opens
+  a session of its own; on SQLite that session shares one connection through
+  StaticPool, so closing it rolls back anything flushed but not committed. The
+  first version of this feature lost every snapshot it took to exactly that. The
+  snapshot's id is assigned in Python rather than at flush time so callers can
+  still identify the row, and the module reads admin caps through the caller's
+  own session for the same reason.
+
+### Known gaps recorded
+
+- `maps.py` and `tag_groups.py` run no `content_guard` checks on any path --
+  no size limit, no sanitizer, no scanner, on neither create nor update. Every
+  other content router does. This predates this release.
+- Snapshot screenshots are outstanding, as are the Assistant Pane's from 0.25.0.
+  Both guide sections carry a dated "screenshots pending" note.
+
 ## [0.25.0] - 2026-09-02
 
 An assistant that lives in the app, runs on the user's own endpoint, and can

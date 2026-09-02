@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from '../api'
+  import SnapshotHistoryModal from '../lib/SnapshotHistoryModal.svelte'
   import ParameterEditor from '../lib/ParameterEditor.svelte'
   import ModelSelect from '../lib/ModelSelect.svelte'
   import { onMount } from 'svelte'
@@ -212,6 +213,19 @@
 
   // A link clicked while this page is already open changes only the hash.
   $: if ($routeParams.params.id && rules.length) openFromRoute()
+
+  // Version history (Phase 25). One modal serves every type that keeps history.
+  let historyShow = false
+  let historyType = 'verification_rule'
+  let historyId = ''
+  let historyName = ''
+
+  function openHistory(item: any, type: string = 'verification_rule') {
+    historyType = type
+    historyId = item.id
+    historyName = item.name || ''
+    historyShow = true
+  }
 </script>
 
 <div class="page-header">
@@ -263,6 +277,7 @@
                 class={r.is_active ? 'primary' : ''}
               >{r.is_active ? 'ON' : 'OFF'}</button>
               <button onclick={() => startEdit(r)}>Edit</button>
+              <button onclick={() => openHistory(r)}>History</button>
               <button class="danger" onclick={() => handleDelete(r.id)}>Delete</button>
             </div>
           </div>
@@ -528,4 +543,12 @@
   currentTag={tagModal.tag}
   bind:errorMsg={tagError}
   onSave={saveTag}
+/>
+
+<SnapshotHistoryModal
+  bind:show={historyShow}
+  resourceType={historyType}
+  resourceId={historyId}
+  resourceName={historyName}
+  onRestored={() => withScroll(load)}
 />

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from '../api'
+  import SnapshotHistoryModal from '../lib/SnapshotHistoryModal.svelte'
   import ParameterEditor from '../lib/ParameterEditor.svelte'
   import ModelSelect from '../lib/ModelSelect.svelte'
   import { onMount } from 'svelte'
@@ -204,6 +205,19 @@
 
   // A link clicked while this page is already open changes only the hash.
   $: if ($routeParams.params.id && (memoryRules.length || scenarioRules.length)) openFromRoute()
+
+  // Version history (Phase 25). One modal serves every type that keeps history.
+  let historyShow = false
+  let historyType = 'memory_rule'
+  let historyId = ''
+  let historyName = ''
+
+  function openHistory(item: any, type: string = 'memory_rule') {
+    historyType = type
+    historyId = item.id
+    historyName = item.name || ''
+    historyShow = true
+  }
 </script>
 
 <div class="page-header">
@@ -259,6 +273,7 @@
               <button onclick={() => editingId = null} style="font-size: 12px;">Cancel</button>
             {:else}
               <button onclick={() => startEdit(m)} style="font-size: 12px;">Edit</button>
+              <button onclick={() => openHistory(m)}>History</button>
               <button class="danger" onclick={() => handleDelete(m.id)} style="font-size: 12px;">Delete</button>
             {/if}
           </td>
@@ -476,6 +491,7 @@
             </td>
             <td>
               <button onclick={() => startEditScenarioRule(r)} style="font-size: 12px;">Edit</button>
+              <button onclick={() => openHistory(r, 'scenario_rule')}>History</button>
               <button class="danger" onclick={() => handleDeleteScenarioRule(r.id)} style="font-size: 12px;">Delete</button>
             </td>
           </tr>
@@ -494,3 +510,11 @@
     <p>This does NOT depend on zero-width characters or LLM cooperation for persistence — the database is the source of truth.</p>
   </div>
 </CollapsibleCard>
+
+<SnapshotHistoryModal
+  bind:show={historyShow}
+  resourceType={historyType}
+  resourceId={historyId}
+  resourceName={historyName}
+  onRestored={() => withScroll(load)}
+/>

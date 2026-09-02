@@ -60,6 +60,7 @@ class TestRegistryShape:
         content = {
             "cantrips", "lorebooks", "skills", "tags", "verification",
             "memories", "maps", "debug", "selfcheck", "docs", "navigation",
+            "snapshots",
         }
         configuration = {"endpoints", "settings", "packs", "diagnostics"}
         assert {k for k, g in GROUPS.items() if g.category == "content"} == content
@@ -124,6 +125,8 @@ class TestRiskRules:
             "replay_debug_run",
             "reset_debug_sandbox",
             "delete_memory",
+            # A POST, so no automatic rule covers it: it overwrites a live object.
+            "restore_snapshot_in_place",
         ],
     )
     def test_named_destructive_tools(self, name):

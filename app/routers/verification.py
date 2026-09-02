@@ -11,6 +11,7 @@ from app.dependencies import get_current_user
 from app.models.endpoint import Endpoint
 from app.models.user import User
 from app.models.verification import VerificationLog, VerificationRule
+from app.services import snapshots
 from app.services.admin import get_admin_settings
 from app.services.content_guard import check_size, sanitize_and_log
 from app.services.llm_params import ParameterDef, params_from_api, params_to_api
@@ -265,6 +266,8 @@ async def update_rule(
     if rule is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
 
+    await snapshots.capture(db, current_user.id, "verification_rule", rule_id)
+
     if req.tag is not None and req.tag != rule.tag:
         if not await _check_tag_unique(db, current_user.id, "verify", req.tag, rule_id):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tag already in use")
@@ -304,6 +307,8 @@ async def delete_rule(
     rule = result.scalar_one_or_none()
     if rule is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
+
+    await snapshots.capture(db, current_user.id, "verification_rule", rule_id)
     await db.delete(rule)
     await db.commit()
 

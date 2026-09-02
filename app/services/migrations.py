@@ -948,6 +948,77 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
         ALTER TABLE admin_settings ADD COLUMN max_assistant_tool_result_kb INTEGER DEFAULT 32 NOT NULL;
         """,
     ),
+    # Phase 25. Per-object version history.  resource_id carries no foreign key
+    # on purpose: the snapshot taken immediately before a delete is the one the
+    # user needs afterwards, so it has to outlive the row it describes.
+    # See app.models.resource_snapshot.ResourceSnapshot.
+    (
+        "051_create_resource_snapshots",
+        {
+            "sqlite": """
+            CREATE TABLE IF NOT EXISTS resource_snapshots (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                resource_type VARCHAR(32) DEFAULT '' NOT NULL,
+                resource_id VARCHAR(36) DEFAULT '' NOT NULL,
+                resource_name VARCHAR(128) DEFAULT '' NOT NULL,
+                content_hash VARCHAR(71) DEFAULT '' NOT NULL,
+                content_json TEXT DEFAULT '{}' NOT NULL,
+                source VARCHAR(16) DEFAULT 'pre_edit' NOT NULL,
+                label VARCHAR(128) DEFAULT '' NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS ix_resource_snapshots_user_id
+                ON resource_snapshots (user_id);
+            CREATE INDEX IF NOT EXISTS ix_resource_snapshots_resource_id
+                ON resource_snapshots (resource_id);
+            """,
+            "postgresql": """
+            CREATE TABLE IF NOT EXISTS resource_snapshots (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                resource_type VARCHAR(32) DEFAULT '' NOT NULL,
+                resource_id VARCHAR(36) DEFAULT '' NOT NULL,
+                resource_name VARCHAR(128) DEFAULT '' NOT NULL,
+                content_hash VARCHAR(71) DEFAULT '' NOT NULL,
+                content_json TEXT DEFAULT '{}' NOT NULL,
+                source VARCHAR(16) DEFAULT 'pre_edit' NOT NULL,
+                label VARCHAR(128) DEFAULT '' NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS ix_resource_snapshots_user_id
+                ON resource_snapshots (user_id);
+            CREATE INDEX IF NOT EXISTS ix_resource_snapshots_resource_id
+                ON resource_snapshots (resource_id);
+            """,
+            "mysql": """
+            CREATE TABLE IF NOT EXISTS resource_snapshots (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL,
+                resource_type VARCHAR(32) DEFAULT '' NOT NULL,
+                resource_id VARCHAR(36) DEFAULT '' NOT NULL,
+                resource_name VARCHAR(128) DEFAULT '' NOT NULL,
+                content_hash VARCHAR(71) DEFAULT '' NOT NULL,
+                content_json TEXT NOT NULL,
+                source VARCHAR(16) DEFAULT 'pre_edit' NOT NULL,
+                label VARCHAR(128) DEFAULT '' NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            CREATE INDEX ix_resource_snapshots_user_id ON resource_snapshots (user_id);
+            CREATE INDEX ix_resource_snapshots_resource_id ON resource_snapshots (resource_id);
+            """,
+        },
+    ),
+    # Phase 25. How many snapshots one object keeps before the oldest pre_edit
+    # ones are pruned.  Manual snapshots are never pruned, so this is a floor on
+    # automatic history, not a hard ceiling on the table.
+    (
+        "052_snapshot_caps",
+        """
+        ALTER TABLE admin_settings ADD COLUMN max_snapshots_per_object INTEGER DEFAULT 20 NOT NULL;
+        """,
+    ),
 ]
 
 

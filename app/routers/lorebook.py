@@ -13,6 +13,7 @@ from app.dependencies import get_current_user
 from app.models.lorebook import Lorebook
 from app.models.lorebook_entry import LorebookEntry
 from app.models.user import User
+from app.services import snapshots
 from app.services.admin import get_admin_settings
 from app.services.content_guard import log_scan_findings, sanitize_and_log
 from app.services.safety_scanner import scan_lorebook
@@ -343,6 +344,8 @@ async def update_lorebook(
     if lorebook is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lorebook not found")
 
+    await snapshots.capture(db, current_user.id, "lorebook", lorebook_id)
+
     if req.name is not None:
         lorebook.name = req.name
     if req.description is not None:
@@ -404,6 +407,8 @@ async def delete_lorebook(
     lorebook = result.scalar_one_or_none()
     if lorebook is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lorebook not found")
+
+    await snapshots.capture(db, current_user.id, "lorebook", lorebook_id)
     await db.delete(lorebook)
     await db.commit()
 
@@ -456,6 +461,8 @@ async def update_entry(
     if entry is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entry not found")
 
+    await snapshots.capture(db, current_user.id, "lorebook", lorebook_id)
+
     req.content = await sanitize_and_log(db, current_user.id, req.content, "lorebook_entry", entry_id)
     await _enforce_lorebook_size(db, lorebook_id, len(req.content), exclude_entry_id=entry_id)
 
@@ -489,6 +496,8 @@ async def delete_entry(
     entry = result.scalar_one_or_none()
     if entry is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entry not found")
+
+    await snapshots.capture(db, current_user.id, "lorebook", lorebook_id)
 
     await db.delete(entry)
     await db.commit()

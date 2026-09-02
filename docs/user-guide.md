@@ -44,6 +44,7 @@ GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:
 17. [Model Parameters](#17-model-parameters)
 18. [Debug and Comparing Runs](#18-debug-and-comparing-runs)
 19. [The Activation Hierarchy](#19-the-activation-hierarchy)
+20. [Snapshots and Restore](#snapshots)
 
 ---
 
@@ -1675,3 +1676,64 @@ A **tag group** activates several resources at once — see
 
 `<#gitv-...#>` command tags control the pipeline for one request rather than
 activating a resource. They are covered in [Command Tags](#command-tags).
+
+---
+
+<a id="snapshots"></a>
+
+## 20. Snapshots and Restore
+
+*Screenshots pending (2026-09-02) — this section shipped with the feature, before a capture pass.*
+
+Every time you change or delete a cantrip, lorebook, skill, sample, verification rule, memory
+rule or scenario rule, GitInTheVan stores the version you had immediately before. You do not
+have to remember to do anything: the history is there when you need it.
+
+Open it with the **History** button on the object's card or row. The panel lists every stored
+version newest first, and selecting one shows exactly what changed between it and what you have
+now.
+
+### What is captured
+
+| Source | When |
+|---|---|
+| **Automatic** | Immediately before every update and every delete, including changes made for you by the [Assistant](#assistant). |
+| **Saved** | When you press **Save a version** and give it a name. |
+
+A version is stored only when something actually changed — pressing Update three times without
+editing anything stores one version, not three. Automatic versions are trimmed to the limit an
+admin sets (**Max snapshots per object**, default 20, on the Admin page). Versions you saved by
+name are never trimmed.
+
+Maps are not covered yet. Neither are forbidden words or tag groups.
+
+### Restoring
+
+Two ways, and the difference matters.
+
+**Restore as a copy** creates a new object from the stored version and leaves what you have
+alone. This is the safe one, and it is the only option for an object you deleted — the history
+survives the delete, so a cantrip removed by mistake can be brought back. The copy's tag is
+always cleared, because a tag activates exactly one resource and two objects cannot share one;
+the copy arrives inactive as far as tags are concerned, and you can give it the tag yourself
+once you are happy with it.
+
+**Restore over this object** replaces the current content with the stored version. Before it
+does, it stores what it is about to replace — so if you restore the wrong version, the version
+you were on is now the newest entry in the list and you can go straight back.
+
+If the stored version's tag has since been given to a different object, the restore keeps the
+tag you have now and tells you it did. Everything else is restored.
+
+### What a restore checks
+
+A restore is a content write like any other, so it goes through the same checks as typing the
+content in yourself: the size limits an admin has set, and the safety scanner for cantrip code
+and lorebook entries. A version stored months ago is not trusted just because this install
+wrote it — if the limits have tightened since, the restore is refused and tells you why.
+
+### From the Assistant
+
+The assistant can list versions, save one, and restore one, under the **Snapshots** group on the
+[Assistant Security](#assistant) page. Restoring over an object is treated as a destructive
+action, so under Normal it asks first and shows you the difference.

@@ -10,6 +10,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.cantrip import Cantrip
 from app.models.user import User
+from app.services import snapshots
 from app.services.admin import get_admin_settings
 from app.services.cantrip import test_cantrip
 from app.services.cantrip_context import build_context
@@ -309,6 +310,8 @@ async def update_cantrip(
     if cantrip is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cantrip not found")
 
+    await snapshots.capture(db, current_user.id, "cantrip", cantrip_id)
+
     if req.tag is not None and req.tag != cantrip.tag:
         existing = await db.execute(
             text("SELECT id FROM cantrips WHERE tag = :tag AND user_id = :uid AND id != :cid"),
@@ -341,6 +344,8 @@ async def delete_cantrip(
     cantrip = result.scalar_one_or_none()
     if cantrip is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cantrip not found")
+
+    await snapshots.capture(db, current_user.id, "cantrip", cantrip_id)
     await db.delete(cantrip)
     await db.commit()
 

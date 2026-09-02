@@ -11,6 +11,7 @@ from app.dependencies import get_current_user
 from app.models.endpoint import Endpoint
 from app.models.skill import EndpointSkill, Skill
 from app.models.user import User
+from app.services import snapshots
 from app.services.admin import get_admin_settings
 from app.services.content_guard import check_size, sanitize_and_log
 
@@ -151,6 +152,8 @@ async def update_skill(
     if skill is None:
         raise HTTPException(status_code=404, detail="Skill not found")
 
+    await snapshots.capture(db, current_user.id, "skill", skill_id)
+
     if req.name is not None:
         skill.name = req.name
     if req.description is not None:
@@ -185,6 +188,8 @@ async def delete_skill(
     skill = result.scalar_one_or_none()
     if skill is None:
         raise HTTPException(status_code=404, detail="Skill not found")
+
+    await snapshots.capture(db, current_user.id, "skill", skill_id)
 
     await db.delete(skill)
     await db.commit()

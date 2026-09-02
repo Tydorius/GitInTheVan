@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from '../api'
+  import SnapshotHistoryModal from '../lib/SnapshotHistoryModal.svelte'
   import { onMount } from 'svelte'
   import { routeParams } from '../stores'
   import CodeEditor from '../lib/CodeEditor.svelte'
@@ -114,6 +115,19 @@
   $: if ($routeParams.params.tab === 'skill' || $routeParams.params.tab === 'sample') {
     tab = $routeParams.params.tab
   }
+
+  // Version history (Phase 25). One modal serves every type that keeps history.
+  let historyShow = false
+  let historyType = 'skill'
+  let historyId = ''
+  let historyName = ''
+
+  function openHistory(item: any, type: string = 'skill') {
+    historyType = type
+    historyId = item.id
+    historyName = item.name || ''
+    historyShow = true
+  }
 </script>
 
 <div class="page-header">
@@ -167,6 +181,7 @@
             </td>
             <td style="white-space: nowrap;">
               <button onclick={() => startEdit(s)} style="font-size: 12px;">Edit</button>
+              <button onclick={() => openHistory(s, s.type === 'sample' ? 'sample' : 'skill')} style="font-size: 12px;">History</button>
               <button class="danger" onclick={() => handleDelete(s)} style="font-size: 12px; margin-left: 4px;">Delete</button>
             </td>
           </tr>
@@ -235,3 +250,11 @@
     </div>
   </div>
 {/if}
+
+<SnapshotHistoryModal
+  bind:show={historyShow}
+  resourceType={historyType}
+  resourceId={historyId}
+  resourceName={historyName}
+  onRestored={() => withScroll(load)}
+/>

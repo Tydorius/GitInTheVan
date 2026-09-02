@@ -338,6 +338,81 @@ class TestAssistantConversationsUpgradePath:
             assert fetched.saved is False
 
 
+class TestResourceSnapshotsUpgradePath:
+    """`resource_snapshots` (051) is a new table, so the pre-upgrade state is
+    produced by dropping what `create_all` built -- the same technique
+    `TestAssistantConversationsUpgradePath` uses for 049."""
+
+    async def test_table_is_absent_before_migrating(self, fresh_sqlite_engine):
+        """Vacuity check: prove the fixture reproduces a pre-025 install."""
+        async with fresh_sqlite_engine.begin() as conn:
+            await conn.execute(text("DROP TABLE resource_snapshots;"))
+            result = await conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table' "
+                     "AND name='resource_snapshots';")
+            )
+            assert result.fetchone() is None
+
+    async def test_table_arrives_and_is_usable_through_the_orm(self, fresh_sqlite_engine):
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+
+        from app.models.resource_snapshot import ResourceSnapshot
+        from app.models.user import User
+
+        async with fresh_sqlite_engine.begin() as conn:
+            await conn.execute(text("DROP TABLE resource_snapshots;"))
+
+        await run_migrations(fresh_sqlite_engine)
+
+        async with fresh_sqlite_engine.begin() as conn:
+            result = await conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table' "
+                     "AND name='resource_snapshots';")
+            )
+            assert result.fetchone() is not None, (
+                "resource_snapshots is missing after migration 051"
+            )
+
+        session_factory = async_sessionmaker(fresh_sqlite_engine, expire_on_commit=False)
+        async with session_factory() as db:
+            user = User(username="u-snapshots", password_hash="x", gitv_api_key="k")
+            db.add(user)
+            await db.flush()
+            snapshot = ResourceSnapshot(
+                user_id=user.id,
+                resource_type="cantrip",
+                resource_id="c-1",
+                resource_name="Dice Controller",
+                content_hash="sha256:abc",
+                content_json='{"code": "x"}',
+            )
+            db.add(snapshot)
+            await db.commit()
+
+            fetched = await db.get(ResourceSnapshot, snapshot.id)
+            assert fetched is not None
+            assert fetched.resource_name == "Dice Controller"
+            assert fetched.source == "pre_edit"
+            assert fetched.label == ""
+
+    async def test_the_snapshot_cap_arrives_on_admin_settings(self, fresh_sqlite_engine):
+        """052 is an ALTER on a table that predates the migration system, so the
+        pre-upgrade state is the column dropped rather than the table."""
+        async with fresh_sqlite_engine.begin() as conn:
+            await conn.execute(
+                text("ALTER TABLE admin_settings DROP COLUMN max_snapshots_per_object;")
+            )
+
+        await run_migrations(fresh_sqlite_engine)
+
+        async with fresh_sqlite_engine.begin() as conn:
+            result = await conn.execute(
+                text("SELECT max_snapshots_per_object FROM admin_settings LIMIT 1;")
+            )
+            row = result.fetchone()
+            assert row is None or row[0] == 20
+
+
 class TestMigrationCoverage:
     """Guard against the 0.18.0 skills.budget_weight class of bug.
 
@@ -410,7 +485,7 @@ class TestAdvisoryLock:
 
     async def test_migration_count(self):
         """Sanity check: verify we have the expected number of migrations."""
-        assert len(MIGRATIONS) == 50
+        assert len(MIGRATIONS) == 52
 
     async def test_all_migrations_have_unique_names(self):
         names = [name for name, _ in MIGRATIONS]

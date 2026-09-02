@@ -38,6 +38,7 @@ class AdminSettings(Base):
     max_assistant_tool_calls_per_turn: Mapped[int] = mapped_column(Integer, default=16, server_default="16", nullable=False)
     max_assistant_conversations: Mapped[int] = mapped_column(Integer, default=20, server_default="20", nullable=False)
     max_assistant_tool_result_kb: Mapped[int] = mapped_column(Integer, default=32, server_default="32", nullable=False)
+    max_snapshots_per_object: Mapped[int] = mapped_column(Integer, default=20, server_default="20", nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=text("CURRENT_TIMESTAMP"), nullable=False,
         onupdate=lambda: datetime.now(UTC),

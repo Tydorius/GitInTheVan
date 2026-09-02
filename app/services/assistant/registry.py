@@ -52,6 +52,7 @@ from app.routers.packs import (
 from app.routers.scenario_rules import ScenarioRuleCreate, ScenarioRuleUpdate
 from app.routers.settings import SettingsUpdate
 from app.routers.skills import AttachRequest, SkillCreate, SkillUpdate
+from app.routers.snapshots import RestoreAsNewRequest, SnapshotCreate
 from app.routers.summarization import SummarizationSettingsUpdate
 from app.routers.tag_groups import GroupCreate, GroupUpdate, MembersUpdate
 from app.routers.verification import (
@@ -178,6 +179,7 @@ _GROUP_LIST: list[Group] = [
     Group("debug", "Debug", "/debug/compare", "debug", "content"),
     Group("selfcheck", "Self-checks", "/", "dashboard", "content"),
     Group("docs", "Documentation", "/", "dashboard", "content"),
+    Group("snapshots", "Snapshots", "/cantrips", "snapshots", "content"),
     Group("navigation", "Navigation", "/", "dashboard", "content"),
     # --- configuration -----------------------------------------------------
     Group("endpoints", "Endpoints", "/endpoints", "endpoints", "configuration"),
@@ -1739,6 +1741,107 @@ _TOOL_LIST: list[Tool] = [
         doc=(
             "Removes the sandbox and its state permanently.\n"
             "Call list_debug_sandboxes first."
+        ),
+    ),
+    # ============================= snapshots ===============================
+    Tool(
+        name="list_snapshots",
+        group="snapshots",
+        risk=Risk.READ,
+        summary="List stored versions of an object.",
+        method="GET",
+        path="/api/snapshots",
+        query_params={
+            "resource_type": "cantrip, lorebook, skill, verification_rule, memory_rule or scenario_rule.",
+            "resource_id": "Restrict to one object's history.",
+        },
+        doc=(
+            "Every update and delete of a cantrip, lorebook, skill, verification "
+            "rule, memory rule or scenario rule stores the previous version "
+            "automatically, so this is where an undo comes from.\n"
+            "Rows survive the object being deleted, so this also answers "
+            "'can I get back the cantrip I removed?'.\n"
+            "Returns metadata only; call get_snapshot to see the content."
+        ),
+    ),
+    Tool(
+        name="get_snapshot",
+        group="snapshots",
+        risk=Risk.READ,
+        summary="Read one stored version, with its content.",
+        method="GET",
+        path="/api/snapshots/{snapshot_id}",
+        path_params={"snapshot_id": "Snapshot id."},
+        doc=(
+            "Returns exactly what a restore would write, so you can show the user "
+            "the difference before offering one.\n"
+            "Call list_snapshots for the id."
+        ),
+    ),
+    Tool(
+        name="create_snapshot",
+        group="snapshots",
+        risk=Risk.WRITE,
+        summary="Pin the object's current state as a named version.",
+        method="POST",
+        path="/api/snapshots",
+        args_model=SnapshotCreate,
+        doc=(
+            "Saves a version the user can come back to, labelled however they "
+            "describe it. Pinned versions are never pruned.\n"
+            "Worth offering before you make a large or experimental change on "
+            "the user's behalf.\n"
+            "Refuses with 409 if nothing has changed since the last stored version."
+        ),
+    ),
+    Tool(
+        name="restore_snapshot_as_new",
+        group="snapshots",
+        risk=Risk.WRITE,
+        summary="Recreate a stored version as a new object.",
+        method="POST",
+        path="/api/snapshots/{snapshot_id}/restore-as-new",
+        args_model=RestoreAsNewRequest,
+        path_params={"snapshot_id": "Snapshot id."},
+        doc=(
+            "The safe restore: the live object is untouched and a copy is created "
+            "beside it. Prefer this unless the user asks to overwrite.\n"
+            "The copy's tag is cleared, because a tag activates one resource and "
+            "has to stay unique. The response says so in notes.\n"
+            "Works for an object that has been deleted."
+        ),
+    ),
+    Tool(
+        name="restore_snapshot_in_place",
+        group="snapshots",
+        risk=Risk.DESTRUCTIVE,
+        summary="Overwrite the live object with a stored version.",
+        method="POST",
+        path="/api/snapshots/{snapshot_id}/restore-in-place",
+        path_params={"snapshot_id": "Snapshot id."},
+        current_reader=("GET", "/api/snapshots/{snapshot_id}"),
+        doc=(
+            "Replaces the object's current content with the stored version. The "
+            "version being replaced is snapshotted first, so this is itself "
+            "undoable.\n"
+            "Fails with 409 if the object no longer exists; use "
+            "restore_snapshot_as_new instead.\n"
+            "Read the notes in the response: a tag that now belongs to another "
+            "object is left alone rather than moved."
+        ),
+    ),
+    Tool(
+        name="delete_snapshot",
+        group="snapshots",
+        risk=Risk.DESTRUCTIVE,
+        summary="Delete one stored version permanently.",
+        method="DELETE",
+        path="/api/snapshots/{snapshot_id}",
+        path_params={"snapshot_id": "Snapshot id."},
+        doc=(
+            "Removes one version from the object's history. There is no undo for "
+            "this, and old versions are pruned automatically anyway.\n"
+            "Only call it when the user asks to remove a specific version."
         ),
     ),
     # =========================== diagnostics ===============================

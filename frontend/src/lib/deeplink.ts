@@ -67,6 +67,7 @@ const TYPE_ROUTES: Record<string, string> = {
   map_stage: '/maps',
   verification_rule: '/verification',
   memory_rule: '/memories',
+  scenario_rule: '/memories',
   endpoint: '/endpoints',
   debug_run: '/',
 }
