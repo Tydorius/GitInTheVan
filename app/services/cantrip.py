@@ -293,9 +293,15 @@ async def process_cantrips(
         budget_allocations = body_json.get("_gitv_budget_allocations")
 
         accumulated_memories: dict[str, str] = {}
-        accumulated_personality = ""
-        accumulated_scenario = ""
-        accumulated_example_dialogs = ""
+        # JanitorAI parity: the card fields are seeded with the request's real
+        # section values, each cantrip sees the previous cantrip's output, and
+        # the final value replaces the card's own section (never concatenated
+        # alongside it).
+        seeded_character = {
+            "personality": context["character"]["personality"],
+            "scenario": context["character"]["scenario"],
+            "example_dialogs": context["character"]["example_dialogs"],
+        }
 
         for cantrip in cantrips:
             if budget_allocations:
@@ -366,9 +372,9 @@ async def process_cantrips(
                 },
             )
 
-            accumulated_personality += result.personality
-            accumulated_scenario += result.scenario
-            accumulated_example_dialogs += result.example_dialogs
+            context["character"]["personality"] = result.personality
+            context["character"]["scenario"] = result.scenario
+            context["character"]["example_dialogs"] = result.example_dialogs
             accumulated_memories.update(result.memories)
 
             chat_data = result.chat_data
@@ -387,19 +393,29 @@ async def process_cantrips(
         await save_memories_for_chat(internal_chat_id, user_id, accumulated_memories)
         logger.info("Cantrip memory updates: %d keys for chat %s", len(accumulated_memories), internal_chat_id[:12])
 
-    if accumulated_personality or accumulated_scenario or accumulated_example_dialogs:
+    final_personality = context["character"]["personality"]
+    final_scenario = context["character"]["scenario"]
+    final_example_dialogs = context["character"]["example_dialogs"]
+
+    character_changed = (
+        final_personality != seeded_character["personality"]
+        or final_scenario != seeded_character["scenario"]
+        or final_example_dialogs != seeded_character["example_dialogs"]
+    )
+
+    if character_changed:
         body_json["messages"] = apply_cantrip_result_to_messages(
             messages,
-            accumulated_personality,
-            accumulated_scenario,
-            accumulated_example_dialogs,
+            final_personality,
+            final_scenario,
+            final_example_dialogs,
         )
         logger.info(
             "Cantrips processed: %d scripts, personality=%d chars, scenario=%d chars, dialogs=%d chars",
             len(cantrips),
-            len(accumulated_personality),
-            len(accumulated_scenario),
-            len(accumulated_example_dialogs),
+            len(final_personality),
+            len(final_scenario),
+            len(final_example_dialogs),
         )
 
     return body_json

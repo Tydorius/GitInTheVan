@@ -1043,3 +1043,151 @@ class TestProxyIntegration:
         forwarded = httpx_mock.get_request()
         forwarded_body = json.loads(forwarded.content)
         assert "SHOULD_NOT_APPEAR" not in json.dumps(forwarded_body["messages"])
+
+
+# ============================================================================
+# JanitorAI-shaped requests: seeded card fields and splice application
+# ============================================================================
+
+class TestJanitorAISeededExecution:
+    """Card fields on JanitorAI-shaped requests are seeded with the card's
+    real section values, and script output splices those sections in place
+    (replace semantics) instead of adding separate blocks."""
+
+    SYSTEM = (
+        "You are a roleplay engine.\n"
+        "<Aria's Persona>Aria is a quiet archivist.</Aria's Persona>\n"
+        "<Scenario>The library is closed for the night.</Scenario>\n"
+        "<UserPersona>A visitor.</UserPersona>\n"
+    )
+
+    def _messages(self):
+        return [
+            {"role": "system", "content": self.SYSTEM},
+            {"role": "user", "content": "I browse the shelves."},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_script_sees_original_card_values(self):
+        code = 'context.character.personality += " [" + context.character.name + "]";'
+        result = await run_cantrip(code, build_context(self._messages()))
+        assert result.error is None
+        assert result.personality == "Aria is a quiet archivist. [Aria]"
+
+    @pytest.mark.asyncio
+    async def test_replace_removes_original_from_prompt(self):
+        code = 'context.character.personality = "Completely rewritten.";'
+        messages = self._messages()
+        result = await run_cantrip(code, build_context(messages))
+        assert result.personality == "Completely rewritten."
+        applied = apply_cantrip_result_to_messages(
+            messages,
+            result.personality,
+            "The library is closed for the night.",  # scenario untouched
+            "",
+        )
+        system = applied[0]["content"]
+        assert "Completely rewritten." in system
+        assert "quiet archivist" not in system
+        assert "[Personality]" not in system
+
+
+class TestProxyIntegrationJanitorSeeded:
+    """End-to-end over the proxy: a JanitorAI-shaped request gets seeded card
+    fields, chained cantrips, and splice application."""
+
+    MOCK_ENDPOINT_URL = "http://mock-backend:9998"
+
+    SYSTEM = (
+        "You are a roleplay engine.\n"
+        "<Aria's Persona>Aria is a quiet archivist.</Aria's Persona>\n"
+        "<Scenario>The library is closed for the night.</Scenario>\n"
+        "<UserPersona>A visitor.</UserPersona>\n"
+    )
+
+    @pytest.fixture(autouse=True)
+    def set_endpoint(self, monkeypatch):
+        from app.config import Settings
+        test_settings = Settings(
+            default_endpoint_url=self.MOCK_ENDPOINT_URL,
+            default_endpoint_api_key="sk-test-key",
+            default_endpoint_model="test-model",
+        )
+        monkeypatch.setattr("app.services.proxy.settings", test_settings)
+
+    @pytest.mark.asyncio
+    async def test_chained_cantrips_splice_into_card_sections(
+        self, admin_client, httpx_mock
+    ):
+        client, _, api_key = admin_client
+
+        ep_resp = await client.post("/api/endpoints", json={
+            "name": "TestEndpoint",
+            "base_url": self.MOCK_ENDPOINT_URL,
+            "api_key": "upstream-key",
+            "enabled": True,
+        })
+        assert ep_resp.status_code == 201
+        await client.put("/api/settings", json={
+            "default_endpoint_id": ep_resp.json()["id"],
+        })
+
+        # The first cantrip appends to the seeded personality; the second
+        # reads that output (chaining) and replaces the scenario wholesale.
+        await client.post("/api/cantrips", json={
+            "name": "Append",
+            "code": 'context.character.personality += " Also nocturnal.";',
+            "is_active": True,
+            "execution_order": 1,
+        })
+        await client.post("/api/cantrips", json={
+            "name": "Replace",
+            "code": (
+                'if (context.character.personality.includes("Also nocturnal.")) {\n'
+                '    context.character.scenario = "The storm has arrived.";\n'
+                '}'
+            ),
+            "is_active": True,
+            "execution_order": 2,
+        })
+
+        httpx_mock.add_response(
+            url=f"{self.MOCK_ENDPOINT_URL}/v1/chat/completions",
+            json={
+                "id": "test",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "test-model",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            },
+            status_code=200,
+        )
+
+        response = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [
+                    {"role": "system", "content": self.SYSTEM},
+                    {"role": "user", "content": "Tydorius: I browse the shelves."},
+                ],
+            },
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert response.status_code == 200
+
+        forwarded = httpx_mock.get_request()
+        messages = json.loads(forwarded.content)["messages"]
+        system = messages[0]["content"]
+        # Append spliced into the card's own section, exactly once:
+        assert system.count("Aria is a quiet archivist.") == 1
+        assert "Also nocturnal." in system
+        # The second cantrip saw the first's output and replaced the scenario:
+        assert "The storm has arrived." in system
+        assert "closed for the night" not in system
+        # No inject blocks alongside the card sections, and splicing edits the
+        # system message in place rather than adding messages.
+        assert "[Personality]" not in system
+        assert "[Scenario]" not in system
+        assert len(messages) == 2

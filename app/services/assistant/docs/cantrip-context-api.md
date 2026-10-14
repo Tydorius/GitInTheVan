@@ -12,16 +12,20 @@ context.chat.conversation_id    - conversation identifier
 context.chat.user_name          - the user's name
 context.chat.message_created_at - timestamp
 
-context.character.name                - read-only
-context.character.personality         - mutable, appendable
-context.character.scenario            - mutable, appendable
-context.character.example_dialogs     - mutable, appendable
+context.character.name                - derived from the request when present
+context.character.personality         - mutable (append or replace)
+context.character.scenario            - mutable (append or replace)
+context.character.example_dialogs     - mutable (append or replace)
 context.character.description         - character description
 context.character.first_message       - first message
 context.character.alternate_greetings - alternate greetings
 ```
 
-Cantrips modify `context.character.personality`/`.scenario`/`.example_dialogs` by appending text; the runner returns their final values and the caller injects them.
+On JanitorAI-shaped requests (the system message carries the card's tagged sections — `<Char's Persona>`, `<Scenario>`, `<example_dialogs>`), the three mutable fields are **seeded with the card's real values** and `character.name` is derived from the persona marker. The runner returns each field's final value and the caller splices it back into the card's own section, so assignment (`=`) replaces the card text and `+=` appends to it — JanitorAI semantics. Multiple cantrips run sequentially: each sees the previous cantrip's field output, and the final value wins.
+
+Requests without those sections (non-JanitorAI clients) keep the historical behavior: fields start empty and cantrip output is injected as separate `[Personality]`/`[Scenario]`/`[Example Dialogs]` system-message blocks alongside the untouched original prompt.
+
+Not recoverable from a proxied request: `description` (JanitorAI never sends it to the LLM), `first_message` and `alternate_greetings` (they exist as greeting messages, not card sections). These stay empty in live runs; the Cantrip Tester's explicit inputs still populate them.
 
 ## GitInTheVan extensions
 

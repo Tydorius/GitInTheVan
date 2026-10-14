@@ -2,6 +2,61 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.27.0] - 2026-10-13
+
+Cantrips can finally do what JanitorAI scripts do: read the character card's
+real fields and replace them. Until now the three mutable fields were always
+seeded empty and cantrip output was injected as extra blocks alongside the
+untouched card text, so a script that *replaces* a card's personality,
+scenario or example dialogs left the original in place — the model saw both,
+contradicting itself.
+
+### Changed
+
+- **Card fields are seeded with the card's real values on JanitorAI-shaped
+  requests.** JanitorAI flattens the card into tagged sections at the tail of
+  the system message — `<Char's Persona>`, `<Scenario>`, `<example_dialogs>`
+  (verified against wire captures; a legacy variant with inner
+  `<Start Personality>`-style markers is tolerated). The three mutable fields
+  and `character.name` now start from those values, so `+=` appends to the
+  real card text and scripts can branch on what the card actually says.
+- **Cantrip output splices into the card's own sections (replace semantics).**
+  Assignment (`=`) replaces the section body in place, clearing a field
+  removes the section (JanitorAI omits empty sections), and setting a field
+  the card left empty inserts the section at its canonical position. No extra
+  blocks are added alongside the card on such requests.
+- **Cantrips now chain.** Each cantrip sees the previous cantrip's field
+  output, and the final value is what reaches the LLM — matching JanitorAI's
+  sequential script execution. Previously each cantrip's output was
+  concatenated independently, which under replace semantics would duplicate
+  the card text.
+- The Driver-Callable `[TOOL RESULT]` fallback only uses `scenario`/
+  `personality` values the script actually changed, so a seeded (untouched)
+  card field can no longer leak into a tool result.
+
+### Compatibility notes
+
+- Requests **without** card sections (SillyTavern, OpenWebUI, or any
+  non-JanitorAI client) keep the previous behavior exactly: fields start
+  empty and output is injected as separate `[Personality]`/`[Scenario]`/
+  `[Example Dialogs]` system-message blocks.
+- If JanitorAI changes its flatten format again, parsing fails safe to that
+  same inject-block behavior — never a corrupted prompt. The marker
+  definitions live in one place (`app/services/cantrip_context.py`) so a
+  format change is a one-line update.
+- `description`, `first_message` and `alternate_greetings` remain unseeded in
+  live runs: JanitorAI provably never sends the description to the LLM at
+  all, and greetings exist as messages, not card sections.
+- Cantrips run both in JanitorAI (client-side) and in GitInTheVan will apply
+  their effect twice; disable one side.
+
+### Added
+
+- `parse_character_sections()` and splice application in
+  `app/services/cantrip_context.py`; pure-Python coverage in
+  `tests/test_cantrip_context.py` plus Deno end-to-end tests for seeding,
+  replace and chaining in `tests/test_cantrips.py`.
+
 ## [0.26.0] - 2026-09-02
 
 A way back. Every change to a cantrip, lorebook, skill, sample, verification

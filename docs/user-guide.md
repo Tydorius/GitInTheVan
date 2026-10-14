@@ -424,8 +424,8 @@ The test panel lets you run a cantrip against sample context without forwarding 
 4. Click **Run Test**
 
 The results show:
-- **Scenario Output**: Text injected into the scenario context
-- **Personality Output**: Text injected into the personality context
+- **Scenario Output**: The final value of `context.character.scenario` (seeded from the test messages' card sections when present)
+- **Personality Output**: The final value of `context.character.personality`
 - **Debug Logs**: Output from `console.log()` calls in the cantrip
 - **Chat Data Result**: The final state of `context.chat_data` after execution
 
@@ -450,9 +450,24 @@ Cantrips have access to the JanitorAI context object:
 const lastMessage = context.chat.last_message;
 const messageCount = context.chat.message_count;
 
+// Append to the card's fields...
 context.character.scenario += " Additional world context.";
 context.character.personality += ", additional trait";
+
+// ...or replace them wholesale, exactly like on JanitorAI
+context.character.scenario = "The storm has arrived.";
 ```
+
+**How character fields behave.** On requests from JanitorAI, the system prompt carries the character card in tagged sections (`<Char's Persona>`, `<Scenario>`, `<example_dialogs>`). GitInTheVan seeds the three mutable fields with the card's **real values** — your cantrip reads the actual personality/scenario/example dialogs, and its final value is spliced back into the card's own section:
+
+- `context.character.scenario += " text"` appends to the card's scenario
+- `context.character.scenario = " text"` **replaces** it (the original is removed)
+- Setting a field to `""` removes the section from the prompt entirely
+- `context.character.name` is filled in from the card
+
+Multiple cantrips run in order, and each one sees the previous cantrip's output; the final value is what reaches the LLM — the same way JanitorAI runs scripts.
+
+Requests from **other clients** (whose prompts have no card sections) keep the classic behavior: the fields start empty and cantrip output is injected as separate system-message blocks after the original prompt.
 
 GitInTheVan extensions — persistent storage, memory, budget, response modification, and tool calls:
 

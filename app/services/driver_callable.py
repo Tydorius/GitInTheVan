@@ -184,6 +184,18 @@ async def execute_tool_call(
     context = build_context(messages, **params)
     context["tool_call"] = {"name": call.name, "args": call.args}
     context["tool_result"] = ""
+    # Card fields are seeded with the request's real section values, so only a
+    # value the script actually changed counts as tool output; an untouched
+    # card scenario must not leak into the tool result block.
+    seeded_scenario = context["character"]["scenario"]
+    seeded_personality = context["character"]["personality"]
+
+    def _changed_output(seeded: str, final: str) -> str:
+        if final == seeded:
+            return ""
+        if seeded and final.startswith(seeded):
+            return final[len(seeded):]
+        return final
 
     async with async_session() as db:
         chat_data = await _load_chat_data(db, user_id, params["conversation_id"])
@@ -216,11 +228,11 @@ async def execute_tool_call(
     tool_result = ""
     if hasattr(result, "tool_result") and result.tool_result:
         tool_result = result.tool_result
-    elif result.scenario:
-        tool_result = result.scenario
-    elif result.personality:
-        tool_result = result.personality
     else:
+        tool_result = _changed_output(seeded_scenario, result.scenario) or _changed_output(
+            seeded_personality, result.personality
+        )
+    if not tool_result:
         tool_result = "Tool completed (no output)"
 
     return tool_result.strip()
