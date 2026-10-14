@@ -645,10 +645,21 @@ const lastMessage = context.chat.last_message;
 const messageCount = context.chat.message_count;
 const charName = context.character.name;
 
-// Modify character context (append-only recommended)
+// Append to the card's fields...
 context.character.scenario += " Additional world context.";
 context.character.personality += ", additional trait";
+
+// ...or replace them wholesale, exactly like on JanitorAI
+context.character.scenario = "The storm has arrived.";
 ```
+
+On JanitorAI-shaped requests the three mutable fields are seeded with the
+card's real values (parsed from the `<Char's Persona>`/`<Scenario>`/
+`<example_dialogs>` sections of the system prompt), and a cantrip's final
+value is spliced back into the card's own section — assignment replaces the
+card text, `+=` appends to it, and clearing the field removes the section.
+Requests from other clients keep the fallback behavior: fields start empty
+and output is injected as separate system-message blocks.
 
 ### GitInTheVan Extensions
 

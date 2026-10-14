@@ -410,8 +410,8 @@ verification judge and the verification retry.</p>
 <li>Click <strong>Run Test</strong></li>
 </ol>
 <p>The results show:
-- <strong>Scenario Output</strong>: Text injected into the scenario context
-- <strong>Personality Output</strong>: Text injected into the personality context
+- <strong>Scenario Output</strong>: The final value of <code>context.character.scenario</code> (seeded from the test messages' card sections when present)
+- <strong>Personality Output</strong>: The final value of <code>context.character.personality</code>
 - <strong>Debug Logs</strong>: Output from <code>console.log()</code> calls in the cantrip
 - <strong>Chat Data Result</strong>: The final state of <code>context.chat_data</code> after execution</p>
 <h3 id="addingediting-a-cantrip">Adding/Editing a Cantrip</h3>
@@ -432,9 +432,22 @@ verification judge and the verification retry.</p>
 <pre><code class="language-javascript">const lastMessage = context.chat.last_message;
 const messageCount = context.chat.message_count;
 
+// Append to the card's fields...
 context.character.scenario += &quot; Additional world context.&quot;;
 context.character.personality += &quot;, additional trait&quot;;
+
+// ...or replace them wholesale, exactly like on JanitorAI
+context.character.scenario = &quot;The storm has arrived.&quot;;
 </code></pre>
+<p><strong>How character fields behave.</strong> On requests from JanitorAI, the system prompt carries the character card in tagged sections (<code>&lt;Char's Persona&gt;</code>, <code>&lt;Scenario&gt;</code>, <code>&lt;example_dialogs&gt;</code>). GitInTheVan seeds the three mutable fields with the card's <strong>real values</strong> — your cantrip reads the actual personality/scenario/example dialogs, and its final value is spliced back into the card's own section:</p>
+<ul>
+<li><code>context.character.scenario += " text"</code> appends to the card's scenario</li>
+<li><code>context.character.scenario = " text"</code> <strong>replaces</strong> it (the original is removed)</li>
+<li>Setting a field to <code>""</code> removes the section from the prompt entirely</li>
+<li><code>context.character.name</code> is filled in from the card</li>
+</ul>
+<p>Multiple cantrips run in order, and each one sees the previous cantrip's output; the final value is what reaches the LLM — the same way JanitorAI runs scripts.</p>
+<p>Requests from <strong>other clients</strong> (whose prompts have no card sections) keep the classic behavior: the fields start empty and cantrip output is injected as separate system-message blocks after the original prompt.</p>
 <p>GitInTheVan extensions — persistent storage, memory, budget, response modification, and tool calls:</p>
 <pre><code class="language-javascript">// Per-chat persistent state (survives across cycles)
 const day = context.chat_data.get('day') || 1;
