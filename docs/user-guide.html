@@ -249,7 +249,8 @@ below covers the timeline only.</p>
 <p><img alt="Endpoints List" src="media/gitv-endpoints.png"></p>
 <p>The Endpoints page manages your LLM backend connections. Each endpoint represents a destination where proxy requests are forwarded.</p>
 <h3 id="endpoint-list">Endpoint List</h3>
-<p>Each endpoint card shows the <strong>name</strong>, <strong>enabled/disabled status</strong>, <strong>base URL</strong>, <strong>API base path</strong>, a masked <strong>provider API key</strong>, the <strong>provider</strong> (or "Custom (passthrough)"), the <strong>content bypass method</strong>, and the endpoint's <strong>role tag and priority</strong>. <strong>Edit</strong> and <strong>Delete</strong> buttons are on each card, and <strong>Collapse All</strong> / <strong>Expand All</strong> fold the cards when you have many.</p>
+<p>Each endpoint card shows the <strong>name</strong>, <strong>enabled/disabled status</strong>, <strong>base URL</strong>, <strong>API base path</strong>, whether a <strong>provider API key is set</strong> (the key itself is never listed — the <strong>Reveal</strong> button fetches it on demand, and every reveal is written to the audit log), the <strong>provider</strong> (or "Custom (passthrough)"), the <strong>content bypass method</strong>, and the endpoint's <strong>role tag and priority</strong>. <strong>Edit</strong> and <strong>Delete</strong> buttons are on each card, and <strong>Collapse All</strong> / <strong>Expand All</strong> fold the cards when you have many.</p>
+<p>When editing an endpoint, leaving the key field blank keeps the current key.</p>
 <h3 id="adding-an-endpoint">Adding an Endpoint</h3>
 <p><img alt="Edit Endpoint, upper half" src="media/gitv-endpoints-edit-endpoint-1-top.png"></p>
 <p><img alt="Edit Endpoint, lower half" src="media/gitv-endpoints-edit-endpoint-2-bottom.png"></p>
@@ -569,7 +570,10 @@ if (!budget) {
 - <strong>Selective</strong>: Requires both a primary AND secondary keyword to match
 - <strong>Disabled</strong>: Temporarily disable this entry without deleting it</p>
 <h3 id="lorebook-pipeline-positions">Lorebook Pipeline Positions</h3>
-<p>Lorebooks support the same four pipeline positions as cantrips (Pre-Driver, Driver-Callable, Pre-Navigator, Post-Navigator). Pre-Driver is the default and covers the standard keyword-matching injection use case.</p>
+<p>Lorebooks inject at one point in the pipeline: <strong>Pre-Driver</strong>, before the request is forwarded.
+The four position toggles shown on some older installs (Pre-Driver, Driver-Callable,
+Pre-Navigator, Post-Navigator) were never wired up for lorebooks and have no effect; only
+cantrips run at the other positions.</p>
 <hr>
 <p><a id="skills"></a></p>
 <h2 id="7-skills-samples">7. Skills &amp; Samples</h2>
@@ -791,6 +795,12 @@ API it actually speaks.</p>
 <td>Driver-callable tools</td>
 <td>Disable tool access for this message</td>
 <td>Force tool access if tools are available</td>
+</tr>
+<tr>
+<td><code>MAP</code></td>
+<td>Map pipelines</td>
+<td>Run the standard single-stage pipeline for this message instead of any map</td>
+<td>Force map resolution if a map is available</td>
 </tr>
 </tbody>
 </table>
@@ -1524,7 +1534,9 @@ a replay that took a shortcut would stop being evidence.</p>
 <p><strong>Create sandbox copy</strong> forks a run into something you can iterate on. The fork
 copies the request <em>and</em> the conversation state it read — memories, chat data,
 summary — into a conversation of its own, so repeated runs accumulate there and
-the original thread is never touched.</p>
+the original thread is never touched. Cantrip stores scoped to you rather than
+the chat (<code>user_data</code>, <code>cantrip_data</code>) are read so the run sees real state, but
+a sandbox or replay never writes them.</p>
 <p>From a sandbox you can run it, edit the prompt, reset it to the state it was
 forked from, or delete it and its state entirely.</p>
 <p><strong>Nothing is sent back to the service the original request came from.</strong> A
@@ -1570,8 +1582,9 @@ unchanged.</p>
 <p>A <strong>tag group</strong> activates several resources at once — see
 <a href="#tags-and-groups">Tags and Groups</a>.</p>
 <h3 id="command-tags-are-separate">Command tags are separate</h3>
-<p><code>&lt;#gitv-...#&gt;</code> command tags control the pipeline for one request rather than
-activating a resource. They are covered in <a href="#command-tags">Command Tags</a>.</p>
+<p><code>&lt;COMMAND:setting&gt;</code> tags (e.g. <code>&lt;VERIFY:off&gt;</code>) control the pipeline for one
+request rather than activating a resource. They are covered in
+<a href="#command-tags">Command Tags</a>.</p>
 <hr>
 <p><a id="snapshots"></a></p>
 <h2 id="20-snapshots-and-restore">20. Snapshots and Restore</h2>
@@ -1624,6 +1637,9 @@ tag you have now and tells you it did. Everything else is restored.</p>
 content in yourself: the size limits an admin has set, and the safety scanner for cantrip code
 and lorebook entries. A version stored months ago is not trusted just because this install
 wrote it — if the limits have tightened since, the restore is refused and tells you why.</p>
+<p>If the scanner finds critical patterns in the stored version, the restore is refused until you
+confirm you want to proceed. The dialog lists exactly what was found; the same gate applies to
+saving cantrips, lorebook entries and importing maps.</p>
 <h3 id="from-the-assistant">From the Assistant</h3>
 <p>The assistant can list versions, save one, and restore one, under the <strong>Snapshots</strong> group on the
 <a href="#assistant">Assistant Security</a> page. Restoring over an object is treated as a destructive

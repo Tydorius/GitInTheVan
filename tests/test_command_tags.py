@@ -53,10 +53,22 @@ class TestParseCommandTags:
         assert parse_command_tags("Just regular text") == []
 
     def test_all_valid_commands(self):
-        for cmd in ["VERIFY", "SUMMARY", "FORBIDDEN", "MEMORY", "DRIVER"]:
+        for cmd in ["VERIFY", "SUMMARY", "FORBIDDEN", "MEMORY", "DRIVER", "MAP"]:
             parsed = parse_command_tags(f"<{cmd}:on>")
             assert len(parsed) == 1
             assert parsed[0].command == cmd
+
+    def test_map_off_parses_and_strips(self):
+        """<MAP:off> became reachable in Phase 27; before that the consumption
+        code in proxy.py existed but the grammar excluded the command."""
+        cmds = parse_command_tags("Continue <MAP:off>")
+        assert cmds == [ParsedCommand(command="MAP", setting="off", persist=False)]
+        assert strip_command_tags("Continue <MAP:off>") == "Continue "
+
+    def test_map_persist_parses(self):
+        cmds = parse_command_tags("<MAP:off:persist>")
+        assert cmds[0].command == "MAP"
+        assert cmds[0].persist is True
 
     def test_duplicate_one_off_first_wins(self):
         cmds = parse_command_tags("<VERIFY:off> <VERIFY:on>")

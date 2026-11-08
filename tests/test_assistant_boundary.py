@@ -124,13 +124,15 @@ class TestKeyNeverLeaves:
         assert listed.ok
         assert BOUNDARY_KEY not in str(listed.result)
         rows = listed.result["endpoints"]
-        assert rows[0]["api_key"] == "***"
+        # The route itself no longer carries the key (Phase 27); the projection
+        # must not fabricate an api_key field where the route sent none.
+        assert "api_key" not in rows[0]
         assert rows[0]["api_key_set"] is True
 
         single = await execute(ctx, TOOLS["get_endpoint"], {"endpoint_id": endpoint_id})
         assert single.ok
         assert BOUNDARY_KEY not in str(single.result)
-        assert single.result["api_key"] == "***"
+        assert "api_key" not in single.result
         assert single.result["api_key_set"] is True
 
     @pytest.mark.asyncio
@@ -168,12 +170,13 @@ class TestKeyNeverLeaves:
 
         unprojected = replace(TOOLS["list_endpoints"], name="probe_raw", project_result=None)
         raw = await execute(ctx, unprojected, {})
-        assert raw.result["endpoints"][0]["api_key"] != "***"
-        # Shape-based redaction still catches an `sk-` key even unprojected.
+        # The leak is gone at the source: without the projection there is no
+        # api_key field at all, rather than a real key the projection masks.
+        assert "api_key" not in raw.result["endpoints"][0]
         assert BOUNDARY_KEY not in str(raw.result)
 
         projected = await execute(ctx, TOOLS["list_endpoints"], {})
-        assert projected.result["endpoints"][0]["api_key"] == "***"
+        assert "api_key" not in projected.result["endpoints"][0]
 
     @pytest.mark.asyncio
     async def test_a_key_with_no_recognisable_shape_is_caught_by_the_projection(self, admin_client):

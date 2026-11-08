@@ -15,7 +15,7 @@ from app.models.lorebook_entry import LorebookEntry
 from app.models.user import User
 from app.services import snapshots
 from app.services.admin import get_admin_settings
-from app.services.content_guard import log_scan_findings, sanitize_and_log
+from app.services.content_guard import gate_scan_findings, log_scan_findings, sanitize_and_log
 from app.services.safety_scanner import scan_lorebook
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,9 @@ class EntryInput(BaseModel):
     is_selective: bool = False
     is_disabled: bool = False
     character_limit: int = 0
+    # Set by a client that has already shown the scanner findings to the user
+    # and been told to proceed anyway. Not a model column.
+    override_scan: bool = False
 
 
 class EntryResponse(BaseModel):
@@ -152,6 +155,7 @@ class RawImport(BaseModel):
     name: str | None = None
     description: str | None = None
     entries: Any = None
+    override_scan: bool = False
 
 
 def _entry_to_response(entry: LorebookEntry) -> EntryResponse:
@@ -431,7 +435,8 @@ async def add_entry(
     await _enforce_lorebook_size(db, lorebook_id, len(req.content))
 
     scan = scan_lorebook([{"name": req.name, "content": req.content}])
-    await log_scan_findings(db, current_user.id, scan, "lorebook_entry", lorebook_id)
+    await log_scan_findings(current_user.id, scan, "lorebook_entry", lorebook_id)
+    gate_scan_findings(scan, req.override_scan, "Lorebook entry")
 
     entry = LorebookEntry(lorebook_id=lorebook_id, **_entry_input_to_dict(req))
     db.add(entry)
@@ -467,7 +472,8 @@ async def update_entry(
     await _enforce_lorebook_size(db, lorebook_id, len(req.content), exclude_entry_id=entry_id)
 
     scan = scan_lorebook([{"name": req.name, "content": req.content}])
-    await log_scan_findings(db, current_user.id, scan, "lorebook_entry", entry_id)
+    await log_scan_findings(current_user.id, scan, "lorebook_entry", entry_id)
+    gate_scan_findings(scan, req.override_scan, "Lorebook entry")
 
     for key, value in _entry_input_to_dict(req).items():
         setattr(entry, key, value)
@@ -611,7 +617,8 @@ async def import_lorebook(
         )
 
     scan = scan_lorebook([{"name": e["name"], "content": e["content"]} for e in normalized])
-    await log_scan_findings(db, current_user.id, scan, "lorebook_import")
+    await log_scan_findings(current_user.id, scan, "lorebook_import")
+    gate_scan_findings(scan, req.override_scan, "Imported lorebook")
 
     lorebook = Lorebook(
         user_id=current_user.id,

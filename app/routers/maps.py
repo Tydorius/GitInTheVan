@@ -11,7 +11,15 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.map import Map, MapStage, MapStageResource
 from app.models.user import User
+from app.services.admin import get_admin_settings
+from app.services.content_guard import (
+    check_size,
+    gate_scan_findings,
+    log_scan_findings,
+    sanitize_and_log,
+)
 from app.services.llm_params import ParameterDef, params_from_api, params_to_api
+from app.services.safety_scanner import scan_map_report
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +193,61 @@ async def _check_tag_unique(db: AsyncSession, tag: str, user_id: str, exclude_id
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tag already in use")
 
 
+async def _guard_map_texts(
+    db: AsyncSession,
+    user_id: str,
+    req: MapCreate | MapUpdate,
+    stages: list[StageInput] | None,
+    map_id: str = "",
+) -> None:
+    """Sanitize every user-authored text field a map carries and size-check the
+    three instruction fields against the rule cap — the same checks every other
+    instruction-bearing type runs on write. Runs on create, update and import.
+
+    Fields are mutated in place on the request model, so the sanitized values
+    are what gets persisted. There is no scanner gate here: a map built in the
+    UI references its cantrips by id and carries no code; the scanner gate
+    belongs to import, where embedded resources arrive.
+    """
+    admin_settings = await get_admin_settings()
+    max_chars = admin_settings.max_rule_size_kb * 1024
+
+    if req.name:
+        req.name = await sanitize_and_log(db, user_id, req.name, "map", map_id)
+    if req.description:
+        req.description = await sanitize_and_log(db, user_id, req.description, "map", map_id)
+    global_instructions = getattr(req, "global_llm_instructions", None)
+    if global_instructions:
+        check_size(global_instructions, max_chars, "Map global instructions")
+        req.global_llm_instructions = await sanitize_and_log(
+            db, user_id, global_instructions, "map", map_id
+        )
+
+    for stage in stages or []:
+        if stage.name:
+            stage.name = await sanitize_and_log(db, user_id, stage.name, "map_stage", map_id)
+        if stage.description:
+            stage.description = await sanitize_and_log(
+                db, user_id, stage.description, "map_stage", map_id
+            )
+        if stage.system_instructions:
+            check_size(
+                stage.system_instructions, max_chars,
+                f"Stage '{stage.name}' system instructions",
+            )
+            stage.system_instructions = await sanitize_and_log(
+                db, user_id, stage.system_instructions, "map_stage", map_id
+            )
+        if stage.verification_instructions:
+            check_size(
+                stage.verification_instructions, max_chars,
+                f"Stage '{stage.name}' verification instructions",
+            )
+            stage.verification_instructions = await sanitize_and_log(
+                db, user_id, stage.verification_instructions, "map_stage", map_id
+            )
+
+
 def _build_stage(stage_input: StageInput, stage_order: int, map_id: str) -> MapStage:
     stage = MapStage(
         map_id=map_id,
@@ -269,6 +332,7 @@ async def create_map(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     await _check_tag_unique(db, req.tag, current_user.id)
+    await _guard_map_texts(db, current_user.id, req, req.stages)
     m = Map(
         user_id=current_user.id,
         name=req.name,
@@ -312,6 +376,8 @@ async def update_map(
     m = result.scalar_one_or_none()
     if m is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Map not found")
+
+    await _guard_map_texts(db, current_user.id, req, req.stages, map_id)
 
     if req.tag is not None and req.tag != m.tag:
         await _check_tag_unique(db, req.tag, current_user.id, map_id)
@@ -401,6 +467,7 @@ class MapImportRequest(BaseModel):
     description: str | None = None
     data: dict[str, Any]
     resource_mode: str = "smart"  # smart | keep_both | reuse | overwrite
+    override_scan: bool = False
 
 
 @router.post("/import", response_model=MapResponse, status_code=status.HTTP_201_CREATED)
@@ -421,7 +488,21 @@ async def import_map(
     Linked resources (a source with no embedded content) are resolved from a
     repo you have already linked. allow_fetch is off here: a hand-uploaded JSON
     file never causes a clone.
+
+    The export is decomposed and scanned object-by-object exactly like a pack
+    install; critical findings block the import unless override_scan is set.
     """
+    report = scan_map_report(req.data)
+    await log_scan_findings(current_user.id, report.aggregate, "map_import")
+    gate_scan_findings(report.aggregate, req.override_scan, "Imported map")
+
+    if req.name:
+        req.name = await sanitize_and_log(db, current_user.id, req.name, "map_import")
+    if req.description:
+        req.description = await sanitize_and_log(
+            db, current_user.id, req.description, "map_import"
+        )
+
     from app.services.map_transfer import build_map_from_export
 
     outcome = await build_map_from_export(

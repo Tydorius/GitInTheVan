@@ -13,6 +13,7 @@ import app.services.budget as _budget_module
 import app.services.bypass as _bypass_module
 import app.services.cantrip as _cantrip_module
 import app.services.command_tags as _command_tags_module
+import app.services.content_guard as _content_guard_module
 import app.services.conversation as _conversation_module
 import app.services.debug as _debug_module
 import app.services.debug_replay as _debug_replay_module
@@ -50,6 +51,7 @@ _SESSION_MODULES = [
     _bypass_module,
     _cantrip_module,
     _command_tags_module,
+    _content_guard_module,
     _conversation_module,
     _debug_module,
     _debug_replay_module,

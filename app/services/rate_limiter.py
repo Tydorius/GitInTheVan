@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import time
 from collections import defaultdict
@@ -50,6 +51,19 @@ def get_client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def _bucket_key(prefix: str, auth: str, ip: str) -> str:
+    """Bucket key for an authenticated request.
+
+    The whole credential is hashed: every HS256 JWT starts with the same
+    constant bytes, so truncating the raw token made the key identical for
+    every user and a shared-NAT IP collapsed them into one bucket.
+    """
+    if not auth:
+        return f"{prefix}:{ip}"
+    digest = hashlib.sha256(auth.encode()).hexdigest()[:20]
+    return f"{prefix}:{digest}"
+
+
 async def check_proxy_rate_limit(request: Request) -> None:
     from app.config import settings
 
@@ -58,8 +72,7 @@ async def check_proxy_rate_limit(request: Request) -> None:
 
     auth = request.headers.get("authorization", "")
     ip = get_client_ip(request)
-    key = f"proxy:{auth[:16]}:{ip}" if auth else f"proxy:{ip}"
-    proxy_limiter.check(key, settings.rate_limit_proxy_per_min)
+    proxy_limiter.check(_bucket_key("proxy", auth, ip), settings.rate_limit_proxy_per_min)
 
 
 async def check_api_rate_limit(request: Request) -> None:
@@ -70,5 +83,4 @@ async def check_api_rate_limit(request: Request) -> None:
 
     auth = request.headers.get("authorization", "")
     ip = get_client_ip(request)
-    key = f"api:{auth[:16]}:{ip}" if auth else f"api:{ip}"
-    api_limiter.check(key, settings.rate_limit_api_per_min)
+    api_limiter.check(_bucket_key("api", auth, ip), settings.rate_limit_api_per_min)

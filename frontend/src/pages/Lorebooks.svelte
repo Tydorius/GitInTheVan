@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api } from '../api'
+  import { api, withScanOverride } from '../api'
   import SnapshotHistoryModal from '../lib/SnapshotHistoryModal.svelte'
   import { onMount } from 'svelte'
   import { routeParams } from '../stores'
@@ -173,7 +173,7 @@
         entries = []
       }
       for (const e of entries) {
-        await api.addLorebookEntry(selectedLorebook.id, {
+        const fields = {
           name: e.name || '',
           keys: Array.isArray(e.keys) ? e.keys : [],
           secondary_keys: Array.isArray(e.secondary_keys) ? e.secondary_keys : [],
@@ -183,7 +183,10 @@
           is_constant: e.is_constant || false,
           is_selective: e.is_selective || false,
           is_disabled: e.is_disabled || false,
-        })
+        }
+        await withScanOverride((overrideScan: boolean) =>
+          api.addLorebookEntry(selectedLorebook.id, { ...fields, override_scan: overrideScan }),
+        )
       }
       jsonMode = false
       await openLorebook(selectedLorebook)
@@ -228,9 +231,16 @@
         is_disabled: entryForm.is_disabled,
       }
       if (editingEntryId) {
-        await api.updateLorebookEntry(selectedLorebook.id, editingEntryId, data)
+        await withScanOverride((overrideScan: boolean) =>
+          api.updateLorebookEntry(selectedLorebook.id, editingEntryId, {
+            ...data,
+            override_scan: overrideScan,
+          }),
+        )
       } else {
-        await api.addLorebookEntry(selectedLorebook.id, data)
+        await withScanOverride((overrideScan: boolean) =>
+          api.addLorebookEntry(selectedLorebook.id, { ...data, override_scan: overrideScan }),
+        )
       }
       showEntryForm = false
       resetEntryForm()
@@ -263,7 +273,9 @@
         description: Array.isArray(data) ? '' : (data.description || ''),
         entries,
       }
-      await api.importLorebook(payload)
+      await withScanOverride((overrideScan: boolean) =>
+        api.importLorebook({ ...payload, override_scan: overrideScan }),
+      )
       showImport = false
       importJson = ''
       importName = ''
