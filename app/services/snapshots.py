@@ -471,7 +471,7 @@ async def guard_content(
 
     if spec.scan_type:
         scan = scan_json_content(json.dumps(guarded, ensure_ascii=False), spec.scan_type)
-        await log_scan_findings(db, user_id, scan, spec.resource_type, "")
+        await log_scan_findings(user_id, scan, spec.resource_type, "")
         gate_scan_findings(scan, override, spec.label)
 
     return guarded

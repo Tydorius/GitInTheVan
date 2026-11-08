@@ -493,7 +493,7 @@ async def import_map(
     install; critical findings block the import unless override_scan is set.
     """
     report = scan_map_report(req.data)
-    await log_scan_findings(db, current_user.id, report.aggregate, "map_import")
+    await log_scan_findings(current_user.id, report.aggregate, "map_import")
     gate_scan_findings(report.aggregate, req.override_scan, "Imported map")
 
     if req.name:

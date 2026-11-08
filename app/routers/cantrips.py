@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api/cantrips", tags=["cantrips"])
 
 
 async def _check_and_scan_cantrip_code(
-    db: AsyncSession, user_id: str, code: str, cantrip_id: str = "",
+    user_id: str, code: str, cantrip_id: str = "",
     override: bool = False,
 ) -> None:
     """Cantrip code is executable JavaScript — unlike text content it's never run
@@ -37,7 +37,7 @@ async def _check_and_scan_cantrip_code(
     admin_settings = await get_admin_settings()
     check_size(code, admin_settings.max_script_size_kb * 1024, "Cantrip code")
     scan = scan_cantrip(code)
-    await log_scan_findings(db, user_id, scan, "cantrip", cantrip_id)
+    await log_scan_findings(user_id, scan, "cantrip", cantrip_id)
     gate_scan_findings(scan, override, "Cantrip code")
 
 
@@ -280,7 +280,7 @@ async def create_cantrip(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    await _check_and_scan_cantrip_code(db, current_user.id, req.code, override=req.override_scan)
+    await _check_and_scan_cantrip_code(current_user.id, req.code, override=req.override_scan)
 
     cantrip = Cantrip(
         user_id=current_user.id,
@@ -334,7 +334,7 @@ async def update_cantrip(
     update_data.pop("override_scan", None)
     if "code" in update_data and update_data["code"] is not None:
         await _check_and_scan_cantrip_code(
-            db, current_user.id, update_data["code"], cantrip_id, override=req.override_scan
+            current_user.id, update_data["code"], cantrip_id, override=req.override_scan
         )
 
     for key, value in update_data.items():

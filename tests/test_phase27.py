@@ -44,6 +44,35 @@ class TestScanGateCantrips:
         assert overridden.json()["code"] == EXFIL_CODE
 
     @pytest.mark.asyncio
+    async def test_blocked_update_is_still_audited_and_snapshots_nothing(self, admin_client):
+        """A refused write is the one case where the audit row is the only
+        record it ever happened — it must survive the 422 rollback, and the
+        pre_edit snapshot taken earlier in the same request must not (a refused
+        edit is not a version)."""
+        client, _, _ = admin_client
+        created = await client.post("/api/cantrips", json={
+            "name": "Audited", "code": "const a = 1;",
+        })
+        cid = created.json()["id"]
+
+        blocked = await client.put(f"/api/cantrips/{cid}", json={"code": EXFIL_CODE})
+        assert blocked.status_code == 422
+
+        audit = await client.get("/api/admin/audit")
+        assert audit.status_code == 200
+        entries = [
+            e for e in audit.json()["logs"]
+            if e["action"] == "content_safety_scan" and e["target_id"] == cid
+        ]
+        assert entries, "a scanner-blocked write must leave an audit trail"
+
+        snaps = await client.get(
+            "/api/snapshots", params={"resource_type": "cantrip", "resource_id": cid}
+        )
+        assert snaps.status_code == 200
+        assert snaps.json()["snapshots"] == []
+
+    @pytest.mark.asyncio
     async def test_override_scan_is_not_persisted_as_a_column(self, admin_client):
         """update_cantrip model_dumps the request; override_scan must be popped
         before setattr or every cantrip gains a phantom attribute."""
@@ -69,6 +98,14 @@ class TestScanGateLorebooks:
 
         listing = await client.get(f"/api/lorebooks/{lb_id}")
         assert listing.json()["entries"] == []
+
+        audit = await client.get("/api/admin/audit")
+        assert audit.status_code == 200
+        entries = [
+            e for e in audit.json()["logs"]
+            if e["action"] == "content_safety_scan" and e["target_type"] == "lorebook_entry"
+        ]
+        assert entries, "a scanner-blocked entry must leave an audit trail"
 
         ok = await client.post(f"/api/lorebooks/{lb_id}/entries", json={
             **SCRIPT_ENTRY, "override_scan": True,

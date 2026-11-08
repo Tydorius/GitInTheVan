@@ -435,7 +435,7 @@ async def add_entry(
     await _enforce_lorebook_size(db, lorebook_id, len(req.content))
 
     scan = scan_lorebook([{"name": req.name, "content": req.content}])
-    await log_scan_findings(db, current_user.id, scan, "lorebook_entry", lorebook_id)
+    await log_scan_findings(current_user.id, scan, "lorebook_entry", lorebook_id)
     gate_scan_findings(scan, req.override_scan, "Lorebook entry")
 
     entry = LorebookEntry(lorebook_id=lorebook_id, **_entry_input_to_dict(req))
@@ -472,7 +472,7 @@ async def update_entry(
     await _enforce_lorebook_size(db, lorebook_id, len(req.content), exclude_entry_id=entry_id)
 
     scan = scan_lorebook([{"name": req.name, "content": req.content}])
-    await log_scan_findings(db, current_user.id, scan, "lorebook_entry", entry_id)
+    await log_scan_findings(current_user.id, scan, "lorebook_entry", entry_id)
     gate_scan_findings(scan, req.override_scan, "Lorebook entry")
 
     for key, value in _entry_input_to_dict(req).items():
@@ -617,7 +617,7 @@ async def import_lorebook(
         )
 
     scan = scan_lorebook([{"name": e["name"], "content": e["content"]} for e in normalized])
-    await log_scan_findings(db, current_user.id, scan, "lorebook_import")
+    await log_scan_findings(current_user.id, scan, "lorebook_import")
     gate_scan_findings(scan, req.override_scan, "Imported lorebook")
 
     lorebook = Lorebook(
