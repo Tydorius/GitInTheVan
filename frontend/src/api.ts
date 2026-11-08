@@ -66,10 +66,36 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     } else {
       msg = resp.statusText;
     }
-    throw new Error(msg || resp.statusText);
+    const err = new Error(msg || resp.statusText) as Error & { status?: number; detail?: unknown };
+    err.status = resp.status;
+    err.detail = detail;
+    throw err;
   }
 
   return data as T;
+}
+
+/** Retry helper for the safety-scanner blocking gate (HTTP 422).
+ *
+ * The backend refuses a write whose scan produced critical findings until the
+ * client re-sends it with `override_scan: true`. This helper surfaces the
+ * findings, asks the user, and re-sends once with the override set.
+ */
+export function withScanOverride(attempt: (overrideScan: boolean) => Promise<any>): Promise<any> {
+  return attempt(false).catch((err: any) => {
+    const findings: unknown[] | undefined = err?.detail?.scan_findings;
+    if (!Array.isArray(findings) || findings.length === 0) throw err;
+    const lines = findings.map(
+      (f: any) => `[${f.severity}] ${f.description}${f.line ? ` (line ${f.line})` : ''}`,
+    );
+    const ok = confirm(
+      `The safety scanner blocked this save:\n\n${lines.join('\n')}\n\n` +
+        'These patterns can be harmless in ordinary content, but they are also what ' +
+        'sandbox-escape attempts look like. Save anyway?',
+    );
+    if (!ok) throw err;
+    return attempt(true);
+  });
 }
 
 export interface CertIPCheck {
@@ -371,6 +397,9 @@ export const api = {
 
   // Endpoints
   listEndpoints: () => request<{ endpoints: any[] }>('/api/endpoints'),
+  /** The only call that returns the stored provider key; every reveal is audited server-side. */
+  revealEndpointKey: (id: string) =>
+    request<{ api_key: string }>(`/api/endpoints/${id}/reveal`, { method: 'POST' }),
   createEndpoint: (data: { name: string; base_url: string; api_key: string; api_base_path?: string; enabled?: boolean; parameters?: LlmParameter[]; models?: EndpointModel[] }) =>
     request<any>('/api/endpoints', { method: 'POST', body: JSON.stringify(data) }),
   updateEndpoint: (id: string, data: any) =>
@@ -504,10 +533,10 @@ export const api = {
     request<void>(`/api/maps/${id}`, { method: 'DELETE' }),
   exportMap: (id: string, mode: 'embedded' | 'linked' = 'embedded') =>
     request<any>(`/api/maps/${id}/export?mode=${mode}`),
-  importMap: (data: any, name?: string, resourceMode?: string) =>
+  importMap: (data: any, name?: string, resourceMode?: string, overrideScan: boolean = false) =>
     request<any>('/api/maps/import', {
       method: 'POST',
-      body: JSON.stringify({ data, name, resource_mode: resourceMode }),
+      body: JSON.stringify({ data, name, resource_mode: resourceMode, override_scan: overrideScan }),
     }),
 
   // API Keys (Per-Endpoint)
@@ -733,15 +762,15 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ resource_type: resourceType, resource_id: resourceId, label }),
     }),
-  restoreSnapshotAsNew: (id: string, name: string = '') =>
+  restoreSnapshotAsNew: (id: string, name: string = '', overrideScan: boolean = false) =>
     request<{ resource_type: string; resource_id: string; name: string; created: boolean; notes: string[] }>(
       `/api/snapshots/${id}/restore-as-new`,
-      { method: 'POST', body: JSON.stringify({ name }) },
+      { method: 'POST', body: JSON.stringify({ name, override_scan: overrideScan }) },
     ),
-  restoreSnapshotInPlace: (id: string) =>
+  restoreSnapshotInPlace: (id: string, overrideScan: boolean = false) =>
     request<{ resource_type: string; resource_id: string; name: string; created: boolean; notes: string[] }>(
       `/api/snapshots/${id}/restore-in-place`,
-      { method: 'POST' },
+      { method: 'POST', body: JSON.stringify({ override_scan: overrideScan }) },
     ),
   deleteSnapshot: (id: string) => request<void>(`/api/snapshots/${id}`, { method: 'DELETE' }),
   /** The live object a snapshot belongs to, for the history panel's diff. */

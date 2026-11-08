@@ -11,6 +11,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.tag_group import TagGroup, TagGroupMember
 from app.models.user import User
+from app.services.content_guard import check_size, sanitize_and_log
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,25 @@ def _group_to_response(group: TagGroup) -> GroupResponse:
     )
 
 
+async def _guard_group_texts(
+    db: AsyncSession, user_id: str, name: str | None, tag: str | None
+) -> tuple[str | None, str | None]:
+    """Sanitize the two free-text fields a group carries. Both are short, but
+    they are user-authored text that reaches activation matching, so they run
+    the same write-path checks as every other text field (rule 18)."""
+    from app.services.admin import get_admin_settings
+
+    admin_settings = await get_admin_settings()
+    max_chars = admin_settings.max_rule_size_kb * 1024
+    if name is not None:
+        check_size(name, max_chars, "Tag group name")
+        name = await sanitize_and_log(db, user_id, name, "tag_group")
+    if tag is not None:
+        check_size(tag, max_chars, "Tag group tag")
+        tag = await sanitize_and_log(db, user_id, tag, "tag_group")
+    return name, tag
+
+
 @router.get("", response_model=GroupListResponse)
 async def list_tag_groups(
     current_user: Annotated[User, Depends(get_current_user)],
@@ -93,6 +113,7 @@ async def create_tag_group(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    body.name, body.tag = await _guard_group_texts(db, current_user.id, body.name, body.tag)
     group = TagGroup(
         user_id=current_user.id,
         name=body.name,
@@ -147,6 +168,9 @@ async def update_tag_group(
     group = result.scalar_one_or_none()
     if not group:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag group not found")
+
+    if body.name is not None or body.tag is not None:
+        body.name, body.tag = await _guard_group_texts(db, current_user.id, body.name, body.tag)
 
     if body.name is not None:
         group.name = body.name

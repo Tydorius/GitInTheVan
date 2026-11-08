@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api } from '../api'
+  import { api, withScanOverride } from '../api'
   import ParameterEditor from '../lib/ParameterEditor.svelte'
   import ModelSelect from '../lib/ModelSelect.svelte'
   import { onMount } from 'svelte'
@@ -164,7 +164,9 @@
     error = ''
     try {
       const data = JSON.parse(importJson)
-      const result = await api.importMap(data, importName || undefined, importMode)
+      const result = await withScanOverride((overrideScan: boolean) =>
+        api.importMap(data, importName || undefined, importMode, overrideScan),
+      )
 
       const notes: string[] = [...(result.import_warnings || [])]
       if ((result.requires_repos || []).length) {

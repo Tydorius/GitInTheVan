@@ -227,6 +227,10 @@ async def _forward_request_impl(
             extract_command_tags_from_messages,
             strip_command_tags_from_messages,
         )
+
+        # jslorebook blocks are extracted and stripped for prompt hygiene only;
+        # nothing executes them. Wiring them up is Phase 20 (dynamic lorebooks),
+        # deferred — see Planning/project-plan.md phase 27 item 8.
         from app.services.jslorebook import extract_from_messages as extract_jslorebook
         from app.services.tagging import extract_all_tags_from_messages, strip_tags
 
@@ -1024,7 +1028,10 @@ async def _run_driver_callable_loop(
                 result_text = f"Error: tool '{call.name}' not found"
             else:
                 result_text = await execute_tool_call(
-                    tool, call, loop_messages, request_headers, user_id, conversation_id
+                    tool, call, loop_messages, request_headers, user_id, conversation_id,
+                    persist_shared=not (
+                        body_json.get("_gitv_sandbox") or body_json.get("_gitv_replay")
+                    ),
                 )
 
             tool_msg = format_tool_result(call.name, result_text)

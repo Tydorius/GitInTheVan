@@ -14,7 +14,7 @@ from app.services import snapshots
 from app.services.admin import get_admin_settings
 from app.services.cantrip import test_cantrip
 from app.services.cantrip_context import build_context
-from app.services.content_guard import check_size, log_scan_findings
+from app.services.content_guard import check_size, gate_scan_findings, log_scan_findings
 from app.services.deno_runner import CantripExecutionError, CantripTimeoutError
 from app.services.safety_scanner import scan_cantrip
 from app.templates.cantrip_templates import get_templates
@@ -24,15 +24,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/cantrips", tags=["cantrips"])
 
 
-async def _check_and_scan_cantrip_code(db: AsyncSession, user_id: str, code: str, cantrip_id: str = "") -> None:
+async def _check_and_scan_cantrip_code(
+    db: AsyncSession, user_id: str, code: str, cantrip_id: str = "",
+    override: bool = False,
+) -> None:
     """Cantrip code is executable JavaScript — unlike text content it's never run
     through sanitize_input()'s control-char stripping (could corrupt valid source),
-    only size-checked and pattern-scanned. See Planning/security-control-document.md.
+    only size-checked and pattern-scanned. Critical findings block the save
+    unless the request explicitly overrides them. See
+    Planning/security-control-document.md.
     """
     admin_settings = await get_admin_settings()
     check_size(code, admin_settings.max_script_size_kb * 1024, "Cantrip code")
     scan = scan_cantrip(code)
     await log_scan_findings(db, user_id, scan, "cantrip", cantrip_id)
+    gate_scan_findings(scan, override, "Cantrip code")
 
 
 class CantripCreate(BaseModel):
@@ -51,6 +57,9 @@ class CantripCreate(BaseModel):
     timeout_ms: int = 5000
     tag: str = ""
     budget_weight: float = 1.0
+    # Set by a client that has already shown the scanner findings to the user
+    # and been told to proceed anyway. Not a model column.
+    override_scan: bool = False
 
 
 class CantripUpdate(BaseModel):
@@ -69,6 +78,7 @@ class CantripUpdate(BaseModel):
     timeout_ms: int | None = None
     tag: str | None = None
     budget_weight: float | None = None
+    override_scan: bool = False
 
 
 class CantripResponse(BaseModel):
@@ -270,7 +280,7 @@ async def create_cantrip(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    await _check_and_scan_cantrip_code(db, current_user.id, req.code)
+    await _check_and_scan_cantrip_code(db, current_user.id, req.code, override=req.override_scan)
 
     cantrip = Cantrip(
         user_id=current_user.id,
@@ -321,8 +331,11 @@ async def update_cantrip(
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tag already in use")
 
     update_data = req.model_dump(exclude_unset=True)
+    update_data.pop("override_scan", None)
     if "code" in update_data and update_data["code"] is not None:
-        await _check_and_scan_cantrip_code(db, current_user.id, update_data["code"], cantrip_id)
+        await _check_and_scan_cantrip_code(
+            db, current_user.id, update_data["code"], cantrip_id, override=req.override_scan
+        )
 
     for key, value in update_data.items():
         setattr(cantrip, key, value)

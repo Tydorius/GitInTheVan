@@ -58,6 +58,11 @@ class SnapshotCreate(BaseModel):
 
 class RestoreAsNewRequest(BaseModel):
     name: str = ""
+    override_scan: bool = False
+
+
+class RestoreInPlaceRequest(BaseModel):
+    override_scan: bool = False
 
 
 class RestoreResponse(BaseModel):
@@ -190,7 +195,7 @@ async def restore_snapshot_as_new(
     snapshot = await _load(db, current_user.id, snapshot_id)
     try:
         report = await snapshot_service.restore_as_new(
-            db, current_user.id, snapshot, name=req.name
+            db, current_user.id, snapshot, name=req.name, override=req.override_scan
         )
     except snapshot_service.SnapshotError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -208,6 +213,9 @@ async def restore_snapshot_in_place(
     snapshot_id: str,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    # Defaulted so a caller with no body (the assistant executor's registered
+    # template) is unchanged; a scanner-blocked restore still answers 422 there.
+    req: RestoreInPlaceRequest = RestoreInPlaceRequest(),
 ):
     """Overwrite the live object with a stored version.
 
@@ -216,7 +224,9 @@ async def restore_snapshot_in_place(
     """
     snapshot = await _load(db, current_user.id, snapshot_id)
     try:
-        report = await snapshot_service.restore_in_place(db, current_user.id, snapshot)
+        report = await snapshot_service.restore_in_place(
+            db, current_user.id, snapshot, override=req.override_scan
+        )
     except snapshot_service.SnapshotError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 

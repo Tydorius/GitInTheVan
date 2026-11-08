@@ -557,6 +557,12 @@ async def run_verification_loop(
 ) -> tuple[dict[str, Any], VerificationLoopResult | None]:
     from app.services.routing import _build_failover_chain, _endpoint_to_candidate
 
+    # Command override applies on every path that reaches the loop; the streaming
+    # branch checks it earlier only to decide whether to buffer the request.
+    if body_json.get("_gitv_command_overrides", {}).get("verify") is False:
+        logger.info("Verification skipped by <VERIFY:off> command override")
+        return response_data, None
+
     async with async_session() as db:
         rules, v_endpoint, v_model, max_retries = await load_verification_config(
             db, user_id, tags

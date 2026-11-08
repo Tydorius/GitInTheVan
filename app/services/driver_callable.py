@@ -165,6 +165,7 @@ async def execute_tool_call(
     request_headers: dict[str, str],
     user_id: str,
     conversation_id: str = "",
+    persist_shared: bool = True,
 ) -> str:
     from app.services.cantrip import (
         _load_cantrip_data,
@@ -219,11 +220,14 @@ async def execute_tool_call(
             logger.warning("Driver-callable cantrip '%s' error: %s", tool.name, result.error)
             return f"Error: {result.error}"
 
+        # A sandbox or replay run reads the live stores but must not write the
+        # user-scoped ones — same rule as process_cantrips.
         if params["conversation_id"]:
             await _save_chat_data(db, user_id, params["conversation_id"], result.chat_data)
-        await _save_user_data(db, user_id, result.user_data)
-        if result.cantrip_data != cantrip_data:
-            await _save_cantrip_data(db, user_id, tool.id, result.cantrip_data)
+        if persist_shared:
+            await _save_user_data(db, user_id, result.user_data)
+            if result.cantrip_data != cantrip_data:
+                await _save_cantrip_data(db, user_id, tool.id, result.cantrip_data)
 
     tool_result = ""
     if hasattr(result, "tool_result") and result.tool_result:

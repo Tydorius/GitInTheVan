@@ -95,7 +95,9 @@ class EndpointResponse(BaseModel):
     id: str
     name: str
     base_url: str
-    api_key: str
+    # The provider key itself is never in this response — it is handed back only
+    # by POST /{id}/reveal, which audits every call.
+    api_key_set: bool
     api_base_path: str
     provider: str
     default_model: str
@@ -117,7 +119,7 @@ def _endpoint_to_response(e: Endpoint) -> EndpointResponse:
         id=e.id,
         name=e.name,
         base_url=e.base_url,
-        api_key=e.api_key,
+        api_key_set=bool(e.api_key),
         api_base_path=e.api_base_path,
         provider=e.provider,
         default_model=e.default_model,
@@ -288,6 +290,39 @@ async def delete_endpoint(
 
     await db.delete(endpoint)
     await db.commit()
+
+
+class ApiKeyRevealResponse(BaseModel):
+    api_key: str
+
+
+@router.post("/{endpoint_id}/reveal", response_model=ApiKeyRevealResponse)
+async def reveal_endpoint_api_key(
+    endpoint_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """The one place a stored provider key is handed back to the client.
+
+    The list and single-object responses carry only ``api_key_set``; a key that
+    is never in a list response cannot be screenshotted out of one. Every
+    reveal is audited, which is also why this is a POST: it is an action with a
+    side effect, not a fetch of a representation.
+    """
+    from app.services.audit import log_action
+
+    result = await db.execute(
+        select(Endpoint).where(Endpoint.id == endpoint_id, Endpoint.user_id == current_user.id)
+    )
+    endpoint = result.scalar_one_or_none()
+    if endpoint is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Endpoint not found")
+
+    await log_action(
+        db, current_user.id, "endpoint_key_reveal", "endpoint", endpoint_id, endpoint.name
+    )
+    await db.commit()
+    return ApiKeyRevealResponse(api_key=endpoint.api_key)
 
 
 class ModelListResponse(BaseModel):

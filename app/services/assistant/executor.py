@@ -125,8 +125,14 @@ def redact_text(text: str, secrets: tuple[str, ...] | list[str] = ()) -> str:
 def _redact_one_endpoint(item: dict[str, Any]) -> dict[str, Any]:
     out = dict(item)
     raw = out.get("api_key")
-    out["api_key"] = "***"
-    out["api_key_set"] = bool(raw)
+    if raw:
+        # The route stopped returning keys in Phase 27; this branch is defense
+        # in depth for any future field that carries one.
+        out["api_key"] = "***"
+    else:
+        out.pop("api_key", None)
+    if "api_key_set" not in out:
+        out["api_key_set"] = bool(raw)
     return out
 
 

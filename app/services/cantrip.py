@@ -212,6 +212,18 @@ async def _load_active_cantrips(
     return list(result.scalars().all())
 
 
+def _store_writes_isolated(body_json: dict[str, Any]) -> bool:
+    """Sandbox and replay runs must not mutate stores keyed outside the fork.
+
+    chat_data and memories are isolated by the forked/synthetic chat id the
+    proxy resolves, but user_data and cantrip_data are keyed by user alone, so
+    writes from a sandbox or replay would land in the same live rows a real
+    request writes. Reads stay live so the run still sees the state it is
+    replaying; only persistence is suppressed.
+    """
+    return bool(body_json.get("_gitv_sandbox") or body_json.get("_gitv_replay"))
+
+
 async def process_cantrips(
     body_json: dict[str, Any],
     user_id: str,
@@ -277,6 +289,7 @@ async def process_cantrips(
             return body_json
 
         conversation_id = params.get("conversation_id", "")
+        isolated = _store_writes_isolated(body_json)
         chat_data = await _load_chat_data(db, user_id, conversation_id)
         user_data = await _load_user_data(db, user_id)
 
@@ -380,13 +393,16 @@ async def process_cantrips(
             chat_data = result.chat_data
             user_data = result.user_data
 
-            if result.cantrip_data != cantrip_data:
+            if result.cantrip_data != cantrip_data and not isolated:
                 await _save_cantrip_data(db, user_id, cantrip.id, result.cantrip_data)
 
-        if conversation_id:
+        # A sandbox writes chat_data into its forked id (isolated); a replay
+        # would write the live conversation's store, so it does not.
+        if conversation_id and not body_json.get("_gitv_replay"):
             await _save_chat_data(db, user_id, conversation_id, chat_data)
 
-        await _save_user_data(db, user_id, user_data)
+        if not isolated:
+            await _save_user_data(db, user_id, user_data)
 
     if internal_chat_id and accumulated_memories:
         from app.services.conversation import save_memories_for_chat
@@ -469,6 +485,7 @@ async def process_cantrips_post_driver(
             return response_content
 
         conversation_id = params.get("conversation_id", "")
+        isolated = _store_writes_isolated(body_json)
         chat_data = await _load_chat_data(db, user_id, conversation_id)
         user_data = await _load_user_data(db, user_id)
 
@@ -514,13 +531,17 @@ async def process_cantrips_post_driver(
             chat_data = result.chat_data
             user_data = result.user_data
 
-            if result.cantrip_data != cantrip_data:
+            if result.cantrip_data != cantrip_data and not isolated:
                 await _save_cantrip_data(db, user_id, cantrip.id, result.cantrip_data)
 
-        if conversation_id:
+        # Same isolation rules as process_cantrips: the fork owns chat_data for
+        # a sandbox, a replay writes nothing, and user/cantrip-scoped stores are
+        # never written from an isolated run.
+        if conversation_id and not body_json.get("_gitv_replay"):
             await _save_chat_data(db, user_id, conversation_id, chat_data)
 
-        await _save_user_data(db, user_id, user_data)
+        if not isolated:
+            await _save_user_data(db, user_id, user_data)
 
     if current_content != response_content:
         logger.info(

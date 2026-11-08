@@ -287,7 +287,9 @@ The Endpoints page manages your LLM backend connections. Each endpoint represent
 
 ### Endpoint List
 
-Each endpoint card shows the **name**, **enabled/disabled status**, **base URL**, **API base path**, a masked **provider API key**, the **provider** (or "Custom (passthrough)"), the **content bypass method**, and the endpoint's **role tag and priority**. **Edit** and **Delete** buttons are on each card, and **Collapse All** / **Expand All** fold the cards when you have many.
+Each endpoint card shows the **name**, **enabled/disabled status**, **base URL**, **API base path**, whether a **provider API key is set** (the key itself is never listed — the **Reveal** button fetches it on demand, and every reveal is written to the audit log), the **provider** (or "Custom (passthrough)"), the **content bypass method**, and the endpoint's **role tag and priority**. **Edit** and **Delete** buttons are on each card, and **Collapse All** / **Expand All** fold the cards when you have many.
+
+When editing an endpoint, leaving the key field blank keeps the current key.
 
 ### Adding an Endpoint
 
@@ -635,7 +637,10 @@ Each entry has:
 
 ### Lorebook Pipeline Positions
 
-Lorebooks support the same four pipeline positions as cantrips (Pre-Driver, Driver-Callable, Pre-Navigator, Post-Navigator). Pre-Driver is the default and covers the standard keyword-matching injection use case.
+Lorebooks inject at one point in the pipeline: **Pre-Driver**, before the request is forwarded.
+The four position toggles shown on some older installs (Pre-Driver, Driver-Callable,
+Pre-Navigator, Post-Navigator) were never wired up for lorebooks and have no effect; only
+cantrips run at the other positions.
 
 ---
 
@@ -896,6 +901,7 @@ Tags are case-insensitive: `<verify:off>` works the same as `<VERIFY:OFF>`.
 | `FORBIDDEN` | Forbidden words scanner | Skip forbidden word scan | Force scan even if GUI setting is off |
 | `MEMORY` | Memory injection + extraction | Skip memory injection and `<memstore>` extraction | Force memory processing |
 | `DRIVER` | Driver-callable tools | Disable tool access for this message | Force tool access if tools are available |
+| `MAP` | Map pipelines | Run the standard single-stage pipeline for this message instead of any map | Force map resolution if a map is available |
 
 ### Precedence
 
@@ -1624,7 +1630,9 @@ a replay that took a shortcut would stop being evidence.
 **Create sandbox copy** forks a run into something you can iterate on. The fork
 copies the request *and* the conversation state it read — memories, chat data,
 summary — into a conversation of its own, so repeated runs accumulate there and
-the original thread is never touched.
+the original thread is never touched. Cantrip stores scoped to you rather than
+the chat (`user_data`, `cantrip_data`) are read so the run sees real state, but
+a sandbox or replay never writes them.
 
 From a sandbox you can run it, edit the prompt, reset it to the state it was
 forked from, or delete it and its state entirely.
@@ -1689,8 +1697,9 @@ A **tag group** activates several resources at once — see
 
 ### Command tags are separate
 
-`<#gitv-...#>` command tags control the pipeline for one request rather than
-activating a resource. They are covered in [Command Tags](#command-tags).
+`<COMMAND:setting>` tags (e.g. `<VERIFY:off>`) control the pipeline for one
+request rather than activating a resource. They are covered in
+[Command Tags](#command-tags).
 
 ---
 
@@ -1746,6 +1755,10 @@ A restore is a content write like any other, so it goes through the same checks 
 content in yourself: the size limits an admin has set, and the safety scanner for cantrip code
 and lorebook entries. A version stored months ago is not trusted just because this install
 wrote it — if the limits have tightened since, the restore is refused and tells you why.
+
+If the scanner finds critical patterns in the stored version, the restore is refused until you
+confirm you want to proceed. The dialog lists exactly what was found; the same gate applies to
+saving cantrips, lorebook entries and importing maps.
 
 ### From the Assistant
 

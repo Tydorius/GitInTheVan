@@ -14,20 +14,20 @@ from app.models.memory import Memory
 logger = logging.getLogger(__name__)
 
 COMMAND_TAG_PATTERN = re.compile(
-    r"<(VERIFY|SUMMARY|FORBIDDEN|MEMORY|DRIVER)"
+    r"<(VERIFY|SUMMARY|FORBIDDEN|MEMORY|DRIVER|MAP)"
     r":(on|off|reset)"
     r"(?::(persist))?>",
     re.IGNORECASE,
 )
 
 COMMAND_TAG_STRIP_PATTERN = re.compile(
-    r"<(?:VERIFY|SUMMARY|FORBIDDEN|MEMORY|DRIVER)"
+    r"<(?:VERIFY|SUMMARY|FORBIDDEN|MEMORY|DRIVER|MAP)"
     r":(?:on|off|reset)"
     r"(?::(?:persist))?>",
     re.IGNORECASE,
 )
 
-VALID_COMMANDS = {"VERIFY", "SUMMARY", "FORBIDDEN", "MEMORY", "DRIVER"}
+VALID_COMMANDS = {"VERIFY", "SUMMARY", "FORBIDDEN", "MEMORY", "DRIVER", "MAP"}
 PERSIST_PREFIX = "__cmd_persist_"
 PERSIST_OVERRIDE_PREFIX = "__cmd_override_"
 

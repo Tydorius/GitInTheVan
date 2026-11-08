@@ -2,6 +2,65 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.28.0] - 2026-11-07
+
+Phase 27: every item in this release is a gap that had already been found and
+verified — nothing failed, so nothing reported it. The theme is that content
+guards, secrets and conversation overrides now behave the way their
+documentation always claimed they did.
+
+### Security
+
+- **The safety scanner can block.** A critical finding on a cantrip create or
+  update, a lorebook entry create/update/import, a map import, or a snapshot
+  restore now refuses the write with HTTP 422 and lists the findings; the
+  client shows them and can re-send once with `override_scan` after an explicit
+  confirm. Findings are still audit-logged either way. This closes the oldest
+  open security item (since 0.21.0): the scanner existed but only ever
+  observed.
+- **`maps.py` and `tag_groups.py` now run content guards.** Map names,
+  descriptions, global and per-stage instructions are sanitized and
+  size-checked against the rule cap on create and update; a map import is
+  decomposed and scanned object-by-object exactly like a pack install. Tag
+  group names and tags are sanitized. Both routers previously ran no checks on
+  any path.
+- **Provider API keys are no longer returned by the endpoints list.** The list
+  and object responses carry `api_key_set` instead; the key is handed back only
+  by the new `POST /api/endpoints/{id}/reveal`, and every reveal is audited. In
+  the UI the key field starts blank when editing (blank keeps the current key)
+  and the card has a Reveal button. The assistant projection already assumed
+  this shape.
+- **The management-API rate limiter is per-user again.** The bucket key hashed
+  only the first 16 characters of the credential, which is the constant
+  `Bearer eyJhbGciO` for every HS256 JWT — every user behind one NAT shared a
+  single 120/min bucket. The whole credential is hashed now.
+
+### Fixed
+
+- **`<VERIFY:off>` now works on non-streaming requests.** The override was only
+  consulted on the streaming branch; both non-streaming paths ran the
+  verification loop regardless. The check now lives at the top of
+  `run_verification_loop`, which covers every path including driver-callable.
+- **Sandboxes and replays no longer write the user-scoped cantrip stores.** A
+  cantrip writing `user_data` or `cantrip_data` during a sandbox or replay run
+  used to mutate the same live rows a real request writes; a replay also wrote
+  the live `chat_data`. Reads still see real state, so what the guide claimed
+  ("writes nothing") is now simply true.
+- **`<MAP:off>` works.** The consumption code existed but the command grammar
+  excluded `MAP`, so the branch was unreachable; the docs that mentioned it
+  were describing something that did not exist. The command is now part of the
+  grammar and documented in the guide's command table.
+
+### Documentation
+
+- The Activation Hierarchy section no longer shows a `<#gitv-...#>` command
+  syntax that never existed.
+- The Lorebooks section no longer claims lorebooks support the four cantrip
+  pipeline positions; the columns exist but were never wired (they cannot be
+  dropped — migrations are additive only).
+- The guide documents jslorebook blocks as stripped-not-executed and the
+  sandbox section spells out which stores a sandbox or replay never writes.
+
 ## [0.27.0] - 2026-10-13
 
 Cantrips can finally do what JanitorAI scripts do: read the character card's

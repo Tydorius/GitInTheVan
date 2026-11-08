@@ -405,6 +405,7 @@ async def guard_content(
     user_id: str,
     spec: SnapshotSpec,
     content: dict[str, Any],
+    override: bool = False,
 ) -> dict[str, Any]:
     """Run the same checks the type's own create and update paths run.
 
@@ -415,10 +416,10 @@ async def guard_content(
     was captured.
 
     Blocking behaviour matches create and update exactly: size is a hard 413,
-    and the scanner logs its findings to the audit trail without blocking. A
-    blocking override flow is separate, still-open work -- see
-    Planning/security-control-document.md.
+    and critical scanner findings raise a 422 unless the caller passes the
+    explicit override (gate_scan_findings).
     """
+    from app.services.content_guard import gate_scan_findings
     from app.services.safety_scanner import scan_json_content
 
     max_bytes = (
@@ -471,6 +472,7 @@ async def guard_content(
     if spec.scan_type:
         scan = scan_json_content(json.dumps(guarded, ensure_ascii=False), spec.scan_type)
         await log_scan_findings(db, user_id, scan, spec.resource_type, "")
+        gate_scan_findings(scan, override, spec.label)
 
     return guarded
 
@@ -514,6 +516,7 @@ async def restore_as_new(
     snapshot: ResourceSnapshot,
     *,
     name: str = "",
+    override: bool = False,
 ) -> RestoreReport:
     """Create a copy of a stored version, leaving the live object untouched.
 
@@ -523,7 +526,7 @@ async def restore_as_new(
     collide outright or silently start firing in its place.
     """
     spec = spec_for(snapshot.resource_type)
-    content = await guard_content(db, user_id, spec, load_content(snapshot))
+    content = await guard_content(db, user_id, spec, load_content(snapshot), override=override)
     fields = _assignable(spec, content)
     notes: list[str] = []
 
@@ -558,6 +561,8 @@ async def restore_in_place(
     db: AsyncSession,
     user_id: str,
     snapshot: ResourceSnapshot,
+    *,
+    override: bool = False,
 ) -> RestoreReport:
     """Overwrite the live object with a stored version.
 
@@ -573,7 +578,7 @@ async def restore_in_place(
             "Restore it as a new copy instead."
         )
 
-    content = await guard_content(db, user_id, spec, load_content(snapshot))
+    content = await guard_content(db, user_id, spec, load_content(snapshot), override=override)
     fields = _assignable(spec, content)
     notes: list[str] = []
 

@@ -66,3 +66,27 @@ async def log_scan_findings(
     await log_action(
         db, user_id, "content_safety_scan", target_type, target_id, details, ip_address,
     )
+
+
+def gate_scan_findings(scan: ScanResult, override: bool, resource_label: str) -> None:
+    """Raise HTTP 422 when the scan found critical patterns and the request did
+    not explicitly override them.
+
+    Callers log the findings first (log_scan_findings), then gate. The response
+    detail carries the critical findings so a client can show what was found
+    and re-submit with the override set; a client that cannot ask (the proxy
+    path, an import script) simply sees the 422.
+    """
+    if scan.safe or override:
+        return
+    raise HTTPException(
+        status_code=422,
+        detail={
+            "message": f"{resource_label} failed the safety scan",
+            "scan_findings": [
+                {"severity": f.severity, "description": f.description, "line": f.line}
+                for f in scan.findings
+                if f.severity == "critical"
+            ],
+        },
+    )

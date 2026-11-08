@@ -55,6 +55,7 @@
   let showApiKey = false
   let visibleKeys: Record<string, boolean> = {}
   let copiedKeyId: string | null = null
+  let revealedKeys: Record<string, string> = {}
 
   const providers = [
     { value: '', label: 'Custom (raw passthrough)' },
@@ -145,7 +146,9 @@
 
   function startEdit(ep: any) {
     editingId = ep.id
-    form = { name: ep.name, base_url: ep.base_url, api_key: ep.api_key, api_base_path: ep.api_base_path || '', provider: ep.provider || '', default_model: ep.default_model || '', bypass_method: ep.bypass_method || 'none', enabled: ep.enabled, role_tag: ep.role_tag || 'default', priority: ep.priority || 1, custom_tag: ep.custom_tag || '',
+    // The list no longer carries the key; editing starts blank and a blank
+    // field means "keep the current key" (see handleSubmit).
+    form = { name: ep.name, base_url: ep.base_url, api_key: '', api_base_path: ep.api_base_path || '', provider: ep.provider || '', default_model: ep.default_model || '', bypass_method: ep.bypass_method || 'none', enabled: ep.enabled, role_tag: ep.role_tag || 'default', priority: ep.priority || 1, custom_tag: ep.custom_tag || '',
       parameters: structuredClone(ep.parameters || []),
       models: (ep.models || []).map((m: any) => ({ name: m.name, description: m.description || '', parameters: structuredClone(m.parameters || []) })) }
     showForm = true
@@ -155,13 +158,24 @@
     error = ''
     try {
       if (editingId) {
-        await api.updateEndpoint(editingId, form)
+        const payload = { ...form }
+        if (!payload.api_key) delete payload.api_key
+        await api.updateEndpoint(editingId, payload)
       } else {
         await api.createEndpoint(form)
       }
       showForm = false
       resetForm()
       await withScroll(load)
+    } catch (e: any) { error = e.message }
+  }
+
+  async function revealKey(ep: any) {
+    error = ''
+    try {
+      const result = await api.revealEndpointKey(ep.id)
+      revealedKeys[ep.id] = result.api_key
+      setTimeout(() => { delete revealedKeys[ep.id]; revealedKeys = { ...revealedKeys } }, 15000)
     } catch (e: any) { error = e.message }
   }
 
@@ -250,7 +264,19 @@
         <div style="color: var(--text-dim); font-size: 12px; margin-bottom: 12px;">
           <div>URL: {ep.base_url}</div>
           <div>API Path: {ep.api_base_path || '/v1 (default)'}</div>
-          <div>Provider Key: {ep.api_key ? ep.api_key.slice(0, 8) + '...' : 'none'}</div>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <span>Provider Key:</span>
+            {#if revealedKeys[ep.id]}
+              <code style="user-select: all;">{revealedKeys[ep.id]}</code>
+            {:else if ep.api_key_set}
+              <span>set (hidden)</span>
+            {:else}
+              <span>none</span>
+            {/if}
+            {#if ep.api_key_set && !revealedKeys[ep.id]}
+              <button style="padding: 2px 8px; font-size: 12px;" onclick={() => revealKey(ep)}>Reveal</button>
+            {/if}
+          </div>
           <div>Provider: {ep.provider ? providers.find(p => p.value === ep.provider)?.label || ep.provider : 'Custom (passthrough)'}</div>
           <div>Bypass: {ep.bypass_method || 'none'}</div>
           <div>Role: {ep.role_tag || 'default'}{ep.role_tag === 'custom' && ep.custom_tag ? ` (${ep.custom_tag})` : ''} · Priority: {ep.priority || 1}</div>
@@ -338,7 +364,7 @@
               type={showApiKey ? "text" : "text"}
               style="flex: 1; -webkit-text-security: {showApiKey ? 'none' : 'disc'}; text-security: {showApiKey ? 'none' : 'disc'};"
               bind:value={form.api_key}
-              placeholder="sk-..."
+              placeholder={editingId ? 'Leave blank to keep the current key' : 'sk-...'}
             />
             <button
               type="button"

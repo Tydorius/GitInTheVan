@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api } from '../api'
+  import { api, withScanOverride } from '../api'
   import SnapshotHistoryModal from '../lib/SnapshotHistoryModal.svelte'
   import { onMount } from 'svelte'
   import { routeParams } from '../stores'
@@ -125,8 +125,11 @@
   async function handleSubmit() {
     error = ''
     try {
-      if (editingId) { await api.updateCantrip(editingId, form) }
-      else { await api.createCantrip(form) }
+      await withScanOverride((overrideScan: boolean) =>
+        editingId
+          ? api.updateCantrip(editingId, { ...form, override_scan: overrideScan })
+          : api.createCantrip({ ...form, override_scan: overrideScan }),
+      )
       showForm = false; resetForm(); await withScroll(load)
     } catch (e: any) { error = e.message }
   }
