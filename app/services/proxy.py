@@ -656,7 +656,8 @@ async def _forward_request_impl(
 
     if stream:
         return await _forward_streaming(
-            request.method, upstream_url, headers, body, timeout, user_id, body_json, path
+            request.method, upstream_url, headers, body, timeout, user_id, body_json, path,
+            request_headers=request_headers,
         )
 
     return await _forward_non_streaming_verified(
@@ -677,10 +678,18 @@ async def _load_ux_settings(user_id: str) -> dict[str, Any]:
                     "gitv_status": s.gitv_status,
                     "simulated_streaming_speed": s.simulated_streaming_speed,
                     "preserve_thinking": s.preserve_thinking,
+                    "streaming_post_processing": s.streaming_post_processing_enabled,
                 }
     except Exception:
         pass
-    return {"gitv_status": False, "simulated_streaming_speed": 0, "preserve_thinking": True}
+    return {
+        "gitv_status": False,
+        "simulated_streaming_speed": 0,
+        "preserve_thinking": True,
+        # Fail toward enforcement: the stream is buffered either way, so a
+        # settings read that cannot happen costs nothing by running the checks.
+        "streaming_post_processing": True,
+    }
 
 
 async def _load_user_param_layer(user_id: str, field_name: str) -> list[ParamDef]:
@@ -1898,6 +1907,7 @@ async def _forward_streaming(
     user_id: str | None = None,
     body_json: dict[str, Any] | None = None,
     path: str = "",
+    request_headers: dict[str, str] | None = None,
 ) -> StreamingResponse:
     has_memory_processing = (
         user_id is not None
@@ -1912,7 +1922,8 @@ async def _forward_streaming(
         )
 
     return await _forward_streaming_with_memory(
-        method, url, headers, body, timeout, user_id, body_json, path
+        method, url, headers, body, timeout, user_id, body_json, path,
+        request_headers=request_headers or {},
     )
 
 
@@ -1989,10 +2000,24 @@ async def _forward_streaming_with_memory(
     user_id: str,
     body_json: dict[str, Any],
     path: str = "",
+    request_headers: dict[str, str] | None = None,
 ) -> StreamingResponse:
-    """Buffer a streaming response, extract and strip <memstore> tags,
-    record the post-hash, then re-emit as SSE. Memory tags span content
-    chunks so they can't be reliably extracted from individual chunks."""
+    """Buffer a streaming response, run response-side stages, extract and
+    strip <memstore> tags, record the post-hash, then re-emit as SSE.
+
+    The upstream call is made non-streaming: this path buffers the full
+    response before the client sees a byte either way, and an SSE body cannot
+    survive `_do_forward`'s JSON parse -- forwarding the body with `stream:
+    true` intact returned an empty response to the client on every raw
+    (non-LiteLLM) endpoint from 0.9.x until 0.29.0. The client still receives
+    SSE, re-emitted from the buffered response.
+    """
+    body_json = dict(body_json or {})
+    body_json["stream"] = False
+    body = json.dumps(
+        {k: v for k, v in body_json.items() if not k.startswith("_gitv")}
+    ).encode()
+
     failover_chain = body_json.get("_gitv_failover_chain") if body_json else None
     if failover_chain and path:
         response_data, status_code = await _forward_with_failover(
@@ -2006,6 +2031,24 @@ async def _forward_streaming_with_memory(
         )
 
     if status_code == 200:
+        ux_settings = await _load_ux_settings(user_id)
+
+        # Response-side stages, when enabled (0.29.0, default on). The stream
+        # is already buffered, so these cost only their own execution -- and
+        # without this block a forbidden-word list or a post-navigator cantrip
+        # silently never ran on any streaming request that did not also enable
+        # verification. Order mirrors the non-streaming path: post-driver
+        # processing, post-navigator cantrips, then memory extraction.
+        if ux_settings.get("streaming_post_processing", True):
+            response_data = await _apply_post_driver_processing(
+                response_data, body_json, user_id, request_headers or {}
+            )
+            response_data = await _apply_post_navigator_processing(
+                response_data, body_json, user_id, request_headers or {}
+            )
+            if isinstance(response_data, dict):
+                response_data.pop("_gitv_forbidden_summary", None)
+
         response_data = await _extract_response_memories(response_data, user_id, body_json)
 
         # This path buffers the whole response before re-emitting it as SSE, so
@@ -2016,7 +2059,6 @@ async def _forward_streaming_with_memory(
             await _save_debug_exchange(response_data, body_json, user_id)
 
         model = body_json.get("model", "")
-        ux_settings = await _load_ux_settings(user_id)
         return _convert_to_sse(
             JSONResponse(status_code=200, content=response_data),
             model,

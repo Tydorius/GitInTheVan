@@ -11,6 +11,7 @@
     preserve_thinking: true,
     gitv_status: false,
     simulated_streaming_speed: 0,
+    streaming_post_processing_enabled: true,
   }
   // One parameter set per LLM role. These are the blanket layer: broader than
   // the endpoint, narrower than whatever the client sent.
@@ -82,6 +83,7 @@
       settings.preserve_thinking = s.preserve_thinking
       settings.gitv_status = s.gitv_status
       settings.simulated_streaming_speed = s.simulated_streaming_speed || 0
+      settings.streaming_post_processing_enabled = s.streaming_post_processing_enabled ?? true
       driverParams = structuredClone(s.parameters || [])
       verificationParams = structuredClone(s.verification_parameters || [])
       summarizationParams = structuredClone(s.summarization_parameters || [])
@@ -254,6 +256,15 @@
     </label>
     <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
       Include the LLM's reasoning/thought process in the final response if the model produces it.
+    </p>
+  </div>
+  <div class="form-group">
+    <label>
+      <input type="checkbox" bind:checked={settings.streaming_post_processing_enabled} style="width: auto;">
+      Run Response Checks on Streams
+    </label>
+    <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+      Streaming responses are already buffered for memory extraction, so the forbidden-words scan and pre/post-Navigator cantrips can run at no extra buffering cost. Turn off to skip them and deliver the response the moment extraction finishes.
     </p>
   </div>
   <div class="form-group">

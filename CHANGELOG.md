@@ -2,6 +2,57 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.29.0] - 2026-11-17
+
+Streaming responses, end to end. The headline fix returns content to clients
+that were receiving empty streams; the rest makes the response-side pipeline
+honest about what runs on a streamed request.
+
+### Fixed
+
+- **Authenticated streaming against a raw endpoint returned an empty response.**
+  Every authenticated streaming request buffers the response for `<memstore>`
+  extraction — but the buffered forward kept `stream: true` in the upstream
+  body, so a raw (non-LiteLLM) endpoint answered with SSE that could not be
+  parsed, and the client received one empty delta and `[DONE]`. Broken since
+  the buffered path was introduced (0.9.x era); survived because the only
+  streaming proxy test used the unauthenticated fixture, which passes through
+  untouched. The upstream call is now made non-streaming — the client still
+  receives SSE, re-emitted from the buffered response.
+- **Verification retries are re-scanned for forbidden words.** The scan ran
+  once on the first Driver response and its findings were fed to every judge
+  call after that: a retry introducing a *new* forbidden phrase passed on the
+  stale empty context, and a clean retry kept being judged against findings it
+  had already fixed. Each retry is now scanned before it is judged.
+
+### Changed
+
+- **Response checks now run on buffered streams (default on).** The
+  forbidden-words scan and pre-/post-Navigator cantrips previously never ran
+  on a streaming request unless verification was also enabled — silently, with
+  no setting and no log line. Streaming responses are already buffered for
+  memory extraction, so enabling these costs only the checks themselves. New
+  per-user setting **Settings > Streaming and Status > Run Response Checks on
+  Streams** turns them back off for latency-sensitive setups. This is a
+  behavior change for streaming users with forbidden words or post-response
+  cantrips configured: those checks now actually execute.
+
+### Documentation
+
+- The Forbidden Words section no longer claims the forbidden check alone
+  triggers the verification loop when no rules are configured; the loop has
+  always required at least one rule (the guide was describing an unreachable
+  code path — the ruleless branch of `check_response` is dead code).
+- Streaming and Status section rewritten around how delivery actually works
+  (buffered, then re-emitted), including the new toggle.
+
+### Upgrade notes
+
+- Runs migration `053_streaming_post_processing` (new
+  `user_settings.streaming_post_processing_enabled` column, default on).
+- The Settings page screenshot (`gitv-settings.png`) predates the new toggle;
+  a re-shoot is queued for the next capture pass.
+
 ## [0.28.0] - 2026-11-07
 
 Phase 27: every item in this release is a gap that had already been found and

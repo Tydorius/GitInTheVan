@@ -52,6 +52,14 @@ class UserSettings(Base):
     driver_callable_turns: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     bypass_method: Mapped[str] = mapped_column(String(32), default="none", nullable=False)
     prefill_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # 0.29.0: pre-navigator/post-navigator cantrips and the forbidden-words
+    # scan also run on buffered streaming responses. The stream is already
+    # fully buffered for <memstore> extraction, so enforcement costs only the
+    # checks themselves; turning this off restores the pre-0.29.0 behavior of
+    # skipping response-side stages on streams.
+    streaming_post_processing_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="1", nullable=False
+    )
     context_budget_percent: Mapped[float] = mapped_column(Float, default=10.0, nullable=False)
     context_window_override: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     debug_mode: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

@@ -26,6 +26,7 @@ class SettingsResponse(BaseModel):
     driver_callable_turns: int
     bypass_method: str
     prefill_enabled: bool
+    streaming_post_processing_enabled: bool
     context_budget_percent: float
     context_window_override: int
     debug_mode: bool
@@ -46,6 +47,7 @@ class SettingsUpdate(BaseModel):
     driver_callable_turns: int | None = None
     bypass_method: str | None = None
     prefill_enabled: bool | None = None
+    streaming_post_processing_enabled: bool | None = None
     context_budget_percent: float | None = None
     context_window_override: int | None = None
     debug_mode: bool | None = None
@@ -77,6 +79,7 @@ async def get_settings(
         driver_callable_turns=user_settings.driver_callable_turns,
         bypass_method=user_settings.bypass_method,
         prefill_enabled=user_settings.prefill_enabled,
+        streaming_post_processing_enabled=user_settings.streaming_post_processing_enabled,
         context_budget_percent=user_settings.context_budget_percent,
         context_window_override=user_settings.context_window_override,
         debug_mode=user_settings.debug_mode,
@@ -115,6 +118,8 @@ async def update_settings(
         user_settings.bypass_method = req.bypass_method
     if req.prefill_enabled is not None:
         user_settings.prefill_enabled = req.prefill_enabled
+    if req.streaming_post_processing_enabled is not None:
+        user_settings.streaming_post_processing_enabled = req.streaming_post_processing_enabled
     if req.context_budget_percent is not None:
         user_settings.context_budget_percent = max(0.0, min(100.0, req.context_budget_percent))
     if req.context_window_override is not None:
@@ -146,6 +151,7 @@ async def update_settings(
         driver_callable_turns=user_settings.driver_callable_turns,
         bypass_method=user_settings.bypass_method,
         prefill_enabled=user_settings.prefill_enabled,
+        streaming_post_processing_enabled=user_settings.streaming_post_processing_enabled,
         context_budget_percent=user_settings.context_budget_percent,
         context_window_override=user_settings.context_window_override,
         debug_mode=user_settings.debug_mode,

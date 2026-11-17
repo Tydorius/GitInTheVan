@@ -1019,6 +1019,16 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
         ALTER TABLE admin_settings ADD COLUMN max_snapshots_per_object INTEGER DEFAULT 20 NOT NULL;
         """,
     ),
+    # 0.29.0: response-side stages (pre/post-navigator cantrips, forbidden
+    # words) run on buffered streaming responses. Default on -- a configured
+    # check should actually run, and the stream is already buffered for
+    # <memstore> extraction so the marginal cost is the checks themselves.
+    (
+        "053_streaming_post_processing",
+        """
+        ALTER TABLE user_settings ADD COLUMN streaming_post_processing_enabled BOOLEAN DEFAULT 1 NOT NULL;
+        """,
+    ),
 ]
 
 

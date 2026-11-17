@@ -749,11 +749,11 @@ The Forbidden Words tab provides a fast, string-matching check that runs before 
 
 **How it works:**
 
-1. After the Driver responds, the response is scanned against your list of forbidden phrases
+1. After the Driver responds, the response is scanned against your list of forbidden phrases — on every request type, including buffered streaming responses (see [Streaming and Status](#streaming-and-status) to disable that)
 2. Any matches are collected into a violation summary
 3. If matches are found and the Navigator is enabled, the summary is prepended to the verification prompt as a `[FORBIDDEN CONTENT DETECTED]` block
-4. If matches are found and the Navigator is not enabled, the matches are logged but the response is still returned
-5. If the Navigator has no rules but forbidden words exist, the forbidden check alone triggers the verification loop
+4. When the Navigator rejects a response and regenerates it, the retry is re-scanned before it is judged — a retry that swaps one forbidden phrase for another does not pass on the previous response's stale findings
+5. If the Navigator has no rules configured, matches are logged but the response is still returned; the retry loop requires at least one verification rule
 
 **Settings:**
 - **Enable Forbidden Words Check**: Master toggle
@@ -1176,11 +1176,12 @@ Model configuration is per-endpoint — there is no model override here. Set the
 
 ### Streaming and Status
 
-These settings affect how responses are delivered when verification is enabled. Since verification requires buffering the full response, these options control the streaming experience:
+These settings affect how responses are delivered. Streaming responses are buffered by the proxy (memory extraction needs the full response) and then re-delivered to your client as streaming output — these options control what runs before that delivery:
 
+- **Run Response Checks on Streams**: Run the forbidden-words scan and pre-/post-Navigator cantrips on buffered streaming responses (on by default). The response is already buffered, so these cost only the checks themselves; turn this off to deliver the response the moment memory extraction finishes. Before 0.29.0 these checks silently never ran on streaming requests unless verification was enabled.
 - **GITV Status Block**: Includes a `<think><gitv>` status block before the response showing pipeline activity
 - **Preserve Thinking**: Include the LLM's reasoning/thought process in the final response
-- **Simulated Streaming Speed**: When verification buffers the response, simulate streaming output at this speed (tokens/min, 0 = instant)
+- **Simulated Streaming Speed**: When the response is buffered (verification or response checks), simulate streaming output at this speed (tokens/min, 0 = instant)
 
 ### Conversation Summarization
 

@@ -286,3 +286,129 @@ class TestLiteLLMToolsPassthrough:
         assert captured["tools"] == tools
         assert captured["tool_choice"] == "auto"
         assert captured["parallel_tool_calls"] is False
+
+
+# ============================================================================
+# Authenticated streaming (0.29.0)
+#
+# Every authenticated streaming request buffers the response (memstore
+# extraction) and re-emits it as SSE. Until 0.29.0 the buffered forward kept
+# `stream: true` in the upstream body, so a raw (non-LiteLLM) endpoint
+# answered with SSE that _do_forward could not JSON-parse -- and the client
+# received an empty stream. The one pre-existing streaming test uses the
+# unauthenticated fixture (true passthrough), which is why this survived.
+# ============================================================================
+
+
+class TestAuthenticatedStreaming:
+    @pytest.mark.asyncio
+    async def test_streaming_sends_non_streaming_upstream_and_returns_content(
+        self, admin_client, httpx_mock
+    ):
+        client, _, api_key = admin_client
+
+        ep_resp = await client.post("/api/endpoints", json={
+            "name": "Raw", "base_url": MOCK_ENDPOINT_URL, "api_key": "sk-test",
+        })
+        assert ep_resp.status_code in (200, 201), ep_resp.text
+        await client.put("/api/settings", json={"default_endpoint_id": ep_resp.json()["id"]})
+
+        httpx_mock.add_response(
+            url=f"{MOCK_ENDPOINT_URL}/v1/chat/completions",
+            json=_mock_response("Hello back!"),
+            status_code=200,
+        )
+
+        resp = await client.post("/v1/chat/completions", json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "stream": True,
+        }, headers={"Authorization": f"Bearer {api_key}"})
+
+        assert resp.status_code == 200
+        # The client still receives SSE...
+        assert "Hello back!" in resp.text
+        assert "[DONE]" in resp.text
+        # ...but the upstream call was made non-streaming, or an SSE answer
+        # would fail _do_forward's JSON parse and the stream would come back
+        # empty (the 0.9.x-0.28.x behavior on raw endpoints).
+        forwarded = httpx_mock.get_request(url=f"{MOCK_ENDPOINT_URL}/v1/chat/completions")
+        assert json.loads(forwarded.content)["stream"] is False
+
+    @pytest.mark.asyncio
+    async def test_streaming_runs_post_response_cantrips(self, admin_client, httpx_mock):
+        client, _, api_key = admin_client
+
+        ep_resp = await client.post("/api/endpoints", json={
+            "name": "Raw", "base_url": MOCK_ENDPOINT_URL, "api_key": "sk-test",
+        })
+        assert ep_resp.status_code in (200, 201), ep_resp.text
+        await client.put("/api/settings", json={"default_endpoint_id": ep_resp.json()["id"]})
+
+        cantrip_resp = await client.post("/api/cantrips", json={
+            "name": "Stamp",
+            "code": 'context.response.content = context.response.content + " [POSTNAV]";',
+            "is_active": True,
+            "run_post_navigator": True,
+        })
+        assert cantrip_resp.status_code in (200, 201), cantrip_resp.text
+
+        httpx_mock.add_response(
+            url=f"{MOCK_ENDPOINT_URL}/v1/chat/completions",
+            json=_mock_response("Base reply"),
+            status_code=200,
+        )
+
+        resp = await client.post("/v1/chat/completions", json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "stream": True,
+        }, headers={"Authorization": f"Bearer {api_key}"})
+
+        assert resp.status_code == 200
+        # Response-side stages run on buffered streams by default (0.29.0);
+        # before that, a post-navigator cantrip silently never ran on any
+        # streaming request without verification.
+        assert "Base reply [POSTNAV]" in resp.text
+
+    @pytest.mark.asyncio
+    async def test_streaming_post_processing_disabled_by_setting(
+        self, admin_client, httpx_mock
+    ):
+        client, _, api_key = admin_client
+
+        ep_resp = await client.post("/api/endpoints", json={
+            "name": "Raw", "base_url": MOCK_ENDPOINT_URL, "api_key": "sk-test",
+        })
+        assert ep_resp.status_code in (200, 201), ep_resp.text
+        await client.put("/api/settings", json={"default_endpoint_id": ep_resp.json()["id"]})
+
+        cantrip_resp = await client.post("/api/cantrips", json={
+            "name": "Stamp",
+            "code": 'context.response.content = context.response.content + " [POSTNAV]";',
+            "is_active": True,
+            "run_post_navigator": True,
+        })
+        assert cantrip_resp.status_code in (200, 201), cantrip_resp.text
+
+        settings_resp = await client.put("/api/settings", json={
+            "streaming_post_processing_enabled": False,
+        })
+        assert settings_resp.status_code == 200
+        assert settings_resp.json()["streaming_post_processing_enabled"] is False
+
+        httpx_mock.add_response(
+            url=f"{MOCK_ENDPOINT_URL}/v1/chat/completions",
+            json=_mock_response("Base reply"),
+            status_code=200,
+        )
+
+        resp = await client.post("/v1/chat/completions", json={
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "stream": True,
+        }, headers={"Authorization": f"Bearer {api_key}"})
+
+        assert resp.status_code == 200
+        assert "Base reply" in resp.text
+        assert "[POSTNAV]" not in resp.text
