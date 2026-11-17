@@ -20,6 +20,7 @@ from app.services.content_guard import (
 )
 from app.services.llm_params import ParameterDef, params_from_api, params_to_api
 from app.services.safety_scanner import scan_map_report
+from app.services.snapshots import capture as capture_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -377,6 +378,10 @@ async def update_map(
     if m is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Map not found")
 
+    # Pre-edit snapshot before the write, so an update that rebuilds every
+    # stage is undoable. Best-effort: a history failure must not block an edit.
+    await capture_snapshot(db, current_user.id, "map", map_id)
+
     await _guard_map_texts(db, current_user.id, req, req.stages, map_id)
 
     if req.tag is not None and req.tag != m.tag:
@@ -408,10 +413,16 @@ async def update_map(
 
     await db.commit()
 
+    # populate_existing: the Map instance above is still in the identity map
+    # with its pre-edit `stages` collection loaded, and a plain re-select
+    # returns that stale collection -- an update that replaced the stages
+    # answered with the old ones. Force the refresh so the response is the
+    # row as committed.
     result = await db.execute(
         select(Map)
         .where(Map.id == m.id)
         .options(selectinload(Map.stages).selectinload(MapStage.resources))
+        .execution_options(populate_existing=True)
     )
     return _map_to_response(result.scalar_one())
 
@@ -428,6 +439,11 @@ async def delete_map(
     m = result.scalar_one_or_none()
     if m is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Map not found")
+
+    # Snapshots outlive the object they describe, so a deleted map stays
+    # recoverable as a restore-as-new copy. Best-effort, same as update.
+    await capture_snapshot(db, current_user.id, "map", map_id)
+
     await db.delete(m)
     await db.commit()
 

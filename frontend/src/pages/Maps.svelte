@@ -2,6 +2,7 @@
   import { api, withScanOverride } from '../api'
   import ParameterEditor from '../lib/ParameterEditor.svelte'
   import ModelSelect from '../lib/ModelSelect.svelte'
+  import SnapshotHistoryModal from '../lib/SnapshotHistoryModal.svelte'
   import { onMount } from 'svelte'
   import { routeParams } from '../stores'
   import { downloadJson } from '../lib/download'
@@ -16,6 +17,16 @@
   let endpoints: any[] = []
   let lorebooks: any[] = []
   let cantrips: any[] = []
+
+  let historyShow = false
+  let historyId = ''
+  let historyName = ''
+
+  function openHistory(m: any) {
+    historyId = m.id
+    historyName = m.name || ''
+    historyShow = true
+  }
 
   let editForm: any = {
     name: '', description: '', tag: '', is_public: false, version: '1.0',
@@ -446,6 +457,7 @@
           </td>
           <td>
             <button onclick={() => startEdit(m)}>Edit</button>
+            <button onclick={() => openHistory(m)}>History</button>
             <button onclick={() => exportMap(m)} title="Full content of every attached resource — installs anywhere">Export</button>
             <button onclick={() => exportMap(m, 'linked')} title="References instead of copies where the origin is known — the map tracks upstream">Export (linked)</button>
             <button class="danger" onclick={() => deleteMap(m.id)}>Delete</button>
@@ -455,6 +467,14 @@
     </tbody>
   </table>
 {/if}
+
+<SnapshotHistoryModal
+  bind:show={historyShow}
+  resourceType="map"
+  resourceId={historyId}
+  resourceName={historyName}
+  onRestored={() => withScroll(load)}
+/>
 
 {#if showImport}
   <div class="modal-overlay" role="dialog" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) showImport = false; }}>

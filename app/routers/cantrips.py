@@ -545,3 +545,43 @@ async def test_stored_cantrip(
         debug_logs=test_result.debug_logs,
         error=test_result.error,
     )
+
+
+@router.get("/{cantrip_id}/export")
+async def export_cantrip(
+    cantrip_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Download one cantrip as JSON, in the same shape a content pack publishes.
+
+    Export-shaped by design: local wiring (tag, is_active, run_* routing flags)
+    stays behind, because a file that travels between installs should not carry
+    it. The History panel holds full-fidelity copies for restore.
+    """
+    import json as _json
+
+    from fastapi.responses import Response
+
+    result = await db.execute(
+        select(Cantrip).where(Cantrip.id == cantrip_id, Cantrip.user_id == current_user.id)
+    )
+    c = result.scalar_one_or_none()
+    if c is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cantrip not found")
+
+    data = {
+        "name": c.name,
+        "description": c.description or "",
+        "llm_instructions": c.llm_instructions or "",
+        "code": c.code or "",
+        "author": "",
+        "version": "1.0.0",
+        "updated": c.updated_at.isoformat() if c.updated_at else "",
+    }
+    slug = c.name.lower().replace(" ", "_")[:64] or "cantrip"
+    return Response(
+        content=_json.dumps(data, ensure_ascii=False, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{slug}.json"'},
+    )

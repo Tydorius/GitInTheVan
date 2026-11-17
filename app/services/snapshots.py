@@ -45,6 +45,7 @@ from app.models.admin_settings import AdminSettings
 from app.models.cantrip import Cantrip
 from app.models.lorebook import Lorebook
 from app.models.lorebook_entry import LorebookEntry
+from app.models.map import Map, MapStage, MapStageResource
 from app.models.memory_rule import MemoryRule
 from app.models.resource_snapshot import ResourceSnapshot
 from app.models.scenario_rule import ScenarioRule
@@ -92,6 +93,13 @@ class SnapshotSpec:
     child_fk: str = ""
     # Child fields the sanitizer applies to; the size cap is their sum.
     child_sanitize_fields: tuple[str, ...] = ()
+    # Second nesting level (map -> stages -> resources). The grandchild list is
+    # embedded in each child's serialized dict under `grandchild_attr`, keyed by
+    # `grandchild_fk` back to the child row. It carries no user-authored prose,
+    # so it has no sanitize fields of its own.
+    grandchild_attr: str = ""
+    grandchild_model: Any = None
+    grandchild_fk: str = ""
     # Whether `tag` is unique per user for this type. Restore-as-new clears it.
     has_tag: bool = True
 
@@ -154,6 +162,29 @@ SNAPSHOT_TYPES: dict[str, SnapshotSpec] = {
         # ScenarioRule fires on a token threshold, not a tag -- it has no tag column.
         has_tag=False,
     ),
+    # Phase 28. A map is a two-level tree: stages carry the settings, and each
+    # stage carries loose attachments to cantrips/lorebooks/skills. The guard
+    # mirrors `_guard_map_texts` in routers/maps.py (which has no scanner gate:
+    # a map built in the UI references resources by id and carries no code), and
+    # the child size cap sums every stage's instruction fields -- stricter than
+    # the router's per-field check, which is the safe direction for a restore.
+    "map": SnapshotSpec(
+        resource_type="map",
+        model=Map,
+        label="Map instructions",
+        size_cap_attr="max_rule_size_kb",
+        size_fields=("global_llm_instructions",),
+        sanitize_fields=("name", "description", "global_llm_instructions"),
+        child_attr="stages",
+        child_model=MapStage,
+        child_fk="map_id",
+        child_sanitize_fields=(
+            "name", "description", "system_instructions", "verification_instructions",
+        ),
+        grandchild_attr="resources",
+        grandchild_model=MapStageResource,
+        grandchild_fk="map_stage_id",
+    ),
 }
 
 # `sample` rows live on the Skill table and differ only by their `type` column.
@@ -214,6 +245,12 @@ def child_columns(spec: SnapshotSpec) -> tuple[str, ...]:
     return _columns_of(spec.child_model, _SKIP_CHILD_COLUMNS | {spec.child_fk})
 
 
+def grandchild_columns(spec: SnapshotSpec) -> tuple[str, ...]:
+    if not spec.grandchild_attr:
+        return ()
+    return _columns_of(spec.grandchild_model, _SKIP_CHILD_COLUMNS | {spec.grandchild_fk})
+
+
 def serialize(spec: SnapshotSpec, row: Any) -> dict[str, Any]:
     """Every content column of a row, plus its children. Lossless by construction."""
     content: dict[str, Any] = {
@@ -221,10 +258,17 @@ def serialize(spec: SnapshotSpec, row: Any) -> dict[str, Any]:
     }
     if spec.child_attr:
         names = child_columns(spec)
-        content[spec.child_attr] = [
-            {name: _json_safe(getattr(child, name)) for name in names}
-            for child in getattr(row, spec.child_attr)
-        ]
+        children = []
+        for child in getattr(row, spec.child_attr):
+            item = {name: _json_safe(getattr(child, name)) for name in names}
+            if spec.grandchild_attr:
+                gnames = grandchild_columns(spec)
+                item[spec.grandchild_attr] = [
+                    {name: _json_safe(getattr(gc, name)) for name in gnames}
+                    for gc in getattr(child, spec.grandchild_attr)
+                ]
+            children.append(item)
+        content[spec.child_attr] = children
     return content
 
 
@@ -244,7 +288,10 @@ async def load_row(db: AsyncSession, user_id: str, spec: SnapshotSpec, resource_
         spec.model.id == resource_id, spec.model.user_id == user_id
     )
     if spec.child_attr:
-        query = query.options(selectinload(getattr(spec.model, spec.child_attr)))
+        option = selectinload(getattr(spec.model, spec.child_attr))
+        if spec.grandchild_attr:
+            option = option.selectinload(getattr(spec.child_model, spec.grandchild_attr))
+        query = query.options(option)
     result = await db.execute(query)
     return result.scalar_one_or_none()
 
@@ -469,6 +516,18 @@ async def guard_content(
             rebuilt.append(child)
         guarded[spec.child_attr] = rebuilt
 
+    if spec.grandchild_attr:
+        # No prose of its own to sanitize; shape only. A missing list becomes
+        # empty so a restore of an old snapshot degrades rather than raises.
+        for child in guarded.get(spec.child_attr) or []:
+            gc = child.get(spec.grandchild_attr)
+            if gc is None:
+                child[spec.grandchild_attr] = []
+            elif not isinstance(gc, list) or not all(isinstance(g, dict) for g in gc):
+                raise SnapshotError(
+                    f"This snapshot's '{spec.grandchild_attr}' is not a list."
+                )
+
     if spec.scan_type:
         scan = scan_json_content(json.dumps(guarded, ensure_ascii=False), spec.scan_type)
         await log_scan_findings(user_id, scan, spec.resource_type, "")
@@ -501,13 +560,108 @@ async def _tag_taken(
     return result.scalars().first() is not None
 
 
-def _rebuild_children(db: AsyncSession, spec: SnapshotSpec, parent_id: str, content: dict) -> None:
+async def _rebuild_children(
+    db: AsyncSession, spec: SnapshotSpec, parent_id: str, content: dict
+) -> None:
     known = set(child_columns(spec))
+    gknown = set(grandchild_columns(spec)) if spec.grandchild_attr else set()
     for child in content.get(spec.child_attr) or []:
         if not isinstance(child, dict):
             continue
         fields = {k: v for k, v in child.items() if k in known}
-        db.add(spec.child_model(**{spec.child_fk: parent_id}, **fields))
+        row = spec.child_model(**{spec.child_fk: parent_id}, **fields)
+        db.add(row)
+        if spec.grandchild_attr:
+            # Grandchild rows key on the child's id, which the database assigns
+            # at flush time. Both callers are restores, which already flush, so
+            # a flush here is consistent with them -- unlike capture, which
+            # deliberately never flushes (see its docstring).
+            await db.flush()
+            for gc in child.get(spec.grandchild_attr) or []:
+                if not isinstance(gc, dict):
+                    continue
+                gfields = {k: v for k, v in gc.items() if k in gknown}
+                db.add(spec.grandchild_model(**{spec.grandchild_fk: row.id}, **gfields))
+
+
+async def _resolve_map_references(
+    db: AsyncSession, user_id: str, content: dict[str, Any], notes: list[str]
+) -> None:
+    """Settle a map snapshot's cross-object references at restore time.
+
+    Stage endpoints are real foreign keys (``ON DELETE SET NULL`` in the live
+    schema), so a reference to a missing endpoint becomes None here too --
+    what the database itself would have done. Stage resources are loose ids
+    with no FK: an attachment whose target no longer exists (or was never this
+    user's) is dropped, because it can never load again. Every decision lands
+    in ``notes`` -- a restore that silently lost wiring is worse than one that
+    says what it lost.
+    """
+    from app.models.endpoint import Endpoint
+
+    stages = content.get("stages") or []
+
+    endpoint_ids = {
+        stage[field]
+        for stage in stages
+        for field in ("endpoint_id", "verification_endpoint_id")
+        if stage.get(field)
+    }
+    live_endpoints: set[str] = set()
+    if endpoint_ids:
+        result = await db.execute(
+            select(Endpoint.id).where(
+                Endpoint.id.in_(endpoint_ids), Endpoint.user_id == user_id
+            )
+        )
+        live_endpoints = set(result.scalars().all())
+
+    # `sample` rows live on the Skill table, differing only by their type column.
+    target_models = {
+        "cantrip": Cantrip, "lorebook": Lorebook, "skill": Skill, "sample": Skill,
+    }
+    wanted: dict[str, set[str]] = {}
+    for stage in stages:
+        for res in stage.get("resources") or []:
+            rtype = str(res.get("resource_type") or "")
+            rid = str(res.get("resource_id") or "")
+            if rtype in target_models and rid:
+                wanted.setdefault(rtype, set()).add(rid)
+    live_resources: set[tuple[str, str]] = set()
+    for rtype, ids in wanted.items():
+        model = target_models[rtype]
+        result = await db.execute(
+            select(model.id).where(model.id.in_(ids), model.user_id == user_id)
+        )
+        live_resources.update((rtype, rid) for rid in result.scalars().all())
+
+    for stage in stages:
+        stage_name = str(stage.get("name") or "unnamed")
+        for field, label in (
+            ("endpoint_id", "endpoint"),
+            ("verification_endpoint_id", "verification endpoint"),
+        ):
+            value = stage.get(field)
+            if value and value not in live_endpoints:
+                stage[field] = None
+                notes.append(
+                    f"Stage '{stage_name}': its {label} no longer exists, so the "
+                    "reference was cleared."
+                )
+        kept = []
+        dropped = []
+        for res in stage.get("resources") or []:
+            key = (str(res.get("resource_type") or ""), str(res.get("resource_id") or ""))
+            (kept if key in live_resources else dropped).append(res)
+        if dropped:
+            stage["resources"] = kept
+            names = ", ".join(
+                f"{d.get('resource_type')} '{str(d.get('resource_id'))[:8]}'" for d in dropped
+            )
+            notes.append(
+                f"Stage '{stage_name}': {len(dropped)} attached resource(s) no longer "
+                f"exist and were removed ({names})."
+            )
 
 
 async def restore_as_new(
@@ -530,6 +684,9 @@ async def restore_as_new(
     fields = _assignable(spec, content)
     notes: list[str] = []
 
+    if spec.resource_type == "map":
+        await _resolve_map_references(db, user_id, content, notes)
+
     captured = str(fields.get("name") or snapshot.resource_name or "Restored")
     fields["name"] = (name.strip() or f"{captured} (restored)")[:128]
 
@@ -545,7 +702,7 @@ async def restore_as_new(
     await db.flush()
 
     if spec.child_attr:
-        _rebuild_children(db, spec, row.id, content)
+        await _rebuild_children(db, spec, row.id, content)
         await db.flush()
 
     return RestoreReport(
@@ -582,6 +739,9 @@ async def restore_in_place(
     fields = _assignable(spec, content)
     notes: list[str] = []
 
+    if spec.resource_type == "map":
+        await _resolve_map_references(db, user_id, content, notes)
+
     # strict: this is the only record of what the restore is about to overwrite.
     await capture(
         db, user_id, spec.resource_type, snapshot.resource_id,
@@ -604,10 +764,24 @@ async def restore_in_place(
     if spec.child_attr:
         from sqlalchemy import delete as sa_delete
 
+        if spec.grandchild_attr:
+            # Child deletes cascade to grandchildren only where the database
+            # enforces foreign keys (SQLite file DBs do, :memory: does not), so
+            # remove them explicitly rather than depend on the pragma.
+            child_ids = (
+                select(spec.child_model.id)
+                .where(getattr(spec.child_model, spec.child_fk) == row.id)
+                .scalar_subquery()
+            )
+            await db.execute(
+                sa_delete(spec.grandchild_model).where(
+                    getattr(spec.grandchild_model, spec.grandchild_fk).in_(child_ids)
+                )
+            )
         await db.execute(
             sa_delete(spec.child_model).where(getattr(spec.child_model, spec.child_fk) == row.id)
         )
-        _rebuild_children(db, spec, row.id, content)
+        await _rebuild_children(db, spec, row.id, content)
         await db.flush()
 
     return RestoreReport(
