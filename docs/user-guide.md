@@ -410,7 +410,7 @@ Each cantrip card shows:
 - **Name** and **Public** badge (if shared)
 - **ON/OFF toggle**: Enable or disable without editing
 - **Test**: Open the cantrip tester
-- **Edit** / **Delete**
+- **Edit** / **History** / **Export** (download as JSON) / **Delete**
 
 The card footer displays the active pipeline positions, execution order, and timeout.
 
@@ -673,6 +673,8 @@ Samples are wrapped in `<writing_sample>` tags and inserted as a system message 
 
 1. Navigate to **Skills & Samples** in the sidebar
 2. Use the **Skills** / **Writing Samples** tabs to switch between types
+
+Each row also carries **History** (version history) and **Export** (download as JSON) buttons.
 3. Click **New Skill** or **New Writing Sample**
 4. Fill in name, description, and content (markdown supported)
 5. Select the type if needed (Skill or Writing Sample)
@@ -831,7 +833,7 @@ Click **View** to expand and read the full summary text. Click **Delete** to rem
 
 ![Add Memory Rule](media/gitv-memories-add-rule.png)
 
-Memory Rules override summarization behavior for specific conversations. Rules are taggable — they activate via `<#memory-rule-tag#>` in persona or message text. A rule with no tag acts as the default fallback.
+Memory Rules override summarization behavior for specific conversations. Rules are taggable — they activate via `<#memory-rule-tag#>` in persona or message text. A rule with no tag acts as the default fallback. Each rule can also be exported as JSON (**Export**) and keeps version history (**History**).
 
 Each rule can override:
 - **Summarization Enabled**: Turn summarization on or off for matching conversations
@@ -847,7 +849,7 @@ To create a memory rule:
 3. Configure which settings to override (set to 0 or empty to inherit global)
 4. Click **Create**
 
-Use **Edit** to modify a rule and the **ON/OFF** toggle to enable/disable without deleting.
+Use **Edit** to modify a rule and the **ON/OFF** toggle to enable/disable without deleting. **Export** downloads the rule as JSON (the **History** button keeps its version history).
 
 ### Scenario Summarization Rules
 
@@ -944,7 +946,7 @@ The table shows each map with:
 - **Stages**: Number of LLM stages in the chain
 - **Tag**: Activation tag (click to copy the `<#map-tag#>` string)
 - **Active**: ON/OFF toggle
-- **Actions**: Edit, Export, Delete
+- **Actions**: Edit, History, Export, Delete
 
 ### Map Activation
 
@@ -1003,6 +1005,8 @@ This lets a shared world-setting lorebook remain active across the whole chain w
 ### Import and Export
 
 Maps export as a single JSON file containing all stages, resource contents, and configuration. Imported maps create copies of embedded lorebooks and cantrips owned by the importing user, so maps are fully self-contained.
+
+Maps also keep version history like every other resource type: every update and delete stores the previous version (all stages and their attachments), and the **History** button lists them. A restore recreates the stages and attachments; if a stage referenced an endpoint, cantrip or lorebook that no longer exists, the restore drops that reference and says so in its notes rather than recreating wiring that can never load.
 
 ![Map Import](media/gitv-maps-edit-4.png)
 
@@ -1711,8 +1715,9 @@ request rather than activating a resource. They are covered in
 *Screenshots pending (2026-09-02) — this section shipped with the feature, before a capture pass.*
 
 Every time you change or delete a cantrip, lorebook, skill, sample, verification rule, memory
-rule or scenario rule, GitInTheVan stores the version you had immediately before. You do not
-have to remember to do anything: the history is there when you need it.
+rule, scenario rule or map, GitInTheVan stores the version you had immediately before. You do
+not have to remember to do anything: the history is there when you need it. For a map, the
+version includes every stage and its attachments.
 
 Open it with the **History** button on the object's card or row. The panel lists every stored
 version newest first, and selecting one shows exactly what changed between it and what you have
@@ -1730,7 +1735,9 @@ editing anything stores one version, not three. Automatic versions are trimmed t
 admin sets (**Max snapshots per object**, default 20, on the Admin page). Versions you saved by
 name are never trimmed.
 
-Maps are not covered yet. Neither are forbidden words or tag groups.
+Maps are covered as of 0.30.0 — a map version includes every stage and attachment, and a
+restore that finds a referenced endpoint, cantrip or lorebook gone drops the reference and
+says so in its notes. Forbidden words and tag groups are still not covered.
 
 ### Restoring
 

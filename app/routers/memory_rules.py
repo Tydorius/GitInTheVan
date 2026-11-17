@@ -232,3 +232,40 @@ async def delete_rule(
     await snapshots.capture(db, current_user.id, "memory_rule", rule_id)
     await db.delete(rule)
     await db.commit()
+
+
+@router.get("/{rule_id}/export")
+async def export_memory_rule(
+    rule_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Download one memory rule as JSON, pack-shaped (see packs.py)."""
+    import json as _json
+
+    from fastapi.responses import Response
+
+    result = await db.execute(
+        select(MemoryRule).where(MemoryRule.id == rule_id, MemoryRule.user_id == current_user.id)
+    )
+    rule = result.scalar_one_or_none()
+    if rule is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory rule not found")
+
+    data = {
+        "name": rule.name,
+        "description": rule.description or "",
+        "summarization_enabled": rule.summarization_enabled,
+        "token_threshold": rule.token_threshold,
+        "keep_recent": rule.keep_recent,
+        "prompt": rule.prompt or "",
+        "author": "",
+        "version": "1.0.0",
+        "updated": rule.updated_at.isoformat() if rule.updated_at else "",
+    }
+    slug = rule.name.lower().replace(" ", "_")[:64] or "memory_rule"
+    return Response(
+        content=_json.dumps(data, ensure_ascii=False, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{slug}.json"'},
+    )

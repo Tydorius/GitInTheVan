@@ -270,3 +270,41 @@ async def detach_skill(
 
     await db.delete(link)
     await db.commit()
+
+
+@router.get("/{skill_id}/export")
+async def export_skill(
+    skill_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Download one skill or writing sample as JSON, pack-shaped (see packs.py).
+
+    The stored `type` column decides which of the two the file says it is.
+    """
+    import json as _json
+
+    from fastapi.responses import Response
+
+    result = await db.execute(
+        select(Skill).where(Skill.id == skill_id, Skill.user_id == current_user.id)
+    )
+    s = result.scalar_one_or_none()
+    if s is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill not found")
+
+    data = {
+        "name": s.name,
+        "description": s.description or "",
+        "content": s.content or "",
+        "type": s.type,
+        "author": "",
+        "version": "1.0.0",
+        "updated": s.updated_at.isoformat() if s.updated_at else "",
+    }
+    slug = s.name.lower().replace(" ", "_")[:64] or "skill"
+    return Response(
+        content=_json.dumps(data, ensure_ascii=False, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{slug}.json"'},
+    )

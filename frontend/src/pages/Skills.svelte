@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from '../api'
   import SnapshotHistoryModal from '../lib/SnapshotHistoryModal.svelte'
+  import { downloadJson } from '../lib/download'
   import { onMount } from 'svelte'
   import { routeParams } from '../stores'
   import CodeEditor from '../lib/CodeEditor.svelte'
@@ -128,6 +129,13 @@
     historyName = item.name || ''
     historyShow = true
   }
+
+  async function handleExport(id: string) {
+    try {
+      const data = await api.exportSkill(id)
+      downloadJson(data, `${data.name || 'skill'}.json`)
+    } catch (e: any) { error = e.message }
+  }
 </script>
 
 <div class="page-header">
@@ -182,6 +190,7 @@
             <td style="white-space: nowrap;">
               <button onclick={() => startEdit(s)} style="font-size: 12px;">Edit</button>
               <button onclick={() => openHistory(s, s.type === 'sample' ? 'sample' : 'skill')} style="font-size: 12px;">History</button>
+              <button onclick={() => handleExport(s.id)} style="font-size: 12px;">Export</button>
               <button class="danger" onclick={() => handleDelete(s)} style="font-size: 12px; margin-left: 4px;">Delete</button>
             </td>
           </tr>

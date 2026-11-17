@@ -399,7 +399,7 @@ verification judge and the verification retry.</p>
 - <strong>Name</strong> and <strong>Public</strong> badge (if shared)
 - <strong>ON/OFF toggle</strong>: Enable or disable without editing
 - <strong>Test</strong>: Open the cantrip tester
-- <strong>Edit</strong> / <strong>Delete</strong></p>
+- <strong>Edit</strong> / <strong>History</strong> / <strong>Export</strong> (download as JSON) / <strong>Delete</strong></p>
 <p>The card footer displays the active pipeline positions, execution order, and timeout.</p>
 <h3 id="cantrip-tester">Cantrip Tester</h3>
 <p><img alt="Cantrip Test Panel" src="media/gitv-cantrips-test-example.png"></p>
@@ -597,10 +597,11 @@ cantrips run at the other positions.</p>
 <ol>
 <li>Navigate to <strong>Skills &amp; Samples</strong> in the sidebar</li>
 <li>Use the <strong>Skills</strong> / <strong>Writing Samples</strong> tabs to switch between types</li>
-<li>Click <strong>New Skill</strong> or <strong>New Writing Sample</strong></li>
-<li>Fill in name, description, and content (markdown supported)</li>
-<li>Select the type if needed (Skill or Writing Sample)</li>
 </ol>
+<p>Each row also carries <strong>History</strong> (version history) and <strong>Export</strong> (download as JSON) buttons.
+3. Click <strong>New Skill</strong> or <strong>New Writing Sample</strong>
+4. Fill in name, description, and content (markdown supported)
+5. Select the type if needed (Skill or Writing Sample)</p>
 <h3 id="attaching-to-endpoints">Attaching to Endpoints</h3>
 <ol>
 <li>Create or edit a skill/sample</li>
@@ -711,7 +712,7 @@ API it actually speaks.</p>
 <p>Click <strong>View</strong> to expand and read the full summary text. Click <strong>Delete</strong> to remove a summary (the conversation will be re-summarized next time it exceeds the threshold).</p>
 <h3 id="memory-rules">Memory Rules</h3>
 <p><img alt="Add Memory Rule" src="media/gitv-memories-add-rule.png"></p>
-<p>Memory Rules override summarization behavior for specific conversations. Rules are taggable — they activate via <code>&lt;#memory-rule-tag#&gt;</code> in persona or message text. A rule with no tag acts as the default fallback.</p>
+<p>Memory Rules override summarization behavior for specific conversations. Rules are taggable — they activate via <code>&lt;#memory-rule-tag#&gt;</code> in persona or message text. A rule with no tag acts as the default fallback. Each rule can also be exported as JSON (<strong>Export</strong>) and keeps version history (<strong>History</strong>).</p>
 <p>Each rule can override:
 - <strong>Summarization Enabled</strong>: Turn summarization on or off for matching conversations
 - <strong>Token Threshold</strong>: Override the global threshold (0 = use global)
@@ -723,7 +724,7 @@ API it actually speaks.</p>
 2. Enter a <strong>Name</strong> and optional <strong>Tag</strong>
 3. Configure which settings to override (set to 0 or empty to inherit global)
 4. Click <strong>Create</strong></p>
-<p>Use <strong>Edit</strong> to modify a rule and the <strong>ON/OFF</strong> toggle to enable/disable without deleting.</p>
+<p>Use <strong>Edit</strong> to modify a rule and the <strong>ON/OFF</strong> toggle to enable/disable without deleting. <strong>Export</strong> downloads the rule as JSON (the <strong>History</strong> button keeps its version history).</p>
 <h3 id="scenario-summarization-rules">Scenario Summarization Rules</h3>
 <p>Scenario summarization automatically compresses the system message (character definition + scenario + lorebooks) when it exceeds a token threshold. This is critical for large lorebooks or complex character cards that can consume thousands of tokens.</p>
 <p><strong>Two firing positions:</strong></p>
@@ -832,7 +833,7 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 - <strong>Stages</strong>: Number of LLM stages in the chain
 - <strong>Tag</strong>: Activation tag (click to copy the <code>&lt;#map-tag#&gt;</code> string)
 - <strong>Active</strong>: ON/OFF toggle
-- <strong>Actions</strong>: Edit, Export, Delete</p>
+- <strong>Actions</strong>: Edit, History, Export, Delete</p>
 <h3 id="map-activation">Map Activation</h3>
 <p>Maps activate via <code>&lt;#map-tag#&gt;</code> tags in persona or message text, the same tag system used by lorebooks, cantrips, and verification rules. One map per request (first match wins). When no map tag is present, the standard pipeline runs.</p>
 <h3 id="map-editor">Map Editor</h3>
@@ -892,6 +893,7 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <p>This lets a shared world-setting lorebook remain active across the whole chain while a stage-specific cantrip runs only once.</p>
 <h3 id="import-and-export">Import and Export</h3>
 <p>Maps export as a single JSON file containing all stages, resource contents, and configuration. Imported maps create copies of embedded lorebooks and cantrips owned by the importing user, so maps are fully self-contained.</p>
+<p>Maps also keep version history like every other resource type: every update and delete stores the previous version (all stages and their attachments), and the <strong>History</strong> button lists them. A restore recreates the stages and attachments; if a stage referenced an endpoint, cantrip or lorebook that no longer exists, the restore drops that reference and says so in its notes rather than recreating wiring that can never load.</p>
 <p><img alt="Map Import" src="media/gitv-maps-edit-4.png"></p>
 <p>When importing, choose a <strong>Resource Handling</strong> mode:</p>
 <table>
@@ -1591,8 +1593,9 @@ request rather than activating a resource. They are covered in
 <h2 id="20-snapshots-and-restore">20. Snapshots and Restore</h2>
 <p><em>Screenshots pending (2026-09-02) — this section shipped with the feature, before a capture pass.</em></p>
 <p>Every time you change or delete a cantrip, lorebook, skill, sample, verification rule, memory
-rule or scenario rule, GitInTheVan stores the version you had immediately before. You do not
-have to remember to do anything: the history is there when you need it.</p>
+rule, scenario rule or map, GitInTheVan stores the version you had immediately before. You do
+not have to remember to do anything: the history is there when you need it. For a map, the
+version includes every stage and its attachments.</p>
 <p>Open it with the <strong>History</strong> button on the object's card or row. The panel lists every stored
 version newest first, and selecting one shows exactly what changed between it and what you have
 now.</p>
@@ -1619,7 +1622,9 @@ now.</p>
 editing anything stores one version, not three. Automatic versions are trimmed to the limit an
 admin sets (<strong>Max snapshots per object</strong>, default 20, on the Admin page). Versions you saved by
 name are never trimmed.</p>
-<p>Maps are not covered yet. Neither are forbidden words or tag groups.</p>
+<p>Maps are covered as of 0.30.0 — a map version includes every stage and attachment, and a
+restore that finds a referenced endpoint, cantrip or lorebook gone drops the reference and
+says so in its notes. Forbidden words and tag groups are still not covered.</p>
 <h3 id="restoring">Restoring</h3>
 <p>Two ways, and the difference matters.</p>
 <p><strong>Restore as a copy</strong> creates a new object from the stored version and leaves what you have

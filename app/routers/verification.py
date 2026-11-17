@@ -313,6 +313,45 @@ async def delete_rule(
     await db.commit()
 
 
+@router.get("/rules/{rule_id}/export")
+async def export_rule(
+    rule_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Download one verification rule as JSON, pack-shaped (see packs.py)."""
+    import json as _json
+
+    from fastapi.responses import Response
+
+    result = await db.execute(
+        select(VerificationRule).where(
+            VerificationRule.id == rule_id, VerificationRule.user_id == current_user.id
+        )
+    )
+    rule = result.scalar_one_or_none()
+    if rule is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
+
+    data = {
+        "name": rule.name,
+        "description": rule.description or "",
+        "prompt": rule.prompt or "",
+        "max_retries": rule.max_retries,
+        "execution_order": rule.execution_order,
+        "resubmission_strategy": rule.resubmission_strategy,
+        "author": "",
+        "version": "1.0.0",
+        "updated": rule.updated_at.isoformat() if rule.updated_at else "",
+    }
+    slug = rule.name.lower().replace(" ", "_")[:64] or "rule"
+    return Response(
+        content=_json.dumps(data, ensure_ascii=False, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{slug}.json"'},
+    )
+
+
 @router.get("/logs")
 async def list_logs(
     current_user: Annotated[User, Depends(get_current_user)],

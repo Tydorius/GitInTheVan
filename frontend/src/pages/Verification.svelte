@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from '../api'
   import SnapshotHistoryModal from '../lib/SnapshotHistoryModal.svelte'
+  import { downloadJson } from '../lib/download'
   import ParameterEditor from '../lib/ParameterEditor.svelte'
   import ModelSelect from '../lib/ModelSelect.svelte'
   import { onMount } from 'svelte'
@@ -226,6 +227,13 @@
     historyName = item.name || ''
     historyShow = true
   }
+
+  async function handleExport(id: string) {
+    try {
+      const data = await api.exportVerificationRule(id)
+      downloadJson(data, `${data.name || 'rule'}.json`)
+    } catch (e: any) { error = e.message }
+  }
 </script>
 
 <div class="page-header">
@@ -278,6 +286,7 @@
               >{r.is_active ? 'ON' : 'OFF'}</button>
               <button onclick={() => startEdit(r)}>Edit</button>
               <button onclick={() => openHistory(r)}>History</button>
+              <button onclick={() => handleExport(r.id)}>Export</button>
               <button class="danger" onclick={() => handleDelete(r.id)}>Delete</button>
             </div>
           </div>

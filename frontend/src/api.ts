@@ -423,6 +423,8 @@ export const api = {
     request<any>(`/api/cantrips/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteCantrip: (id: string) =>
     request<void>(`/api/cantrips/${id}`, { method: 'DELETE' }),
+  exportCantrip: (id: string) =>
+    request<any>(`/api/cantrips/${id}/export`),
   testCantrip: (data: any) =>
     request<any>('/api/cantrips/test', { method: 'POST', body: JSON.stringify(data) }),
   testCantripById: (id: string, data: any) =>
@@ -470,6 +472,8 @@ export const api = {
     request<any>(`/api/skills/${skillId}/attach`, { method: 'POST', body: JSON.stringify({ endpoint_id: endpointId }) }),
   detachSkill: (skillId: string, endpointId: string) =>
     request<void>(`/api/skills/${skillId}/attach/${endpointId}`, { method: 'DELETE' }),
+  exportSkill: (id: string) =>
+    request<any>(`/api/skills/${id}/export`),
 
   // Scenario Rules
   listScenarioRules: () => request<{ rules: any[] }>('/api/scenario-rules'),
@@ -492,6 +496,8 @@ export const api = {
     request<any>(`/api/verification/rules/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteVerificationRule: (id: string) =>
     request<void>(`/api/verification/rules/${id}`, { method: 'DELETE' }),
+  exportVerificationRule: (id: string) =>
+    request<any>(`/api/verification/rules/${id}/export`),
   getVerificationSettings: () =>
     request<{ verification_enabled: boolean; verification_endpoint_id: string | null; verification_model: string }>('/api/verification/settings'),
   updateVerificationSettings: (data: any) =>
@@ -519,6 +525,8 @@ export const api = {
     request<any>(`/api/memory-rules/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteMemoryRule: (id: string) =>
     request<void>(`/api/memory-rules/${id}`, { method: 'DELETE' }),
+  exportMemoryRule: (id: string) =>
+    request<any>(`/api/memory-rules/${id}/export`),
 
   // Maps
   listMaps: () =>

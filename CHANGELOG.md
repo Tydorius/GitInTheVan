@@ -2,6 +2,41 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.30.0] - 2026-11-17
+
+Phase 28: Snapshot Completion. Maps join the version-history system, and the
+four resource types that could be snapshotted but never downloaded can now be
+exported. Plus one map-update bug found by the new tests.
+
+### Added
+
+- **Maps keep version history.** Every map update and delete stores the
+  previous version — all stages, their endpoint references and their
+  cantrip/lorebook/skill attachments. The History button on the Maps page
+  lists versions; restoring rebuilds stages and attachments. A restore that
+  finds a referenced endpoint gone clears it (matching the schema's own
+  `ON DELETE SET NULL`), and an attachment whose target is gone is dropped;
+  every such decision is stated in the restore's notes. Snapshots outlive the
+  map, so a deleted map is recoverable as a restore-as-new copy.
+- **Per-object export for cantrips, skills (and samples), verification rules
+  and memory rules.** One **Export** button per card downloads the object as
+  JSON in the same shape a content pack publishes — local wiring (tags,
+  activation flags, run positions) deliberately stays behind. Ownership is
+  enforced: another user's object is a 404, not a download.
+
+### Fixed
+
+- **A map update that replaced the stages answered with the old ones.** The
+  post-commit re-select returned the pre-edit `stages` collection from the
+  identity map, so a stage list edit looked like it had not applied (a fresh
+  GET showed the truth). The response is now built with `populate_existing`.
+  Pre-existing since maps shipped; found by Phase 28's snapshot tests.
+
+### Upgrade notes
+
+- No migration this release: map snapshots store their tree in the existing
+  `resource_snapshots.content_json` column.
+
 ## [0.29.0] - 2026-11-17
 
 Streaming responses, end to end. The headline fix returns content to clients

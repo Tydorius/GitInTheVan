@@ -1752,12 +1752,12 @@ _TOOL_LIST: list[Tool] = [
         method="GET",
         path="/api/snapshots",
         query_params={
-            "resource_type": "cantrip, lorebook, skill, verification_rule, memory_rule or scenario_rule.",
+            "resource_type": "cantrip, lorebook, skill, verification_rule, memory_rule, scenario_rule or map.",
             "resource_id": "Restrict to one object's history.",
         },
         doc=(
             "Every update and delete of a cantrip, lorebook, skill, verification "
-            "rule, memory rule or scenario rule stores the previous version "
+            "rule, memory rule, scenario rule or map stores the previous version "
             "automatically, so this is where an undo comes from.\n"
             "Rows survive the object being deleted, so this also answers "
             "'can I get back the cantrip I removed?'.\n"

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api, withScanOverride } from '../api'
   import SnapshotHistoryModal from '../lib/SnapshotHistoryModal.svelte'
+  import { downloadJson } from '../lib/download'
   import { onMount } from 'svelte'
   import { routeParams } from '../stores'
   import CodeEditor from '../lib/CodeEditor.svelte'
@@ -226,6 +227,13 @@
     historyName = item.name || ''
     historyShow = true
   }
+
+  async function handleExport(id: string) {
+    try {
+      const data = await api.exportCantrip(id)
+      downloadJson(data, `${data.name || 'cantrip'}.json`)
+    } catch (e: any) { error = e.message }
+  }
 </script>
 
 <div class="page-header">
@@ -349,6 +357,7 @@
           <button onclick={() => openTest(s.id)}>Test</button>
           <button onclick={() => startEdit(s)}>Edit</button>
           <button onclick={() => openHistory(s)}>History</button>
+          <button onclick={() => handleExport(s.id)}>Export</button>
           <button class="danger" onclick={() => handleDelete(s.id)}>Delete</button>
           <button onclick={() => toggleCard(`cantrip-${s.id}`)} style="padding: 2px 4px; font-size: 14px; border: none; background: none; cursor: pointer;" title={(collapsedCards[`cantrip-${s.id}`] ?? false) ? 'Expand' : 'Collapse'}>
             {(collapsedCards[`cantrip-${s.id}`] ?? false) ? '▶' : '▼'}

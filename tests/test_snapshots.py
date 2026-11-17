@@ -347,11 +347,13 @@ class TestManualSnapshots:
 
     async def test_an_unsupported_type_is_refused(self, admin_client):
         client, _token, _key = admin_client
+        # `map` was the canonical unsupported type until Phase 28 made it a
+        # supported one; `user` is not a user-authored resource and never will be.
         resp = await client.post(
-            "/api/snapshots", json={"resource_type": "map", "resource_id": "x"}
+            "/api/snapshots", json={"resource_type": "user", "resource_id": "x"}
         )
         assert resp.status_code == 400
-        assert "map" in resp.json()["detail"]
+        assert "user" in resp.json()["detail"]
 
 
 class TestPruning:
@@ -501,3 +503,193 @@ class TestSchemaShape:
     def test_resource_id_has_no_foreign_key(self):
         column = ResourceSnapshot.__table__.c.resource_id
         assert column.foreign_keys == set()
+
+
+# ============================================================================
+# Maps (Phase 28)
+#
+# A map is the only two-level type: stages carry settings, and each stage
+# carries loose attachments. The tests that matter here are the ones a flat
+# copy would silently get wrong: the grandchild rows surviving a round trip,
+# and a restore settling references to things that no longer exist rather
+# than recreating wiring that can never load again.
+# ============================================================================
+
+
+class TestMapSnapshots:
+    @staticmethod
+    def _map_payload(endpoint_id, cantrip_id):
+        return {
+            "name": "Battle Map",
+            "tag": "battle",
+            "global_llm_instructions": "Run the battle.",
+            "stages": [
+                {
+                    "name": "Draft",
+                    "system_instructions": "Write a first draft.",
+                    "endpoint_id": endpoint_id,
+                    "output_mode": "persist",
+                    "resources": [
+                        {
+                            "resource_type": "cantrip",
+                            "resource_id": cantrip_id,
+                            "position": "pre_driver",
+                            "sticky": True,
+                        }
+                    ],
+                },
+                {"name": "Polish", "system_instructions": "Polish it.", "output_mode": "persist"},
+            ],
+        }
+
+    async def _make_map(self, client, endpoint_id, cantrip_id):
+        resp = await client.post(
+            "/api/maps", json=self._map_payload(endpoint_id, cantrip_id)
+        )
+        assert resp.status_code == 201, resp.text
+        return resp.json()
+
+    @staticmethod
+    async def _make_endpoint(client):
+        resp = await client.post(
+            "/api/endpoints",
+            json={"name": "EP", "base_url": "http://x.test", "api_key": "sk-test"},
+        )
+        assert resp.status_code in (200, 201), resp.text
+        return resp.json()["id"]
+
+    @pytest.mark.asyncio
+    async def test_update_and_delete_capture_map_snapshots(self, admin_client):
+        client, _token, _key = admin_client
+        endpoint_id = await self._make_endpoint(client)
+        cantrip_id = await _make_cantrip(client)
+        m = await self._make_map(client, endpoint_id, cantrip_id)
+
+        upd = await client.put(f"/api/maps/{m['id']}", json={"name": "Battle Map v2"})
+        assert upd.status_code == 200, upd.text
+        rows = await _snapshots_for(client, "map", m["id"])
+        assert len(rows) == 1
+        detail = (await client.get(f"/api/snapshots/{rows[0]['id']}")).json()
+        content = detail["content"]
+        assert content["name"] == "Battle Map"
+        assert content["global_llm_instructions"] == "Run the battle."
+        assert [s["name"] for s in content["stages"]] == ["Draft", "Polish"]
+        draft = content["stages"][0]
+        assert draft["endpoint_id"] == endpoint_id
+        assert draft["resources"][0]["resource_id"] == cantrip_id
+        assert draft["resources"][0]["sticky"] is True
+
+        # A no-change update stores the state it is about to (not) overwrite --
+        # which is new relative to the newest snapshot, because that one holds
+        # the *pre-edit* state. The second consecutive no-change update is the
+        # one dedup catches: the live state is now the newest snapshot.
+        upd = await client.put(f"/api/maps/{m['id']}", json={"name": "Battle Map v2"})
+        assert upd.status_code == 200
+        rows = await _snapshots_for(client, "map", m["id"])
+        assert len(rows) == 2
+        upd = await client.put(f"/api/maps/{m['id']}", json={"name": "Battle Map v2"})
+        assert upd.status_code == 200
+        assert len(await _snapshots_for(client, "map", m["id"])) == 2
+
+        # A real change, then delete: the delete's capture stores the final
+        # state, which differs from the newest snapshot.
+        upd = await client.put(f"/api/maps/{m['id']}", json={"name": "Battle Map v3"})
+        assert upd.status_code == 200
+        assert (await client.delete(f"/api/maps/{m['id']}")).status_code == 204
+        rows = await _snapshots_for(client, "map", m["id"])
+        assert len(rows) == 3
+        latest = (await client.get(f"/api/snapshots/{rows[0]['id']}")).json()
+        assert latest["content"]["name"] == "Battle Map v3"
+
+    @pytest.mark.asyncio
+    async def test_restore_in_place_rebuilds_stages_and_resources(self, admin_client):
+        client, _token, _key = admin_client
+        endpoint_id = await self._make_endpoint(client)
+        cantrip_id = await _make_cantrip(client)
+        m = await self._make_map(client, endpoint_id, cantrip_id)
+
+        pinned = await client.post(
+            "/api/snapshots",
+            json={"resource_type": "map", "resource_id": m["id"], "label": "original"},
+        )
+        assert pinned.status_code == 201, pinned.text
+
+        # Replace the stages entirely -- the update path deletes and rebuilds.
+        upd = await client.put(
+            f"/api/maps/{m['id']}",
+            json={"name": "Rewritten", "stages": [{"name": "Solo", "output_mode": "discard"}]},
+        )
+        assert upd.status_code == 200, upd.text
+        assert len(upd.json()["stages"]) == 1
+
+        restored = await client.post(
+            f"/api/snapshots/{pinned.json()['id']}/restore-in-place"
+        )
+        assert restored.status_code == 200, restored.text
+        assert restored.json()["notes"] == []
+
+        after = (await client.get(f"/api/maps/{m['id']}")).json()
+        assert after["name"] == "Battle Map"
+        assert [s["name"] for s in after["stages"]] == ["Draft", "Polish"]
+        draft = after["stages"][0]
+        assert draft["endpoint_id"] == endpoint_id
+        assert draft["resources"][0]["resource_id"] == cantrip_id
+
+        # The restore itself took a pre_edit snapshot, so it is undoable.
+        rows = await _snapshots_for(client, "map", m["id"])
+        assert len(rows) == 2
+
+    @pytest.mark.asyncio
+    async def test_restore_as_new_settles_dangling_references(self, admin_client):
+        client, _token, _key = admin_client
+        endpoint_id = await self._make_endpoint(client)
+        cantrip_id = await _make_cantrip(client)
+        m = await self._make_map(client, endpoint_id, cantrip_id)
+
+        # The pre_edit snapshot from this update still references both.
+        upd = await client.put(f"/api/maps/{m['id']}", json={"name": "Battle Map v2"})
+        assert upd.status_code == 200, upd.text
+        rows = await _snapshots_for(client, "map", m["id"])
+        original = rows[0]["id"]
+
+        assert (await client.delete(f"/api/endpoints/{endpoint_id}")).status_code == 204
+        assert (await client.delete(f"/api/cantrips/{cantrip_id}")).status_code == 204
+
+        restored = await client.post(
+            f"/api/snapshots/{original}/restore-as-new", json={"name": "Recovered"}
+        )
+        assert restored.status_code == 200, restored.text
+        notes = " ".join(restored.json()["notes"])
+        assert "endpoint no longer exists" in notes
+        assert "attached resource" in notes
+        assert "tag 'battle' was cleared" in notes
+
+        new_map = (await client.get(f"/api/maps/{restored.json()['resource_id']}")).json()
+        assert new_map["name"] == "Recovered"
+        assert new_map["tag"] == ""
+        assert [s["name"] for s in new_map["stages"]] == ["Draft", "Polish"]
+        assert new_map["stages"][0]["endpoint_id"] is None
+        assert new_map["stages"][0]["resources"] == []
+
+    @pytest.mark.asyncio
+    async def test_live_references_are_kept_on_restore(self, admin_client):
+        client, _token, _key = admin_client
+        endpoint_id = await self._make_endpoint(client)
+        cantrip_id = await _make_cantrip(client)
+        m = await self._make_map(client, endpoint_id, cantrip_id)
+
+        pinned = await client.post(
+            "/api/snapshots",
+            json={"resource_type": "map", "resource_id": m["id"]},
+        )
+        restored = await client.post(
+            f"/api/snapshots/{pinned.json()['id']}/restore-as-new", json={"name": ""}
+        )
+        assert restored.status_code == 200, restored.text
+        # No reference was dangled, so no settling note. (The tag-clearing note
+        # may be present -- it says "resource" too, so match on the phrase.)
+        assert [n for n in restored.json()["notes"] if "no longer exists" in n] == []
+
+        new_map = (await client.get(f"/api/maps/{restored.json()['resource_id']}")).json()
+        assert new_map["stages"][0]["endpoint_id"] == endpoint_id
+        assert new_map["stages"][0]["resources"][0]["resource_id"] == cantrip_id
