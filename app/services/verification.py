@@ -718,6 +718,22 @@ async def run_verification_loop(
         current_data = retry_data
         current_content = _extract_content(current_data)
 
+        # A retry is a fresh generation, not a re-judgement of the old one:
+        # re-scan it, or a retry that swaps one forbidden phrase for another
+        # passes against the first response's stale findings (and a clean
+        # retry keeps being judged against findings it already fixed).
+        # scan_response is a no-op when the user's forbidden-words check is
+        # disabled; the command override is honoured here exactly as it was
+        # for the original scan.
+        if body_json.get("_gitv_command_overrides", {}).get("forbidden") is not False:
+            try:
+                from app.services.forbidden_words import scan_response
+
+                rescan = await scan_response(current_content, user_id)
+                forbidden_summary = rescan.summary if rescan.has_matches else ""
+            except Exception:
+                logger.exception("Forbidden words re-scan on retry failed")
+
         retries += 1
 
     loop_result = VerificationLoopResult(

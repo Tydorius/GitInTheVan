@@ -485,7 +485,7 @@ class TestAdvisoryLock:
 
     async def test_migration_count(self):
         """Sanity check: verify we have the expected number of migrations."""
-        assert len(MIGRATIONS) == 52
+        assert len(MIGRATIONS) == 53
 
     async def test_all_migrations_have_unique_names(self):
         names = [name for name, _ in MIGRATIONS]
@@ -501,3 +501,66 @@ class TestAdvisoryLock:
                         f"Migration {name} is a plain string but contains '{kw}' "
                         f"(should be a dialect-specific dict)"
                     )
+
+
+class TestUserSettingsStreamingColumnUpgrade:
+    """Regression guard for the 0.29.0 `streaming_post_processing_enabled` column.
+
+    `user_settings` is on the proxy hot path (`_load_ux_settings` runs on every
+    buffered streaming response). A model column with no migration works on a
+    fresh `create_all` install and is silently absent on every upgrade, failing
+    at query time (see the 0.18.0 `skills.budget_weight` precedent). This test
+    builds the 0.28.0 shape -- column dropped after `create_all` -- then runs
+    the real migrations and exercises the query the proxy makes.
+    """
+
+    @staticmethod
+    async def _upgraded_engine():
+        from sqlalchemy import text
+        from sqlalchemy.ext.asyncio import create_async_engine
+
+        from app.models import Base
+        from app.services.migrations import run_migrations
+
+        engine = create_async_engine("sqlite+aiosqlite://", echo=False)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(
+                text("ALTER TABLE user_settings DROP COLUMN streaming_post_processing_enabled;")
+            )
+        # Vacuity check: prove this reproduces the broken state before
+        # migrating, or the test proves nothing.
+        async with engine.connect() as conn:
+            cols = [r[1] for r in await conn.exec_driver_sql("PRAGMA table_info(user_settings)")]
+            assert "streaming_post_processing_enabled" not in cols
+        await run_migrations(engine)
+        return engine
+
+    async def test_migration_053_adds_column_and_query_works(self):
+        engine = await self._upgraded_engine()
+
+        from sqlalchemy import select
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        from app.models.user_settings import UserSettings
+
+        async with engine.begin() as conn:
+            cols = [r[1] for r in await conn.exec_driver_sql("PRAGMA table_info(user_settings)")]
+            assert "streaming_post_processing_enabled" in cols
+
+        # Insert and read through the ORM, as production code does -- raw SQL
+        # would need to satisfy every NOT NULL default by hand.
+        async with AsyncSession(engine) as session:
+            settings = UserSettings(user_id="u1")
+            settings.streaming_post_processing_enabled = True
+            session.add(settings)
+            await session.commit()
+
+            loaded = (
+                await session.execute(
+                    select(UserSettings).where(UserSettings.user_id == "u1")
+                )
+            ).scalar_one()
+            assert loaded.streaming_post_processing_enabled is True
+
+        await engine.dispose()

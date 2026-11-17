@@ -651,11 +651,11 @@ cantrips run at the other positions.</p>
 <p>The Forbidden Words tab provides a fast, string-matching check that runs before the Navigator. This is more efficient than using an LLM for simple word/phrase filters.</p>
 <p><strong>How it works:</strong></p>
 <ol>
-<li>After the Driver responds, the response is scanned against your list of forbidden phrases</li>
+<li>After the Driver responds, the response is scanned against your list of forbidden phrases — on every request type, including buffered streaming responses (see <a href="#streaming-and-status">Streaming and Status</a> to disable that)</li>
 <li>Any matches are collected into a violation summary</li>
 <li>If matches are found and the Navigator is enabled, the summary is prepended to the verification prompt as a <code>[FORBIDDEN CONTENT DETECTED]</code> block</li>
-<li>If matches are found and the Navigator is not enabled, the matches are logged but the response is still returned</li>
-<li>If the Navigator has no rules but forbidden words exist, the forbidden check alone triggers the verification loop</li>
+<li>When the Navigator rejects a response and regenerates it, the retry is re-scanned before it is judged — a retry that swaps one forbidden phrase for another does not pass on the previous response's stale findings</li>
+<li>If the Navigator has no rules configured, matches are logged but the response is still returned; the retry loop requires at least one verification rule</li>
 </ol>
 <p><strong>Settings:</strong>
 - <strong>Enable Forbidden Words Check</strong>: Master toggle
@@ -1054,11 +1054,12 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <p>Model configuration is per-endpoint — there is no model override here. Set the <strong>Default Model</strong> on each endpoint in the Endpoints page; it is used as a fallback when the client doesn't specify one.</p>
 <p><strong>Default Parameters</strong> blocks appear here for each role — all requests, verification calls, and summarization calls. They are the broadest layer of the parameter system; anything set on an endpoint, a model, a rule or a map stage overrides them. See <a href="#model-parameters">Model Parameters</a>.</p>
 <h3 id="streaming-and-status">Streaming and Status</h3>
-<p>These settings affect how responses are delivered when verification is enabled. Since verification requires buffering the full response, these options control the streaming experience:</p>
+<p>These settings affect how responses are delivered. Streaming responses are buffered by the proxy (memory extraction needs the full response) and then re-delivered to your client as streaming output — these options control what runs before that delivery:</p>
 <ul>
+<li><strong>Run Response Checks on Streams</strong>: Run the forbidden-words scan and pre-/post-Navigator cantrips on buffered streaming responses (on by default). The response is already buffered, so these cost only the checks themselves; turn this off to deliver the response the moment memory extraction finishes. Before 0.29.0 these checks silently never ran on streaming requests unless verification was enabled.</li>
 <li><strong>GITV Status Block</strong>: Includes a <code>&lt;think&gt;&lt;gitv&gt;</code> status block before the response showing pipeline activity</li>
 <li><strong>Preserve Thinking</strong>: Include the LLM's reasoning/thought process in the final response</li>
-<li><strong>Simulated Streaming Speed</strong>: When verification buffers the response, simulate streaming output at this speed (tokens/min, 0 = instant)</li>
+<li><strong>Simulated Streaming Speed</strong>: When the response is buffered (verification or response checks), simulate streaming output at this speed (tokens/min, 0 = instant)</li>
 </ul>
 <h3 id="conversation-summarization">Conversation Summarization</h3>
 <p><img alt="Summarization Settings" src="media/gitv-settings-2.png"></p>

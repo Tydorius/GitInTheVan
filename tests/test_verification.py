@@ -906,3 +906,109 @@ class TestVerificationTagActivation:
         all_urls = [str(r.url) for r in httpx_mock.get_requests()]
         assert any(self.VERIFY_URL in u for u in all_urls), "Verification endpoint was never hit"
         assert any(self.DRIVER_URL in u for u in all_urls), "Driver endpoint was never hit"
+
+
+# ============================================================================
+# Forbidden-words re-scan on verification retries (0.29.0)
+#
+# The forbidden summary used to be captured once, from the first Driver
+# response, and fed to every judge call after that. A retry that introduced a
+# NEW forbidden phrase passed on stale (empty) context, and a clean retry kept
+# being judged against findings it had already fixed. The loop now re-scans
+# each retry before judging it.
+# ============================================================================
+
+
+class TestForbiddenRescanOnRetry:
+    DRIVER_URL = "http://mock-backend:9999"
+    VERIFY_URL = "http://mock-verify:8888"
+
+    @pytest.fixture(autouse=True)
+    def set_endpoint(self, monkeypatch):
+        from app.config import Settings
+
+        test_settings = Settings(
+            default_endpoint_url=self.DRIVER_URL,
+            default_endpoint_api_key="sk-test-key",
+            default_endpoint_model="test-model",
+        )
+        monkeypatch.setattr("app.services.proxy.settings", test_settings)
+
+    @pytest.mark.asyncio
+    async def test_retry_content_rescanned_before_judging(self, admin_client, httpx_mock):
+        client, _, api_key = admin_client
+
+        driver_resp = await client.post("/api/endpoints", json={
+            "name": "Driver", "base_url": self.DRIVER_URL, "api_key": "sk-test",
+        })
+        verify_resp = await client.post("/api/endpoints", json={
+            "name": "Judge", "base_url": self.VERIFY_URL, "api_key": "sk-test2",
+        })
+        driver_id, verify_id = driver_resp.json()["id"], verify_resp.json()["id"]
+        await client.put("/api/settings", json={"default_endpoint_id": driver_id})
+
+        rule_resp = await client.post("/api/verification/rules", json={
+            "name": "Quality", "prompt": "Must be high quality", "max_retries": 2,
+        })
+        assert rule_resp.status_code in (200, 201), rule_resp.text
+        await client.put("/api/verification/settings", json={
+            "verification_enabled": True,
+            "verification_endpoint_id": verify_id,
+            "verification_model": "judge-model",
+        })
+
+        fw_settings = await client.put("/api/forbidden-words/settings", json={
+            "forbidden_words_enabled": True,
+        })
+        assert fw_settings.status_code == 200, fw_settings.text
+        fw_resp = await client.post("/api/forbidden-words", json={"phrase": "curseword"})
+        assert fw_resp.status_code in (200, 201), fw_resp.text
+
+        # Driver: first response is clean of forbidden words but low quality;
+        # the retry is better quality and introduces the forbidden phrase.
+        httpx_mock.add_response(
+            url=f"{self.DRIVER_URL}/v1/chat/completions",
+            json=_mock_llm_response("Meh quality reply."),
+            status_code=200,
+        )
+        httpx_mock.add_response(
+            url=f"{self.DRIVER_URL}/v1/chat/completions",
+            json=_mock_llm_response("High quality reply with curseword inside."),
+            status_code=200,
+        )
+        # Judge: flag the first, approve the second. What matters is what the
+        # second judge call was TOLD: with the re-scan it carries the fresh
+        # forbidden-content block; without it, the stale empty summary.
+        httpx_mock.add_response(
+            url=f"{self.VERIFY_URL}/v1/chat/completions",
+            json=_mock_verification_response(violation=True, reason="Low quality", severity="medium"),
+            status_code=200,
+        )
+        httpx_mock.add_response(
+            url=f"{self.VERIFY_URL}/v1/chat/completions",
+            json=_mock_verification_response(violation=False),
+            status_code=200,
+        )
+
+        resp = await client.post("/v1/chat/completions", json={
+            "model": "test",
+            "messages": [{"role": "user", "content": "Hello"}],
+        }, headers={"Authorization": f"Bearer {api_key}"})
+
+        assert resp.status_code == 200
+        content = resp.json()["choices"][0]["message"]["content"]
+        assert "High quality" in content
+
+        judge_requests = [
+            r for r in httpx_mock.get_requests()
+            if str(r.url).startswith(self.VERIFY_URL)
+        ]
+        assert len(judge_requests) == 2
+        first_prompt = json.loads(judge_requests[0].content)["messages"][1]["content"]
+        second_prompt = json.loads(judge_requests[1].content)["messages"][1]["content"]
+        # First response had no forbidden phrase, so the first judge call
+        # carries no forbidden context...
+        assert "FORBIDDEN CONTENT DETECTED" not in first_prompt
+        # ...and the retry's fresh phrase reaches the second judge call.
+        assert "FORBIDDEN CONTENT DETECTED" in second_prompt
+        assert "curseword" in second_prompt
