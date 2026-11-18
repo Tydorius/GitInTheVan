@@ -1052,29 +1052,59 @@ async def run_map_pipeline(
             )
 
         if stage.driver_callable_turns > 0:
-            # NOT IMPLEMENTED under maps. These flags are only read by
-            # _run_driver_callable_loop in proxy.py, which the map branch never
-            # reaches, and build_tool_notification is never called -- so the
-            # stage's model is not told the tools exist and no tool loop runs.
-            # Wiring it up means teaching the loop to forward through the
-            # stage's failover chain instead of a single url/headers pair.
-            # Setting the flags anyway so the intent survives, but warn rather
-            # than let a configured stage quietly do nothing.
-            logger.warning(
-                "Map stage '%s' requests %d driver-callable turn(s), but the tool "
-                "loop is not wired into the map pipeline -- no tools will be "
-                "offered and no tool calls will execute on this stage.",
-                stage.name, stage.driver_callable_turns,
-            )
-            body_json["_gitv_driver_callable"] = True
-            body_json["_gitv_driver_callable_turns"] = min(
-                stage.driver_callable_turns, caps["max_driver_callable_turns"]
-            )
+            # Offer the stage's own driver-callable cantrips as tools: the
+            # model must be told they exist before the first forward (the
+            # original no-op gap), and the tool loop runs on the stage's own
+            # forwarder -- every round through the stage's failover chain and
+            # parameters, recorded as map-stage LLM calls.
+            from app.services.cantrip import _load_active_cantrips
+            from app.services.driver_callable import build_tool_notification
+            from app.services.proxy import inject_tool_notification_safe
 
-        response_data, status_code = await _forward_stage_llm(
-            body_json, endpoints, model, timeout, stage_index=stage_idx,
-            configured=stage_params,
-        )
+            async with async_session() as db:
+                stage_tools = [
+                    c for c in await _load_active_cantrips(db, user_id, "pre_driver")
+                    if c.run_driver_callable
+                    and (not stage_cantrip_ids or c.id in stage_cantrip_ids)
+                ]
+            dc_turns = min(stage.driver_callable_turns, caps["max_driver_callable_turns"])
+            if stage_tools and dc_turns > 0:
+                notification = build_tool_notification(stage_tools, dc_turns)
+                body_json["messages"] = inject_tool_notification_safe(
+                    body_json.get("messages", []), notification
+                )
+                body_json["_gitv_driver_callable"] = True
+                body_json["_gitv_driver_callable_turns"] = dc_turns
+
+        if body_json.get("_gitv_driver_callable"):
+            from app.services.proxy import _run_driver_callable_loop
+
+            async def _stage_forward(loop_body_dict: dict[str, Any]):
+                return await _forward_stage_llm(
+                    {**body_json, "messages": loop_body_dict["messages"]},
+                    endpoints, model, timeout,
+                    stage_index=stage_idx, configured=stage_params,
+                )
+
+            loop_result = await _run_driver_callable_loop(
+                body_json, "POST", "", {}, timeout, user_id, request_headers or {},
+                forward=_stage_forward,
+                tool_only_ids=stage_cantrip_ids or None,
+            )
+            if loop_result is not None:
+                response_data, status_code = loop_result, 200
+            else:
+                response_data, status_code = await _forward_stage_llm(
+                    body_json, endpoints, model, timeout, stage_index=stage_idx,
+                    configured=stage_params,
+                )
+            body_json.pop("_gitv_driver_callable", None)
+            body_json.pop("_gitv_driver_callable_turns", None)
+        else:
+            response_data, status_code = await _forward_stage_llm(
+                body_json, endpoints, model, timeout, stage_index=stage_idx,
+                configured=stage_params,
+            )
 
         if status_code != 200:
             logger.warning("Map stage '%s': LLM returned %d", stage.name, status_code)

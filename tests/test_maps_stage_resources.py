@@ -605,3 +605,87 @@ class TestCantripMapNominationWiring:
         assert triggered.json()["choices"][0]["message"]["content"] == "MAPPED"
         hosts = [r.url.host for r in httpx_mock.get_requests()]
         assert hosts == ["main.test", "two.test"], hosts
+
+
+WEATHER_TOOL = """
+context.tool_result = "SUNNY_IN_PARIS";
+context.chat_data.set("tool_ran", "yes");
+"""
+
+
+class TestDriverCallableInStages:
+    @needs_deno
+    @pytest.mark.asyncio
+    async def test_a_stage_tool_loop_runs_through_the_stage_endpoint(
+        self, admin_client, httpx_mock
+    ):
+        """The warned no-op is now real: the stage's model is offered its own
+        driver-callable cantrips, a call tag executes the tool, and the loop
+        re-forwards through the stage's endpoint until a clean answer."""
+        from sqlalchemy import select
+
+        from app.models.chat_data import ChatData
+        from tests.conftest import TestSessionLocal
+
+        client, _, api_key = admin_client
+
+        await _endpoint(client, "Tool", "tool.test", "tooler")
+        created = await client.post("/api/maps/import", json={"data": {
+            "name": "Tooled",
+            "stages": [
+                _stage(1, "Worker", "tooler", "persist",
+                       [_cantrip_resource("Weather", WEATHER_TOOL)]),
+            ],
+        }})
+        assert created.status_code == 201, created.text
+        stage = created.json()["stages"][0]
+        # Turn on the tool loop for the stage (the importer has no field for
+        # it; the direct route does).
+        updated = await client.put(f"/api/maps/{created.json()['id']}", json={
+            "stages": [{
+                "name": stage["name"], "endpoint_tag": "tooler",
+                "output_mode": "persist",
+                "driver_callable_turns": 1,
+                "resources": [{
+                    "resource_type": "cantrip",
+                    "resource_id": stage["resources"][0]["resource_id"],
+                    "position": "pre_driver", "sticky": False,
+                }],
+            }],
+        })
+        assert updated.status_code in (200, 201), updated.text
+
+        await client.put("/api/settings", json={"default_map_id": created.json()["id"]})
+
+        # Round 1: the model calls the tool. Round 2: clean answer.
+        httpx_mock.add_response(
+            url="http://tool.test/v1/chat/completions",
+            json={"choices": [{"message": {"content": 'Let me check <call:weather city="Paris">'}}]},
+        )
+        httpx_mock.add_response(
+            url="http://tool.test/v1/chat/completions",
+            json={"choices": [{"message": {"content": "FINAL_AFTER_TOOL"}}]},
+        )
+
+        resp = await client.post("/v1/chat/completions", json={
+            "model": "test", "messages": [{"role": "user", "content": "Go"}],
+        }, headers={"Authorization": f"Bearer {api_key}"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["choices"][0]["message"]["content"] == "FINAL_AFTER_TOOL"
+
+        bodies = _bodies_for(httpx_mock, "tool.test")
+        assert len(bodies) == 2, [r.url.host for r in httpx_mock.get_requests()]
+        # Round 1 was told the tool exists.
+        assert "weather" in json.dumps(bodies[0]["messages"]).lower()
+        # Round 2 carried the tool result and no call tag leaked upstream.
+        round2 = json.dumps(bodies[1]["messages"])
+        assert "SUNNY_IN_PARIS" in round2
+        assert "<call:weather" not in round2
+
+        # The tool really executed (Deno), not just round-tripped as text.
+        uid = (await client.get("/api/auth/me")).json()["id"]
+        async with TestSessionLocal() as db:
+            rows = (await db.execute(
+                select(ChatData).where(ChatData.user_id == uid, ChatData.key == "tool_ran")
+            )).scalars().all()
+        assert len(rows) == 1

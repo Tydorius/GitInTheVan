@@ -1220,12 +1220,20 @@ async def _run_driver_callable_loop(
     timeout: httpx.Timeout,
     user_id: str,
     request_headers: dict[str, str],
+    forward=None,
+    tool_only_ids: set[str] | None = None,
 ) -> dict[str, Any] | None:
     """Run the Driver-Callable tool loop.
 
     Returns the final response_data dict if the loop ran, or None if
     driver-callable is not active for this request (caller should
     forward normally).
+
+    ``forward`` overrides how each round reaches the LLM (map stages inject
+    their failover-chain forwarder here); it receives the loop's body dict
+    and returns ``(response_data, status_code)``, recording its own LLM
+    calls. ``tool_only_ids`` restricts which cantrips are offered as tools
+    (a map stage offers only its own).
     """
     if not body_json.get("_gitv_driver_callable"):
         return None
@@ -1245,6 +1253,10 @@ async def _run_driver_callable_loop(
     async with async_session() as db:
         all_cantrips = await _load_active_cantrips(db, user_id, "pre_driver")
         tool_cantrips = {c.name.lower(): c for c in all_cantrips if c.run_driver_callable}
+    if tool_only_ids is not None:
+        tool_cantrips = {
+            name: c for name, c in tool_cantrips.items() if c.id in tool_only_ids
+        }
 
     loop_messages = [msg.copy() for msg in body_json.get("messages", [])]
     conversation_id = body_json.get("_gitv_chat_id", "")
@@ -1272,18 +1284,24 @@ async def _run_driver_callable_loop(
             model_requested=body_json.get("model", ""),
         )
 
+    if forward is None:
+        async def forward(loop_body_dict: dict[str, Any]) -> tuple[dict[str, Any], int]:
+            body_bytes = json.dumps(loop_body_dict).encode()
+            started = time.monotonic()
+            response_data, status_code = await _do_forward(
+                method, url, headers, body_bytes, timeout,
+                provider=body_json.get("_gitv_provider", ""),
+                base_url=body_json.get("_gitv_base_url", ""),
+                api_key=body_json.get("_gitv_api_key", ""),
+            )
+            _record_loop_call(started, response_data, status_code)
+            return response_data, status_code
+
     rounds = 0
     max_rounds = max(turns_remaining, 1)
 
     while rounds < max_rounds:
-        body_bytes = json.dumps(loop_body).encode()
-        started = time.monotonic()
-        response_data, status_code = await _do_forward(method, url, headers, body_bytes, timeout,
-            provider=body_json.get("_gitv_provider", ""),
-            base_url=body_json.get("_gitv_base_url", ""),
-            api_key=body_json.get("_gitv_api_key", ""),
-        )
-        _record_loop_call(started, response_data, status_code)
+        response_data, status_code = await forward(loop_body)
 
         if status_code != 200:
             logger.warning("Driver-callable loop: forward returned %d", status_code)
@@ -1339,14 +1357,7 @@ async def _run_driver_callable_loop(
 
         loop_body["messages"] = loop_messages
 
-    body_bytes = json.dumps(loop_body).encode()
-    started = time.monotonic()
-    response_data, status_code = await _do_forward(method, url, headers, body_bytes, timeout,
-        provider=body_json.get("_gitv_provider", ""),
-        base_url=body_json.get("_gitv_base_url", ""),
-        api_key=body_json.get("_gitv_api_key", ""),
-    )
-    _record_loop_call(started, response_data, status_code)
+    response_data, status_code = await forward(loop_body)
 
     if status_code == 200:
         choices = response_data.get("choices", [])
