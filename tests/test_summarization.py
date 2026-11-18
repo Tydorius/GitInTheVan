@@ -64,8 +64,9 @@ class TestEstimateTokens:
 
     def test_simple_string(self):
         msgs = [{"role": "user", "content": "abcd"}]
-        # 4 chars / 4 = 1 token + 3 overhead + 1 role = 5
-        assert estimate_tokens(msgs) == 5
+        # Delegates to the app-wide estimator: 4 chars / 4 = 1 token, no
+        # per-message overhead.
+        assert estimate_tokens(msgs) == 1
 
     def test_list_content(self):
         msgs = [{"role": "user", "content": [{"type": "text", "text": "abcdefgh"}]}]

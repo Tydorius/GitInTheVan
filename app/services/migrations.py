@@ -1029,6 +1029,152 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
         ALTER TABLE user_settings ADD COLUMN streaming_post_processing_enabled BOOLEAN DEFAULT 1 NOT NULL;
         """,
     ),
+    # 0.31.0. Token metrics tracking: per-object prompt deltas and per-call LLM
+    # metrics, plus the admin retention cap. (chat_id, object_type, object_id)
+    # on the prompt table is a lookup index, never a unique key -- the same
+    # object fires once per matching request. See app/models/metrics.py.
+    (
+        "054_metrics_tables",
+        {
+            "sqlite": """
+            CREATE TABLE IF NOT EXISTS prompt_object_metrics (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                chat_id VARCHAR(64) DEFAULT '' NOT NULL,
+                object_type VARCHAR(32) DEFAULT '' NOT NULL,
+                object_id VARCHAR(64) DEFAULT '' NOT NULL,
+                parent_id VARCHAR(64) DEFAULT '' NOT NULL,
+                pre_tokens INTEGER DEFAULT 0 NOT NULL,
+                post_tokens INTEGER DEFAULT 0 NOT NULL,
+                difference INTEGER DEFAULT 0 NOT NULL,
+                context VARCHAR(16) DEFAULT 'live' NOT NULL,
+                is_retry BOOLEAN DEFAULT 0 NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS ix_prompt_object_metrics_lookup
+                ON prompt_object_metrics (chat_id, object_type, object_id);
+            CREATE INDEX IF NOT EXISTS ix_prompt_object_metrics_user_created
+                ON prompt_object_metrics (user_id, created_at);
+            CREATE TABLE IF NOT EXISTS llm_call_metrics (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                chat_id VARCHAR(64) DEFAULT '' NOT NULL,
+                purpose VARCHAR(32) DEFAULT '' NOT NULL,
+                endpoint_id VARCHAR(36) DEFAULT '' NOT NULL,
+                endpoint_name VARCHAR(128) DEFAULT '' NOT NULL,
+                model VARCHAR(128) DEFAULT '' NOT NULL,
+                status_code INTEGER,
+                latency_ms FLOAT DEFAULT 0 NOT NULL,
+                failover_attempt INTEGER DEFAULT 0 NOT NULL,
+                prompt_tokens INTEGER,
+                completion_tokens INTEGER,
+                reasoning_tokens INTEGER,
+                tokens_source VARCHAR(16) DEFAULT '' NOT NULL,
+                rule_id VARCHAR(36) DEFAULT '' NOT NULL,
+                context VARCHAR(16) DEFAULT 'live' NOT NULL,
+                is_retry BOOLEAN DEFAULT 0 NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS ix_llm_call_metrics_user_created
+                ON llm_call_metrics (user_id, created_at);
+            CREATE INDEX IF NOT EXISTS ix_llm_call_metrics_chat
+                ON llm_call_metrics (chat_id);
+            ALTER TABLE admin_settings ADD COLUMN metrics_retention_days INTEGER DEFAULT 30 NOT NULL;
+            """,
+            "postgresql": """
+            CREATE TABLE IF NOT EXISTS prompt_object_metrics (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                chat_id VARCHAR(64) DEFAULT '' NOT NULL,
+                object_type VARCHAR(32) DEFAULT '' NOT NULL,
+                object_id VARCHAR(64) DEFAULT '' NOT NULL,
+                parent_id VARCHAR(64) DEFAULT '' NOT NULL,
+                pre_tokens INTEGER DEFAULT 0 NOT NULL,
+                post_tokens INTEGER DEFAULT 0 NOT NULL,
+                difference INTEGER DEFAULT 0 NOT NULL,
+                context VARCHAR(16) DEFAULT 'live' NOT NULL,
+                is_retry BOOLEAN DEFAULT 0 NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS ix_prompt_object_metrics_lookup
+                ON prompt_object_metrics (chat_id, object_type, object_id);
+            CREATE INDEX IF NOT EXISTS ix_prompt_object_metrics_user_created
+                ON prompt_object_metrics (user_id, created_at);
+            CREATE TABLE IF NOT EXISTS llm_call_metrics (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                chat_id VARCHAR(64) DEFAULT '' NOT NULL,
+                purpose VARCHAR(32) DEFAULT '' NOT NULL,
+                endpoint_id VARCHAR(36) DEFAULT '' NOT NULL,
+                endpoint_name VARCHAR(128) DEFAULT '' NOT NULL,
+                model VARCHAR(128) DEFAULT '' NOT NULL,
+                status_code INTEGER,
+                latency_ms FLOAT DEFAULT 0 NOT NULL,
+                failover_attempt INTEGER DEFAULT 0 NOT NULL,
+                prompt_tokens INTEGER,
+                completion_tokens INTEGER,
+                reasoning_tokens INTEGER,
+                tokens_source VARCHAR(16) DEFAULT '' NOT NULL,
+                rule_id VARCHAR(36) DEFAULT '' NOT NULL,
+                context VARCHAR(16) DEFAULT 'live' NOT NULL,
+                is_retry BOOLEAN DEFAULT 0 NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS ix_llm_call_metrics_user_created
+                ON llm_call_metrics (user_id, created_at);
+            CREATE INDEX IF NOT EXISTS ix_llm_call_metrics_chat
+                ON llm_call_metrics (chat_id);
+            ALTER TABLE admin_settings ADD COLUMN metrics_retention_days INTEGER DEFAULT 30 NOT NULL;
+            """,
+            "mysql": """
+            CREATE TABLE IF NOT EXISTS prompt_object_metrics (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL,
+                chat_id VARCHAR(64) DEFAULT '' NOT NULL,
+                object_type VARCHAR(32) DEFAULT '' NOT NULL,
+                object_id VARCHAR(64) DEFAULT '' NOT NULL,
+                parent_id VARCHAR(64) DEFAULT '' NOT NULL,
+                pre_tokens INTEGER DEFAULT 0 NOT NULL,
+                post_tokens INTEGER DEFAULT 0 NOT NULL,
+                difference INTEGER DEFAULT 0 NOT NULL,
+                context VARCHAR(16) DEFAULT 'live' NOT NULL,
+                is_retry BOOLEAN DEFAULT 0 NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            CREATE INDEX ix_prompt_object_metrics_lookup
+                ON prompt_object_metrics (chat_id, object_type, object_id);
+            CREATE INDEX ix_prompt_object_metrics_user_created
+                ON prompt_object_metrics (user_id, created_at);
+            CREATE TABLE IF NOT EXISTS llm_call_metrics (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL,
+                chat_id VARCHAR(64) DEFAULT '' NOT NULL,
+                purpose VARCHAR(32) DEFAULT '' NOT NULL,
+                endpoint_id VARCHAR(36) DEFAULT '' NOT NULL,
+                endpoint_name VARCHAR(128) DEFAULT '' NOT NULL,
+                model VARCHAR(128) DEFAULT '' NOT NULL,
+                status_code INTEGER,
+                latency_ms FLOAT DEFAULT 0 NOT NULL,
+                failover_attempt INTEGER DEFAULT 0 NOT NULL,
+                prompt_tokens INTEGER,
+                completion_tokens INTEGER,
+                reasoning_tokens INTEGER,
+                tokens_source VARCHAR(16) DEFAULT '' NOT NULL,
+                rule_id VARCHAR(36) DEFAULT '' NOT NULL,
+                context VARCHAR(16) DEFAULT 'live' NOT NULL,
+                is_retry BOOLEAN DEFAULT 0 NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            CREATE INDEX ix_llm_call_metrics_user_created
+                ON llm_call_metrics (user_id, created_at);
+            CREATE INDEX ix_llm_call_metrics_chat
+                ON llm_call_metrics (chat_id);
+            ALTER TABLE admin_settings ADD COLUMN metrics_retention_days INTEGER DEFAULT 30 NOT NULL;
+            """,
+        },
+    ),
 ]
 
 

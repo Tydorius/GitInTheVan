@@ -15,12 +15,11 @@ from app.models.conversation_summary import ConversationSummary
 from app.models.endpoint import Endpoint
 from app.models.memory_rule import MemoryRule
 from app.models.user_settings import UserSettings
+from app.services.budget import estimate_messages_tokens
 from app.services.llm_params import apply_to_body, parse_params, resolve
 
 logger = logging.getLogger(__name__)
 
-CHARS_PER_TOKEN = 4
-MESSAGE_OVERHEAD_TOKENS = 3
 MAX_TRANSCRIPT_CHARS = 24000
 
 DEFAULT_PROMPT = (
@@ -49,13 +48,10 @@ def _extract_text(content: Any) -> str:
 
 
 def estimate_tokens(messages: list[dict[str, Any]]) -> int:
-    total = 0
-    for msg in messages:
-        total += MESSAGE_OVERHEAD_TOKENS
-        total += len(_extract_text(msg.get("content", ""))) // CHARS_PER_TOKEN
-        if msg.get("role"):
-            total += 1
-    return total
+    # Delegates to the app-wide estimator (budget.py). One chars/4 formula for
+    # everything; the old per-message overhead (+3, +1 for role) existed only
+    # here and made the summary threshold disagree with every other estimate.
+    return estimate_messages_tokens(messages)
 
 
 def compute_boundary_hash(messages: list[dict[str, Any]]) -> str:

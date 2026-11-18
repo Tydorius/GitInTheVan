@@ -339,6 +339,7 @@ async def check_response(
                     model_requested=judge_model,
                     failover_attempt=attempt,
                     error=f"{type(exc).__name__}: {exc}"[:500],
+                    rule_id=rule.id,
                 )
                 last_detail = "an exception"
                 continue
@@ -355,6 +356,7 @@ async def check_response(
                 provider=candidate.provider,
                 model_requested=judge_model,
                 failover_attempt=attempt,
+                rule_id=rule.id,
             )
 
             if status_code != 200:
@@ -625,6 +627,13 @@ async def run_verification_loop(
     current_content = _extract_content(current_data)
 
     while True:
+        # Rows recorded from here on belong to a retry cycle once one has
+        # started: the re-judge and the regeneration are real cost, but they
+        # must not inflate the first-pass stats of the objects that built the
+        # original prompt.
+        from app.services.metrics import set_metrics_retry
+        set_metrics_retry(body_json, retries > 0)
+
         check_result = await check_response(
             current_content, rules, v_endpoint, v_model,
             forbidden_context=forbidden_summary,
@@ -685,10 +694,14 @@ async def run_verification_loop(
         retry_body_bytes = json.dumps(retry_body).encode()
 
         logger.info("Verification: retrying request (attempt %d)", retries + 1)
+        # The regeneration is retry-cycle output from this point on, even on
+        # the first cycle (the loop-top flag only sees it one iteration later).
+        set_metrics_retry(body_json, True)
         # The retry re-sends the user's own request, so it takes the driver's
         # transport and the driver's failover chain -- including LiteLLM when the
         # endpoint has a provider. Sending it raw here was the same gap the judge
         # had, one layer up.
+        from app.services.debug_metrics import PURPOSE_MAIN, record_llm_call
         from app.services.proxy import _do_forward, _forward_with_failover
 
         driver_chain = body_json.get("_gitv_failover_chain") or []
@@ -698,12 +711,26 @@ async def run_verification_loop(
                     body_json, driver_chain, method, path, headers, timeout, retry_body_bytes,
                 )
             else:
+                retry_started = time.monotonic()
                 retry_data, retry_status = await _do_forward(
                     method, url, headers, retry_body_bytes, timeout,
                     provider=body_json.get("_gitv_provider", ""),
                     base_url=body_json.get("_gitv_base_url", ""),
                     api_key=body_json.get("_gitv_api_key", ""),
                     configured=body_json.get("_gitv_llm_params"),
+                )
+                # The failover branch records through _record_call; this raw
+                # branch was the one unrecorded retry path left.
+                record_llm_call(
+                    body_json,
+                    purpose=PURPOSE_MAIN,
+                    latency_ms=(time.monotonic() - retry_started) * 1000.0,
+                    status_code=retry_status,
+                    response_data=retry_data,
+                    messages=retry_body.get("messages"),
+                    endpoint_id=body_json.get("_gitv_endpoint_id", ""),
+                    provider=body_json.get("_gitv_provider", ""),
+                    model_requested=body_json.get("model", ""),
                 )
         except Exception:
             logger.exception("Verification retry request failed")

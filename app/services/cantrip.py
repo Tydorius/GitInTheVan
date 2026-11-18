@@ -316,6 +316,9 @@ async def process_cantrips(
             "example_dialogs": context["character"]["example_dialogs"],
         }
 
+        from app.services.budget import estimate_tokens as _est_tokens
+        from app.services.metrics import record_prompt_object
+
         for cantrip in cantrips:
             if budget_allocations:
                 context["budget"] = build_cantrip_budget_context(
@@ -383,6 +386,19 @@ async def process_cantrips(
                     "user_data": _diff_store(user_data, result.user_data),
                     "cantrip_data": _diff_store(cantrip_data, result.cantrip_data),
                 },
+            )
+
+            # Per-cantrip prompt delta: attribute the character-field change to
+            # the cantrip that made it, measured against the values in place
+            # before it ran (the previous cantrip's output, or the card's own).
+            record_prompt_object(
+                body_json, "cantrip", cantrip.id,
+                _est_tokens(context["character"]["personality"])
+                + _est_tokens(context["character"]["scenario"])
+                + _est_tokens(context["character"]["example_dialogs"]),
+                _est_tokens(result.personality)
+                + _est_tokens(result.scenario)
+                + _est_tokens(result.example_dialogs),
             )
 
             context["character"]["personality"] = result.personality
@@ -498,6 +514,9 @@ async def process_cantrips_post_driver(
 
         current_content = response_content
 
+        from app.services.budget import estimate_tokens as _est_tokens
+        from app.services.metrics import record_prompt_object
+
         for cantrip in cantrips:
             cantrip_data = await _load_cantrip_data(db, user_id, cantrip.id)
 
@@ -524,9 +543,16 @@ async def process_cantrips_post_driver(
                     cantrip.name, " | ".join(result.debug_logs),
                 )
 
+            # Response-content delta for this cantrip, against the content in
+            # place before it ran (the previous cantrip's output).
+            prev_content_tokens = _est_tokens(current_content)
             if result.response_content is not None and result.response_content != current_content:
                 current_content = result.response_content
                 context["response"]["modified"] = True
+            record_prompt_object(
+                body_json, "cantrip", cantrip.id,
+                prev_content_tokens, _est_tokens(current_content),
+            )
 
             chat_data = result.chat_data
             user_data = result.user_data

@@ -2,6 +2,63 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.31.0] - 2026-11-18
+
+Token metrics tracking: which lorebooks, cantrips and pipeline stages bloat
+the prompt budget over time, and what each LLM role actually costs in tokens
+and latency. Two new tables ship as one feature, plus a dedicated Metrics
+page and an admin retention cap.
+
+### Added
+
+- **Per-object prompt metrics.** One row per triggered object per request:
+  lorebook entries (per entry, with the book id carried so aggregates roll
+  up), cantrips (character-field and response-content deltas measured between
+  loop iterations, attributed to the cantrip that made the change),
+  driver-callable tool results, conversation and scenario summaries, memory
+  injections, skills, writing samples, and map stage instructions. Map stage
+  rows carry the map id on `parent_id`. Rows record on every authenticated
+  request -- debug mode is not required.
+- **Per-LLM-call metrics.** One row per upstream call, fed from the existing
+  `record_llm_call` hook: purpose (driver / judge / summarizer / map stage),
+  endpoint, model, status, latency, failover attempt, tokens with an explicit
+  `usage`-vs-`estimate` source (never blended silently), the verification
+  rule id on judge calls, and `context`/`is_retry` flags. Sandbox and replay
+  runs are recorded but flagged; default aggregates exclude them without
+  losing the rows.
+- **Metrics page** (nav: Metrics): a 7/30/90-day window with a chat filter,
+  prompt-object aggregates (fires, sum and average delta, top offenders), and
+  LLM aggregates per role/endpoint/model (call count, success rate, retries,
+  failovers, mean/median latency, token sums split by source). Recent-rows
+  views show the raw last 20 of each table.
+- **Admin retention setting** (`metrics_retention_days`, default 30): rows
+  older than the cap are pruned at startup and every six hours. Clamped at
+  1 day, like every other cap.
+- Migration `054` creates both tables (dialect-aware) and the admin column.
+
+### Fixed
+
+- **Five upstream LLM calls were never recorded anywhere**: both
+  driver-callable loop forwards, the two non-failover fallback forwards
+  (verified non-streaming and buffered streaming), the verification retry
+  forward on its raw path, and the map stage judge. All now pass through
+  `record_llm_call`, so debug runs and the metrics tables see them. A
+  driver-callable tool round was previously invisible to cost accounting.
+- **Lorebook entry provenance was always empty.** The proxy and the map stage
+  injector built entry dicts without `lorebook_id`/`entry_id`, so
+  `MatchedEntry` carried empty strings and the debug trace's matched-entry
+  metadata could never name the book or entry an injection came from. The
+  per-entry metrics rows exposed it immediately.
+
+### Changed
+
+- **One token estimator.** `summarization.estimate_tokens` now delegates to
+  `budget.estimate_messages_tokens` instead of keeping its own +4/message
+  variant. The conversation-summary threshold estimate drops accordingly
+  (about four tokens per message); every other estimate is unchanged.
+- Verification judge rows in the debug trace now carry the `rule_id` they
+  judged.
+
 ## [0.30.1] - 2026-11-17
 
 ### Added

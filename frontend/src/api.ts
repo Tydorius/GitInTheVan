@@ -146,6 +146,91 @@ export interface DebugListResponse {
   max_saved: number;
 }
 
+/** Metrics (0.31.0): one prompt-mutating object aggregated over a window. */
+export interface PromptObjectAggregate {
+  object_type: string;
+  object_id: string;
+  parent_id: string;
+  object_name: string;
+  parent_name: string;
+  fires: number;
+  sum_difference: number;
+  avg_difference: number;
+}
+
+export interface PromptTypeTotal {
+  object_type: string;
+  fires: number;
+  sum_difference: number;
+}
+
+/** One purpose/endpoint/model group of LLM calls over a window. */
+export interface LlmCallAggregate {
+  purpose: string;
+  endpoint_id: string;
+  endpoint_name: string;
+  model: string;
+  rule_id: string;
+  rule_name: string;
+  calls: number;
+  ok: number;
+  errors: number;
+  retries: number;
+  failovers: number;
+  mean_latency_ms: number;
+  median_latency_ms: number;
+  min_latency_ms: number;
+  max_latency_ms: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  reasoning_tokens: number;
+  tokens_source_counts: { usage: number; estimate: number };
+}
+
+export interface MetricsSummary {
+  window_days: number;
+  chat_id: string;
+  include_flagged: boolean;
+  chats: string[];
+  prompt_objects: PromptObjectAggregate[];
+  prompt_type_totals: PromptTypeTotal[];
+  llm_calls: LlmCallAggregate[];
+}
+
+export interface PromptObjectMetricRow {
+  id: string;
+  chat_id: string;
+  context: string;
+  is_retry: boolean;
+  created_at: string;
+  object_type: string;
+  object_id: string;
+  parent_id: string;
+  pre_tokens: number;
+  post_tokens: number;
+  difference: number;
+}
+
+export interface LlmCallMetricRow {
+  id: string;
+  chat_id: string;
+  context: string;
+  is_retry: boolean;
+  created_at: string;
+  purpose: string;
+  endpoint_id: string;
+  endpoint_name: string;
+  model: string;
+  status_code: number | null;
+  latency_ms: number;
+  failover_attempt: number;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  reasoning_tokens: number | null;
+  tokens_source: string;
+  rule_id: string;
+}
+
 /** One cantrip a run considered, whether or not it fired. */
 export interface DebugCantrip {
   id: string;
@@ -560,6 +645,18 @@ export const api = {
   // Audit Logs
   listAuditLogs: (limit = 100, offset = 0) =>
     request<{ logs: any[]; total: number }>(`/api/audit?limit=${limit}&offset=${offset}`),
+
+  // Metrics
+  getMetricsSummary: (days = 30, chatId = '', includeFlagged = false) =>
+    request<MetricsSummary>(`/api/metrics/summary?days=${days}`
+      + `${chatId ? `&chat_id=${encodeURIComponent(chatId)}` : ''}`
+      + `${includeFlagged ? '&include_flagged=true' : ''}`),
+  listPromptObjectMetrics: (limit = 100, offset = 0, chatId = '') =>
+    request<{ rows: PromptObjectMetricRow[]; total: number }>(`/api/metrics/prompt-objects?limit=${limit}&offset=${offset}`
+      + `${chatId ? `&chat_id=${encodeURIComponent(chatId)}` : ''}`),
+  listLlmCallMetrics: (limit = 100, offset = 0, chatId = '') =>
+    request<{ rows: LlmCallMetricRow[]; total: number }>(`/api/metrics/llm-calls?limit=${limit}&offset=${offset}`
+      + `${chatId ? `&chat_id=${encodeURIComponent(chatId)}` : ''}`),
 
   // Admin (admin only)
   getAdminSettings: () =>

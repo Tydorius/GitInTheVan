@@ -30,12 +30,13 @@ async def is_debug_mode(user_id: str) -> bool:
         return bool(row)
 
 
-def _run_source(body_json: dict[str, Any]) -> str:
+def run_source(body_json: dict[str, Any]) -> str:
     """Where this run came from: live traffic, a replay, or a sandbox.
 
     Surfaced in the run list and every comparison column, because a sandbox run
     reads a forked conversation and a replay reads a throwaway one -- neither is
-    directly comparable to live traffic without saying so.
+    directly comparable to live traffic without saying so. The metrics tables
+    store the same value in their ``context`` column.
     """
     if body_json.get("_gitv_sandbox"):
         return "sandbox"
@@ -81,7 +82,7 @@ def init_debug(body_json: dict[str, Any], tags: list) -> None:
         "tags": [t.get("raw", "") for t in tags] if tags else [],
         "run": {
             "started_at": datetime.now(UTC).isoformat(),
-            "source": _run_source(body_json),
+            "source": run_source(body_json),
             "replay_of": body_json.get("_gitv_replay_of", ""),
             "sandbox_id": body_json.get("_gitv_sandbox_id", ""),
             "llm_calls": [],
