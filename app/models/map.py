@@ -80,6 +80,20 @@ class MapStage(Base):
 
     output_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="persist")
 
+    # Maps QoL (0.33.0). "full" rebuilds each stage from the client's snapshot
+    # as before; "blank" drops every system-role message from the stage's copy
+    # (client persona, pre-map injections) so lightweight utility stages run
+    # without prompt noise -- the stage instructions become the system message.
+    base_prompt_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="full", server_default="full"
+    )
+    # Optional skip condition evaluated against the chat's chat_data before
+    # the stage runs: {"path": "world.day", "op": ">=", "value": 30}. Empty
+    # string means unconditional.
+    condition_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=""
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

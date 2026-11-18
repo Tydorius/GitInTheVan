@@ -369,6 +369,11 @@ async def _forward_request_impl(
         from app.services.budget import estimate_tokens as _est_tokens
         from app.services.metrics import record_prompt_object, set_metrics_chat
         set_metrics_chat(body_json, internal_chat_id)
+        # Every cantrip position reads the chat id from here (via
+        # extract_context_params) when the client sends no conversation
+        # header -- previously only the map branch set it, so post-driver
+        # store writes from header-less clients silently dropped.
+        body_json["_gitv_chat_id"] = internal_chat_id
 
         # Phase 29b: <CANTRIP:description> queues a draft for the Assistant
         # pane (or auto-installs when both gates are on). Handled before the
@@ -509,15 +514,62 @@ async def _forward_request_impl(
             stage_bound_cantrip_ids,
         )
         cmd_overrides_map = body_json.get("_gitv_command_overrides", {})
-        map_active = None
+        map_candidate = None
         if cmd_overrides_map.get("map") is not False:
-            map_active = await resolve_map(user_id, tags)
+            map_candidate = await resolve_map(user_id, tags)
+
+        # The global cantrip pass runs before map selection is finalized so a
+        # cantrip can nominate a map (context.maps.activate). It excludes the
+        # candidate map's stage-bound cantrips exactly as before; those run on
+        # their own stage inside run_map_pipeline.
+        body_json = await process_cantrips(
+            body_json, user_id, request_headers, tags,
+            internal_chat_id=internal_chat_id,
+            exclude_ids=stage_bound_cantrip_ids(map_candidate) if map_candidate else None,
+        )
+
+        map_active = map_candidate
+        nominations = body_json.pop("_gitv_map_nominations", [])
+        if nominations and cmd_overrides_map.get("map") is not False:
+            # A nomination competes in selection (rule 19: maps pick exactly
+            # one winner), it does not union-run. <MAP:off> suppresses it like
+            # any other map activation.
+            nominated_tags = list(tags or []) + [
+                {"raw": f"<#map-{t}#>", "type": "map", "name": t} for t in nominations
+            ]
+            resolved = await resolve_map(user_id, nominated_tags)
+            if resolved is not None and (
+                map_candidate is None or resolved.id != map_candidate.id
+            ):
+                logger.info(
+                    "Map nomination(s) %s selected map '%s'",
+                    ", ".join(nominations), resolved.name,
+                )
+                ran_globally = {
+                    row.get("object_id")
+                    for row in body_json.get("_gitv_metrics", {}).get("rows_prompt", [])
+                    if row.get("object_type") == "cantrip"
+                }
+                overlap = stage_bound_cantrip_ids(resolved) & ran_globally
+                if overlap:
+                    logger.warning(
+                        "Map '%s' was nominated after the global cantrip pass, and "
+                        "%d cantrip(s) bound to its stages already ran globally this "
+                        "request -- they will run again on their stage. Avoid "
+                        "nominating maps whose stages bind globally-active cantrips.",
+                        resolved.name, len(overlap),
+                    )
+                map_active = resolved
+        if debug_on:
+            _capture_cantrip_pass(
+                body_json, "pre_driver",
+                "Cantrips (Global Pass, Pre-Map)" if map_active else "Cantrips (Pre-Driver)",
+            )
 
         if map_active:
             import httpx as _httpx
             map_timeout = _httpx.Timeout(settings.request_timeout, connect=10.0)
             logger.info("Map '%s' active — routing to map pipeline", map_active.name)
-            body_json["_gitv_chat_id"] = internal_chat_id
 
             # Writing samples are injected below on the non-map path, after this
             # branch has already returned. Do it here too, or a sample attached to
@@ -530,17 +582,6 @@ async def _forward_request_impl(
                 )
                 body_json["messages"] = inject_samples(body_json["messages"], map_samples)
 
-            # The global cantrip pass excludes anything bound to a map stage;
-            # those run on their own stage inside run_map_pipeline.
-            body_json = await process_cantrips(
-                body_json, user_id, request_headers, tags,
-                internal_chat_id=internal_chat_id,
-                exclude_ids=stage_bound_cantrip_ids(map_active),
-            )
-            if debug_on:
-                _capture_cantrip_pass(
-                    body_json, "pre_driver", "Cantrips (Global Pass, Pre-Map)"
-                )
             response_data = await run_map_pipeline(body_json, user_id, request_headers, map_active, map_timeout)
 
             if body_json.get("_gitv_chat_id"):
@@ -571,11 +612,9 @@ async def _forward_request_impl(
 
             return JSONResponse(status_code=200, content=response_data)
 
-        body_json = await process_cantrips(body_json, user_id, request_headers, tags, internal_chat_id=internal_chat_id)
-        if debug_on:
-            _capture_cantrip_pass(body_json, "pre_driver", "Cantrips (Pre-Driver)")
-
-        body_json["_gitv_chat_id"] = internal_chat_id
+        # The global pre-driver pass already ran above (before map selection,
+        # so cantrip nominations could be counted). Anything between here and
+        # the forward is post-cantrip prompt work.
         body_json["_gitv_messages_for_hash"] = body_json.get("messages", [])
 
         from app.services.summarization import maybe_summarize
@@ -1181,12 +1220,20 @@ async def _run_driver_callable_loop(
     timeout: httpx.Timeout,
     user_id: str,
     request_headers: dict[str, str],
+    forward=None,
+    tool_only_ids: set[str] | None = None,
 ) -> dict[str, Any] | None:
     """Run the Driver-Callable tool loop.
 
     Returns the final response_data dict if the loop ran, or None if
     driver-callable is not active for this request (caller should
     forward normally).
+
+    ``forward`` overrides how each round reaches the LLM (map stages inject
+    their failover-chain forwarder here); it receives the loop's body dict
+    and returns ``(response_data, status_code)``, recording its own LLM
+    calls. ``tool_only_ids`` restricts which cantrips are offered as tools
+    (a map stage offers only its own).
     """
     if not body_json.get("_gitv_driver_callable"):
         return None
@@ -1206,6 +1253,10 @@ async def _run_driver_callable_loop(
     async with async_session() as db:
         all_cantrips = await _load_active_cantrips(db, user_id, "pre_driver")
         tool_cantrips = {c.name.lower(): c for c in all_cantrips if c.run_driver_callable}
+    if tool_only_ids is not None:
+        tool_cantrips = {
+            name: c for name, c in tool_cantrips.items() if c.id in tool_only_ids
+        }
 
     loop_messages = [msg.copy() for msg in body_json.get("messages", [])]
     conversation_id = body_json.get("_gitv_chat_id", "")
@@ -1233,18 +1284,24 @@ async def _run_driver_callable_loop(
             model_requested=body_json.get("model", ""),
         )
 
+    if forward is None:
+        async def forward(loop_body_dict: dict[str, Any]) -> tuple[dict[str, Any], int]:
+            body_bytes = json.dumps(loop_body_dict).encode()
+            started = time.monotonic()
+            response_data, status_code = await _do_forward(
+                method, url, headers, body_bytes, timeout,
+                provider=body_json.get("_gitv_provider", ""),
+                base_url=body_json.get("_gitv_base_url", ""),
+                api_key=body_json.get("_gitv_api_key", ""),
+            )
+            _record_loop_call(started, response_data, status_code)
+            return response_data, status_code
+
     rounds = 0
     max_rounds = max(turns_remaining, 1)
 
     while rounds < max_rounds:
-        body_bytes = json.dumps(loop_body).encode()
-        started = time.monotonic()
-        response_data, status_code = await _do_forward(method, url, headers, body_bytes, timeout,
-            provider=body_json.get("_gitv_provider", ""),
-            base_url=body_json.get("_gitv_base_url", ""),
-            api_key=body_json.get("_gitv_api_key", ""),
-        )
-        _record_loop_call(started, response_data, status_code)
+        response_data, status_code = await forward(loop_body)
 
         if status_code != 200:
             logger.warning("Driver-callable loop: forward returned %d", status_code)
@@ -1300,14 +1357,7 @@ async def _run_driver_callable_loop(
 
         loop_body["messages"] = loop_messages
 
-    body_bytes = json.dumps(loop_body).encode()
-    started = time.monotonic()
-    response_data, status_code = await _do_forward(method, url, headers, body_bytes, timeout,
-        provider=body_json.get("_gitv_provider", ""),
-        base_url=body_json.get("_gitv_base_url", ""),
-        api_key=body_json.get("_gitv_api_key", ""),
-    )
-    _record_loop_call(started, response_data, status_code)
+    response_data, status_code = await forward(loop_body)
 
     if status_code == 200:
         choices = response_data.get("choices", [])

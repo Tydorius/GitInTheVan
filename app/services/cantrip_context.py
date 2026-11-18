@@ -162,6 +162,7 @@ def build_context(
     character_description: str = "",
     first_message: str = "",
     alternate_greetings: list[str] | None = None,
+    request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     last_messages = []
     for msg in messages:
@@ -196,6 +197,18 @@ def build_context(
             "user_name": user_name,
             "message_created_at": message_created_at,
         },
+        # Read-only request facts (Maps QoL item 5). Normalized so a context
+        # built without params still has every key -- scripts branch on
+        # map_stage_name without existence checks.
+        "request": {
+            "model": (request or {}).get("model", ""),
+            "stream": bool((request or {}).get("stream", False)),
+            "is_map": bool((request or {}).get("is_map", False)),
+            "map_name": (request or {}).get("map_name", ""),
+            "map_stage_index": (request or {}).get("map_stage_index", -1),
+            "map_stage_name": (request or {}).get("map_stage_name", ""),
+            "map_stage_endpoint": (request or {}).get("map_stage_endpoint", ""),
+        },
         "character": {
             "name": character_name,
             "personality": personality,
@@ -214,10 +227,33 @@ def extract_context_params(body: dict[str, Any], request_headers: dict[str, str]
     conversation_id = request_headers.get("x-conversation-id", "")
     if not conversation_id:
         conversation_id = request_headers.get("x-chat-id", "")
+    if not conversation_id:
+        # Clients that send no conversation header still have an internal
+        # rolling-hash chat id. Without this fallback, post-driver cantrips
+        # (including map stage capture) silently dropped their chat_data
+        # writes: the store save is keyed on this value and skipped when
+        # empty, while pre-driver cantrips persisted fine because their
+        # caller passes the internal id explicitly.
+        conversation_id = body.get("_gitv_chat_id", "")
     params["conversation_id"] = conversation_id
 
     user_name = request_headers.get("x-user-name", "User")
     params["user_name"] = user_name
+
+    # Read-only request facts (Maps QoL item 5): which model the client asked
+    # for, whether this is a stream, and -- for cantrips running inside a map
+    # stage -- which map and stage. Retires the guess-a-stage-by-timer hacks;
+    # a stage cantrip can branch on context.request.map_stage_name instead.
+    stage_info = body.get("_gitv_stage_info") or {}
+    params["request"] = {
+        "model": body.get("model", ""),
+        "stream": bool(body.get("stream", False)),
+        "is_map": bool(stage_info),
+        "map_name": stage_info.get("map", ""),
+        "map_stage_index": stage_info.get("index", -1),
+        "map_stage_name": stage_info.get("name", ""),
+        "map_stage_endpoint": stage_info.get("endpoint", ""),
+    }
 
     return params
 

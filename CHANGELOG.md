@@ -2,6 +2,69 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.33.0] - 2026-11-18
+
+Maps QoL bundle: the three existing map TODOs plus request items 6, 7, the
+map half of 1, with item 5's request context riding along.
+
+### Added
+
+- **Stage base prompt mode** (`base_prompt_mode`): **Full** (default) keeps
+  today's behavior — every stage rebuilds from the client's snapshot
+  including the persona and pre-map injections. **Blank** drops every
+  system-role message from the stage's copy, so lightweight utility stages
+  (summarize, extract, judge) run without persona/scenario noise; the stage
+  instructions become the system message.
+- **Stage run conditions** (`condition_json`): a stage can run only when the
+  chat's stored data satisfies a small condition — `{"path": "world.day",
+  "op": ">=", "value": 30}` against `context.chat_data`. Checked before
+  anything the stage could spend (endpoint resolution, injections, the LLM
+  call); a skipped stage contributes nothing and is debug-captured as *Map
+  Stage Skipped*. The evaluator never raises (a malformed condition fails
+  open to running, with the reason in the timeline) and the write path
+  rejects anything it would fail open on.
+- **Capture output mode**: a stage whose output goes to its own cantrips
+  instead of the prompt. They run post-driver with the stage output as
+  `context.response.content`; their store writes persist (the ledger-capture
+  pattern — a "World" stage filing its output into `chat_data`), and like
+  discard the output never feeds later stages. Embedded pack cantrips now
+  round-trip their run-position flags (capture cantrips live or die by
+  `run_pre_navigator`).
+- **Driver-callable inside map stages** — the warned no-op is real wiring: a
+  stage with `driver_callable_turns > 0` offers **its own** attached
+  cantrips as tools (the model is told they exist before the first forward),
+  and the tool loop runs on an injected stage forwarder so every round goes
+  through the stage's failover chain and parameters and is recorded as a
+  map-stage LLM call.
+- **Cantrip-nominated maps** — `context.maps.activate(tag)`: a pre-driver
+  cantrip can ask for a map by tag. The nomination is shaped like a tag and
+  competes in normal map selection (rule 19: maps pick exactly one winner —
+  a nomination never stacks, and `<MAP:off>` suppresses it). The global
+  cantrip pass now runs before final map resolution; a warning is logged
+  when a nomination switches to a map whose stage cantrips already ran
+  globally this request.
+- **`context.request`** for cantrips — read-only request facts: `model`,
+  `stream`, and inside a map `is_map` / `map_name` / `map_stage_index` /
+  `map_stage_name` / `map_stage_endpoint`. Stage cantrips can branch on
+  which stage they are in instead of guessing from timing.
+
+### Fixed
+
+- **Post-driver cantrip store writes no longer vanish for header-less
+  clients.** `extract_context_params` read the conversation id from
+  `x-conversation-id`/`x-chat-id` headers only and the store save is skipped
+  on an empty id, so pre-driver cantrips persisted (their caller passes the
+  internal id) while pre/post-Navigator cantrips silently dropped every
+  `chat_data` write for clients that send no header. The internal rolling-
+  hash chat id is now the fallback, and the proxy sets `_gitv_chat_id` on
+  every authenticated path rather than only the map branch.
+
+### Migration
+
+- `056_map_stage_base_prompt_and_condition`: adds
+  `map_stages.base_prompt_mode` + `map_stages.condition_json`. Additive,
+  valid on all three dialects.
+
 ## [0.32.0] - 2026-11-18
 
 Phase 29 — Chat Lexicon & Cantrip Drafts. Two in-chat action commands:

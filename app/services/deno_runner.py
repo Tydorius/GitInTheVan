@@ -52,6 +52,11 @@ class CantripResult:
     user_data: dict = field(default_factory=dict)
     cantrip_data: dict = field(default_factory=dict)
     memories: dict = field(default_factory=dict)
+    # Map tags the cantrip asked to activate via context.maps.activate(tag).
+    # A nomination, not a command: maps are a selection resource under repo
+    # rule 19, so the nominated tag competes in tag_matches_resource
+    # selection rather than joining the additive union.
+    maps_nominated: list[str] = field(default_factory=list)
     debug_logs: list[str] = field(default_factory=list)
     error: str | None = None
 
@@ -146,6 +151,7 @@ async def run_cantrip(
             user_data=result_data.get("user_data", {}),
             cantrip_data=result_data.get("cantrip_data", {}),
             memories=result_data.get("memories", {}),
+            maps_nominated=result_data.get("maps_nominated", []),
             debug_logs=result_data.get("debug_logs", []),
             error=result_data.get("error"),
         )

@@ -15,7 +15,10 @@ GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:
 > **About the screenshots**
 >
 > Screenshots of the main pages were captured on **2026-08-31 against 0.24.0**,
-> except the Metrics page, which dates from **2026-11-18 against 0.31.0**.
+> except the Metrics page, which dates from **2026-11-18 against 0.31.0**, and
+> the Chat Lexicon settings card, the cantrip auto-install admin toggle and the
+> Assistant pane's cantrip drafts list, which date from **2026-11-18 against
+> 0.32.0**.
 > A few images of individual dialogs and panels still date from **2026-07-08,
 > against 0.16.x** — those show the tool working the same way, but the
 > surrounding UI may have moved on.
@@ -487,6 +490,16 @@ context.memory.set('weather', 'stormy');
 // Context budget (when budgeting is enabled in Settings)
 const budget = context.budget;  // {total, remaining, weight, share, detail_level}
 
+// Read-only facts about the current request (which model, streaming, and
+// inside a map: which map and stage)
+if (context.request.is_map) {
+    console.log(`Running in stage ${context.request.map_stage_name}`);
+}
+
+// Ask for a map by tag (pre-driver positions); a nomination competes in
+// normal map selection, it never stacks maps
+context.maps.activate('world');
+
 console.log('Debug output visible in cantrip tester');
 ```
 
@@ -940,7 +953,11 @@ Action commands look like command tags but carry free text instead of on/off. Th
 
 **Lexicon settings** (Settings → Chat Lexicon & Cantrip Drafts): the compiler defaults to on — typing the command is the opt-in — and uses its own endpoint if configured, else the summarization endpoint, else the default endpoint. A compile that fails (unreachable endpoint, unparseable output, safety-scan refusal, size cap) is skipped silently: the entry simply does not exist yet, and the request forwards untouched.
 
+![Chat Lexicon settings card](media/gitv-settings-lexicon.png)
+
 **Cantrip auto-install** is doubly gated, and both switches default to off: an admin allows it under Admin → Global Caps, and you enable your half in Settings. With both on, `<CANTRIP:...>` drafts, validates, smoke-tests and installs the cantrip inside the request instead of queueing it — a draft that fails validation or the safety scan is refused, and one that fails only its sandbox smoke test is installed **disabled** with the findings recorded. Either way you get a one-line `[OOC: GitV: ...]` note in the reply. These notes are stripped from the history on the next request, and they are the only `[OOC: ...]` blocks GitV removes — your own OOC notes always reach the model.
+
+![Cantrip auto-install: the admin half of the gate](media/gitv-admin-cantrip-auto-install.png)
 
 ---
 
@@ -988,8 +1005,10 @@ Each subsequent card is a **stage**:
 - **System Instructions**: Instructions specific to this stage's LLM (prepended to its call)
 - **Endpoint**: Which endpoint to use for this stage (blank = your default endpoint)
 - **Model Override**: Force a specific model for this stage (blank = endpoint default)
-- **Driver-Callable Turns**: Maximum tool-call rounds for this stage (0 = disabled)
-- **Output Mode**: How this stage's output feeds the next stage
+- **Driver-Callable Turns**: Maximum tool-call rounds for this stage (0 = disabled). The stage offers **its own** attached cantrips as tools: the model is told they exist, a `<call:tool_name>` tag executes the tool, and the loop re-forwards through the stage's endpoint until the model answers without calling.
+- **Output Mode**: How this stage's output feeds the next stage (see below)
+- **Base Prompt**: **Full** (default) rebuilds the stage from the client's prompt and all pre-map injections. **Blank** drops every system message from the stage's copy — the stage instructions become the system message — so lightweight utility stages (summarize, extract, judge) run without persona/scenario noise.
+- **Run Condition**: Optional. The stage runs only when the chat's stored data (`context.chat_data`) satisfies a small condition: a dot-path (`world.day`), an operator (`exists`, `is missing`, `==`, `!=`, `>=`, `>`, `<=`, `<`) and a value. Checked before anything the stage would spend — a skipped stage costs nothing and shows as *Map Stage Skipped* in the Debug timeline. Blank runs always.
 - **Attached Lorebooks**: Lorebooks injected before this stage's LLM call
 - **Attached Cantrips**: Cantrips run before this stage's LLM call (with a **Sticky** option)
 
@@ -1008,6 +1027,15 @@ Each stage's output is handled before the next stage runs:
 | **Persist** (default) | Stage output is added to the conversation as an assistant message before the next stage runs |
 | **Sanitize** | Stage output is converted to a system context block (e.g., `[STAGE N OUTPUT]`) and stripped from message history |
 | **Discard** | Stage output is dropped entirely (only used for verification within its own stage) |
+| **Capture** | Stage output goes to this stage's own cantrips instead of the prompt: they run post-driver with the output as `context.response.content`, and whatever they write to their stores persists — the ledger-capture pattern (a "World" stage that files its output into `chat_data`). Like discard, the output never feeds later stages. |
+
+### Cantrip-Nominated Maps
+
+A pre-driver cantrip can ask for a map by tag: `context.maps.activate("world")`. The nominated tag competes in normal map selection — it can select a tagged (even inactive) map nothing else would have chosen, but it never stacks maps, and `<MAP:off>` suppresses it like any other map activation. One caution: the nomination is resolved after the global cantrip pass, so a cantrip that both runs globally and is bound to a stage of the nominated map will run twice in that request.
+
+### Request Facts for Cantrips
+
+Every cantrip context now carries `context.request` — read-only facts about the current request: `model`, `stream`, and, inside a map, `is_map`, `map_name`, `map_stage_index`, `map_stage_name` and `map_stage_endpoint`. A stage cantrip can branch on which stage it is in instead of guessing from timing.
 
 ### Sticky vs Stage-Only Resources
 
@@ -1266,7 +1294,8 @@ Admin actions (user creation, deletion, password resets) are recorded in the aud
 
 ## 15. Assistant
 
-*Screenshots pending (2026-09-02) — the pane shipped this section before a capture pass.*
+*Screenshots of the pane's conversation view are still pending (2026-09-02); the drafts list
+below was captured 2026-11-18.*
 
 The Assistant Pane is a persistent panel on the right edge of the management UI where one of
 your own configured endpoints acts as an assistant for GitInTheVan itself. It can read and
@@ -1274,6 +1303,11 @@ change your cantrips, lorebooks, maps, verification rules, memory rules, tags, s
 settings; navigate you to the right page; and explain why a resource did or did not fire. It
 runs as native tool calls against the same API this UI uses — nothing about it is a separate
 integration.
+
+A `<CANTRIP:description>` command queues its draft here, under **Cantrip drafts**, with
+**Start** (seeds an assistant conversation for drafting and validating it) and **Dismiss**:
+
+![Assistant pane: cantrip drafts list](media/gitv-assistant-drafts.png)
 
 Collapsed, it is a slim rail on the right edge with a small badge when it needs your attention.
 Click the rail (or the floating button on narrow screens) to open it, pick or start a

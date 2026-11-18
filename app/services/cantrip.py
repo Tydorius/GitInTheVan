@@ -406,6 +406,14 @@ async def process_cantrips(
             context["character"]["example_dialogs"] = result.example_dialogs
             accumulated_memories.update(result.memories)
 
+            # Map nominations ride the body like memories do; the proxy's map
+            # branch merges them into selection after the cantrip pass.
+            if result.maps_nominated:
+                nominations = body_json.setdefault("_gitv_map_nominations", [])
+                for tag in result.maps_nominated:
+                    if tag not in nominations:
+                        nominations.append(tag)
+
             chat_data = result.chat_data
             user_data = result.user_data
 
@@ -471,12 +479,14 @@ async def process_cantrips_post_driver(
     request_headers: dict[str, str],
     tags: list | None = None,
     position: str = "pre_navigator",
+    only_ids: set[str] | None = None,
 ) -> str:
     """Run post-Driver cantrips that can modify the response content.
 
-    Used for pre-Navigator (regex/keyword checks, cleanup) and
-    post-Navigator (final formatting) positions. Cantrips at these
-    positions have access to context.response.content.
+    Used for pre-Navigator (regex/keyword checks, cleanup) and post-Navigator
+    (final formatting) positions. Cantrips at these positions have access to
+    context.response.content. ``only_ids`` restricts the pass to specific
+    cantrips (map stage capture mode runs just the stage's own).
     """
     messages = body_json.get("messages", [])
     if not messages:
@@ -496,6 +506,9 @@ async def process_cantrips_post_driver(
                 c.tag, "cantrip", c.is_active, c.is_public, c.user_id, user_id, tags or []
             ):
                 cantrips.append(c)
+
+        if only_ids is not None:
+            cantrips = [c for c in cantrips if c.id in only_ids]
 
         if not cantrips:
             return response_content

@@ -36,7 +36,8 @@ def _skill_resource(name, content, rtype="skill", sticky=False):
     }
 
 
-def _stage(order, name, tag, output_mode, resources=None):
+def _stage(order, name, tag, output_mode, resources=None, *,
+           base_prompt_mode="full", condition_json=""):
     return {
         "stage_order": order,
         "name": name,
@@ -46,6 +47,8 @@ def _stage(order, name, tag, output_mode, resources=None):
         "driver_callable_turns": 0,
         "verification_enabled": False,
         "output_mode": output_mode,
+        "base_prompt_mode": base_prompt_mode,
+        "condition_json": condition_json,
         "resources": resources or [],
     }
 
@@ -484,3 +487,334 @@ class TestMapPackParameterRoundTrip:
         )
         assert resp.status_code == 201, resp.text
         assert resp.json()["stages"][0]["parameters"] == []
+
+
+# ---------------------------------------------------------------------------
+# Maps QoL (0.33.0): base_prompt_mode, stage conditions, capture output mode
+# ---------------------------------------------------------------------------
+
+
+class TestStageConditionEvaluator:
+    """Unit coverage for the condition evaluator. The E2E tests below cover
+    the pipeline wiring; these pin the decision table, including every
+    fail-open path (a malformed condition must never silently disable a
+    stage)."""
+
+    def _run(self, cond, chat_data):
+        from app.services.map_pipeline import evaluate_stage_condition
+        return evaluate_stage_condition(json.dumps(cond), chat_data)
+
+    def test_numeric_thresholds(self):
+        assert self._run({"path": "world.day", "op": ">=", "value": 30},
+                         {"world": {"day": 30}})[0] is True
+        assert self._run({"path": "world.day", "op": ">=", "value": 30},
+                         {"world": {"day": 7}})[0] is False
+        # Numeric strings compare numerically, not lexically.
+        assert self._run({"path": "world.day", "op": ">", "value": "29"},
+                         {"world": {"day": "30"}})[0] is True
+
+    def test_equality_and_existence(self):
+        assert self._run({"path": "weather", "op": "==", "value": "storm"},
+                         {"weather": "storm"})[0] is True
+        assert self._run({"path": "weather", "op": "!=", "value": "storm"},
+                         {"weather": "calm"})[0] is True
+        assert self._run({"path": "weather", "op": "exists"}, {})[0] is False
+        assert self._run({"path": "weather", "op": "not_exists"}, {})[0] is True
+        # A missing path never equals the literal "None".
+        assert self._run({"path": "weather", "op": "==", "value": "None"}, {})[0] is False
+
+    def test_every_malformed_condition_runs_the_stage(self):
+        from app.services.map_pipeline import evaluate_stage_condition
+        for raw in ('{not json', '', 'null'):
+            run, _ = evaluate_stage_condition(raw, {})
+            assert run is True, raw
+        run, _ = self._run({"path": "a", "op": "like", "value": 1}, {})
+        assert run is True  # unknown op
+        run, _ = self._run({"op": "exists"}, {})
+        assert run is True  # no path
+        run, _ = self._run({"path": "a", "op": ">"}, {"a": "text"})
+        assert run is True  # ordering on non-numbers
+
+
+class TestBasePromptMode:
+    @pytest.mark.asyncio
+    async def test_blank_stage_drops_client_system_prompt(self, admin_client, httpx_mock):
+        """A blank stage sees only its instructions plus the history -- the
+        client's system message and pre-map injections are dropped from that
+        stage's copy, and the full stage before it still sees them."""
+        client, _, api_key = admin_client
+        await _make_endpoint(client, "Utility", "util.test", "utility")
+        created = await client.post("/api/maps/import", json={"data": {
+            "name": "Isolation",
+            "stages": [
+                _stage(1, "Reader", "utility", "sanitize"),
+                _stage(2, "Blanky", "utility", "persist", base_prompt_mode="blank"),
+            ],
+        }})
+        assert created.status_code == 201, created.text
+        await client.put("/api/settings", json={"default_map_id": created.json()["id"]})
+
+        for _ in range(2):
+            httpx_mock.add_response(
+                url="http://util.test/v1/chat/completions",
+                json={"choices": [{"message": {"content": "OK"}}]},
+            )
+
+        resp = await client.post("/v1/chat/completions", json={
+            "model": "test",
+            "messages": [
+                {"role": "system", "content": "PERSONA_AND_SCENARIO_BLOCK"},
+                {"role": "user", "content": "Proceed"},
+            ],
+        }, headers={"Authorization": f"Bearer {api_key}"})
+        assert resp.status_code == 200, resp.text
+
+        bodies = _bodies_for(httpx_mock, "util.test")
+        assert len(bodies) == 2
+        # Stage 1 (full): the client system message travels.
+        assert any("PERSONA_AND_SCENARIO_BLOCK" in json.dumps(b["messages"])
+                   for b in bodies[:1])
+        # Stage 2 (blank): no system message survives except the stage
+        # instructions block, which becomes the system message.
+        stage2 = json.dumps(bodies[1]["messages"])
+        assert "PERSONA_AND_SCENARIO_BLOCK" not in stage2
+        system_msgs = [m for m in bodies[1]["messages"] if m.get("role") == "system"]
+        # Two system blocks are correct: the stage instructions (now the
+        # system message) and the prior stage's sanitized output riding
+        # sticky. What must NOT be there is the client's persona block.
+        assert len(system_msgs) == 2
+        assert any("Instructions for Blanky." in m["content"] for m in system_msgs)
+        assert any("[STAGE 1 OUTPUT:" in m["content"] for m in system_msgs)
+        # The conversation itself survives isolation.
+        assert any(m.get("role") == "user" and m.get("content") == "Proceed"
+                   for m in bodies[1]["messages"])
+
+    @pytest.mark.asyncio
+    async def test_full_mode_keeps_today_behaviour(self, admin_client, httpx_mock):
+        client, _, api_key = admin_client
+        await _make_endpoint(client, "Utility", "util.test", "utility")
+        created = await client.post("/api/maps/import", json={"data": {
+            "name": "FullOnly",
+            "stages": [_stage(1, "Reader", "utility", "persist")],
+        }})
+        assert created.status_code == 201, created.text
+        await client.put("/api/settings", json={"default_map_id": created.json()["id"]})
+        httpx_mock.add_response(
+            url="http://util.test/v1/chat/completions",
+            json={"choices": [{"message": {"content": "OK"}}]},
+        )
+        resp = await client.post("/v1/chat/completions", json={
+            "model": "test",
+            "messages": [
+                {"role": "system", "content": "PERSONA_AND_SCENARIO_BLOCK"},
+                {"role": "user", "content": "Proceed"},
+            ],
+        }, headers={"Authorization": f"Bearer {api_key}"})
+        assert resp.status_code == 200
+        assert "PERSONA_AND_SCENARIO_BLOCK" in json.dumps(
+            _bodies_for(httpx_mock, "util.test")[0]["messages"])
+
+
+class TestStageConditions:
+    @pytest.fixture
+    async def conditioned_map(self, admin_client):
+        client, _, api_key = admin_client
+        main = await _make_endpoint(client, "Main", "main.test", "default")
+        await client.put("/api/settings", json={"default_endpoint_id": main})
+        await _make_endpoint(client, "Early", "early.test", "early")
+        await _make_endpoint(client, "Late", "late.test", "late")
+        # Direct create, not /import: the importer installs maps untagged
+        # (pack tags are the author's, not yours), and this map activates by
+        # its own tag.
+        created = await client.post("/api/maps", json={
+            "name": "Conditional",
+            "tag": "condmap",
+            "stages": [
+                {"name": "World", "endpoint_tag": "early", "output_mode": "sanitize",
+                 "condition_json": '{"path": "world.day", "op": ">=", "value": 30}'},
+                {"name": "Story", "endpoint_tag": "late", "output_mode": "persist"},
+            ],
+        })
+        assert created.status_code in (200, 201), created.text
+        return client, api_key
+
+    async def _seed_day(self, client, day):
+        """Seed chat_data under the conversation the next (tagged) request
+        resolves to via the rolling hash. The fixture's first, map-free
+        request established that conversation."""
+        from sqlalchemy import select
+
+        from app.models.chat_data import ChatData
+        from app.models.conversation_hash import ConversationHash
+        from tests.conftest import TestSessionLocal
+
+        uid = (await client.get("/api/auth/me")).json()["id"]
+        async with TestSessionLocal() as db:
+            rows = (await db.execute(
+                select(ConversationHash)
+                .where(ConversationHash.user_id == uid)
+                .order_by(ConversationHash.created_at.desc())
+            )).scalars().all()
+            assert rows, "no conversation was established"
+            conv_id = rows[0].internal_chat_id
+            db.add(ChatData(user_id=uid, conversation_id=conv_id,
+                            key="world", value_json=json.dumps({"day": day})))
+            await db.commit()
+
+    @pytest.mark.httpx_mock(assert_all_responses_were_requested=False)
+    @pytest.mark.asyncio
+    async def test_condition_false_skips_the_stage(self, conditioned_map, httpx_mock):
+        client, api_key = conditioned_map
+        httpx_mock.add_response(
+            url="http://main.test/v1/chat/completions",
+            json={"choices": [{"message": {"content": "seed reply"}}]})
+        seed = await client.post("/v1/chat/completions", json={
+            "model": "test",
+            "messages": [{"role": "user", "content": "hello"},
+                         {"role": "assistant", "content": "seed reply"}],
+        }, headers={"Authorization": f"Bearer {api_key}"})
+        assert seed.status_code == 200, seed.text
+        await self._seed_day(client, day=7)
+
+        httpx_mock.add_response(url="http://early.test/v1/chat/completions",
+                                json={"choices": [{"message": {"content": "WORLD"}}]})
+        httpx_mock.add_response(url="http://late.test/v1/chat/completions",
+                                json={"choices": [{"message": {"content": "STORY_ONLY"}}]})
+        resp = await client.post("/v1/chat/completions", json={
+            "model": "test",
+            "messages": [{"role": "user", "content": "hello"},
+                         {"role": "assistant", "content": "seed reply"},
+                         {"role": "user", "content": "<#map-condmap#> go"}],
+        }, headers={"Authorization": f"Bearer {api_key}"})
+        assert resp.status_code == 200, resp.text
+
+        hosts = [r.url.host for r in httpx_mock.get_requests()]
+        # The skipped stage never called its endpoint; the last stage's
+        # output is the reply. (main.test = the seeding request.)
+        assert "early.test" not in hosts, hosts
+        assert hosts[-1] == "late.test"
+        assert resp.json()["choices"][0]["message"]["content"] == "STORY_ONLY"
+
+    @pytest.mark.asyncio
+    async def test_condition_true_runs_the_stage(self, conditioned_map, httpx_mock):
+        client, api_key = conditioned_map
+        httpx_mock.add_response(
+            url="http://main.test/v1/chat/completions",
+            json={"choices": [{"message": {"content": "seed reply"}}]})
+        await client.post("/v1/chat/completions", json={
+            "model": "test",
+            "messages": [{"role": "user", "content": "hello"},
+                         {"role": "assistant", "content": "seed reply"}],
+        }, headers={"Authorization": f"Bearer {api_key}"})
+        await self._seed_day(client, day=31)
+
+        httpx_mock.add_response(url="http://early.test/v1/chat/completions",
+                                json={"choices": [{"message": {"content": "WORLD"}}]})
+        httpx_mock.add_response(url="http://late.test/v1/chat/completions",
+                                json={"choices": [{"message": {"content": "STORY"}}]})
+        resp = await client.post("/v1/chat/completions", json={
+            "model": "test",
+            "messages": [{"role": "user", "content": "hello"},
+                         {"role": "assistant", "content": "seed reply"},
+                         {"role": "user", "content": "<#map-condmap#> go"}],
+        }, headers={"Authorization": f"Bearer {api_key}"})
+        assert resp.status_code == 200
+        hosts = [r.url.host for r in httpx_mock.get_requests()]
+        assert hosts[-2:] == ["early.test", "late.test"], hosts
+
+    @pytest.mark.httpx_mock(assert_all_responses_were_requested=False)
+    @pytest.mark.asyncio
+    async def test_the_skip_is_debug_captured(self, conditioned_map, httpx_mock):
+        from app.services.debug import get_exchange, list_exchanges
+
+        client, api_key = conditioned_map
+        await client.put("/api/settings", json={"debug_mode": True})
+        uid = (await client.get("/api/auth/me")).json()["id"]
+
+        httpx_mock.add_response(
+            url="http://main.test/v1/chat/completions",
+            json={"choices": [{"message": {"content": "seed reply"}}]})
+        await client.post("/v1/chat/completions", json={
+            "model": "test",
+            "messages": [{"role": "user", "content": "hello"},
+                         {"role": "assistant", "content": "seed reply"}],
+        }, headers={"Authorization": f"Bearer {api_key}"})
+        await self._seed_day(client, day=7)
+
+        httpx_mock.add_response(url="http://early.test/v1/chat/completions",
+                                json={"choices": [{"message": {"content": "WORLD"}}]})
+        httpx_mock.add_response(url="http://late.test/v1/chat/completions",
+                                json={"choices": [{"message": {"content": "STORY"}}]})
+        await client.post("/v1/chat/completions", json={
+            "model": "test",
+            "messages": [{"role": "user", "content": "hello"},
+                         {"role": "assistant", "content": "seed reply"},
+                         {"role": "user", "content": "<#map-condmap#> go"}],
+        }, headers={"Authorization": f"Bearer {api_key}"})
+
+        runs = await list_exchanges(uid, limit=5)
+        found = None
+        for r in runs:
+            candidate = await get_exchange(uid, r["id"])
+            names = [s["name"] for s in candidate["pipeline_data"]["stages"]]
+            if "map_stage_skipped" in names:
+                found = candidate
+                break
+        assert found is not None, "no run captured the skip"
+        skip = next(s for s in found["pipeline_data"]["stages"]
+                    if s["name"] == "map_stage_skipped")
+        assert skip["item_name"] == "World"
+        assert "world.day" in skip["detail"]
+
+
+class TestMapsQoLValidation:
+    @pytest.mark.asyncio
+    async def test_bad_condition_is_rejected_at_write_time(self, admin_client):
+        client, _, _ = admin_client
+        for bad in ['{"op": ">=', '{"path": "a", "op": "explode", "value": 1}',
+                    '{"op": "exists"}', '{"path": "a", "op": ">"}', '["not", "object"]']:
+            resp = await client.post("/api/maps", json={
+                "name": f"Bad {bad[:12]}", "stages": [
+                    {"name": "S1", "output_mode": "persist", "condition_json": bad},
+                ],
+            })
+            assert resp.status_code == 422, (bad, resp.text)
+
+    @pytest.mark.asyncio
+    async def test_bad_modes_are_rejected(self, admin_client):
+        client, _, _ = admin_client
+        resp = await client.post("/api/maps", json={
+            "name": "BadMode", "stages": [
+                {"name": "S1", "output_mode": "explode"},
+            ],
+        })
+        assert resp.status_code == 422
+        resp = await client.post("/api/maps", json={
+            "name": "BadBase", "stages": [
+                {"name": "S1", "output_mode": "persist", "base_prompt_mode": "card"},
+            ],
+        })
+        assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_export_import_round_trips_the_new_fields(self, admin_client):
+        client, _, _ = admin_client
+        created = await client.post("/api/maps", json={
+            "name": "RoundTrip",
+            "tag": "rt",
+            "stages": [{
+                "name": "S1", "output_mode": "capture",
+                "base_prompt_mode": "blank",
+                "condition_json": '{"path": "world.day", "op": ">=", "value": 30}',
+            }],
+        })
+        assert created.status_code in (200, 201), created.text
+        map_id = created.json()["id"]
+
+        exported = (await client.get(f"/api/maps/{map_id}/export")).json()
+        imported = await client.post("/api/maps/import", json={"data": exported})
+        assert imported.status_code == 201, imported.text
+        stage = imported.json()["stages"][0]
+        assert stage["output_mode"] == "capture"
+        assert stage["base_prompt_mode"] == "blank"
+        assert json.loads(stage["condition_json"])["op"] == ">="

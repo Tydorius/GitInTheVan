@@ -1281,7 +1281,15 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             ALTER TABLE user_settings ADD COLUMN cantrip_auto_install_enabled BOOLEAN DEFAULT FALSE NOT NULL;
             ALTER TABLE admin_settings ADD COLUMN assistant_cantrip_auto_install_allowed BOOLEAN DEFAULT FALSE NOT NULL;
             """,
-        },
+        },    ),
+    (
+        "056_map_stage_base_prompt_and_condition",
+        # Maps QoL (0.33.0): per-stage prompt isolation and skip condition.
+        # Plain SQL, valid on all three dialects.
+        """
+        ALTER TABLE map_stages ADD COLUMN base_prompt_mode VARCHAR(16) DEFAULT 'full' NOT NULL;
+        ALTER TABLE map_stages ADD COLUMN condition_json TEXT DEFAULT '' NOT NULL;
+        """,
     ),
 ]
 
