@@ -227,8 +227,11 @@ async def _forward_request_impl(
         init_metrics(body_json, user_id)
 
         from app.services.command_tags import (
+            extract_action_commands_from_messages,
             extract_command_tags_from_messages,
+            strip_action_commands_from_messages,
             strip_command_tags_from_messages,
+            strip_gitv_notices_from_messages,
         )
 
         # jslorebook blocks are extracted and stripped for prompt hygiene only;
@@ -244,6 +247,16 @@ async def _forward_request_impl(
                 content = msg.get("content", "")
                 if isinstance(content, str):
                     msg["content"] = strip_tags(content)
+                elif isinstance(content, list):
+                    # Structured content carries text inside part dicts; a
+                    # string-only rewrite leaves tags in those parts, leaking
+                    # them upstream (Phase 29 fix).
+                    msg["content"] = [
+                        {**item, "text": strip_tags(item["text"])}
+                        if isinstance(item, dict) and isinstance(item.get("text"), str)
+                        else item
+                        for item in content
+                    ]
 
         jslb_scripts, cleaned_msgs = extract_jslorebook(body_json.get("messages", []))
         if jslb_scripts:
@@ -257,6 +270,22 @@ async def _forward_request_impl(
                 f"{c.command}:{c.setting}" + (":persist" if c.persist else "") for c in message_commands
             ])
             body_json["messages"] = strip_command_tags_from_messages(body_json["messages"])
+
+        # Phase 29 action commands (<LEXICON:name>, <CANTRIP:description>) are
+        # parsed here and acted on later in the pipeline; their free-text
+        # argument never reaches the upstream model. GitV OOC notices from a
+        # previous reply are stripped on every request so they reach the
+        # player once and never persist in the resent history.
+        action_commands = extract_action_commands_from_messages(body_json.get("messages", []))
+        if action_commands:
+            logger.info("Action commands detected: %s", [
+                f"{a.command}: {a.text[:60]}" for a in action_commands
+            ])
+            body_json["messages"] = strip_action_commands_from_messages(body_json["messages"])
+            body_json["_gitv_action_commands"] = [
+                {"command": a.command, "text": a.text} for a in action_commands
+            ]
+        body_json["messages"] = strip_gitv_notices_from_messages(body_json["messages"])
 
         body_json["_gitv_tags"] = tags
 
@@ -322,6 +351,22 @@ async def _forward_request_impl(
         from app.services.metrics import record_prompt_object, set_metrics_chat
         set_metrics_chat(body_json, internal_chat_id)
 
+        # Phase 29b: <CANTRIP:description> queues a draft for the Assistant
+        # pane (or auto-installs when both gates are on). Handled before the
+        # map branch so drafts queue on map requests too; the resulting OOC
+        # notice rides the response out at the return points.
+        if user_id and body_json.get("_gitv_action_commands"):
+            from app.services.lexicon import handle_cantrip_request
+            for action in body_json["_gitv_action_commands"]:
+                if action["command"] != "CANTRIP":
+                    continue
+                try:
+                    await handle_cantrip_request(
+                        body_json, user_id, request_headers, internal_chat_id, action["text"]
+                    )
+                except Exception:
+                    logger.exception("Cantrip draft handling failed; request continues")
+
         cmd_overrides_mem = body_json.get("_gitv_command_overrides", {})
         memory_disabled = cmd_overrides_mem.get("memory") is False
         memories = {} if memory_disabled else await load_memories_for_chat(internal_chat_id, user_id)
@@ -373,7 +418,9 @@ async def _forward_request_impl(
                     setting="scenario_summary_enabled", setting_value=True,
                     metadata={"changed": did_change})
 
-        body_json = await _apply_lorebook_injection(body_json, user_id, tags)
+        body_json = await _apply_lorebook_injection(
+            body_json, user_id, tags, request_headers, internal_chat_id
+        )
         if debug_on:
             entries = body_json.pop("_gitv_matched_entries", [])
             debug_capture(body_json, "lorebook_injection", "Lorebook Injection",
@@ -479,6 +526,7 @@ async def _forward_request_impl(
 
             if body_json.get("_gitv_chat_id"):
                 response_data = await _extract_response_memories(response_data, user_id, body_json)
+                response_data = _append_pending_notices(response_data, body_json)
 
             if body_json.get("_gitv_debug") and user_id:
                 # The map pipeline returns its own verification result; passing
@@ -542,6 +590,22 @@ async def _forward_request_impl(
                     detail="Summarized" if post_scn_changed else "No summarization triggered",
                     setting="scenario_summary_enabled", setting_value=True,
                     metadata={"changed": post_scn_changed})
+
+        # Phase 29a: <LEXICON:name> compiles a lorebook entry for the named
+        # thing via one side LLM call, after summarization so the extraction
+        # sees the compressed history + summary and every injection. The entry
+        # takes effect from the next request on. Non-map path only (v1).
+        if user_id and body_json.get("_gitv_action_commands"):
+            from app.services.lexicon import run_lexicon_compile
+            for action in body_json["_gitv_action_commands"]:
+                if action["command"] != "LEXICON":
+                    continue
+                try:
+                    await run_lexicon_compile(
+                        body_json, user_id, request_headers, internal_chat_id, action["text"]
+                    )
+                except Exception:
+                    logger.exception("Lexicon compile failed; request continues")
 
         sample_contents = body_json.pop("_gitv_sample_contents", None)
         if sample_contents:
@@ -788,6 +852,28 @@ def _strip_think_tags(content: str) -> str:
     return re.sub(r"<think>.*?</think>\s*", "", content, flags=re.DOTALL)
 
 
+def _append_pending_notices(response_data: Any, body_json: dict[str, Any]) -> Any:
+    """Append pipeline OOC notices to the reply so the player sees them.
+
+    Notices ([OOC: GitV: ...], built in lexicon.build_notice) ride the final
+    content out once and are stripped from messages on every subsequent
+    request, so they never persist in the history the client resends.
+    """
+    notices = body_json.get("_gitv_pending_notices") or []
+    if not notices or not isinstance(response_data, dict):
+        return response_data
+    try:
+        choices = response_data.get("choices") or []
+        if choices and isinstance(choices[0].get("message"), dict):
+            message = choices[0]["message"]
+            content = str(message.get("content") or "")
+            joined = "\n".join(notices)
+            message["content"] = f"{content}\n\n{joined}".strip() if content else joined
+    except Exception:
+        logger.exception("Failed to append pending notices")
+    return response_data
+
+
 def _convert_to_sse(
     response: JSONResponse,
     model: str,
@@ -851,7 +937,11 @@ def _convert_to_sse(
 
 
 async def _apply_lorebook_injection(
-    body_json: dict[str, Any], user_id: str, tags: list | None = None
+    body_json: dict[str, Any],
+    user_id: str,
+    tags: list | None = None,
+    request_headers: dict[str, str] | None = None,
+    internal_chat_id: str = "",
 ) -> dict[str, Any]:
     try:
         from app.services.tagging import should_activate_resource
@@ -864,8 +954,30 @@ async def _apply_lorebook_injection(
             )
             lorebooks = result.scalars().all()
 
+            # Fifth activation source (Phase 29a): the conversation binding.
+            # A union source -- it only ever adds. A bound lorebook joins the
+            # candidates regardless of its tag or Active flag, so a lexicon
+            # lorebook (created inactive, untagged) injects in its own chat
+            # and in no other. No prompt tag can switch it off.
+            from app.models.conversation_lorebook_binding import ConversationLorebookBinding
+            from app.services.lexicon import resolve_action_identity
+
+            conversation_id, _ = resolve_action_identity(request_headers or {}, internal_chat_id)
+            bound_lorebook_ids: set[str] = set()
+            if conversation_id:
+                bound_rows = await db.execute(
+                    select(ConversationLorebookBinding.lorebook_id).where(
+                        ConversationLorebookBinding.user_id == user_id,
+                        ConversationLorebookBinding.conversation_id == conversation_id,
+                    )
+                )
+                bound_lorebook_ids = set(bound_rows.scalars().all())
+
             active_lorebooks = []
             for lb in lorebooks:
+                if lb.id in bound_lorebook_ids:
+                    active_lorebooks.append(lb)
+                    continue
                 if lb.tag and tags:
                     activate = should_activate_resource(
                         lb.tag, "lore", lb.is_active, lb.is_public, lb.user_id, user_id, tags
@@ -1207,6 +1319,7 @@ async def _forward_non_streaming_verified(
 
                 if status_code == 200 and body_json.get("_gitv_chat_id"):
                     response_data = await _extract_response_memories(response_data, user_id, body_json)
+                response_data = _append_pending_notices(response_data, body_json)
 
                 if isinstance(response_data, dict):
                     response_data.pop("_gitv_forbidden_summary", None)
@@ -1281,6 +1394,7 @@ async def _forward_non_streaming_verified(
     if status_code == 200 and user_id and body_json.get("_gitv_chat_id"):
         if body_json.get("_gitv_command_overrides", {}).get("memory") is not False:
             response_data = await _extract_response_memories(response_data, user_id, body_json)
+            response_data = _append_pending_notices(response_data, body_json)
 
     if isinstance(response_data, dict):
         response_data.pop("_gitv_forbidden_summary", None)
@@ -2166,6 +2280,7 @@ async def _forward_streaming_with_memory(
                 response_data.pop("_gitv_forbidden_summary", None)
 
         response_data = await _extract_response_memories(response_data, user_id, body_json)
+        response_data = _append_pending_notices(response_data, body_json)
 
         # This path buffers the whole response before re-emitting it as SSE, so
         # the exchange is as complete as the non-streaming one. It was simply

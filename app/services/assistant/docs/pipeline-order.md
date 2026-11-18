@@ -11,9 +11,11 @@ Runs in this order for every request, map or not:
 1. `tag_group_resolution` — expands `<#taggroup-x#>` tags into member tags (dedup applied). Reads/writes `_gitv_tags`.
 2. `memory_injection` — injects the `[PERSISTENT MEMORY]` block built from stored `<memstore>` key/values for this chat (skippable via `<MEMORY:off>`).
 3. `scenario_summarization_pre` — fires after memory injection, before lorebooks/cantrips; compresses an oversized system message (character card, OOC, memories) if a Pre-position scenario rule's threshold is exceeded.
-4. `lorebook_injection` — keyword-matches active lorebook entries and injects them. **Only runs once, here.** The `Lorebook` model carries `run_pre_navigator`/`run_post_navigator`/`run_driver_callable` columns, but `_apply_lorebook_injection()` in `proxy.py` never reads them — lorebooks are effectively pre-driver-only in the live pipeline regardless of what those flags say. Treat the user-guide's "lorebooks support the same four pipeline positions as cantrips" as aspirational, not current behavior.
+4. `lorebook_injection` — keyword-matches active lorebook entries and injects them. Conversation-bound lexicon lorebooks (see activation-hierarchy.md) join the candidate set here too. **Only runs once, here.** The `Lorebook` model carries `run_pre_navigator`/`run_post_navigator`/`run_driver_callable` columns, but `_apply_lorebook_injection()` in `proxy.py` never reads them — lorebooks are effectively pre-driver-only in the live pipeline regardless of what those flags say. Treat the user-guide's "lorebooks support the same four pipeline positions as cantrips" as aspirational, not current behavior.
 5. `skills_injection` — injects endpoint-attached skills into the system message; loads (but does not yet inject) writing samples.
 6. `budget_preparation` — computes the context budget (`_gitv_budget`) that cantrips can read via `context.budget`.
+
+Before the branch, two more things happen alongside the command-tag pass: **action commands** (`<LEXICON:name>`, `<CANTRIP:description>`) are parsed and stripped (free text never reaches the LLM; the argument may not contain angle brackets; first occurrence wins), and stale `[OOC: GitV: ...]` notices from earlier replies are stripped. `<CANTRIP:...>` is handled here as well — it queues a draft row (or auto-installs when both gates are on) so drafts queue on map requests too; its OOC notice rides the response out at the return points. `<LEXICON:...>` runs later, only on the standard branch.
 
 Then the pipeline branches on whether a map is active (`resolve_map()` — tag match or `default_map_id`; skippable via a `<MAP...>`-suppressing command override). **Both branches share stages 1–6 above.**
 
@@ -30,6 +32,7 @@ Then the pipeline branches on whether a map is active (`resolve_map()` — tag m
 7. Cantrips at `pre_driver` position (label "Cantrips (Pre-Driver)").
 8. `conversation_summarization` — rolling-hash-triggered summarization of older turns.
 9. `scenario_summarization_post` — fires after cantrips/skills/lorebooks; controls final system-message size.
+9b. `lexicon_compiler` (Phase 29) — `<LEXICON:name>` compiles a lorebook entry via one side LLM call on the lexicon endpoint chain (own pick → summarizer → default → first enabled, with failover) and files it through the same guards as a hand-written entry. Runs here so the extraction sees the compressed history + summary; any failure degrades to "nothing written". Not captured as a messages snapshot — it changes no messages.
 10. `writing_samples` — injects endpoint-attached writing samples before the last message.
 11. `driver_callable` — if any active cantrip has Driver-Callable checked and turns remain, injects the `[TOOL ACCESS]` notification listing callable tools.
 12. `prefill` — normalizes prefill formatting for endpoints that support it.

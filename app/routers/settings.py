@@ -31,11 +31,17 @@ class SettingsResponse(BaseModel):
     context_window_override: int
     debug_mode: bool
     default_map_id: str | None
+    # Phase 29: lexicon compiler settings and the user half of the
+    # doubly-gated cantrip auto-install.
+    lexicon_enabled: bool = True
+    lexicon_endpoint_id: str | None = None
+    cantrip_auto_install_enabled: bool = False
     # One parameter set per LLM role, matching the three model fields. These are
     # the blanket layer: broader than the endpoint, narrower than the client.
     parameters: list[ParameterDef] = Field(default_factory=list)
     verification_parameters: list[ParameterDef] = Field(default_factory=list)
     summarization_parameters: list[ParameterDef] = Field(default_factory=list)
+    lexicon_parameters: list[ParameterDef] = Field(default_factory=list)
 
 
 class SettingsUpdate(BaseModel):
@@ -52,9 +58,13 @@ class SettingsUpdate(BaseModel):
     context_window_override: int | None = None
     debug_mode: bool | None = None
     default_map_id: str | None = None
+    lexicon_enabled: bool | None = None
+    lexicon_endpoint_id: str | None = None
+    cantrip_auto_install_enabled: bool | None = None
     parameters: list[ParameterDef] | None = None
     verification_parameters: list[ParameterDef] | None = None
     summarization_parameters: list[ParameterDef] | None = None
+    lexicon_parameters: list[ParameterDef] | None = None
 
 
 @router.get("")
@@ -84,9 +94,13 @@ async def get_settings(
         context_window_override=user_settings.context_window_override,
         debug_mode=user_settings.debug_mode,
         default_map_id=user_settings.default_map_id,
+        lexicon_enabled=user_settings.lexicon_enabled,
+        lexicon_endpoint_id=user_settings.lexicon_endpoint_id,
+        cantrip_auto_install_enabled=user_settings.cantrip_auto_install_enabled,
         parameters=params_to_api(user_settings.parameters_json),
         verification_parameters=params_to_api(user_settings.verification_parameters_json),
         summarization_parameters=params_to_api(user_settings.summarization_parameters_json),
+        lexicon_parameters=params_to_api(user_settings.lexicon_parameters_json),
     )
 
 
@@ -128,6 +142,12 @@ async def update_settings(
         user_settings.debug_mode = req.debug_mode
     if req.default_map_id is not None:
         user_settings.default_map_id = req.default_map_id or None
+    if req.lexicon_enabled is not None:
+        user_settings.lexicon_enabled = req.lexicon_enabled
+    if req.lexicon_endpoint_id is not None:
+        user_settings.lexicon_endpoint_id = req.lexicon_endpoint_id or None
+    if req.cantrip_auto_install_enabled is not None:
+        user_settings.cantrip_auto_install_enabled = req.cantrip_auto_install_enabled
     if req.parameters is not None:
         user_settings.parameters_json = params_from_api(req.parameters, "driver parameters")
     if req.verification_parameters is not None:
@@ -137,6 +157,10 @@ async def update_settings(
     if req.summarization_parameters is not None:
         user_settings.summarization_parameters_json = params_from_api(
             req.summarization_parameters, "summarization parameters"
+        )
+    if req.lexicon_parameters is not None:
+        user_settings.lexicon_parameters_json = params_from_api(
+            req.lexicon_parameters, "lexicon parameters"
         )
 
     await db.commit()
@@ -156,7 +180,11 @@ async def update_settings(
         context_window_override=user_settings.context_window_override,
         debug_mode=user_settings.debug_mode,
         default_map_id=user_settings.default_map_id,
+        lexicon_enabled=user_settings.lexicon_enabled,
+        lexicon_endpoint_id=user_settings.lexicon_endpoint_id,
+        cantrip_auto_install_enabled=user_settings.cantrip_auto_install_enabled,
         parameters=params_to_api(user_settings.parameters_json),
         verification_parameters=params_to_api(user_settings.verification_parameters_json),
         summarization_parameters=params_to_api(user_settings.summarization_parameters_json),
+        lexicon_parameters=params_to_api(user_settings.lexicon_parameters_json),
     )

@@ -70,11 +70,18 @@
   let error = ''
   let saved = false
   let sumSaved = false
+  let lexSaved = false
   let copied = false
   let regenerating = false
   let newKeyNotice = false
 
-  let collapse = new CollapseController('settings', ['proxy', 'streaming', 'summarization', 'assistant', 'driver', 'prefill', 'budget'])
+  // Phase 29: the lexicon compiler and the user half of the doubly-gated
+  // cantrip auto-install. Both ride the general settings endpoint.
+  let lexiconForm = { lexicon_enabled: true, lexicon_endpoint_id: '' as string | null }
+  let lexiconParams: any[] = []
+  let cantripAutoInstall = false
+
+  let collapse = new CollapseController('settings', ['proxy', 'streaming', 'summarization', 'assistant', 'driver', 'prefill', 'budget', 'lexicon'])
 
   async function load() {
     try {
@@ -87,6 +94,10 @@
       driverParams = structuredClone(s.parameters || [])
       verificationParams = structuredClone(s.verification_parameters || [])
       summarizationParams = structuredClone(s.summarization_parameters || [])
+      lexiconForm.lexicon_enabled = s.lexicon_enabled ?? true
+      lexiconForm.lexicon_endpoint_id = s.lexicon_endpoint_id || ''
+      lexiconParams = structuredClone(s.lexicon_parameters || [])
+      cantripAutoInstall = s.cantrip_auto_install_enabled ?? false
       endpoints = e.endpoints
       const mapData = await api.listMaps()
       maps = mapData.maps
@@ -152,6 +163,19 @@
     error = ''
     try { await api.updateSettings({ driver_callable_turns: driverCallableTurns } as any) }
     catch (e: any) { error = e.message }
+  }
+
+  async function saveLexicon() {
+    error = ''; lexSaved = false
+    try {
+      await api.updateSettings({
+        lexicon_enabled: lexiconForm.lexicon_enabled,
+        lexicon_endpoint_id: lexiconForm.lexicon_endpoint_id || '',
+        lexicon_parameters: lexiconParams,
+        cantrip_auto_install_enabled: cantripAutoInstall,
+      } as any)
+      lexSaved = true
+    } catch (e: any) { error = e.message }
   }
 
   async function saveBypassPrefill() {
@@ -337,6 +361,58 @@
     </p>
   </div>
   <button class="primary" onclick={saveSummarization}>Save Summarization Settings</button>
+</CollapsibleCard>
+
+<CollapsibleCard title="Chat Lexicon & Cantrip Drafts" cardKey="lexicon" {collapse}>
+  <p style="color: var(--text-dim); font-size: 12px; margin-top: 12px; margin-bottom: 16px;">
+    Two in-chat commands. <code>&lt;LEXICON:name&gt;</code> compiles a lorebook entry for a named
+    thing (character, item, place) from the conversation via one side LLM call and files it in a
+    per-chat lorebook that injects in this conversation only. <code>&lt;CANTRIP:description&gt;</code>
+    queues a cantrip draft for the Assistant pane, where it is drafted, validated and created with
+    the normal permission flow.
+  </p>
+  {#if lexSaved}<div class="success-msg">Lexicon settings saved.</div>{/if}
+  <div class="form-group">
+    <label>
+      <input type="checkbox" bind:checked={lexiconForm.lexicon_enabled} style="width: auto;">
+      Lexicon Compiler Enabled
+    </label>
+    <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+      Typing the command is the opt-in, so this defaults to on. Turn off to make
+      <code>&lt;LEXICON:...&gt;</code> a no-op.
+    </p>
+  </div>
+  <div class="form-group">
+    <label for="lex-ep">Lexicon Endpoint</label>
+    <select id="lex-ep" bind:value={lexiconForm.lexicon_endpoint_id}>
+      <option value="">Use summarizer endpoint, then default</option>
+      {#each endpoints as ep}<option value={ep.id}>{ep.name}</option>{/each}
+    </select>
+    <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+      Used for the compile call. Falls back to the summarization endpoint (same long-context
+      shape), then the default endpoint, then the first enabled endpoint.
+    </p>
+  </div>
+  <div class="form-group">
+    <ParameterEditor
+      bind:params={lexiconParams}
+      title="Default Parameters (lexicon calls)"
+      hint="Sent on lexicon compile and cantrip auto-install drafting calls."
+    />
+  </div>
+  <div class="form-group">
+    <label>
+      <input type="checkbox" bind:checked={cantripAutoInstall} style="width: auto;">
+      Auto-Install Cantrip Drafts
+    </label>
+    <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+      With this on (and only if an admin has allowed it under Admin &rarr; Global Caps),
+      <code>&lt;CANTRIP:...&gt;</code> drafts, validates, smoke-tests and installs the cantrip
+      in-request instead of queueing it. A draft that fails validation is refused; one that
+      fails only its smoke test is installed disabled. Both settings default off.
+    </p>
+  </div>
+  <button class="primary" onclick={saveLexicon}>Save Lexicon Settings</button>
 </CollapsibleCard>
 
 <CollapsibleCard title="Assistant" cardKey="assistant" {collapse}>

@@ -11,14 +11,22 @@
     refreshConversations, openConversation, newConversation, sendMessage,
     continueTurn, decide, abort, toggleSaved, deleteConversation,
     forkConversation, exportConversation, setYolo,
+    drafts, refreshDrafts, startDraft, dismissDraft, markDraftInstalled,
   } from './store'
   import { renderMarkdown } from './markdown'
   import ConfirmCard from './ConfirmCard.svelte'
 
   let draft = ''
   let menuOpen = false
+  let draftsOpen = false
   let expandedItems: Record<string, boolean> = {}
   let dragging = false
+
+  // Pending/started/failed drafts stay visible; installed and dismissed age
+  // out of the list naturally (50 most recent).
+  $: openDrafts = ($drafts || []).filter((d) =>
+    d.status === 'pending' || d.status === 'started' || d.status === 'failed')
+  $: pendingDraftCount = ($drafts || []).filter((d) => d.status === 'pending').length
 
   function toggleItem(id: string) {
     expandedItems = { ...expandedItems, [id]: !expandedItems[id] }
@@ -84,6 +92,7 @@
   function openPane() {
     paneExpanded.set(true)
     refreshConversations()
+    refreshDrafts()
   }
 
   $: if ($paneExpanded) refreshConversations()
@@ -94,6 +103,7 @@
     <button class="assistant-rail" onclick={openPane} title="Open assistant" aria-label="Open assistant">
       <span class="rail-icon">✦</span>
       {#if $pending || $busy}<span class="rail-badge"></span>{/if}
+      {#if pendingDraftCount}<span class="rail-badge drafts-badge" title={`${pendingDraftCount} cantrip draft(s) queued`}>{pendingDraftCount}</span>{/if}
     </button>
   {:else}
     <div class="assistant-drag" role="separator" aria-orientation="vertical" onmousedown={startDrag}></div>
@@ -139,6 +149,30 @@
           </span>
         {/if}
       </div>
+
+      {#if openDrafts.length}
+        <div class="assistant-drafts">
+          <button class="drafts-head" onclick={() => (draftsOpen = !draftsOpen)}>
+            <span class="tool-chevron">{draftsOpen ? '▼' : '▶'}</span>
+            <span>Cantrip drafts ({openDrafts.length})</span>
+          </button>
+          {#if draftsOpen}
+            {#each openDrafts as d (d.id)}
+              <div class="draft-row" title={d.outcome_note || d.request_text}>
+                <span class="draft-status" class:is-failed={d.status === 'failed'}>{d.status}</span>
+                <span class="draft-text">{d.request_text}</span>
+                {#if d.status === 'pending'}
+                  <button title="Seed a conversation and start drafting" onclick={() => startDraft(d)}>Start</button>
+                  <button title="Drop this draft" onclick={() => dismissDraft(d.id)}>Dismiss</button>
+                {:else if d.status === 'started'}
+                  <button title="Record that the cantrip was created" onclick={() => markDraftInstalled(d.id)}>Installed</button>
+                  <button title="Drop this draft" onclick={() => dismissDraft(d.id)}>Dismiss</button>
+                {/if}
+              </div>
+            {/each}
+          {/if}
+        </div>
+      {/if}
 
       {#if $notice}
         <div class="assistant-notice">{$notice}</div>

@@ -1175,6 +1175,114 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             """,
         },
     ),
+    # 0.32.0. Phase 29: Chat Lexicon & Cantrip Drafts. Conversation bindings
+    # (fifth activation source -- one lexicon lorebook per chat, see
+    # app/models/conversation_lorebook_binding.py), the cantrip draft queue,
+    # the lexicon settings block and the doubly-gated auto-install flags.
+    (
+        "055_phase29_lexicon_and_drafts",
+        {
+            "sqlite": """
+            CREATE TABLE IF NOT EXISTS conversation_lorebook_bindings (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                conversation_id VARCHAR(256) NOT NULL,
+                identity_source VARCHAR(16) DEFAULT 'rolling_hash' NOT NULL,
+                lorebook_id VARCHAR(36) NOT NULL REFERENCES lorebooks(id) ON DELETE CASCADE,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, conversation_id)
+            );
+            CREATE INDEX IF NOT EXISTS ix_conversation_lorebook_bindings_user_id
+                ON conversation_lorebook_bindings (user_id);
+            CREATE INDEX IF NOT EXISTS ix_conversation_lorebook_bindings_conversation_id
+                ON conversation_lorebook_bindings (conversation_id);
+            CREATE TABLE IF NOT EXISTS cantrip_requests (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                conversation_id VARCHAR(256) DEFAULT '' NOT NULL,
+                request_text TEXT DEFAULT '' NOT NULL,
+                context_text TEXT DEFAULT '' NOT NULL,
+                status VARCHAR(16) DEFAULT 'pending' NOT NULL,
+                outcome_note TEXT DEFAULT '' NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS ix_cantrip_requests_user_status
+                ON cantrip_requests (user_id, status);
+            ALTER TABLE user_settings ADD COLUMN lexicon_enabled BOOLEAN DEFAULT 1 NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN lexicon_endpoint_id VARCHAR(36);
+            ALTER TABLE user_settings ADD COLUMN lexicon_parameters_json TEXT DEFAULT '[]' NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN cantrip_auto_install_enabled BOOLEAN DEFAULT 0 NOT NULL;
+            ALTER TABLE admin_settings ADD COLUMN assistant_cantrip_auto_install_allowed BOOLEAN DEFAULT 0 NOT NULL;
+            """,
+            "postgresql": """
+            CREATE TABLE IF NOT EXISTS conversation_lorebook_bindings (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                conversation_id VARCHAR(256) NOT NULL,
+                identity_source VARCHAR(16) DEFAULT 'rolling_hash' NOT NULL,
+                lorebook_id VARCHAR(36) NOT NULL REFERENCES lorebooks(id) ON DELETE CASCADE,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, conversation_id)
+            );
+            CREATE INDEX IF NOT EXISTS ix_conversation_lorebook_bindings_user_id
+                ON conversation_lorebook_bindings (user_id);
+            CREATE INDEX IF NOT EXISTS ix_conversation_lorebook_bindings_conversation_id
+                ON conversation_lorebook_bindings (conversation_id);
+            CREATE TABLE IF NOT EXISTS cantrip_requests (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                conversation_id VARCHAR(256) DEFAULT '' NOT NULL,
+                request_text TEXT DEFAULT '' NOT NULL,
+                context_text TEXT DEFAULT '' NOT NULL,
+                status VARCHAR(16) DEFAULT 'pending' NOT NULL,
+                outcome_note TEXT DEFAULT '' NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS ix_cantrip_requests_user_status
+                ON cantrip_requests (user_id, status);
+            ALTER TABLE user_settings ADD COLUMN lexicon_enabled BOOLEAN DEFAULT 1 NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN lexicon_endpoint_id VARCHAR(36);
+            ALTER TABLE user_settings ADD COLUMN lexicon_parameters_json TEXT DEFAULT '[]' NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN cantrip_auto_install_enabled BOOLEAN DEFAULT 0 NOT NULL;
+            ALTER TABLE admin_settings ADD COLUMN assistant_cantrip_auto_install_allowed BOOLEAN DEFAULT 0 NOT NULL;
+            """,
+            "mysql": """
+            CREATE TABLE IF NOT EXISTS conversation_lorebook_bindings (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL,
+                conversation_id VARCHAR(256) NOT NULL,
+                identity_source VARCHAR(16) DEFAULT 'rolling_hash' NOT NULL,
+                lorebook_id VARCHAR(36) NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, conversation_id),
+                KEY ix_conversation_lorebook_bindings_user_id (user_id),
+                KEY ix_conversation_lorebook_bindings_conversation_id (conversation_id),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (lorebook_id) REFERENCES lorebooks(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS cantrip_requests (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL,
+                conversation_id VARCHAR(256) DEFAULT '' NOT NULL,
+                request_text TEXT NOT NULL,
+                context_text TEXT NOT NULL,
+                status VARCHAR(16) DEFAULT 'pending' NOT NULL,
+                outcome_note TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                KEY ix_cantrip_requests_user_status (user_id, status),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            ALTER TABLE user_settings ADD COLUMN lexicon_enabled BOOLEAN DEFAULT 1 NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN lexicon_endpoint_id VARCHAR(36);
+            ALTER TABLE user_settings ADD COLUMN lexicon_parameters_json TEXT DEFAULT '[]' NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN cantrip_auto_install_enabled BOOLEAN DEFAULT 0 NOT NULL;
+            ALTER TABLE admin_settings ADD COLUMN assistant_cantrip_auto_install_allowed BOOLEAN DEFAULT 0 NOT NULL;
+            """,
+        },
+    ),
 ]
 
 

@@ -49,6 +49,7 @@
     max_debug_exchange_kb: 512,
     max_snapshots_per_object: 20,
     metrics_retention_days: 30,
+    assistant_cantrip_auto_install_allowed: false,
     url_blocklist: '',
     runtime_log_level: '',
     assistant_enabled: true,
@@ -111,6 +112,7 @@
         max_debug_exchange_kb: adminSettings.max_debug_exchange_kb,
         max_snapshots_per_object: adminSettings.max_snapshots_per_object,
         metrics_retention_days: adminSettings.metrics_retention_days,
+        assistant_cantrip_auto_install_allowed: (adminSettings as any).assistant_cantrip_auto_install_allowed ?? false,
         url_blocklist: adminSettings.url_blocklist || '',
         runtime_log_level: adminSettings.runtime_log_level || '',
         assistant_enabled: adminSettings.assistant_enabled,
@@ -588,6 +590,18 @@
       <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
         Off by default. The assistant has no web search of its own, so a repo name it suggests
         could be hallucinated -- exactly the shape of a slopsquatted package.
+      </p>
+    </div>
+    <div class="form-group">
+      <label for="cap-cantrip-auto-install">
+        <input id="cap-cantrip-auto-install" type="checkbox" bind:checked={capsForm.assistant_cantrip_auto_install_allowed} style="width: auto; margin-right: 6px;" />
+        Allow in-chat cantrip auto-install (<code>&lt;CANTRIP:...&gt;</code>)
+      </label>
+      <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+        Admin half of a doubly-gated switch; the user enables their half in Settings. With both
+        on, a <code>&lt;CANTRIP:...&gt;</code> command drafts, validates, smoke-tests and installs
+        the cantrip inside the request instead of queueing a draft for the pane. Drafted code
+        always passes the safety scanner and a sandbox smoke run before it can install enabled.
       </p>
     </div>
     <div class="form-row">

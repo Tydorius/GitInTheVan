@@ -2,6 +2,78 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.32.0] - 2026-11-18
+
+Phase 29 — Chat Lexicon & Cantrip Drafts. Two in-chat action commands:
+`<LEXICON:name>` compiles a lorebook entry for any named thing in the
+conversation via one side LLM call, and `<CANTRIP:description>` queues a
+cantrip draft for the Assistant pane (or, doubly gated and off by default,
+drafts and installs it in-request).
+
+### Added
+
+- **Action commands** (`command_tags.py`): a second command class that carries
+  free text (`<LEXICON:name>`, `<CANTRIP:description>`), parsed and stripped on
+  every request. First occurrence per request wins. The argument may not
+  contain angle brackets.
+- **Chat Lexicon compiler** (`app/services/lexicon.py`): one side LLM call on a
+  failover chain (dedicated lexicon endpoint → summarizer endpoint → default →
+  first enabled), recorded under the new `lexicon` LLM-call purpose and
+  debug-captured. Output is brace-slice-parsed JSON (`{name, aliases, type,
+  keys, secondary_keys, content}`); inferred detail is marked. Every failure —
+  unreachable endpoint, unparseable output, guard refusal — degrades to
+  "forward untouched, write nothing".
+- **Conversation binding as the fifth activation source**: one lorebook per
+  chat (`conversation_lorebook_bindings`, unique per user+conversation),
+  created inactive and untagged so it never blanket-runs elsewhere, and
+  included at lorebook injection regardless of tag or Active flag. A union
+  source: it only adds. Documented in the user guide and the assistant concept
+  docs.
+- **Cantrip draft queue**: `cantrip_requests` rows with a pending/started/
+  installed/dismissed/failed status; drafts list, badge and seeding in the
+  Assistant pane (starting a draft seeds a conversation with the request, a
+  conversation snapshot and a pointer at the cantrip docs; the existing
+  validate/test/create tools and permission grid do the work). New routes
+  `GET /api/assistant/drafts` and `PATCH /api/assistant/drafts/{id}` live
+  under the pane's own hard-denied prefix.
+- **OOC notices**: pipeline results reach the player as `[OOC: GitV: ...]`
+  lines appended to the reply (after all response-side processing, so nothing
+  judges the notice) and stripped from the resent history on the next request.
+  Only notices carrying the GitV marker are stripped — player-authored
+  `[OOC: ...]` notes always reach the model.
+- **Cantrip auto-install** (doubly gated, both halves default off): admin
+  `assistant_cantrip_auto_install_allowed` + user
+  `cantrip_auto_install_enabled`. With both on, `<CANTRIP:...>` drafts via one
+  LLM call, then a Deno syntax parse, the size cap and safety scanner (critical
+  findings refuse outright), and a sandbox smoke run with a synthetic context
+  (failure installs the cantrip disabled with findings attached). The outcome
+  is recorded on a `cantrip_requests` row and reported in the OOC notice.
+- **Lexicon settings**: `lexicon_enabled` (default on — typing the command is
+  the opt-in), `lexicon_endpoint_id`, `lexicon_parameters_json` (a rule-20
+  parameter layer, closest-wins over the endpoint's), on a new Settings card
+  alongside the auto-install toggle.
+
+### Changed
+
+- **Tag/command stripping now handles content-parts lists.** Clients that send
+  structured content (image/tool parts) had activation and command tags inside
+  part dicts leak upstream, because both strippers rewrote string content
+  only. All three strip paths (activation tags, command tags, GitV notices)
+  now rewrite `text` fields inside part lists too. Load-bearing since action
+  commands started carrying free text.
+- **Lorebook entry writes share one guarded path.** The sanitize → size →
+  scan → log sequence moved from the lorebook router into
+  `app/services/lorebook_writes.py`, called by both the router (refusal is a
+  413/422) and the lexicon pipeline (refusal degrades). The cantrip syntax
+  validator similarly moved from the router into `deno_runner.py` and is shared
+  with auto-install.
+
+### Migration
+
+- `055_phase29_lexicon_and_drafts`: creates `conversation_lorebook_bindings`
+  and `cantrip_requests`, adds the lexicon and auto-install columns to
+  `user_settings`/`admin_settings`. Additive only, dialect-aware.
+
 ## [0.31.0] - 2026-11-18
 
 Token metrics tracking: which lorebooks, cantrips and pipeline stages bloat

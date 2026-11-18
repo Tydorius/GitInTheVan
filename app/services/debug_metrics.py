@@ -31,6 +31,7 @@ PURPOSE_MAP_STAGE = "map_stage"
 PURPOSE_VERIFICATION = "verification_judge"
 PURPOSE_SUMMARIZER = "summarizer"
 PURPOSE_ASSISTANT = "assistant"
+PURPOSE_LEXICON = "lexicon"
 
 TOKENS_UPSTREAM = "upstream"
 TOKENS_ESTIMATED = "estimated"

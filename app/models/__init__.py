@@ -6,8 +6,10 @@ from app.models.backup_run import BackupRun
 from app.models.base import Base
 from app.models.cantrip import Cantrip
 from app.models.cantrip_data import CantripData
+from app.models.cantrip_request import CantripRequest
 from app.models.chat_data import ChatData
 from app.models.conversation_hash import ConversationHash
+from app.models.conversation_lorebook_binding import ConversationLorebookBinding
 from app.models.conversation_summary import ConversationSummary
 from app.models.debug_exchange import DebugExchange
 from app.models.debug_sandbox import DebugSandbox
@@ -44,8 +46,10 @@ __all__ = [
     "LorebookEntry",
     "Cantrip",
     "CantripData",
+    "CantripRequest",
     "ChatData",
     "ConversationHash",
+    "ConversationLorebookBinding",
     "ConversationSummary",
     "DebugExchange",
     "DebugSandbox",

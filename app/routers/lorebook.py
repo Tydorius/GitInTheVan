@@ -16,35 +16,16 @@ from app.models.user import User
 from app.services import snapshots
 from app.services.admin import get_admin_settings
 from app.services.content_guard import gate_scan_findings, log_scan_findings, sanitize_and_log
+from app.services.lorebook_writes import (
+    enforce_lorebook_size,
+    sanitize_entry_content,
+    scan_entry,
+)
 from app.services.safety_scanner import scan_lorebook
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/lorebooks", tags=["lorebooks"])
-
-
-async def _enforce_lorebook_size(
-    db: AsyncSession, lorebook_id: str, added_chars: int, exclude_entry_id: str | None = None
-) -> None:
-    """Enforce max_lorebook_size_kb against the total content across all entries
-    in a lorebook (matches the original Phase 19b design: "total lorebook entry
-    content per lorebook", not a per-entry cap).
-    """
-    admin_settings = await get_admin_settings()
-    max_bytes = admin_settings.max_lorebook_size_kb * 1024
-
-    q = select(LorebookEntry.content).where(LorebookEntry.lorebook_id == lorebook_id)
-    if exclude_entry_id:
-        q = q.where(LorebookEntry.id != exclude_entry_id)
-    result = await db.execute(q)
-    existing_total = sum(len(c or "") for c in result.scalars().all())
-
-    total = existing_total + added_chars
-    if total > max_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"Lorebook content exceeds size limit ({total} chars, max {max_bytes})",
-        )
 
 
 class EntryInput(BaseModel):
@@ -431,11 +412,10 @@ async def add_entry(
     if lorebook is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lorebook not found")
 
-    req.content = await sanitize_and_log(db, current_user.id, req.content, "lorebook_entry", lorebook_id)
-    await _enforce_lorebook_size(db, lorebook_id, len(req.content))
+    req.content = await sanitize_entry_content(db, current_user.id, lorebook_id, req.content)
+    await enforce_lorebook_size(db, lorebook_id, len(req.content))
 
-    scan = scan_lorebook([{"name": req.name, "content": req.content}])
-    await log_scan_findings(current_user.id, scan, "lorebook_entry", lorebook_id)
+    scan = await scan_entry(current_user.id, req.name, req.content, lorebook_id)
     gate_scan_findings(scan, req.override_scan, "Lorebook entry")
 
     entry = LorebookEntry(lorebook_id=lorebook_id, **_entry_input_to_dict(req))
@@ -468,11 +448,10 @@ async def update_entry(
 
     await snapshots.capture(db, current_user.id, "lorebook", lorebook_id)
 
-    req.content = await sanitize_and_log(db, current_user.id, req.content, "lorebook_entry", entry_id)
-    await _enforce_lorebook_size(db, lorebook_id, len(req.content), exclude_entry_id=entry_id)
+    req.content = await sanitize_entry_content(db, current_user.id, lorebook_id, req.content)
+    await enforce_lorebook_size(db, lorebook_id, len(req.content), exclude_entry_id=entry_id)
 
-    scan = scan_lorebook([{"name": req.name, "content": req.content}])
-    await log_scan_findings(current_user.id, scan, "lorebook_entry", entry_id)
+    scan = await scan_entry(current_user.id, req.name, req.content, lorebook_id)
     gate_scan_findings(scan, req.override_scan, "Lorebook entry")
 
     for key, value in _entry_input_to_dict(req).items():

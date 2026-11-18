@@ -378,57 +378,14 @@ async def validate_cantrip(
     current_user: Annotated[User, Depends(get_current_user)],
 ):
     import asyncio
-    import os
-    import tempfile
 
-    from app.services.deno_runner import DENO_PATH
+    from app.services.deno_runner import validate_cantrip_syntax
 
-    if not DENO_PATH:
-        return ValidateResponse(valid=True, error=None)
-
-    wrapper = f"""
-const __userCode = {repr(req.code)};
-try {{
-    new Function('context', __userCode);
-}} catch(e) {{
-    Deno.stdout.writeSync(new TextEncoder().encode(JSON.stringify({{error: e.message}})));
-    Deno.exit(1);
-}}
-Deno.stdout.writeSync(new TextEncoder().encode(JSON.stringify({{error: null}})));
-"""
-
-    fd, temp_path = tempfile.mkstemp(suffix=".mjs", prefix="gitv_validate_")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(wrapper)
-
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None,
-            lambda: __import__("subprocess").run(
-                [DENO_PATH, "run", "--quiet", temp_path],
-                capture_output=True, timeout=5,
-            ),
-        )
-
-        stdout = result.stdout.decode("utf-8", errors="replace").strip() if result.stdout else ""
-        if stdout:
-            import json
-            try:
-                data = json.loads(stdout)
-                if data.get("error"):
-                    return ValidateResponse(valid=False, error=data["error"])
-            except json.JSONDecodeError:
-                pass
-
-        return ValidateResponse(valid=True, error=None)
-    except Exception as e:
-        return ValidateResponse(valid=False, error=str(e))
-    finally:
-        try:
-            os.unlink(temp_path)
-        except OSError:
-            pass
+    loop = asyncio.get_event_loop()
+    error = await loop.run_in_executor(None, validate_cantrip_syntax, req.code)
+    if error:
+        return ValidateResponse(valid=False, error=error)
+    return ValidateResponse(valid=True, error=None)
 
 
 @router.post("/test")

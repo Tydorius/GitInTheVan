@@ -201,3 +201,59 @@ async def _execute_deno(script_path: str, timeout_ms: int) -> tuple[bytes, int]:
             logger.warning("Deno stderr: %s", stderr_text[:500])
 
     return stdout, return_code
+
+
+def _validate_syntax_sync(code: str) -> str:
+    """Parse-check cantrip code with `new Function` in a bare Deno run.
+
+    Returns "" when the code parses, else the parse error. Without a Deno
+    binary there is nothing to check and the result is "" (valid) -- matching
+    the historical /api/cantrips/validate behavior. Synchronous subprocess;
+    call via run_in_executor off the event loop.
+    """
+    import json as _json
+
+    if not DENO_PATH:
+        return ""
+
+    wrapper = (
+        f"const __userCode = {code!r};\n"
+        "try {\n"
+        "    new Function('context', __userCode);\n"
+        "} catch(e) {\n"
+        "    Deno.stdout.writeSync(new TextEncoder().encode(JSON.stringify({error: e.message})));\n"
+        "    Deno.exit(1);\n"
+        "}\n"
+        "Deno.stdout.writeSync(new TextEncoder().encode(JSON.stringify({error: null})));\n"
+    )
+
+    fd, temp_path = tempfile.mkstemp(suffix=".mjs", prefix="gitv_validate_")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(wrapper)
+
+        result = subprocess.run(
+            [DENO_PATH, "run", "--quiet", temp_path],
+            capture_output=True, timeout=5,
+        )
+        stdout = result.stdout.decode("utf-8", errors="replace").strip() if result.stdout else ""
+        if stdout:
+            try:
+                data = _json.loads(stdout)
+                if data.get("error"):
+                    return str(data["error"])
+            except _json.JSONDecodeError:
+                pass
+        return ""
+    except Exception as e:
+        return str(e)
+    finally:
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
+
+
+def validate_cantrip_syntax(code: str) -> str:
+    """`_validate_syntax_sync` with the name the callers use. See its docstring."""
+    return _validate_syntax_sync(code)
