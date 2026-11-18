@@ -440,3 +440,83 @@ class TestLorebookLoopAsksUnconditionally:
 
         assert not await _injected(uid, "GHOST")
         assert not await _injected(uid, "GHOST", tags=tags_for("<#lore-market#>"))
+
+
+def _nominated(tag: str) -> dict:
+    """The tag shape the proxy builds from context.maps.activate(tag)."""
+    return {"raw": f"<#map-{tag}#>", "type": "map", "name": tag}
+
+
+class TestCantripMapNomination:
+    """Rule 19's deliberate line for cantrip-triggered map activation: a
+    nomination is shaped like a tag and competes in map selection. It is NOT
+    an additive union source -- exactly one map still wins, and a nomination
+    that matches nothing changes nothing."""
+
+    @pytest.mark.asyncio
+    async def test_a_nominated_tag_selects_an_inactive_tagged_map(self, admin_client):
+        from sqlalchemy import select
+
+        from app.models.map import Map
+        from app.services.map_pipeline import resolve_map
+        from tests.conftest import TestSessionLocal
+
+        client, _, _ = admin_client
+        uid = (await client.get("/api/auth/me")).json()["id"]
+        async with TestSessionLocal() as db:
+            db.add(Map(user_id=uid, name="Chosen", tag="chosen", is_active=False))
+            await db.commit()
+
+        selected = await resolve_map(uid, [_nominated("chosen")])
+        assert selected is not None and selected.name == "Chosen"
+
+    @pytest.mark.asyncio
+    async def test_a_nomination_matching_nothing_keeps_the_default(
+        self, admin_client
+    ):
+        from sqlalchemy import select
+
+        from app.models.map import Map
+        from app.models.user_settings import UserSettings
+        from app.services.map_pipeline import resolve_map
+        from tests.conftest import TestSessionLocal
+
+        client, _, _ = admin_client
+        uid = (await client.get("/api/auth/me")).json()["id"]
+        async with TestSessionLocal() as db:
+            default_map = Map(user_id=uid, name="Default", tag="", is_active=True)
+            db.add(default_map)
+            db.add(Map(user_id=uid, name="Idle", tag="idle", is_active=False))
+            await db.flush()
+            # The admin fixture already created the settings row; update it.
+            settings = (await db.execute(
+                __import__("sqlalchemy").select(UserSettings).where(UserSettings.user_id == uid)
+            )).scalar_one()
+            settings.default_map_id = default_map.id
+            await db.commit()
+            default_id = default_map.id
+
+        # The nomination names a tag no map carries: selection falls through
+        # to the explicit default, exactly as a stray prompt tag would.
+        selected = await resolve_map(uid, [_nominated("nomatch")])
+        assert selected is not None and selected.id == default_id
+
+    @pytest.mark.asyncio
+    async def test_union_sources_do_not_apply_to_maps(self, admin_client):
+        """Sanity pin of the other half: unlike lorebooks, running a map is
+        not additive. Two nominated maps both matching still yield exactly
+        one winner (the first by updated_at), never both."""
+        from app.models.map import Map
+        from app.services.map_pipeline import resolve_map
+        from tests.conftest import TestSessionLocal
+
+        client, _, _ = admin_client
+        uid = (await client.get("/api/auth/me")).json()["id"]
+        async with TestSessionLocal() as db:
+            db.add(Map(user_id=uid, name="A", tag="alpha", is_active=False))
+            db.add(Map(user_id=uid, name="B", tag="beta", is_active=False))
+            await db.commit()
+
+        selected = await resolve_map(uid, [_nominated("alpha"), _nominated("beta")])
+        assert selected is not None
+        assert selected.name in ("A", "B")

@@ -935,6 +935,16 @@ async def run_map_pipeline(
                 model or (endpoints[0].default_model if endpoints else ""), user_id,
             )
 
+        # Read-only request facts for this stage's cantrips (Maps QoL item 5):
+        # context.request tells a stage cantrip which map and stage it is in,
+        # so scripts stop guessing by wall-clock timing.
+        body_json["_gitv_stage_info"] = {
+            "map": map_obj.name,
+            "index": stage_idx,
+            "name": stage.name,
+            "endpoint": endpoints[0].name if endpoints else "",
+        }
+
         if not endpoints:
             logger.error("Map stage '%s': no endpoint available", stage.name)
             return {
@@ -1186,6 +1196,11 @@ async def run_map_pipeline(
 
         logger.info("Map stage '%s' completed: %d chars output", stage.name, len(content))
         clear_metrics_stage_ref(body_json)
+
+    # Stage identity is per-stage; without this, response-side passes after
+    # the loop (scenario summarization, post-map cantrip positions) would
+    # still claim to be inside the last stage.
+    body_json.pop("_gitv_stage_info", None)
 
     # Scenario summarization POST: applies to the stage-augmented system message
     # after all stages complete, mirroring how the non-map pipeline runs POST

@@ -46,6 +46,16 @@ context.memory = {
     all: () => Object.assign({}, __memories)
 };
 
+// Map nominations (0.33.0): a script can ask for a map by tag. Collection
+// only -- the host treats it as a selection candidate under the Activation
+// Hierarchy, never a guaranteed run.
+const __mapNominations = [];
+context.maps = {
+    activate: (tag) => {
+        if (typeof tag === 'string' && tag) __mapNominations.push(tag);
+    }
+};
+
 if (!context.character) context.character = {};
 if (!context.character.personality) context.character.personality = "";
 if (!context.character.scenario) context.character.scenario = "";
@@ -90,6 +100,7 @@ const __result = {
     user_data: Object.assign({}, __userData),
     cantrip_data: Object.assign({}, __cantripData),
     memories: Object.assign({}, __memories),
+    maps_nominated: __mapNominations,
     debug_logs: __debugLogs,
     error: __error
 };

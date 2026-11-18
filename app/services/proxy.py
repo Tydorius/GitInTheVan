@@ -514,15 +514,62 @@ async def _forward_request_impl(
             stage_bound_cantrip_ids,
         )
         cmd_overrides_map = body_json.get("_gitv_command_overrides", {})
-        map_active = None
+        map_candidate = None
         if cmd_overrides_map.get("map") is not False:
-            map_active = await resolve_map(user_id, tags)
+            map_candidate = await resolve_map(user_id, tags)
+
+        # The global cantrip pass runs before map selection is finalized so a
+        # cantrip can nominate a map (context.maps.activate). It excludes the
+        # candidate map's stage-bound cantrips exactly as before; those run on
+        # their own stage inside run_map_pipeline.
+        body_json = await process_cantrips(
+            body_json, user_id, request_headers, tags,
+            internal_chat_id=internal_chat_id,
+            exclude_ids=stage_bound_cantrip_ids(map_candidate) if map_candidate else None,
+        )
+
+        map_active = map_candidate
+        nominations = body_json.pop("_gitv_map_nominations", [])
+        if nominations and cmd_overrides_map.get("map") is not False:
+            # A nomination competes in selection (rule 19: maps pick exactly
+            # one winner), it does not union-run. <MAP:off> suppresses it like
+            # any other map activation.
+            nominated_tags = list(tags or []) + [
+                {"raw": f"<#map-{t}#>", "type": "map", "name": t} for t in nominations
+            ]
+            resolved = await resolve_map(user_id, nominated_tags)
+            if resolved is not None and (
+                map_candidate is None or resolved.id != map_candidate.id
+            ):
+                logger.info(
+                    "Map nomination(s) %s selected map '%s'",
+                    ", ".join(nominations), resolved.name,
+                )
+                ran_globally = {
+                    row.get("object_id")
+                    for row in body_json.get("_gitv_metrics", {}).get("rows_prompt", [])
+                    if row.get("object_type") == "cantrip"
+                }
+                overlap = stage_bound_cantrip_ids(resolved) & ran_globally
+                if overlap:
+                    logger.warning(
+                        "Map '%s' was nominated after the global cantrip pass, and "
+                        "%d cantrip(s) bound to its stages already ran globally this "
+                        "request -- they will run again on their stage. Avoid "
+                        "nominating maps whose stages bind globally-active cantrips.",
+                        resolved.name, len(overlap),
+                    )
+                map_active = resolved
+        if debug_on:
+            _capture_cantrip_pass(
+                body_json, "pre_driver",
+                "Cantrips (Global Pass, Pre-Map)" if map_active else "Cantrips (Pre-Driver)",
+            )
 
         if map_active:
             import httpx as _httpx
             map_timeout = _httpx.Timeout(settings.request_timeout, connect=10.0)
             logger.info("Map '%s' active — routing to map pipeline", map_active.name)
-            body_json["_gitv_chat_id"] = internal_chat_id
 
             # Writing samples are injected below on the non-map path, after this
             # branch has already returned. Do it here too, or a sample attached to
@@ -535,17 +582,6 @@ async def _forward_request_impl(
                 )
                 body_json["messages"] = inject_samples(body_json["messages"], map_samples)
 
-            # The global cantrip pass excludes anything bound to a map stage;
-            # those run on their own stage inside run_map_pipeline.
-            body_json = await process_cantrips(
-                body_json, user_id, request_headers, tags,
-                internal_chat_id=internal_chat_id,
-                exclude_ids=stage_bound_cantrip_ids(map_active),
-            )
-            if debug_on:
-                _capture_cantrip_pass(
-                    body_json, "pre_driver", "Cantrips (Global Pass, Pre-Map)"
-                )
             response_data = await run_map_pipeline(body_json, user_id, request_headers, map_active, map_timeout)
 
             if body_json.get("_gitv_chat_id"):
@@ -576,11 +612,9 @@ async def _forward_request_impl(
 
             return JSONResponse(status_code=200, content=response_data)
 
-        body_json = await process_cantrips(body_json, user_id, request_headers, tags, internal_chat_id=internal_chat_id)
-        if debug_on:
-            _capture_cantrip_pass(body_json, "pre_driver", "Cantrips (Pre-Driver)")
-
-        body_json["_gitv_chat_id"] = internal_chat_id
+        # The global pre-driver pass already ran above (before map selection,
+        # so cantrip nominations could be counted). Anything between here and
+        # the forward is post-cantrip prompt work.
         body_json["_gitv_messages_for_hash"] = body_json.get("messages", [])
 
         from app.services.summarization import maybe_summarize

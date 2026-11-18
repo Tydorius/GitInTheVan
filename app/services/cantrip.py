@@ -406,6 +406,14 @@ async def process_cantrips(
             context["character"]["example_dialogs"] = result.example_dialogs
             accumulated_memories.update(result.memories)
 
+            # Map nominations ride the body like memories do; the proxy's map
+            # branch merges them into selection after the cantrip pass.
+            if result.maps_nominated:
+                nominations = body_json.setdefault("_gitv_map_nominations", [])
+                for tag in result.maps_nominated:
+                    if tag not in nominations:
+                        nominations.append(tag)
+
             chat_data = result.chat_data
             user_data = result.user_data
 

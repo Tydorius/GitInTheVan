@@ -457,6 +457,7 @@ class TestMapSafetyScan:
 CAPTURE_CANTRIP = """
 const text = (context.response && context.response.content) || "";
 context.chat_data.set('world_log', text);
+context.chat_data.set('request_info', JSON.stringify(context.request || {}));
 """
 
 
@@ -532,7 +533,75 @@ class TestCaptureOutputMode:
         assert len(rows) == 1
         assert json.loads(rows[0].value_json) == "WORLD_STATE_DELTA"
 
+        # context.request (item 5): the capture cantrip knew which map and
+        # stage it ran in -- no more guessing by wall-clock timing.
+        async with TestSessionLocal() as db:
+            info_rows = (await db.execute(
+                select(ChatData).where(ChatData.user_id == uid, ChatData.key == "request_info")
+            )).scalars().all()
+        assert len(info_rows) == 1
+        info = json.loads(json.loads(info_rows[0].value_json))
+        assert info["is_map"] is True
+        assert info["map_name"] == "WorldCapture"
+        assert info["map_stage_name"] == "World"
+        assert info["map_stage_index"] == 0
+        assert info["map_stage_endpoint"] == "One"
+
         # Capture is not persist: the captured output never entered the next
         # stage's prompt.
         two = json.dumps(_bodies_for(httpx_mock, "two.test")[0])
         assert "WORLD_STATE_DELTA" not in two
+
+
+NOMINATE_CANTRIP = """
+if (context.chat.last_message.indexOf("SPECIAL") !== -1) {
+    context.maps.activate("special");
+}
+"""
+
+
+class TestCantripMapNominationWiring:
+    @needs_deno
+    @pytest.mark.asyncio
+    async def test_a_cantrip_nomination_turns_a_map_on(self, admin_client, httpx_mock):
+        """The full loop: a global pre-driver cantrip nominates a map tag,
+        the proxy re-resolves selection after the pass, and the (inactive,
+        tagged) map runs -- with no tags in the prompt and no default map."""
+        client, _, api_key = admin_client
+
+        main = await _endpoint(client, "Main", "main.test", "default")
+        await client.put("/api/settings", json={"default_endpoint_id": main})
+        await _endpoint(client, "Two", "two.test", "two")
+
+        made = await client.post("/api/cantrips", json={
+            "name": "Nominate", "description": "", "code": NOMINATE_CANTRIP,
+            "is_active": True, "timeout_ms": CANTRIP_TIMEOUT_MS,
+        })
+        assert made.status_code in (200, 201), made.text
+
+        # Inactive + tagged: nothing but a nomination (or its own tag) can
+        # select it -- not the Active flag, not a default.
+        created = await client.post("/api/maps", json={
+            "name": "Nominated", "tag": "special", "is_active": False,
+            "stages": [{"name": "Only", "endpoint_tag": "two", "output_mode": "persist"}],
+        })
+        assert created.status_code in (200, 201), created.text
+
+        httpx_mock.add_response(url="http://main.test/v1/chat/completions",
+                                json={"choices": [{"message": {"content": "plain"}}]})
+        plain = await client.post("/v1/chat/completions", json={
+            "model": "test", "messages": [{"role": "user", "content": "nothing special"}],
+        }, headers={"Authorization": f"Bearer {api_key}"})
+        assert plain.status_code == 200, plain.text
+        assert "special" not in [r.url.host for r in httpx_mock.get_requests()]
+        assert plain.json()["choices"][0]["message"]["content"] == "plain"
+
+        httpx_mock.add_response(url="http://two.test/v1/chat/completions",
+                                json={"choices": [{"message": {"content": "MAPPED"}}]})
+        triggered = await client.post("/v1/chat/completions", json={
+            "model": "test", "messages": [{"role": "user", "content": "do the SPECIAL thing"}],
+        }, headers={"Authorization": f"Bearer {api_key}"})
+        assert triggered.status_code == 200, triggered.text
+        assert triggered.json()["choices"][0]["message"]["content"] == "MAPPED"
+        hosts = [r.url.host for r in httpx_mock.get_requests()]
+        assert hosts == ["main.test", "two.test"], hosts
