@@ -1526,6 +1526,75 @@ Scheduled database backups, and restore.
 per-object restore, and everything created since that backup is lost. The
 confirmation step is there because there is no undo.
 
+### Every admin control and its default
+
+The complete reference for admin-configurable limits, switches and caps —
+what each does, and the default a fresh install starts with. Everything here
+is changed on the Admin page and takes effect without a restart unless noted.
+
+**Budgets with two halves.** Turn and retry budgets follow one rule: the admin
+value is the ceiling for the instance, a user may set their own lower value,
+and the *effective limit is always the lower of the two*. A user cannot raise
+a budget above the admin cap, and users who never touch their half simply get
+the cap (see the rule-22 design note in the project docs).
+
+| Control | Default | What it limits |
+|---|---|---|
+| Max Driver-Callable Turns | **2** | Tool-call rounds per request (min with the user's own setting) |
+| Max Verification Retries | **3** | Verification resubmissions per request (min with the user's setting) |
+| Max Map Stages | **3** | LLM stages a map may chain |
+| Rate Limit: Proxy | **60** /min | Proxy requests per client per minute |
+| Rate Limit: Management API | **120** /min | Management-UI/API requests per client per minute |
+| Max Memory Store | **50 MB** / user | Total `chat_data`/`user_data`/`cantrip_data` a user may hold |
+| Max Cantrip Code | **50 KB** | A cantrip's script size (checked on write and pack install) |
+| Max Verification Rule | **25 KB** | A verification rule's prompt/instructions size |
+| Max Lorebook | **500 KB** | A lorebook and its entries |
+| Max Saved Debug Runs | **10** / user | Runs pinned as comparison baselines (pruning exempts them) |
+| Max Size Per Debug Run | **512 KB** | Serialized trace cap; per-stage snapshots shed first and the run is marked truncated |
+| Max Snapshots Per Object | **20** | Edit/delete history per resource (manual pins are never pruned) |
+| Metrics Retention | **30 days** | Token-metrics rows, pruned at startup and every 6 hours |
+| URL Blocklist | *(empty)* | Domains user content may not reference and endpoints may not target |
+| Enable the Assistant Pane | **ON** | Server-wide switch for the pane |
+| Allow assistant admin reads | **OFF** | Server logs / schema state reading (admins only, still asks) |
+| Allow assistant repo + pack installs | **OFF** | Repo linking and content-pack installation from the pane |
+| Allow in-chat cantrip auto-install | **OFF** | Admin half of the `<CANTRIP:...>` double gate (user half also defaults off) |
+| Max Assistant Tool Calls / Turn | **16** | Ends the turn with a **Continue** prompt rather than looping |
+| Max Assistant Conversations | **20** / user | Unsaved pane conversations |
+| Max Assistant Tool Result | **32 KB** | One tool result fed back to the model |
+| Runtime Log Level | *(blank)* | Blank = startup default (`GITV_LOG_LEVEL`); override applies immediately |
+| Site Banner | *(blank)* | Blank hides it; level Info / Warning / Danger |
+| Scheduled Backups | **OFF** | Days blank = every day, time **03:00** UTC, keep **7** |
+
+Not caps but admin-owned: the **Update** tab (release checks apply the
+update-chain), **Users** tab (disable/enable accounts, reset passwords,
+promote admins), and **Audit Logs** (every mutation, who and when).
+
+**Install-time only (`.env` / `GITV_*` environment variables).** These seed
+the instance and are not editable from the web UI — change them in `.env` and
+restart. The ones that matter day-to-day:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `GITV_SECRET_KEY` | *(must change)* | JWT signing key |
+| `GITV_DATABASE_URL` | SQLite at `data/gitinthevan.db` | SQLite / PostgreSQL / MariaDB connection |
+| `GITV_PORT` / `GITV_HOST` | 8000 / 0.0.0.0 | Bind address |
+| `GITV_REQUEST_TIMEOUT` | 300 s | Upstream call timeout |
+| `GITV_CORS_ORIGINS` | `*` | Allowed browser origins |
+| `GITV_RATE_LIMIT_ENABLED` | true | Master switch (the per-minute values above live in the Admin panel) |
+| `GITV_MAX_REQUEST_BODY_SIZE` | 10 MB | Largest accepted request |
+| `GITV_JWT_EXPIRATION_HOURS` | 24 | Session token lifetime |
+| `GITV_MIN_PASSWORD_LENGTH` | 8 | Password strength floor |
+| `GITV_LOG_LEVEL` | INFO | Startup log level (runtime override in Admin) |
+| `GITV_LOG_FILE` / `GITV_LOG_MAX_SIZE_MB` / `GITV_LOG_RETENTION_DAYS` | off / 1 / 30 | File logging with rotation |
+| `GITV_SSL_CERTFILE` / `GITV_SSL_KEYFILE` / `GITV_GENERATE_CERTS` | blank / blank / true | HTTPS; self-signed generation |
+| `GITV_BEHIND_PROXY` | false | Trust `X-Forwarded-*` headers |
+| `GITV_DENO_PATH` | *(autodetect)* | Cantrip sandbox binary |
+| `GITV_AUTO_UPDATE_CHAIN_ENABLED` | true | Resume chained updates on startup |
+
+The two rate-limit values have both an env seed and an Admin setting: the
+Admin value wins once changed, so the running instance always has one source
+of truth.
+
 ---
 
 <a id="model-parameters"></a>

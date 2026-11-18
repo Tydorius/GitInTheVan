@@ -2,6 +2,30 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.33.1] - 2026-11-18
+
+### Fixed
+
+- **The Admin rate-limit fields were a silent no-op since they shipped.** The
+  UI wrote `rate_limit_proxy_per_min`/`rate_limit_api_per_min` to
+  `admin_settings`, but the rate limiter reads the runtime config on every
+  request — so changing the values in the Admin panel changed nothing. Both
+  values now apply immediately on save and are re-applied from the database
+  at startup, making an admin's change durable while the `.env` values
+  remain the seed. Found while writing the new admin-controls reference
+  documentation.
+- The runtime log-level override now also survives restarts (re-applied at
+  startup when set), instead of silently reverting to `GITV_LOG_LEVEL`.
+
+### Documentation
+
+- **New "Every admin control and its default" reference** in the user
+  guide's Admin section: one table for all in-app limits, switches and caps
+  with their defaults (global limits, content sizes, debug runs, metrics
+  retention, assistant gates, backup schedule), the admin-cap × user-budget
+  lower-of-the-two rule, and a second table for the install-time-only
+  `GITV_*` settings.
+
 ## [0.33.0] - 2026-11-18
 
 Maps QoL bundle: the three existing map TODOs plus request items 6, 7, the

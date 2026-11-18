@@ -67,7 +67,41 @@ async def update_admin_settings(updates: dict[str, Any]) -> AdminSettings:
 
         await db.commit()
         await db.refresh(settings)
-        return settings
+
+    apply_admin_runtime_overrides(settings)
+    return settings
+
+
+def apply_admin_runtime_overrides(s: AdminSettings) -> None:
+    """Push admin-owned values into the running process.
+
+    The rate limiter reads ``app.config.settings`` on every request, so an
+    admin_settings row alone never changed actual limiting -- the Admin UI's
+    rate-limit fields were a silent no-op until this ran. Applied on write
+    and again at startup, a changed value is durable while the env value
+    stays the seed.
+    """
+    from app.config import settings as runtime_settings
+
+    runtime_settings.rate_limit_proxy_per_min = s.rate_limit_proxy_per_min
+    runtime_settings.rate_limit_api_per_min = s.rate_limit_api_per_min
+    if s.runtime_log_level:
+        apply_runtime_log_level(s.runtime_log_level)
+
+
+async def apply_admin_overrides_at_startup() -> None:
+    """Re-apply admin-owned runtime overrides after a restart.
+
+    Without this, an admin's rate-limit change reverted to the env seed on
+    every restart -- persisted in the table, read back by the UI, and never
+    obeyed by the limiter.
+    """
+    try:
+        s = await get_admin_settings()
+    except Exception:
+        logger.exception("Could not load admin settings for runtime overrides")
+        return
+    apply_admin_runtime_overrides(s)
 
 
 def apply_runtime_log_level(level: str) -> None:

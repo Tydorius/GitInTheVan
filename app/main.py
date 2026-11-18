@@ -108,6 +108,11 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("Schema repair failed; continuing startup")
 
+    # Re-apply admin-owned runtime overrides (rate limits, log level) after a
+    # restart: they persist in admin_settings and the env values are only seeds.
+    from app.services.admin import apply_admin_overrides_at_startup
+    await apply_admin_overrides_at_startup()
+
     from app.services.backup import backup_scheduler_loop
     backup_task = asyncio.create_task(backup_scheduler_loop())
 

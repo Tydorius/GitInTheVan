@@ -1394,6 +1394,241 @@ warns when that drift is detected.</p>
 <p><strong>Restore replaces the entire database.</strong> It is the whole-system counterpart to
 per-object restore, and everything created since that backup is lost. The
 confirmation step is there because there is no undo.</p>
+<h3 id="every-admin-control-and-its-default">Every admin control and its default</h3>
+<p>The complete reference for admin-configurable limits, switches and caps —
+what each does, and the default a fresh install starts with. Everything here
+is changed on the Admin page and takes effect without a restart unless noted.</p>
+<p><strong>Budgets with two halves.</strong> Turn and retry budgets follow one rule: the admin
+value is the ceiling for the instance, a user may set their own lower value,
+and the <em>effective limit is always the lower of the two</em>. A user cannot raise
+a budget above the admin cap, and users who never touch their half simply get
+the cap (see the rule-22 design note in the project docs).</p>
+<table>
+<thead>
+<tr>
+<th>Control</th>
+<th>Default</th>
+<th>What it limits</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Max Driver-Callable Turns</td>
+<td><strong>2</strong></td>
+<td>Tool-call rounds per request (min with the user's own setting)</td>
+</tr>
+<tr>
+<td>Max Verification Retries</td>
+<td><strong>3</strong></td>
+<td>Verification resubmissions per request (min with the user's setting)</td>
+</tr>
+<tr>
+<td>Max Map Stages</td>
+<td><strong>3</strong></td>
+<td>LLM stages a map may chain</td>
+</tr>
+<tr>
+<td>Rate Limit: Proxy</td>
+<td><strong>60</strong> /min</td>
+<td>Proxy requests per client per minute</td>
+</tr>
+<tr>
+<td>Rate Limit: Management API</td>
+<td><strong>120</strong> /min</td>
+<td>Management-UI/API requests per client per minute</td>
+</tr>
+<tr>
+<td>Max Memory Store</td>
+<td><strong>50 MB</strong> / user</td>
+<td>Total <code>chat_data</code>/<code>user_data</code>/<code>cantrip_data</code> a user may hold</td>
+</tr>
+<tr>
+<td>Max Cantrip Code</td>
+<td><strong>50 KB</strong></td>
+<td>A cantrip's script size (checked on write and pack install)</td>
+</tr>
+<tr>
+<td>Max Verification Rule</td>
+<td><strong>25 KB</strong></td>
+<td>A verification rule's prompt/instructions size</td>
+</tr>
+<tr>
+<td>Max Lorebook</td>
+<td><strong>500 KB</strong></td>
+<td>A lorebook and its entries</td>
+</tr>
+<tr>
+<td>Max Saved Debug Runs</td>
+<td><strong>10</strong> / user</td>
+<td>Runs pinned as comparison baselines (pruning exempts them)</td>
+</tr>
+<tr>
+<td>Max Size Per Debug Run</td>
+<td><strong>512 KB</strong></td>
+<td>Serialized trace cap; per-stage snapshots shed first and the run is marked truncated</td>
+</tr>
+<tr>
+<td>Max Snapshots Per Object</td>
+<td><strong>20</strong></td>
+<td>Edit/delete history per resource (manual pins are never pruned)</td>
+</tr>
+<tr>
+<td>Metrics Retention</td>
+<td><strong>30 days</strong></td>
+<td>Token-metrics rows, pruned at startup and every 6 hours</td>
+</tr>
+<tr>
+<td>URL Blocklist</td>
+<td><em>(empty)</em></td>
+<td>Domains user content may not reference and endpoints may not target</td>
+</tr>
+<tr>
+<td>Enable the Assistant Pane</td>
+<td><strong>ON</strong></td>
+<td>Server-wide switch for the pane</td>
+</tr>
+<tr>
+<td>Allow assistant admin reads</td>
+<td><strong>OFF</strong></td>
+<td>Server logs / schema state reading (admins only, still asks)</td>
+</tr>
+<tr>
+<td>Allow assistant repo + pack installs</td>
+<td><strong>OFF</strong></td>
+<td>Repo linking and content-pack installation from the pane</td>
+</tr>
+<tr>
+<td>Allow in-chat cantrip auto-install</td>
+<td><strong>OFF</strong></td>
+<td>Admin half of the <code>&lt;CANTRIP:...&gt;</code> double gate (user half also defaults off)</td>
+</tr>
+<tr>
+<td>Max Assistant Tool Calls / Turn</td>
+<td><strong>16</strong></td>
+<td>Ends the turn with a <strong>Continue</strong> prompt rather than looping</td>
+</tr>
+<tr>
+<td>Max Assistant Conversations</td>
+<td><strong>20</strong> / user</td>
+<td>Unsaved pane conversations</td>
+</tr>
+<tr>
+<td>Max Assistant Tool Result</td>
+<td><strong>32 KB</strong></td>
+<td>One tool result fed back to the model</td>
+</tr>
+<tr>
+<td>Runtime Log Level</td>
+<td><em>(blank)</em></td>
+<td>Blank = startup default (<code>GITV_LOG_LEVEL</code>); override applies immediately</td>
+</tr>
+<tr>
+<td>Site Banner</td>
+<td><em>(blank)</em></td>
+<td>Blank hides it; level Info / Warning / Danger</td>
+</tr>
+<tr>
+<td>Scheduled Backups</td>
+<td><strong>OFF</strong></td>
+<td>Days blank = every day, time <strong>03:00</strong> UTC, keep <strong>7</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Not caps but admin-owned: the <strong>Update</strong> tab (release checks apply the
+update-chain), <strong>Users</strong> tab (disable/enable accounts, reset passwords,
+promote admins), and <strong>Audit Logs</strong> (every mutation, who and when).</p>
+<p><strong>Install-time only (<code>.env</code> / <code>GITV_*</code> environment variables).</strong> These seed
+the instance and are not editable from the web UI — change them in <code>.env</code> and
+restart. The ones that matter day-to-day:</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GITV_SECRET_KEY</code></td>
+<td><em>(must change)</em></td>
+<td>JWT signing key</td>
+</tr>
+<tr>
+<td><code>GITV_DATABASE_URL</code></td>
+<td>SQLite at <code>data/gitinthevan.db</code></td>
+<td>SQLite / PostgreSQL / MariaDB connection</td>
+</tr>
+<tr>
+<td><code>GITV_PORT</code> / <code>GITV_HOST</code></td>
+<td>8000 / 0.0.0.0</td>
+<td>Bind address</td>
+</tr>
+<tr>
+<td><code>GITV_REQUEST_TIMEOUT</code></td>
+<td>300 s</td>
+<td>Upstream call timeout</td>
+</tr>
+<tr>
+<td><code>GITV_CORS_ORIGINS</code></td>
+<td><code>*</code></td>
+<td>Allowed browser origins</td>
+</tr>
+<tr>
+<td><code>GITV_RATE_LIMIT_ENABLED</code></td>
+<td>true</td>
+<td>Master switch (the per-minute values above live in the Admin panel)</td>
+</tr>
+<tr>
+<td><code>GITV_MAX_REQUEST_BODY_SIZE</code></td>
+<td>10 MB</td>
+<td>Largest accepted request</td>
+</tr>
+<tr>
+<td><code>GITV_JWT_EXPIRATION_HOURS</code></td>
+<td>24</td>
+<td>Session token lifetime</td>
+</tr>
+<tr>
+<td><code>GITV_MIN_PASSWORD_LENGTH</code></td>
+<td>8</td>
+<td>Password strength floor</td>
+</tr>
+<tr>
+<td><code>GITV_LOG_LEVEL</code></td>
+<td>INFO</td>
+<td>Startup log level (runtime override in Admin)</td>
+</tr>
+<tr>
+<td><code>GITV_LOG_FILE</code> / <code>GITV_LOG_MAX_SIZE_MB</code> / <code>GITV_LOG_RETENTION_DAYS</code></td>
+<td>off / 1 / 30</td>
+<td>File logging with rotation</td>
+</tr>
+<tr>
+<td><code>GITV_SSL_CERTFILE</code> / <code>GITV_SSL_KEYFILE</code> / <code>GITV_GENERATE_CERTS</code></td>
+<td>blank / blank / true</td>
+<td>HTTPS; self-signed generation</td>
+</tr>
+<tr>
+<td><code>GITV_BEHIND_PROXY</code></td>
+<td>false</td>
+<td>Trust <code>X-Forwarded-*</code> headers</td>
+</tr>
+<tr>
+<td><code>GITV_DENO_PATH</code></td>
+<td><em>(autodetect)</em></td>
+<td>Cantrip sandbox binary</td>
+</tr>
+<tr>
+<td><code>GITV_AUTO_UPDATE_CHAIN_ENABLED</code></td>
+<td>true</td>
+<td>Resume chained updates on startup</td>
+</tr>
+</tbody>
+</table>
+<p>The two rate-limit values have both an env seed and an Admin setting: the
+Admin value wins once changed, so the running instance always has one source
+of truth.</p>
 <hr>
 <p><a id="model-parameters"></a></p>
 <h2 id="17-model-parameters">17. Model Parameters</h2>
