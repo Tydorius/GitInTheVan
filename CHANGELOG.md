@@ -2,6 +2,17 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.33.2] - 2026-11-18
+
+### Documentation
+
+- Promoted the Maps stage-editor screenshot (Base Prompt, Output Mode
+  including Capture, Run Condition — captured 2026-11-18 against 0.33.0)
+  into the user guide's Maps section after human review. The older
+  stage-editor image predates the 0.33.0 options and remains for the fields
+  it still shows accurately; the guide's screenshot-dating note now covers
+  the new capture.
+
 ## [0.33.1] - 2026-11-18
 
 ### Fixed
