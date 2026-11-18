@@ -176,7 +176,7 @@ if [ ! -f "$GITV_ROOT/.venv/bin/python" ]; then
 fi
 echo "Installing pip..."
 # Pinned like every other dependency (exact pins only, never ranges).
-"$GITV_ROOT/.venv/bin/python" -m pip install "pip==26.2.1" -q
+"$GITV_ROOT/.venv/bin/python" -m pip install "pip==26.3" -q
 echo "Installing dependencies..."
 # End users get requirements/main.txt; --dev adds the test/lint tooling that
 # only contributors need. Nothing in app/ imports pytest, ruff or pip-audit,
@@ -214,7 +214,7 @@ fi
 DENO_DIR="$GITV_ROOT/.deno"
 DENO_BIN="$DENO_DIR/deno"
 # Pinned, not "latest" - see Planning/security-control-document.md. Bump deliberately.
-DENO_VERSION="v2.8.3"
+DENO_VERSION="v2.9.8"
 
 if [ -f "$DENO_BIN" ]; then
     echo "Deno found at $DENO_BIN"

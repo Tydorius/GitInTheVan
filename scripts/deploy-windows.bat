@@ -268,7 +268,7 @@ if not exist "%GITV_ROOT%\.venv\Scripts\python.exe" (
 )
 echo Installing pip...
 REM Pinned like every other dependency (exact pins only, never ranges).
-"%GITV_ROOT%\.venv\Scripts\python" -m pip install "pip==26.2.1" -q >> "%LOG_FILE%" 2>&1
+"%GITV_ROOT%\.venv\Scripts\python" -m pip install "pip==26.3" -q >> "%LOG_FILE%" 2>&1
 echo Installing dependencies...
 echo Installing Python dependencies... >> "%LOG_FILE%"
 REM End users get requirements\main.txt; --dev adds the test/lint tooling that
@@ -308,7 +308,7 @@ echo [3/6] Checking Deno runtime... >> "%LOG_FILE%"
 set "DENO_DIR=%GITV_ROOT%\.deno"
 set "DENO_EXE=%DENO_DIR%\deno.exe"
 REM Pinned, not "latest" - see Planning/security-control-document.md. Bump deliberately.
-set "DENO_VERSION=v2.8.3"
+set "DENO_VERSION=v2.9.8"
 
 if exist "%DENO_EXE%" (
     echo Deno found at %DENO_EXE% >> "%LOG_FILE%"
