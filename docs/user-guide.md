@@ -14,7 +14,8 @@ GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:
 
 > **About the screenshots**
 >
-> Screenshots of the main pages were captured on **2026-08-31 against 0.24.0**.
+> Screenshots of the main pages were captured on **2026-08-31 against 0.24.0**,
+> except the Metrics page, which dates from **2026-11-18 against 0.31.0**.
 > A few images of individual dialogs and panels still date from **2026-07-08,
 > against 0.16.x** — those show the tool working the same way, but the
 > surrounding UI may have moved on.
@@ -1783,7 +1784,9 @@ action, so under Normal it asks first and shows you the difference.
 
 ## 21. Metrics
 
-*Screenshots pending (2026-11-18) — this section shipped with the feature, before a capture pass.*
+![Metrics page](media/gitv-metrics.png)
+
+*Screenshots from 2026-11-18, against 0.31.0.*
 
 The **Metrics** page shows what your pipeline costs over time: which lorebook entries, cantrips
 and other injected content bloat your prompt budget, and what each LLM role (driver, judge,
@@ -1820,3 +1823,5 @@ enough to spot a lorebook entry that adds a thousand tokens per message; they ar
 Rows are kept for the admin-configured retention period (**Metrics Retention**, default 30 days,
 on the Admin page) and pruned automatically. Metrics are per-user: your tables show your traffic
 only.
+
+![Metrics retention setting on the Admin page](media/gitv-admin-metrics-retention.png)

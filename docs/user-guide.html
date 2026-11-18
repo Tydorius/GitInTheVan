@@ -37,7 +37,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-se
 <hr>
 <blockquote>
 <p><strong>About the screenshots</strong></p>
-<p>Screenshots of the main pages were captured on <strong>2026-08-31 against 0.24.0</strong>.
+<p>Screenshots of the main pages were captured on <strong>2026-08-31 against 0.24.0</strong>,
+except the Metrics page, which dates from <strong>2026-11-18 against 0.31.0</strong>.
 A few images of individual dialogs and panels still date from <strong>2026-07-08,
 against 0.16.x</strong> — those show the tool working the same way, but the
 surrounding UI may have moved on.</p>
@@ -1655,7 +1656,8 @@ action, so under Normal it asks first and shows you the difference.</p>
 <hr>
 <p><a id="metrics"></a></p>
 <h2 id="21-metrics">21. Metrics</h2>
-<p><em>Screenshots pending (2026-11-18) — this section shipped with the feature, before a capture pass.</em></p>
+<p><img alt="Metrics page" src="media/gitv-metrics.png"></p>
+<p><em>Screenshots from 2026-11-18, against 0.31.0.</em></p>
 <p>The <strong>Metrics</strong> page shows what your pipeline costs over time: which lorebook entries, cantrips
 and other injected content bloat your prompt budget, and what each LLM role (driver, judge,
 summarizer, map stage) actually costs in tokens and latency. Where the <a href="#18-debug-and-comparing-runs">Debug page</a>
@@ -1687,5 +1689,6 @@ enough to spot a lorebook entry that adds a thousand tokens per message; they ar
 <p>Rows are kept for the admin-configured retention period (<strong>Metrics Retention</strong>, default 30 days,
 on the Admin page) and pruned automatically. Metrics are per-user: your tables show your traffic
 only.</p>
+<p><img alt="Metrics retention setting on the Admin page" src="media/gitv-admin-metrics-retention.png"></p>
 </body>
 </html>
