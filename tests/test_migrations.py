@@ -507,12 +507,28 @@ class TestAdvisoryLock:
         """PostgreSQL rejects `BOOLEAN DEFAULT 0/1` (no implicit integer-to-
         boolean cast in DEFAULT expressions) and the failure is not a
         tolerable migration error, so startup raises. SQLite accepts anything
-        and MySQL treats BOOLEAN as TINYINT, which is why 054 shipped in
-        0.31.0 and broke only PostgreSQL -- unseen by every SQLite test.
-        Boolean defaults must be TRUE/FALSE."""
+        and MySQL treats BOOLEAN as TINYINT, which is why this shipped
+        repeatedly unseen by every SQLite test: 054/055 in 0.31.0/0.32.0
+        (postgresql blocks), then 053 and sixteen other PLAIN-STRING
+        migrations (003-050) found by the 2026-11-18 upgrade-path validation
+        -- a plain string executes on every dialect, so any hit breaks PG
+        upgrades across that version boundary. Boolean defaults must be
+        TRUE/FALSE everywhere they can reach PostgreSQL: postgresql blocks
+        and plain strings. (sqlite/mysql dict-block variants never execute on
+        PG and are allowed to keep their 0/1 spelling.)"""
         import re
 
         from app.services import migrations as migrations_module
+        from app.services.migrations import MIGRATIONS
+
+        for name, sql_def in MIGRATIONS:
+            if isinstance(sql_def, str):
+                offenders = re.findall(r"BOOLEAN DEFAULT [01]\b", sql_def)
+                assert not offenders, (
+                    f"migration {name} is a plain string (runs on every "
+                    f"dialect) and uses integer boolean defaults ({offenders}); "
+                    "use DEFAULT TRUE / DEFAULT FALSE"
+                )
 
         src = inspect.getsource(migrations_module)
         for block in re.finditer(r'"postgresql":\s*"""(.*?)"""', src, re.DOTALL):
