@@ -70,18 +70,26 @@ drafts and installs it in-request).
 
 ### Fixed (post-release adversarial review, same branch)
 
-- **PostgreSQL upgrades no longer fail in migrations 054/055.** Both used
-  `BOOLEAN DEFAULT 0/1`, which PostgreSQL rejects ("column is of type boolean
-  but default expression is of type integer") — and the failure is not a
-  tolerable migration error, so startup raised. 054 shipped in 0.31.0: any
-  PostgreSQL user who updated to 0.31.0 hit this and will be repaired by this
-  release (their migrations never applied, so they now run the corrected
-  DDL). SQLite accepts anything and MySQL treats BOOLEAN as TINYINT, which is
-  why every test and the SQLite smoke run passed. All boolean defaults in
-  054/055 are now TRUE/FALSE across all three dialect blocks, and a static
-  guard in `test_migrations.py` forbids integer boolean defaults in
-  postgresql DDL from ever returning. Found by the Phase 17 design-refresh
-  review.
+- **PostgreSQL upgrades no longer fail on integer boolean defaults — a
+  20-migration class, not two.** `BOOLEAN DEFAULT 0/1` is rejected by
+  PostgreSQL ("column is of type boolean but default expression is of type
+  integer") and the failure is not a tolerable migration error, so startup
+  raised. The first fix on this branch covered migrations 054/055's
+  postgresql blocks; the real-backup upgrade-path validation (2026-11-18)
+  then proved a PostgreSQL database cannot upgrade across almost any modern
+  version boundary: **18 plain-string migrations (001, 003–050, 053) carried
+  the same defect**, and a plain string executes on every dialect.
+  PostgreSQL users who updated across any affected boundary hit a hard
+  startup failure and are repaired by this release (their failing migrations
+  never applied, so they now run corrected DDL). Fresh installs never
+  noticed: `create_all` pre-builds the schema, so the broken ALTERs were
+  skipped as duplicates — and SQLite accepts integer boolean defaults
+  anyway, which is why every test passed. All boolean defaults that can
+  reach PostgreSQL are now TRUE/FALSE, and the static guard in
+  `test_migrations.py` covers plain strings as well as postgresql blocks.
+  Found by the Phase 17 design-refresh review and the upgrade-path
+  validation run; the SQLite chain (real July backup through six version
+  hops) passed clean throughout.
 - **The action-command stage and the OOC-notice append are now debug-captured**
   (rule 16). Both shipped invisible to the Debug timeline. `init_debug` runs
   before the action-command strip so the original-messages snapshot predates
