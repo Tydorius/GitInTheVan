@@ -66,6 +66,7 @@ surrounding UI may have moved on.</p>
 <li><a href="#18-debug-and-comparing-runs">Debug and Comparing Runs</a></li>
 <li><a href="#19-the-activation-hierarchy">The Activation Hierarchy</a></li>
 <li><a href="#snapshots">Snapshots and Restore</a></li>
+<li><a href="#metrics">Metrics</a></li>
 </ol>
 <hr>
 <p><a id="login"></a></p>
@@ -1651,5 +1652,40 @@ saving cantrips, lorebook entries and importing maps.</p>
 <p>The assistant can list versions, save one, and restore one, under the <strong>Snapshots</strong> group on the
 <a href="#assistant">Assistant Security</a> page. Restoring over an object is treated as a destructive
 action, so under Normal it asks first and shows you the difference.</p>
+<hr>
+<p><a id="metrics"></a></p>
+<h2 id="21-metrics">21. Metrics</h2>
+<p><em>Screenshots pending (2026-11-18) — this section shipped with the feature, before a capture pass.</em></p>
+<p>The <strong>Metrics</strong> page shows what your pipeline costs over time: which lorebook entries, cantrips
+and other injected content bloat your prompt budget, and what each LLM role (driver, judge,
+summarizer, map stage) actually costs in tokens and latency. Where the <a href="#18-debug-and-comparing-runs">Debug page</a>
+shows one run, Metrics shows the trend.</p>
+<p>Recording is always on. Every authenticated request through the proxy writes one row per
+prompt-mutating object that fired and one row per upstream LLM call — debug mode is not required.
+Sandbox and replay runs are recorded too, but flagged; they are excluded from the default view so
+they cannot skew live-traffic statistics, and the <strong>Include sandbox/replay</strong> checkbox brings them
+back.</p>
+<h3 id="reading-the-page">Reading the page</h3>
+<ul>
+<li><strong>Window</strong> (7 / 30 / 90 days), <strong>Chat</strong> filter and the sandbox/replay toggle apply to both
+  tables. <strong>Refresh</strong> reloads.</li>
+<li><strong>Prompt Objects</strong> lists every object that changed a prompt in the window: how many times it
+  fired, the total and average token delta it caused, and which book (for lorebook entries) or
+  map (for stage objects) it belongs to. A positive delta adds to your prompt; a negative one
+  (a cantrip that trims content, a summarizer that compresses it) takes away. Sorted by impact.</li>
+<li><strong>LLM Calls</strong> groups upstream calls by role, endpoint and model: call count, success rate,
+  retry and failover counts, median latency, and token totals. Judge rows carry the verification
+  rule that ran.</li>
+<li><strong>Recent Rows</strong> shows the raw last 20 rows of each table, including flagged ones, for
+  checking exactly what one request recorded.</li>
+</ul>
+<h3 id="about-the-numbers">About the numbers</h3>
+<p>Token counts come from the upstream <code>usage</code> object when your provider returns one, and from a
+chars-per-4 estimate when it does not. The two are never blended silently — the tables say which
+source each row used, and a group whose calls disagree is marked <em>mixed</em>. Estimates are close
+enough to spot a lorebook entry that adds a thousand tokens per message; they are not an invoice.</p>
+<p>Rows are kept for the admin-configured retention period (<strong>Metrics Retention</strong>, default 30 days,
+on the Admin page) and pruned automatically. Metrics are per-user: your tables show your traffic
+only.</p>
 </body>
 </html>

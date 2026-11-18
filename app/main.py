@@ -24,6 +24,7 @@ from app.routers.lorebook import router as lorebook_router
 from app.routers.maps import router as maps_router
 from app.routers.memories import router as memories_router
 from app.routers.memory_rules import router as memory_rules_router
+from app.routers.metrics import router as metrics_router
 from app.routers.packs import router as packs_router
 from app.routers.proxy import router as proxy_router
 from app.routers.scenario_rules import router as scenario_rules_router
@@ -110,6 +111,11 @@ async def lifespan(app: FastAPI):
     from app.services.backup import backup_scheduler_loop
     backup_task = asyncio.create_task(backup_scheduler_loop())
 
+    # Metrics retention: prunes immediately (covering the startup pass), then
+    # every six hours, re-reading the admin cap each cycle.
+    from app.services.metrics import metrics_retention_loop
+    metrics_task = asyncio.create_task(metrics_retention_loop())
+
     # Continues a multi-release upgrade frozen by a previous version. Returns
     # None unless data/update-chain.json has an outstanding step.
     from app.services.updater import start_chain_resume
@@ -123,6 +129,11 @@ async def lifespan(app: FastAPI):
             await chain_task
         except asyncio.CancelledError:
             pass
+    metrics_task.cancel()
+    try:
+        await metrics_task
+    except asyncio.CancelledError:
+        pass
     backup_task.cancel()
     try:
         await backup_task
@@ -195,6 +206,7 @@ app.include_router(lorebook_router)
 app.include_router(maps_router)
 app.include_router(memories_router)
 app.include_router(memory_rules_router)
+app.include_router(metrics_router)
 app.include_router(cantrips_router)
 app.include_router(debug_router)
 app.include_router(diagnostics_router)

@@ -48,6 +48,7 @@
     max_saved_debug_runs: 10,
     max_debug_exchange_kb: 512,
     max_snapshots_per_object: 20,
+    metrics_retention_days: 30,
     url_blocklist: '',
     runtime_log_level: '',
     assistant_enabled: true,
@@ -109,6 +110,7 @@
         max_saved_debug_runs: adminSettings.max_saved_debug_runs,
         max_debug_exchange_kb: adminSettings.max_debug_exchange_kb,
         max_snapshots_per_object: adminSettings.max_snapshots_per_object,
+        metrics_retention_days: adminSettings.metrics_retention_days,
         url_blocklist: adminSettings.url_blocklist || '',
         runtime_log_level: adminSettings.runtime_log_level || '',
         assistant_enabled: adminSettings.assistant_enabled,
@@ -534,6 +536,10 @@
       <div class="form-group">
         <label for="cap-snapshots">Max Snapshots Per Object</label>
         <input id="cap-snapshots" type="number" bind:value={capsForm.max_snapshots_per_object} min="1" />
+      </div>
+      <div class="form-group">
+        <label for="cap-metrics-retention">Metrics Retention (days)</label>
+        <input id="cap-metrics-retention" type="number" bind:value={capsForm.metrics_retention_days} min="1" />
       </div>
     </div>
     <p style="color: var(--text-dim); font-size: 12px;">

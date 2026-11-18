@@ -19,6 +19,7 @@ from app.models.lorebook_entry import LorebookEntry
 from app.models.map import Map, MapStage, MapStageResource
 from app.models.memory import Memory
 from app.models.memory_rule import MemoryRule
+from app.models.metrics import LlmCallMetric, PromptObjectMetric
 from app.models.resource_snapshot import ResourceSnapshot
 from app.models.scenario_rule import ScenarioRule
 from app.models.skill import EndpointSkill, Skill
@@ -56,6 +57,8 @@ __all__ = [
     "MapStageResource",
     "Memory",
     "MemoryRule",
+    "LlmCallMetric",
+    "PromptObjectMetric",
     "ResourceSnapshot",
     "UserData",
     "VerificationRule",

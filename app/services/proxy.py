@@ -223,6 +223,9 @@ async def _forward_request_impl(
     if user_id and "messages" in body_json:
         request_headers = {k.lower(): v for k, v in request.headers.items()}
 
+        from app.services.metrics import init_metrics
+        init_metrics(body_json, user_id)
+
         from app.services.command_tags import (
             extract_command_tags_from_messages,
             strip_command_tags_from_messages,
@@ -314,6 +317,11 @@ async def _forward_request_impl(
         )
         body_json["_gitv_command_overrides"] = command_overrides.to_dict()
 
+        from app.services.budget import estimate_messages_tokens
+        from app.services.budget import estimate_tokens as _est_tokens
+        from app.services.metrics import record_prompt_object, set_metrics_chat
+        set_metrics_chat(body_json, internal_chat_id)
+
         cmd_overrides_mem = body_json.get("_gitv_command_overrides", {})
         memory_disabled = cmd_overrides_mem.get("memory") is False
         memories = {} if memory_disabled else await load_memories_for_chat(internal_chat_id, user_id)
@@ -321,6 +329,10 @@ async def _forward_request_impl(
             memory_block = _build_mem_block(memories)
             if memory_block:
                 await _flag_injection_content(user_id, memory_block, "memory_injection")
+                record_prompt_object(
+                    body_json, "memory_injection", "memory",
+                    0, _est_tokens(memory_block),
+                )
                 msgs = body_json["messages"]
                 system_idx = None
                 for i, msg in enumerate(msgs):
@@ -348,7 +360,12 @@ async def _forward_request_impl(
         if user_id and command_overrides.to_dict().get("summary") is not False:
             from app.services.scenario_summarizer import maybe_summarize_scenario
             pre_summary_msgs = json.dumps(body_json.get("messages", []), default=str)
+            pre_scn_tokens = estimate_messages_tokens(body_json.get("messages", []))
             body_json = await maybe_summarize_scenario(body_json, user_id, "pre")
+            record_prompt_object(
+                body_json, "summary_scenario", "pre",
+                pre_scn_tokens, estimate_messages_tokens(body_json.get("messages", [])),
+            )
             if debug_on:
                 did_change = json.dumps(body_json.get("messages", []), default=str) != pre_summary_msgs
                 debug_capture(body_json, "scenario_summarization_pre", "Scenario Summarization (Pre)",
@@ -383,6 +400,13 @@ async def _forward_request_impl(
                     endpoint_id, user_id, skills_db
                 )
             loaded_detail = take_loaded_detail(endpoint_id)
+            # Per-item prompt metrics for skills and samples. Emitted at load
+            # time because the per-item token estimates live here; both are
+            # always injected afterwards (skills immediately, samples on either
+            # the map branch or the writing-samples stage below).
+            from app.services.metrics import record_prompt_object
+            for d in loaded_detail:
+                record_prompt_object(body_json, d["type"], d["id"], 0, d["tokens"])
             if skill_contents:
                 await _flag_injection_content(user_id, "\n".join(skill_contents), "skills_injection")
                 body_json["messages"] = inject_skills(body_json["messages"], skill_contents)
@@ -465,6 +489,9 @@ async def _forward_request_impl(
                     vresult=body_json.pop("_gitv_map_vresult", None),
                 )
 
+            from app.services.metrics import flush_metrics
+            await flush_metrics(body_json)
+
             if stream:
                 ux_settings = await _load_ux_settings(user_id)
                 return _convert_to_sse(
@@ -487,7 +514,12 @@ async def _forward_request_impl(
         from app.services.summarization import maybe_summarize
         if body_json.get("_gitv_command_overrides", {}).get("summary") is not False:
             pre_summ_msgs = json.dumps(body_json.get("messages", []), default=str)
+            pre_summ_tokens = estimate_messages_tokens(body_json.get("messages", []))
             body_json = await maybe_summarize(body_json, user_id, internal_chat_id, tags)
+            record_prompt_object(
+                body_json, "summary_conversation", "conversation",
+                pre_summ_tokens, estimate_messages_tokens(body_json.get("messages", [])),
+            )
             if debug_on:
                 summ_changed = json.dumps(body_json.get("messages", []), default=str) != pre_summ_msgs
                 debug_capture(body_json, "conversation_summarization", "Conversation Summarization",
@@ -498,7 +530,12 @@ async def _forward_request_impl(
         if user_id and body_json.get("_gitv_command_overrides", {}).get("summary") is not False:
             from app.services.scenario_summarizer import maybe_summarize_scenario
             pre_post_scn = json.dumps(body_json.get("messages", []), default=str)
+            pre_post_scn_tokens = estimate_messages_tokens(body_json.get("messages", []))
             body_json = await maybe_summarize_scenario(body_json, user_id, "post")
+            record_prompt_object(
+                body_json, "summary_scenario", "post",
+                pre_post_scn_tokens, estimate_messages_tokens(body_json.get("messages", [])),
+            )
             if debug_on:
                 post_scn_changed = json.dumps(body_json.get("messages", []), default=str) != pre_post_scn
                 debug_capture(body_json, "scenario_summarization_post", "Scenario Summarization (Post)",
@@ -843,6 +880,13 @@ async def _apply_lorebook_injection(
                 for entry in lb.entries:
                     all_entries.append(
                         {
+                            # Provenance for the debug trace's matched-entry
+                            # metadata and the per-entry metrics rows. Absent
+                            # since the lorebook engine shipped, which left
+                            # MatchedEntry.lorebook_id/entry_id always empty.
+                            "lorebook_id": lb.id,
+                            "lorebook_name": lb.name,
+                            "entry_id": entry.id,
                             "name": entry.name,
                             "keys": entry.keys,
                             "secondary_keys": entry.secondary_keys,
@@ -874,7 +918,7 @@ async def _apply_lorebook_injection(
             # Debug timeline could only report a tag list. Stash it for the
             # caller's capture rather than widening the return type, which has
             # several call sites.
-            body_json["_gitv_matched_entries"] = [
+            matched_detail = [
                 {
                     "lorebook_id": e.lorebook_id,
                     "lorebook_name": e.lorebook_name,
@@ -885,6 +929,16 @@ async def _apply_lorebook_injection(
                 }
                 for e in matched
             ]
+            body_json["_gitv_matched_entries"] = matched_detail
+
+            # Per-entry prompt metrics (settled decision: granularity is the
+            # entry, with the book id on parent_id so aggregates roll up).
+            from app.services.metrics import record_prompt_object
+            for e in matched_detail:
+                record_prompt_object(
+                    body_json, "lorebook_entry", e["entry_id"],
+                    0, e["tokens"], parent_id=e["lorebook_id"],
+                )
 
             return body_json
     except Exception:
@@ -997,16 +1051,37 @@ async def _run_driver_callable_loop(
     loop_body["stream"] = False
     loop_body["messages"] = loop_messages
 
+    from app.services.budget import estimate_tokens as _est_tokens
+    from app.services.debug_metrics import PURPOSE_MAIN, record_llm_call
+    from app.services.metrics import record_prompt_object
+
+    def _record_loop_call(started: float, response_data: dict[str, Any], status_code: int) -> None:
+        # Every tool round is a real upstream call; unrecorded rounds were
+        # invisible to the debug trace and to cost accounting alike.
+        record_llm_call(
+            body_json,
+            purpose=PURPOSE_MAIN,
+            latency_ms=(time.monotonic() - started) * 1000.0,
+            status_code=status_code,
+            response_data=response_data,
+            messages=loop_body.get("messages"),
+            endpoint_id=body_json.get("_gitv_endpoint_id", ""),
+            provider=body_json.get("_gitv_provider", ""),
+            model_requested=body_json.get("model", ""),
+        )
+
     rounds = 0
     max_rounds = max(turns_remaining, 1)
 
     while rounds < max_rounds:
         body_bytes = json.dumps(loop_body).encode()
+        started = time.monotonic()
         response_data, status_code = await _do_forward(method, url, headers, body_bytes, timeout,
             provider=body_json.get("_gitv_provider", ""),
             base_url=body_json.get("_gitv_base_url", ""),
             api_key=body_json.get("_gitv_api_key", ""),
         )
+        _record_loop_call(started, response_data, status_code)
 
         if status_code != 200:
             logger.warning("Driver-callable loop: forward returned %d", status_code)
@@ -1045,6 +1120,10 @@ async def _run_driver_callable_loop(
 
             tool_msg = format_tool_result(call.name, result_text)
             loop_messages.append({"role": "user", "content": tool_msg})
+            record_prompt_object(
+                body_json, "cantrip_tool", tool.id if tool else call.name,
+                0, _est_tokens(tool_msg),
+            )
             logger.info(
                 "Driver-callable: executed '%s' (turn %d, %d remaining)",
                 call.name, rounds, turns_remaining,
@@ -1059,11 +1138,13 @@ async def _run_driver_callable_loop(
         loop_body["messages"] = loop_messages
 
     body_bytes = json.dumps(loop_body).encode()
+    started = time.monotonic()
     response_data, status_code = await _do_forward(method, url, headers, body_bytes, timeout,
         provider=body_json.get("_gitv_provider", ""),
         base_url=body_json.get("_gitv_base_url", ""),
         api_key=body_json.get("_gitv_api_key", ""),
     )
+    _record_loop_call(started, response_data, status_code)
 
     if status_code == 200:
         choices = response_data.get("choices", [])
@@ -1137,6 +1218,9 @@ async def _forward_non_streaming_verified(
                 if body_json.get("_gitv_debug") and user_id:
                     await _save_debug_exchange(response_data, body_json, user_id, locals().get("vresult"))
 
+                from app.services.metrics import flush_metrics
+                await flush_metrics(body_json)
+
                 return JSONResponse(status_code=status_code, content=response_data)
         except Exception:
             logger.exception("Driver-callable loop failed, falling through to normal forward")
@@ -1147,10 +1231,23 @@ async def _forward_non_streaming_verified(
             body_json, failover_chain, method, path, headers, timeout, body,
         )
     else:
+        started = time.monotonic()
         response_data, status_code = await _do_forward(method, url, headers, body, timeout,
             provider=body_json.get("_gitv_provider", ""),
             base_url=body_json.get("_gitv_base_url", ""),
             api_key=body_json.get("_gitv_api_key", ""),
+        )
+        from app.services.debug_metrics import PURPOSE_MAIN, record_llm_call
+        record_llm_call(
+            body_json,
+            purpose=PURPOSE_MAIN,
+            latency_ms=(time.monotonic() - started) * 1000.0,
+            status_code=status_code,
+            response_data=response_data,
+            messages=body_json.get("messages"),
+            endpoint_id=body_json.get("_gitv_endpoint_id", ""),
+            provider=body_json.get("_gitv_provider", ""),
+            model_requested=body_json.get("model", ""),
         )
 
     if status_code == 200 and user_id:
@@ -1194,6 +1291,9 @@ async def _forward_non_streaming_verified(
 
     if body_json.get("_gitv_debug") and user_id:
         await _save_debug_exchange(response_data, body_json, user_id, locals().get("vresult"))
+
+    from app.services.metrics import flush_metrics
+    await flush_metrics(body_json)
 
     return JSONResponse(status_code=status_code, content=response_data)
 
@@ -1979,6 +2079,9 @@ async def _forward_streaming_raw(
                     await _save_debug_exchange(response_data, body_json, user_id)
                 except Exception:
                     logger.exception("Failed to save debug exchange for streamed response")
+            if body_json is not None:
+                from app.services.metrics import flush_metrics
+                await flush_metrics(body_json)
 
     return StreamingResponse(
         stream_generator(),
@@ -2024,10 +2127,23 @@ async def _forward_streaming_with_memory(
             body_json, failover_chain, method, path, headers, timeout, body,
         )
     else:
+        started = time.monotonic()
         response_data, status_code = await _do_forward(method, url, headers, body, timeout,
             provider=body_json.get("_gitv_provider", "") if body_json else "",
             base_url=body_json.get("_gitv_base_url", "") if body_json else "",
             api_key=body_json.get("_gitv_api_key", "") if body_json else "",
+        )
+        from app.services.debug_metrics import PURPOSE_MAIN, record_llm_call
+        record_llm_call(
+            body_json,
+            purpose=PURPOSE_MAIN,
+            latency_ms=(time.monotonic() - started) * 1000.0,
+            status_code=status_code,
+            response_data=response_data,
+            messages=body_json.get("messages"),
+            endpoint_id=body_json.get("_gitv_endpoint_id", ""),
+            provider=body_json.get("_gitv_provider", ""),
+            model_requested=body_json.get("model", ""),
         )
 
     if status_code == 200:
@@ -2058,11 +2174,17 @@ async def _forward_streaming_with_memory(
         if body_json.get("_gitv_debug"):
             await _save_debug_exchange(response_data, body_json, user_id)
 
+        from app.services.metrics import flush_metrics
+        await flush_metrics(body_json)
+
         model = body_json.get("model", "")
         return _convert_to_sse(
             JSONResponse(status_code=200, content=response_data),
             model,
             preserve_thinking=ux_settings.get("preserve_thinking", True),
         )
+
+    from app.services.metrics import flush_metrics
+    await flush_metrics(body_json)
 
     return JSONResponse(status_code=status_code, content=response_data)

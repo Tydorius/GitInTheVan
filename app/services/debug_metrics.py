@@ -69,20 +69,40 @@ def record_llm_call(
     model_resolved: str = "",
     failover_attempt: int = 0,
     error: str = "",
+    rule_id: str = "",
 ) -> None:
-    """Record one upstream LLM call on the run.
+    """Record one upstream LLM call on the run and in the metrics tables.
 
     ``response_data`` supplies the upstream ``usage`` object when present.
     ``messages`` is the request that was actually sent, used only to estimate
     prompt tokens when the provider returns no usage.
-    """
-    run = _run_block(body_json)
-    if run is None:
-        return
 
+    The metrics row is written even when debug is off (the persistent tables
+    are the product feature, the trace is a diagnostic); ``rule_id`` names the
+    verification rule on judge calls so cost joins against verdicts.
+    """
     usage = extract_usage(response_data)
     if usage is None:
         usage = _estimate_usage(messages, response_data)
+
+    from app.services import metrics as metrics_service
+
+    metrics_service.record_llm_metric(
+        body_json,
+        purpose=purpose,
+        latency_ms=latency_ms,
+        status_code=status_code,
+        usage=usage,
+        endpoint_id=endpoint_id,
+        endpoint_name=endpoint_name,
+        model=model_resolved or _resolved_model(response_data) or model_requested,
+        failover_attempt=failover_attempt,
+        rule_id=rule_id,
+    )
+
+    run = _run_block(body_json)
+    if run is None:
+        return
 
     run.setdefault("llm_calls", []).append({
         "purpose": purpose,
@@ -96,6 +116,7 @@ def record_llm_call(
         "latency_ms": round(latency_ms, 1),
         "status_code": status_code,
         "error": error,
+        "rule_id": rule_id,
         **usage,
     })
 

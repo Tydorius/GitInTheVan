@@ -237,6 +237,13 @@ async def _inject_stage_instructions(
         combined = "\n\n".join(instructions_parts)
         block = f"[STAGE INSTRUCTIONS]\n{combined}\n[/STAGE INSTRUCTIONS]"
 
+        from app.services.budget import estimate_tokens as _est_tokens
+        from app.services.metrics import record_prompt_object
+        record_prompt_object(
+            body_json, "stage_instructions", stage.id,
+            0, _est_tokens(block), parent_id=map_obj.id,
+        )
+
         system_idx = None
         for i, msg in enumerate(messages):
             if msg.get("role") == "system":
@@ -284,6 +291,11 @@ async def _inject_stage_lorebooks(
         for lb in lorebooks:
             for entry in lb.entries:
                 all_entries.append({
+                    # Provenance for the per-entry metrics rows (and any
+                    # matched-entry metadata), mirroring proxy.py.
+                    "lorebook_id": lb.id,
+                    "lorebook_name": lb.name,
+                    "entry_id": entry.id,
                     "name": entry.name,
                     "keys": entry.keys,
                     "secondary_keys": entry.secondary_keys,
@@ -305,6 +317,15 @@ async def _inject_stage_lorebooks(
                     "Map stage '%s': %d lorebook entries injected",
                     stage_name, len(matched),
                 )
+                # Per-entry prompt metrics, same granularity and parent (book
+                # id) as the non-map lorebook injection in proxy.py.
+                from app.services.metrics import record_prompt_object
+                for e in matched:
+                    record_prompt_object(
+                        body_json, "lorebook_entry", e.entry_id,
+                        0, max(1, len(e.content) // 4),
+                        parent_id=e.lorebook_id,
+                    )
 
     return body_json
 
@@ -337,6 +358,11 @@ async def _inject_stage_skills(
 
         skill_contents = [s.content for s in skills if s.type == "skill" and s.content]
         sample_contents = [s.content for s in skills if s.type == "sample" and s.content]
+
+        from app.services.metrics import record_prompt_object
+        for s in skills:
+            if s.content:
+                record_prompt_object(body_json, s.type, s.id, 0, max(1, len(s.content) // 4))
 
         messages = body_json.get("messages", [])
         if skill_contents:
@@ -431,6 +457,7 @@ async def _verify_stage(
     content: str,
     stage: MapStage,
     user_id: str,
+    body_json: dict[str, Any] | None = None,
 ) -> tuple[bool, str, bool]:
     """Run verification on a stage's response.
 
@@ -445,6 +472,8 @@ async def _verify_stage(
         logger.warning("Map stage '%s': verification enabled but no endpoint", stage.name)
         return True, _stage_verification_error_note(stage.name, "no configured endpoint"), True
 
+    from app.services.debug_metrics import PURPOSE_VERIFICATION, record_llm_call
+    from app.services.metrics import set_metrics_retry
     from app.services.proxy import _build_upstream_url, _do_forward
 
     messages = await _build_stage_verification_body(content, stage)
@@ -476,13 +505,30 @@ async def _verify_stage(
     timeout = httpx.Timeout(120, connect=15.0)
 
     for attempt in range(max_retries + 1):
+        # A re-judge inside the stage's own retry cycle is flagged, matching
+        # the main verification loop's treatment of retries.
+        set_metrics_retry(body_json or {}, attempt > 0)
         try:
+            verify_started = time.monotonic()
             data, status_code = await _do_forward(
                 "POST", url, headers, body_bytes, timeout,
                 provider=v_endpoint.provider or "",
                 base_url=v_endpoint.base_url,
                 api_key=v_endpoint.api_key,
                 configured=v_params,
+            )
+            record_llm_call(
+                body_json or {},
+                purpose=PURPOSE_VERIFICATION,
+                latency_ms=(time.monotonic() - verify_started) * 1000.0,
+                status_code=status_code,
+                response_data=data,
+                messages=messages,
+                endpoint_id=v_endpoint.id,
+                endpoint_name=v_endpoint.name,
+                provider=v_endpoint.provider or "",
+                model_requested=v_model or "gpt-4",
+                failover_attempt=0,
             )
             if status_code != 200:
                 logger.warning(
@@ -756,6 +802,11 @@ async def run_map_pipeline(
         is_last_stage = stage_idx == len(stages) - 1
         logger.info("Map stage %d/%d: '%s'", stage_idx + 1, len(stages), stage.name)
 
+        # Prompt-object rows recorded inside this iteration (stage cantrips)
+        # attribute to this stage's map.
+        from app.services.metrics import clear_metrics_stage_ref, set_metrics_stage_ref
+        set_metrics_stage_ref(body_json, map_obj.id, stage_idx)
+
         body_json["messages"] = copy.deepcopy(base_messages)
 
         async with async_session() as db:
@@ -919,7 +970,9 @@ async def run_map_pipeline(
             )
 
         if stage.verification_enabled:
-            approved, reason, errored = await _verify_stage(content, stage, user_id)
+            approved, reason, errored = await _verify_stage(content, stage, user_id, body_json)
+            from app.services.metrics import set_metrics_retry
+            set_metrics_retry(body_json, False)
             if not approved:
                 logger.warning(
                     "Map stage '%s': verification failed after retries: %s. Continuing to next stage.",
@@ -985,6 +1038,7 @@ async def run_map_pipeline(
             body_json.pop("_gitv_map_stage_cantrip_ids", None)
 
         logger.info("Map stage '%s' completed: %d chars output", stage.name, len(content))
+        clear_metrics_stage_ref(body_json)
 
     # Scenario summarization POST: applies to the stage-augmented system message
     # after all stages complete, mirroring how the non-map pipeline runs POST
@@ -992,7 +1046,15 @@ async def run_map_pipeline(
     if body_json.get("_gitv_command_overrides", {}).get("summary") is not False:
         from app.services.scenario_summarizer import maybe_summarize_scenario
         try:
+            from app.services.budget import estimate_messages_tokens
+            from app.services.metrics import record_prompt_object
+            pre_map_scn_tokens = estimate_messages_tokens(body_json.get("messages", []))
             body_json = await maybe_summarize_scenario(body_json, user_id, "post")
+            record_prompt_object(
+                body_json, "summary_scenario", "post",
+                pre_map_scn_tokens, estimate_messages_tokens(body_json.get("messages", [])),
+                parent_id=map_obj.id,
+            )
         except Exception:
             logger.exception("Scenario summarization (POST, map) failed")
 

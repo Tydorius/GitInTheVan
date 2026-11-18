@@ -45,6 +45,7 @@ GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:
 18. [Debug and Comparing Runs](#18-debug-and-comparing-runs)
 19. [The Activation Hierarchy](#19-the-activation-hierarchy)
 20. [Snapshots and Restore](#snapshots)
+21. [Metrics](#metrics)
 
 ---
 
@@ -1775,3 +1776,47 @@ saving cantrips, lorebook entries and importing maps.
 The assistant can list versions, save one, and restore one, under the **Snapshots** group on the
 [Assistant Security](#assistant) page. Restoring over an object is treated as a destructive
 action, so under Normal it asks first and shows you the difference.
+
+---
+
+<a id="metrics"></a>
+
+## 21. Metrics
+
+*Screenshots pending (2026-11-18) — this section shipped with the feature, before a capture pass.*
+
+The **Metrics** page shows what your pipeline costs over time: which lorebook entries, cantrips
+and other injected content bloat your prompt budget, and what each LLM role (driver, judge,
+summarizer, map stage) actually costs in tokens and latency. Where the [Debug page](#18-debug-and-comparing-runs)
+shows one run, Metrics shows the trend.
+
+Recording is always on. Every authenticated request through the proxy writes one row per
+prompt-mutating object that fired and one row per upstream LLM call — debug mode is not required.
+Sandbox and replay runs are recorded too, but flagged; they are excluded from the default view so
+they cannot skew live-traffic statistics, and the **Include sandbox/replay** checkbox brings them
+back.
+
+### Reading the page
+
+- **Window** (7 / 30 / 90 days), **Chat** filter and the sandbox/replay toggle apply to both
+  tables. **Refresh** reloads.
+- **Prompt Objects** lists every object that changed a prompt in the window: how many times it
+  fired, the total and average token delta it caused, and which book (for lorebook entries) or
+  map (for stage objects) it belongs to. A positive delta adds to your prompt; a negative one
+  (a cantrip that trims content, a summarizer that compresses it) takes away. Sorted by impact.
+- **LLM Calls** groups upstream calls by role, endpoint and model: call count, success rate,
+  retry and failover counts, median latency, and token totals. Judge rows carry the verification
+  rule that ran.
+- **Recent Rows** shows the raw last 20 rows of each table, including flagged ones, for
+  checking exactly what one request recorded.
+
+### About the numbers
+
+Token counts come from the upstream `usage` object when your provider returns one, and from a
+chars-per-4 estimate when it does not. The two are never blended silently — the tables say which
+source each row used, and a group whose calls disagree is marked *mixed*. Estimates are close
+enough to spot a lorebook entry that adds a thousand tokens per message; they are not an invoice.
+
+Rows are kept for the admin-configured retention period (**Metrics Retention**, default 30 days,
+on the Admin page) and pruned automatically. Metrics are per-user: your tables show your traffic
+only.

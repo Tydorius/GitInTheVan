@@ -51,6 +51,7 @@ class AdminSettingsResponse(BaseModel):
     max_assistant_conversations: int
     max_assistant_tool_result_kb: int
     max_snapshots_per_object: int
+    metrics_retention_days: int
 
 
 class AdminSettingsUpdate(BaseModel):
@@ -81,6 +82,7 @@ class AdminSettingsUpdate(BaseModel):
     max_assistant_conversations: int | None = None
     max_assistant_tool_result_kb: int | None = None
     max_snapshots_per_object: int | None = None
+    metrics_retention_days: int | None = None
 
 
 def _settings_response(s: AdminSettings, effective: str) -> AdminSettingsResponse:
@@ -119,6 +121,7 @@ def _settings_response(s: AdminSettings, effective: str) -> AdminSettingsRespons
         max_assistant_conversations=s.max_assistant_conversations,
         max_assistant_tool_result_kb=s.max_assistant_tool_result_kb,
         max_snapshots_per_object=s.max_snapshots_per_object,
+        metrics_retention_days=s.metrics_retention_days,
     )
 
 
@@ -225,6 +228,8 @@ async def update_settings(
         updates["max_assistant_tool_result_kb"] = max(1, req.max_assistant_tool_result_kb)
     if req.max_snapshots_per_object is not None:
         updates["max_snapshots_per_object"] = max(1, req.max_snapshots_per_object)
+    if req.metrics_retention_days is not None:
+        updates["metrics_retention_days"] = max(1, req.metrics_retention_days)
 
     s = await update_admin_settings(updates)
     from app.services.admin import get_effective_log_level
