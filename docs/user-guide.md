@@ -15,7 +15,10 @@ GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:
 > **About the screenshots**
 >
 > Screenshots of the main pages were captured on **2026-08-31 against 0.24.0**,
-> except the Metrics page, which dates from **2026-11-18 against 0.31.0**.
+> except the Metrics page, which dates from **2026-11-18 against 0.31.0**, and
+> the Chat Lexicon settings card, the cantrip auto-install admin toggle and the
+> Assistant pane's cantrip drafts list, which date from **2026-11-18 against
+> 0.32.0**.
 > A few images of individual dialogs and panels still date from **2026-07-08,
 > against 0.16.x** — those show the tool working the same way, but the
 > surrounding UI may have moved on.
@@ -950,7 +953,11 @@ Action commands look like command tags but carry free text instead of on/off. Th
 
 **Lexicon settings** (Settings → Chat Lexicon & Cantrip Drafts): the compiler defaults to on — typing the command is the opt-in — and uses its own endpoint if configured, else the summarization endpoint, else the default endpoint. A compile that fails (unreachable endpoint, unparseable output, safety-scan refusal, size cap) is skipped silently: the entry simply does not exist yet, and the request forwards untouched.
 
+![Chat Lexicon settings card](media/gitv-settings-lexicon.png)
+
 **Cantrip auto-install** is doubly gated, and both switches default to off: an admin allows it under Admin → Global Caps, and you enable your half in Settings. With both on, `<CANTRIP:...>` drafts, validates, smoke-tests and installs the cantrip inside the request instead of queueing it — a draft that fails validation or the safety scan is refused, and one that fails only its sandbox smoke test is installed **disabled** with the findings recorded. Either way you get a one-line `[OOC: GitV: ...]` note in the reply. These notes are stripped from the history on the next request, and they are the only `[OOC: ...]` blocks GitV removes — your own OOC notes always reach the model.
+
+![Cantrip auto-install: the admin half of the gate](media/gitv-admin-cantrip-auto-install.png)
 
 ---
 
@@ -1287,7 +1294,8 @@ Admin actions (user creation, deletion, password resets) are recorded in the aud
 
 ## 15. Assistant
 
-*Screenshots pending (2026-09-02) — the pane shipped this section before a capture pass.*
+*Screenshots of the pane's conversation view are still pending (2026-09-02); the drafts list
+below was captured 2026-11-18.*
 
 The Assistant Pane is a persistent panel on the right edge of the management UI where one of
 your own configured endpoints acts as an assistant for GitInTheVan itself. It can read and
@@ -1295,6 +1303,11 @@ change your cantrips, lorebooks, maps, verification rules, memory rules, tags, s
 settings; navigate you to the right page; and explain why a resource did or did not fire. It
 runs as native tool calls against the same API this UI uses — nothing about it is a separate
 integration.
+
+A `<CANTRIP:description>` command queues its draft here, under **Cantrip drafts**, with
+**Start** (seeds an assistant conversation for drafting and validating it) and **Dismiss**:
+
+![Assistant pane: cantrip drafts list](media/gitv-assistant-drafts.png)
 
 Collapsed, it is a slim rail on the right edge with a small badge when it needs your attention.
 Click the rail (or the floating button on narrow screens) to open it, pick or start a
