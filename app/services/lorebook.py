@@ -79,6 +79,20 @@ def match_entries(
     return matched
 
 
+def match_book_entries(
+    messages: list[dict], entries: list[dict], scan_depth: int = 0
+) -> list[MatchedEntry]:
+    """Match one book's entries, honoring that book's scan depth.
+
+    scan_depth <= 0 scans the whole message list (previous behavior); N > 0
+    matches keys against only the newest N messages, so a keyword mentioned
+    in ancient history no longer triggers the entry and long chats stop
+    paying a full-history regex scan per key.
+    """
+    window = messages[-scan_depth:] if scan_depth > 0 else messages
+    return match_entries(window, entries)
+
+
 def inject_entries(
     messages: list[dict],
     matched: list[MatchedEntry],

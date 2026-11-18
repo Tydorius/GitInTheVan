@@ -2,6 +2,49 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.35.0] - 2026-11-18
+
+Lorebook & Chat Context bundle — the second feature-request batch (evaluation
+addendum in the project planning docs), three requests in one release.
+
+### Added
+
+- **Lorebooks can inject after cantrips** (`inject_after_cantrips`, in the
+  Pipeline Positions editor). Cantrips read the message list through
+  `context.chat.last_messages` before it reaches the model; with this on, the
+  book's entries are injected *after* the cantrip pass — they still reach the
+  model in the same request, but cantrips cannot read them. Entries with
+  spoilers or mechanics scripts should not see are the use case. The deferred
+  injection runs before conversation summarization and before map stage
+  snapshots, applies to map stage attachments the same way, and is
+  debug-captured as *Lorebook Injection (Post-Cantrip)*. Per-install setting:
+  map exports and packs do not carry it (matching every other book-level
+  setting). Budget-neutral; ordering only, not activation.
+- **Lorebooks can scan only the newest N messages** (`scan_depth`, off by
+  default, pre-fills 10). Keyword matching for the book runs against the
+  newest N messages only — a keyword mentioned in ancient history no longer
+  triggers the entry, and long chats stop paying a full-history regex scan
+  per key per request. Constant entries always apply. Matching is now
+  per-book (was one flattened pass); cross-book ordering by insertion order
+  is unchanged.
+- **`context.chat.turn_index`** — a monotonic per-conversation request
+  counter. `message_count` is `len(messages)` of the client request and stops
+  growing the moment the client trims history; `turn_index` counts client
+  requests and only ever goes up: one per request, never during internal
+  rounds (verification retries, driver-callable loops, map stages), held
+  still during replays, per-fork in sandboxes. Read-only server-side state
+  (new `conversation_turn_counters` table, migration 057) keyed by the
+  Phase-29 conversation identity — the same id lexicon bindings use.
+  Supersedes the "request turn id" half of the old swipe-awareness cheap
+  slice in the feature-request roadmap.
+
+### Migration
+
+057 adds the two lorebook columns and creates
+`conversation_turn_counters`. Backward-compatible and additive; upgrade-path
+test with vacuity check included, and the lorebook hot-path query is
+exercised against an upgraded database.
+
 ## [0.34.0] - 2026-11-18
 
 Security review (dependency wave 2). Every pip-audit and npm-audit finding is

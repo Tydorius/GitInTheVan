@@ -94,6 +94,10 @@
         run_driver_callable: positionLb.run_driver_callable,
         run_pre_navigator: positionLb.run_pre_navigator,
         run_post_navigator: positionLb.run_post_navigator,
+        inject_after_cantrips: positionLb.inject_after_cantrips,
+        scan_depth: positionLb.scanEnabled
+          ? Math.max(1, Math.floor(Number(positionLb.scanDepthValue) || 10))
+          : 0,
       })
       positionLb = null
       await withScroll(load)
@@ -482,7 +486,19 @@
           <label style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
             <input type="checkbox" checked={selectedLorebook.run_post_navigator} disabled style="width: auto;"> Post-Navigator
           </label>
-          <button onclick={() => { positionLb = { ...selectedLorebook } }} style="font-size: 11px; padding: 2px 8px;">Edit Positions</button>
+          <button onclick={() => {
+            positionLb = {
+              ...selectedLorebook,
+              scanEnabled: (selectedLorebook.scan_depth ?? 0) > 0,
+              scanDepthValue: (selectedLorebook.scan_depth ?? 0) > 0 ? selectedLorebook.scan_depth : 10,
+            }
+          }} style="font-size: 11px; padding: 2px 8px;">Edit Positions</button>
+          {#if selectedLorebook.inject_after_cantrips}
+            <span style="font-size: 11px; color: var(--text-dim);">· Injects after cantrips</span>
+          {/if}
+          {#if (selectedLorebook.scan_depth ?? 0) > 0}
+            <span style="font-size: 11px; color: var(--text-dim);">· Scans newest {selectedLorebook.scan_depth}</span>
+          {/if}
         </div>
       </div>
     </div>
@@ -601,6 +617,20 @@
         <label style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
           <input type="checkbox" bind:checked={positionLb.run_post_navigator} style="width: auto;"> Post-Navigator
         </label>
+        <label style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
+          <input type="checkbox" bind:checked={positionLb.inject_after_cantrips} style="width: auto;"> Inject After Cantrips
+        </label>
+        <p style="color: var(--text-dim); font-size: 11px; margin: 2px 0 8px;">
+          Cantrips read the message list before it reaches the model. With this on, the book's entries are injected <em>after</em> cantrips run, so cantrips cannot read them — for entries with spoilers or mechanics cantrips should not see.
+        </p>
+        <label style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
+          <input type="checkbox" bind:checked={positionLb.scanEnabled} style="width: auto;"> Scan only the newest
+          <input type="number" min="1" step="1" bind:value={positionLb.scanDepthValue} disabled={!positionLb.scanEnabled} style="width: 70px;">
+          messages
+        </label>
+        <p style="color: var(--text-dim); font-size: 11px; margin: 2px 0 0;">
+          Off (default) scans the whole conversation. On, only the newest N messages are scanned for this book's keywords — constant entries always apply.
+        </p>
       </div>
       <div class="modal-actions">
         <button onclick={() => positionLb = null}>Cancel</button>

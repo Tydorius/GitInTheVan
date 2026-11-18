@@ -11,6 +11,7 @@ from app.models.chat_data import ChatData
 from app.models.conversation_hash import ConversationHash
 from app.models.conversation_lorebook_binding import ConversationLorebookBinding
 from app.models.conversation_summary import ConversationSummary
+from app.models.conversation_turn_counter import ConversationTurnCounter
 from app.models.debug_exchange import DebugExchange
 from app.models.debug_sandbox import DebugSandbox
 from app.models.endpoint import Endpoint, EndpointModel
@@ -51,6 +52,7 @@ __all__ = [
     "ConversationHash",
     "ConversationLorebookBinding",
     "ConversationSummary",
+    "ConversationTurnCounter",
     "DebugExchange",
     "DebugSandbox",
     "ForbiddenWord",

@@ -367,11 +367,13 @@ async def _inject_stage_lorebooks(
         if not lorebooks:
             return body_json
 
-        from app.services.lorebook import inject_entries, match_entries
-        all_entries: list[dict] = []
+        from app.services.lorebook import inject_entries, match_book_entries
+        messages = body_json.get("messages", [])
+        pre_matched: list = []
+        deferred_matched: list = []
         for lb in lorebooks:
-            for entry in lb.entries:
-                all_entries.append({
+            book_entries = [
+                {
                     # Provenance for the per-entry metrics rows (and any
                     # matched-entry metadata), mirroring proxy.py.
                     "lorebook_id": lb.id,
@@ -387,26 +389,41 @@ async def _inject_stage_lorebooks(
                     "is_selective": entry.is_selective,
                     "is_disabled": entry.is_disabled,
                     "character_limit": entry.character_limit,
-                })
+                }
+                for entry in lb.entries
+            ]
+            # Per-book matching with the book's own scan depth, and the same
+            # inject-after-cantrips split as the global pass (0.35.0).
+            book_matched = match_book_entries(messages, book_entries, lb.scan_depth)
+            if lb.inject_after_cantrips:
+                deferred_matched.extend(book_matched)
+            else:
+                pre_matched.extend(book_matched)
 
-        if all_entries:
-            messages = body_json.get("messages", [])
-            matched = match_entries(messages, all_entries)
-            if matched:
-                body_json["messages"] = inject_entries(messages, matched)
-                logger.info(
-                    "Map stage '%s': %d lorebook entries injected",
-                    stage_name, len(matched),
-                )
-                # Per-entry prompt metrics, same granularity and parent (book
-                # id) as the non-map lorebook injection in proxy.py.
-                from app.services.metrics import record_prompt_object
-                for e in matched:
-                    record_prompt_object(
-                        body_json, "lorebook_entry", e.entry_id,
-                        0, max(1, len(e.content) // 4),
-                        parent_id=e.lorebook_id,
-                    )
+        pre_matched.sort(key=lambda m: m.insertion_order)
+        deferred_matched.sort(key=lambda m: m.insertion_order)
+
+        if pre_matched:
+            body_json["messages"] = inject_entries(messages, pre_matched)
+            logger.info(
+                "Map stage '%s': %d lorebook entries injected",
+                stage_name, len(pre_matched),
+            )
+        if deferred_matched:
+            # Applied after this stage's cantrip pass (see _run_stage).
+            body_json["_gitv_stage_deferred_lorebook"] = deferred_matched
+
+        # Per-entry prompt metrics, same granularity and parent (book id) as
+        # the non-map lorebook injection in proxy.py. Deferred entries are
+        # recorded here too -- they reach this stage's prompt a few steps
+        # later, but they reach it.
+        from app.services.metrics import record_prompt_object
+        for e in pre_matched + deferred_matched:
+            record_prompt_object(
+                body_json, "lorebook_entry", e.entry_id,
+                0, max(1, len(e.content) // 4),
+                parent_id=e.lorebook_id,
+            )
 
     return body_json
 
@@ -996,6 +1013,37 @@ async def run_map_pipeline(
                     metadata={
                         "stage_index": stage_idx,
                         "ran": [{"id": c["id"], "name": c["name"]} for c in ran],
+                    },
+                )
+
+        # 0.35.0: this stage's inject-after-cantrips lorebooks apply here,
+        # after the stage cantrip pass -- stage cantrips read
+        # context.chat.last_messages, so entries not yet injected at cantrip
+        # time are invisible to them. Always popped, so a stage's stash can
+        # never leak into the next stage iteration.
+        stage_deferred = body_json.pop("_gitv_stage_deferred_lorebook", None)
+        if stage_deferred:
+            from app.services.lorebook import inject_entries as _inject_entries
+
+            body_json["messages"] = _inject_entries(
+                body_json["messages"], stage_deferred
+            )
+            logger.info(
+                "Map stage '%s': %d lorebook entries injected after cantrips",
+                stage.name, len(stage_deferred),
+            )
+            if debug_on:
+                debug_capture(
+                    body_json, "map_stage_lorebook_deferred",
+                    f"Stage {stage_idx + 1} Lorebook Injection (Post-Cantrip): {stage.name}",
+                    item_id=stage.id, item_name=stage.name,
+                    detail=f"{len(stage_deferred)} deferred entries injected after stage cantrips",
+                    metadata={
+                        "stage_index": stage_idx,
+                        "entries": [
+                            {"lorebook_name": e.lorebook_name, "entry_name": e.name}
+                            for e in stage_deferred
+                        ],
                     },
                 )
 
