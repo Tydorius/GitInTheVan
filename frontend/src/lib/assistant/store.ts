@@ -262,6 +262,75 @@ export async function refreshConversations(): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Cantrip drafts (Phase 29b) — queued from chat via <CANTRIP:description>
+// ---------------------------------------------------------------------------
+
+export interface CantripDraft {
+  id: string
+  conversation_id: string
+  request_text: string
+  context_text: string
+  status: string
+  outcome_note: string
+  created_at: string
+  updated_at: string
+}
+
+export const drafts = writable<CantripDraft[]>([])
+
+export async function refreshDrafts(): Promise<void> {
+  try {
+    const data = await api.listAssistantDrafts()
+    drafts.set(data.drafts || [])
+  } catch {
+    // Drafts are auxiliary -- a failure here never blocks the pane.
+  }
+}
+
+async function setDraftStatus(id: string, status: string): Promise<void> {
+  await api.patchAssistantDraft(id, status)
+  drafts.update((all) => all.map((d) => (d.id === id ? { ...d, status } : d)))
+}
+
+/** Seed a new assistant conversation from a queued draft: the request, the
+ * conversation snapshot it was made in, and a pointer at the cantrip docs the
+ * pane already carries. From there the existing validate/test/create tools
+ * and the permission grid do the work. */
+export async function startDraft(draft: CantripDraft): Promise<void> {
+  lastError.set('')
+  notice.set('')
+  await setDraftStatus(draft.id, 'started')
+  await newConversation()
+  const seed = [
+    'Write a cantrip for this request:',
+    draft.request_text,
+    '',
+    'Conversation context it should run in:',
+    draft.context_text || '(no context captured)',
+    '',
+    'Use the cantrip API reference you carry, then validate, test and create it. Ask before publishing or enabling it broadly.',
+  ].join('\n')
+  await sendMessage(seed)
+  await refreshDrafts()
+}
+
+export async function dismissDraft(id: string): Promise<void> {
+  try {
+    await setDraftStatus(id, 'dismissed')
+  } catch (e: any) {
+    lastError.set(e?.message || 'Failed to dismiss draft')
+  }
+}
+
+export async function markDraftInstalled(id: string): Promise<void> {
+  try {
+    await setDraftStatus(id, 'installed')
+  } catch (e: any) {
+    lastError.set(e?.message || 'Failed to mark draft installed')
+  }
+}
+
 /** A reload-time `pending_json`. Confirmation state renders as a ConfirmCard;
  * a still-pending client action (e.g. reload mid-navigate) is just replayed. */
 function applyServerPending(raw: any): void {

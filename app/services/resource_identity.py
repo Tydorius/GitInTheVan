@@ -22,17 +22,26 @@ import hashlib
 import json
 import re
 
+# Folder name -> resource type for repo auto-discovery. The two scanners
+# (remote: git_sync._auto_scan_repo; local: packs._discover_local_files) share
+# this map so a new resource folder can never be added to one and forgotten in
+# the other -- exactly how memory_rules shipped in 0.30.1 listed remotely but
+# not locally.
+FOLDER_RESOURCE_TYPES = {
+    "cantrips": "cantrip",
+    "lorebooks": "lorebook",
+    "skills": "skill",
+    "rules": "rule",
+    "memory_rules": "memory_rule",
+    "scenario_rules": "scenario_rule",
+    "maps": "map",
+}
+
 # Folders a repo publishes installable resources from. A resource path may not
 # address anything else -- see safe_repo_join() in app/services/git_sync.py.
-RESOURCE_FOLDERS = (
-    "cantrips",
-    "lorebooks",
-    "skills",
-    "rules",
-    "memory_rules",
-    "scenario_rules",
-    "maps",
-)
+# Derived so the install allow-list and the discovery scanners can never
+# disagree about what a repo may contain.
+RESOURCE_FOLDERS = tuple(FOLDER_RESOURCE_TYPES)
 
 _SCP_LIKE = re.compile(r"^(?:(?P<user>[^@/]+)@)?(?P<host>[^:/]+):(?P<path>.+)$")
 

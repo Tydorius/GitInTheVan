@@ -495,7 +495,7 @@ export const api = {
     request<{ models: string[] }>(`/api/endpoints/${id}/models`),
 
   // Settings
-  getSettings: () => request<{ default_endpoint_id: string | null; default_model: string; preserve_thinking: boolean; gitv_status: boolean; simulated_streaming_speed: number; parameters: LlmParameter[]; verification_parameters: LlmParameter[]; summarization_parameters: LlmParameter[] }>('/api/settings'),
+  getSettings: () => request<{ default_endpoint_id: string | null; default_model: string; preserve_thinking: boolean; gitv_status: boolean; simulated_streaming_speed: number; streaming_post_processing_enabled: boolean; lexicon_enabled: boolean; lexicon_endpoint_id: string | null; cantrip_auto_install_enabled: boolean; parameters: LlmParameter[]; verification_parameters: LlmParameter[]; summarization_parameters: LlmParameter[]; lexicon_parameters: LlmParameter[] }>('/api/settings'),
   updateSettings: (data: any) =>
     request<any>('/api/settings', { method: 'PUT', body: JSON.stringify(data) }),
 
@@ -851,6 +851,11 @@ export const api = {
     request<AssistantConversation>(`/api/assistant/conversations/${id}/save`, { method: 'DELETE' }),
   forkAssistantConversation: (id: string) =>
     request<AssistantConversationSummary & { rotated_title?: string | null }>(`/api/assistant/conversations/${id}/fork`, { method: 'POST', body: JSON.stringify({}) }),
+  // Phase 29b: cantrip drafts queued from chat via <CANTRIP:description>.
+  listAssistantDrafts: () =>
+    request<{ drafts: any[] }>('/api/assistant/drafts'),
+  patchAssistantDraft: (id: string, status: string) =>
+    request<any>(`/api/assistant/drafts/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
 
   // Snapshots
   //

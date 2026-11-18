@@ -823,6 +823,28 @@ Message 4: &quot;More&quot;                                    -&gt; Verificatio
 Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persistent cleared, GUI setting resumes
 </code></pre>
 <p>Persistent overrides are scoped per-conversation. Different chats have independent override state. Overrides appear as memory entries with the <code>__cmd_persist_</code> prefix on the Memories page.</p>
+<h3 id="action-commands">Action Commands</h3>
+<p>Action commands look like command tags but carry free text instead of on/off. They are stripped before the request reaches the LLM, and the first occurrence per request wins.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;LEXICON:name&gt;</code></td>
+<td>Compiles a lorebook entry for the named thing — a character, creature, item, spell, place or faction — from the conversation via one side LLM call, and files it in a <strong>per-chat lexicon lorebook</strong>. The entry surfaces in later scenes when its keys are mentioned. Re-running the command for the same name revises the entry.</td>
+</tr>
+<tr>
+<td><code>&lt;CANTRIP:description&gt;</code></td>
+<td>Queues a cantrip draft for the <strong>Assistant pane</strong> (a badge appears on the pane). Starting a draft seeds an assistant conversation with your description and a snapshot of the conversation; from there the assistant drafts, validates and creates the cantrip under the normal permission flow.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Lexicon settings</strong> (Settings → Chat Lexicon &amp; Cantrip Drafts): the compiler defaults to on — typing the command is the opt-in — and uses its own endpoint if configured, else the summarization endpoint, else the default endpoint. A compile that fails (unreachable endpoint, unparseable output, safety-scan refusal, size cap) is skipped silently: the entry simply does not exist yet, and the request forwards untouched.</p>
+<p><strong>Cantrip auto-install</strong> is doubly gated, and both switches default to off: an admin allows it under Admin → Global Caps, and you enable your half in Settings. With both on, <code>&lt;CANTRIP:...&gt;</code> drafts, validates, smoke-tests and installs the cantrip inside the request instead of queueing it — a draft that fails validation or the safety scan is refused, and one that fails only its sandbox smoke test is installed <strong>disabled</strong> with the findings recorded. Either way you get a one-line <code>[OOC: GitV: ...]</code> note in the reply. These notes are stripped from the history on the next request, and they are the only <code>[OOC: ...]</code> blocks GitV removes — your own OOC notes always reach the model.</p>
 <hr>
 <p><a id="maps"></a></p>
 <h2 id="11-maps">11. Maps</h2>
@@ -1587,6 +1609,18 @@ unchanged.</p>
 </code></pre>
 <p>A <strong>tag group</strong> activates several resources at once — see
 <a href="#tags-and-groups">Tags and Groups</a>.</p>
+<h3 id="conversation-binding-lexicon-lorebooks">Conversation binding (lexicon lorebooks)</h3>
+<p>Lorebooks have one more activation source: a <strong>conversation binding</strong>. The
+<code>&lt;LEXICON:name&gt;</code> command creates one lorebook per chat and binds it to that
+conversation (see <a href="#command-tags">Action Commands</a>). A bound lorebook injects
+in its own conversation regardless of its tag or Active flag — it is created
+inactive and untagged precisely so it never blanket-runs anywhere else. The
+binding only ever adds: no prompt tag can switch it off, and it touches no
+other resource type.</p>
+<p>One known limit: exporting and re-importing the chat on the client side
+produces a new conversation id and orphans the binding. The lorebook still
+exists and can be re-bound by running another <code>&lt;LEXICON:...&gt;</code> command in the
+new chat.</p>
 <h3 id="command-tags-are-separate">Command tags are separate</h3>
 <p><code>&lt;COMMAND:setting&gt;</code> tags (e.g. <code>&lt;VERIFY:off&gt;</code>) control the pipeline for one
 request rather than activating a resource. They are covered in

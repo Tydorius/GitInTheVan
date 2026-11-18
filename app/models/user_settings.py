@@ -60,6 +60,24 @@ class UserSettings(Base):
     streaming_post_processing_enabled: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default="1", nullable=False
     )
+    # Phase 29a: the lexicon compiler. Typing <LEXICON:name> is the opt-in,
+    # so the feature defaults on; the endpoint pick is a model-naming scope
+    # and carries its own parameter layer (rule 20), defaulting to the
+    # summarizer's endpoint when unset.
+    lexicon_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="1", nullable=False
+    )
+    lexicon_endpoint_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("endpoints.id", ondelete="SET NULL"), nullable=True
+    )
+    lexicon_parameters_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]", server_default="[]"
+    )
+    # Phase 29b: user half of the doubly-gated auto-install (admin must ALLOW
+    # first). Both default off; with either off, drafts queue to the pane.
+    cantrip_auto_install_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
     context_budget_percent: Mapped[float] = mapped_column(Float, default=10.0, nullable=False)
     context_window_override: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     debug_mode: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -103,4 +121,5 @@ class UserSettings(Base):
     default_endpoint: Mapped[Endpoint | None] = relationship(foreign_keys=[default_endpoint_id])
     verification_endpoint: Mapped[Endpoint | None] = relationship(foreign_keys=[verification_endpoint_id])
     summarization_endpoint: Mapped[Endpoint | None] = relationship(foreign_keys=[summarization_endpoint_id])
+    lexicon_endpoint: Mapped[Endpoint | None] = relationship(foreign_keys=[lexicon_endpoint_id])
     assistant_endpoint: Mapped[Endpoint | None] = relationship(foreign_keys=[assistant_endpoint_id])

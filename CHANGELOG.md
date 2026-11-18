@@ -2,6 +2,128 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.32.0] - 2026-11-18
+
+Phase 29 — Chat Lexicon & Cantrip Drafts. Two in-chat action commands:
+`<LEXICON:name>` compiles a lorebook entry for any named thing in the
+conversation via one side LLM call, and `<CANTRIP:description>` queues a
+cantrip draft for the Assistant pane (or, doubly gated and off by default,
+drafts and installs it in-request).
+
+### Added
+
+- **Action commands** (`command_tags.py`): a second command class that carries
+  free text (`<LEXICON:name>`, `<CANTRIP:description>`), parsed and stripped on
+  every request. First occurrence per request wins. The argument may not
+  contain angle brackets.
+- **Chat Lexicon compiler** (`app/services/lexicon.py`): one side LLM call on a
+  failover chain (dedicated lexicon endpoint → summarizer endpoint → default →
+  first enabled), recorded under the new `lexicon` LLM-call purpose and
+  debug-captured. Output is brace-slice-parsed JSON (`{name, aliases, type,
+  keys, secondary_keys, content}`); inferred detail is marked. Every failure —
+  unreachable endpoint, unparseable output, guard refusal — degrades to
+  "forward untouched, write nothing".
+- **Conversation binding as the fifth activation source**: one lorebook per
+  chat (`conversation_lorebook_bindings`, unique per user+conversation),
+  created inactive and untagged so it never blanket-runs elsewhere, and
+  included at lorebook injection regardless of tag or Active flag. A union
+  source: it only adds. Documented in the user guide and the assistant concept
+  docs.
+- **Cantrip draft queue**: `cantrip_requests` rows with a pending/started/
+  installed/dismissed/failed status; drafts list, badge and seeding in the
+  Assistant pane (starting a draft seeds a conversation with the request, a
+  conversation snapshot and a pointer at the cantrip docs; the existing
+  validate/test/create tools and permission grid do the work). New routes
+  `GET /api/assistant/drafts` and `PATCH /api/assistant/drafts/{id}` live
+  under the pane's own hard-denied prefix.
+- **OOC notices**: pipeline results reach the player as `[OOC: GitV: ...]`
+  lines appended to the reply (after all response-side processing, so nothing
+  judges the notice) and stripped from the resent history on the next request.
+  Only notices carrying the GitV marker are stripped — player-authored
+  `[OOC: ...]` notes always reach the model.
+- **Cantrip auto-install** (doubly gated, both halves default off): admin
+  `assistant_cantrip_auto_install_allowed` + user
+  `cantrip_auto_install_enabled`. With both on, `<CANTRIP:...>` drafts via one
+  LLM call, then a Deno syntax parse, the size cap and safety scanner (critical
+  findings refuse outright), and a sandbox smoke run with a synthetic context
+  (failure installs the cantrip disabled with findings attached). The outcome
+  is recorded on a `cantrip_requests` row and reported in the OOC notice.
+- **Lexicon settings**: `lexicon_enabled` (default on — typing the command is
+  the opt-in), `lexicon_endpoint_id`, `lexicon_parameters_json` (a rule-20
+  parameter layer, closest-wins over the endpoint's), on a new Settings card
+  alongside the auto-install toggle.
+
+### Changed
+
+- **Tag/command stripping now handles content-parts lists.** Clients that send
+  structured content (image/tool parts) had activation and command tags inside
+  part dicts leak upstream, because both strippers rewrote string content
+  only. All three strip paths (activation tags, command tags, GitV notices)
+  now rewrite `text` fields inside part lists too. Load-bearing since action
+  commands started carrying free text.
+- **Lorebook entry writes share one guarded path.** The sanitize → size →
+  scan → log sequence moved from the lorebook router into
+  `app/services/lorebook_writes.py`, called by both the router (refusal is a
+  413/422) and the lexicon pipeline (refusal degrades). The cantrip syntax
+  validator similarly moved from the router into `deno_runner.py` and is shared
+  with auto-install.
+
+### Fixed (post-release adversarial review, same branch)
+
+- **PostgreSQL upgrades no longer fail on integer boolean defaults — a
+  20-migration class, not two.** `BOOLEAN DEFAULT 0/1` is rejected by
+  PostgreSQL ("column is of type boolean but default expression is of type
+  integer") and the failure is not a tolerable migration error, so startup
+  raised. The first fix on this branch covered migrations 054/055's
+  postgresql blocks; the real-backup upgrade-path validation (2026-11-18)
+  then proved a PostgreSQL database cannot upgrade across almost any modern
+  version boundary: **18 plain-string migrations (001, 003–050, 053) carried
+  the same defect**, and a plain string executes on every dialect.
+  PostgreSQL users who updated across any affected boundary hit a hard
+  startup failure and are repaired by this release (their failing migrations
+  never applied, so they now run corrected DDL). Fresh installs never
+  noticed: `create_all` pre-builds the schema, so the broken ALTERs were
+  skipped as duplicates — and SQLite accepts integer boolean defaults
+  anyway, which is why every test passed. All boolean defaults that can
+  reach PostgreSQL are now TRUE/FALSE, and the static guard in
+  `test_migrations.py` covers plain strings as well as postgresql blocks.
+  Found by the Phase 17 design-refresh review and the upgrade-path
+  validation run; the SQLite chain (real July backup through six version
+  hops) passed clean throughout.
+- **The action-command stage and the OOC-notice append are now debug-captured**
+  (rule 16). Both shipped invisible to the Debug timeline. `init_debug` runs
+  before the action-command strip so the original-messages snapshot predates
+  it and the capture shows a real before/after delta; the notice append
+  captures its failure case (notices the player will never see) too.
+- **Migration 055's upgrade path is genuinely tested.** The upgrade test now
+  drops the four droppable 055 columns before migrating (`lexicon_endpoint_id`
+  cannot be dropped on SQLite — FK-referenced — documented in the test) and
+  exercises all of them through the ORM post-migration. Previously skipped
+  with a false "cannot be dropped on SQLite" justification — the exact
+  `skills.budget_weight` bug class, since `user_settings` is not covered by
+  `TestMigrationCoverage`. Mutation-verified.
+- **Local pack repos list `memory_rules/` again.** 0.30.1 fixed the remote
+  auto-scan but not the local one, so the headline feature was invisible when
+  browsing a local repo. Both scanners now share one folder map
+  (`FOLDER_RESOURCE_TYPES` in `resource_identity.py`) from which the install
+  allow-list derives; both scanners' outputs are tested.
+- **Rule 19 reconciled with its intent.** Provenance: the four principles are
+  the maintainer's mandate; the "routes through `should_activate_resource()`"
+  sentence was the enforcement mechanism against that day's subtractor bugs.
+  The conversation binding is now documented in the rule as the fifth
+  activation source (a pure union source, like the selection-resources
+  exception it follows), the rule's executable test covers it, and the
+  lorebook loop calls `should_activate_resource()` unconditionally — the last
+  `if resource.tag and tags:` pre-check is gone. `tags=None` is normalized
+  first (the removed guard had hidden that None raised inside the try and
+  silently disabled all lorebook injection).
+
+### Migration
+
+- `055_phase29_lexicon_and_drafts`: creates `conversation_lorebook_bindings`
+  and `cantrip_requests`, adds the lexicon and auto-install columns to
+  `user_settings`/`admin_settings`. Additive only, dialect-aware.
+
 ## [0.31.0] - 2026-11-18
 
 Token metrics tracking: which lorebooks, cantrips and pipeline stages bloat

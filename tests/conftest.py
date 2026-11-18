@@ -20,6 +20,7 @@ import app.services.debug_replay as _debug_replay_module
 import app.services.debug_sandbox as _debug_sandbox_module
 import app.services.driver_callable as _driver_callable_module
 import app.services.forbidden_words as _forbidden_words_module
+import app.services.lexicon as _lexicon_module
 import app.services.map_pipeline as _map_pipeline_module
 import app.services.memory as _memory_module
 import app.services.metrics as _metrics_module
@@ -59,6 +60,7 @@ _SESSION_MODULES = [
     _debug_sandbox_module,
     _driver_callable_module,
     _forbidden_words_module,
+    _lexicon_module,
     _map_pipeline_module,
     _memory_module,
     _metrics_module,

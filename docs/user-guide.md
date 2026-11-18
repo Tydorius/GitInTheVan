@@ -929,6 +929,19 @@ Message 5: "Done <VERIFY:reset>"                     -> Persistent cleared, GUI 
 
 Persistent overrides are scoped per-conversation. Different chats have independent override state. Overrides appear as memory entries with the `__cmd_persist_` prefix on the Memories page.
 
+### Action Commands
+
+Action commands look like command tags but carry free text instead of on/off. They are stripped before the request reaches the LLM, and the first occurrence per request wins.
+
+| Command | Effect |
+|---------|--------|
+| `<LEXICON:name>` | Compiles a lorebook entry for the named thing — a character, creature, item, spell, place or faction — from the conversation via one side LLM call, and files it in a **per-chat lexicon lorebook**. The entry surfaces in later scenes when its keys are mentioned. Re-running the command for the same name revises the entry. |
+| `<CANTRIP:description>` | Queues a cantrip draft for the **Assistant pane** (a badge appears on the pane). Starting a draft seeds an assistant conversation with your description and a snapshot of the conversation; from there the assistant drafts, validates and creates the cantrip under the normal permission flow. |
+
+**Lexicon settings** (Settings → Chat Lexicon & Cantrip Drafts): the compiler defaults to on — typing the command is the opt-in — and uses its own endpoint if configured, else the summarization endpoint, else the default endpoint. A compile that fails (unreachable endpoint, unparseable output, safety-scan refusal, size cap) is skipped silently: the entry simply does not exist yet, and the request forwards untouched.
+
+**Cantrip auto-install** is doubly gated, and both switches default to off: an admin allows it under Admin → Global Caps, and you enable your half in Settings. With both on, `<CANTRIP:...>` drafts, validates, smoke-tests and installs the cantrip inside the request instead of queueing it — a draft that fails validation or the safety scan is refused, and one that fails only its sandbox smoke test is installed **disabled** with the findings recorded. Either way you get a one-line `[OOC: GitV: ...]` note in the reply. These notes are stripped from the history on the next request, and they are the only `[OOC: ...]` blocks GitV removes — your own OOC notes always reach the model.
+
 ---
 
 <a id="maps"></a>
@@ -1703,6 +1716,21 @@ Tags are written inline and stripped before the request is forwarded:
 
 A **tag group** activates several resources at once — see
 [Tags and Groups](#tags-and-groups).
+
+### Conversation binding (lexicon lorebooks)
+
+Lorebooks have one more activation source: a **conversation binding**. The
+`<LEXICON:name>` command creates one lorebook per chat and binds it to that
+conversation (see [Action Commands](#command-tags)). A bound lorebook injects
+in its own conversation regardless of its tag or Active flag — it is created
+inactive and untagged precisely so it never blanket-runs anywhere else. The
+binding only ever adds: no prompt tag can switch it off, and it touches no
+other resource type.
+
+One known limit: exporting and re-importing the chat on the client side
+produces a new conversation id and orphans the binding. The lorebook still
+exists and can be re-bound by running another `<LEXICON:...>` command in the
+new chat.
 
 ### Command tags are separate
 

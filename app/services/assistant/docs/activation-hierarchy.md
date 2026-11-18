@@ -41,6 +41,12 @@ Maps and memory rules each pick exactly one winner per request, so Active cannot
 
 They still obey rules 1–3 unchanged; only rule 4's mechanism differs (an explicit single-valued setting instead of a per-resource Active flag). This is the one documented departure from `should_activate_resource()`, and it narrows activation rather than widening it, so it does not violate rule 1.
 
+## Conversation binding: the fifth source
+
+Lorebooks have one activation source no other resource type has: a **conversation binding** (`conversation_lorebook_bindings`, Phase 29). `<LEXICON:name>` in chat compiles an entry into a per-chat lorebook and binds that lorebook to the conversation it was created in (client header id when the platform sends one, else the internal rolling-hash id). At injection time (`_apply_lorebook_injection` in `proxy.py`), a bound lorebook joins the candidate set regardless of its tag or Active flag — lexicon lorebooks are created inactive and untagged precisely so they cannot blanket-run in other chats.
+
+The binding is a union source like any other: it only ever adds, no prompt tag can switch it off, and it applies to no resource type but lorebooks. It is not a `should_activate_resource()` input — it is resolved separately from the binding table and OR-ed in before the tag/Active loop.
+
 ## Command tags are a different system
 
 `<VERIFY:off>`, `<SUMMARY:on:persist>`, etc. (see `app/services/command_tags.py`) switch **pipeline features** on or off for a request — they do not activate a resource. They are the only place in GitInTheVan where deactivation exists: `<VERIFY:off>` genuinely turns verification off for that message, which nothing in the Activation Hierarchy can do. Do not confuse the two systems: a `<#verify-tone#>` tag activates a specific verification *rule*; `<VERIFY:off>` disables the verification *feature* regardless of which rules would otherwise have fired. Full syntax and precedence in `tags.md` and the `#command-tags` guide section.

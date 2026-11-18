@@ -40,6 +40,11 @@ class AdminSettings(Base):
     max_assistant_tool_result_kb: Mapped[int] = mapped_column(Integer, default=32, server_default="32", nullable=False)
     max_snapshots_per_object: Mapped[int] = mapped_column(Integer, default=20, server_default="20", nullable=False)
     metrics_retention_days: Mapped[int] = mapped_column(Integer, default=30, server_default="30", nullable=False)
+    # Phase 29b: admin half of the doubly-gated cantrip auto-install. Default
+    # off; with it off, <CANTRIP:...> always queues to the Assistant pane.
+    assistant_cantrip_auto_install_allowed: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=text("CURRENT_TIMESTAMP"), nullable=False,
         onupdate=lambda: datetime.now(UTC),

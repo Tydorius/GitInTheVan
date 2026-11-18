@@ -18,9 +18,16 @@ The rules, restated:
 Maps and memory rules are the documented exception to rule 4 only: exactly one
 can win, so their blanket source is an explicit single-valued setting rather
 than a per-resource Active flag. They still obey rules 1-3.
+
+The Phase 29 conversation binding is the fifth activation source: a per-chat
+lorebook bound by conversation identity. It is a pure union source -- resolved
+separately and OR-ed in, so it activates in its own chat regardless of tag or
+Active flag and nothing can switch it off.
 """
 
 from __future__ import annotations
+
+import json
 
 import pytest
 
@@ -293,3 +300,143 @@ class TestLoadersDoNotPreEmptTheHierarchy:
 
         async with TestSessionLocal() as db:
             assert await resolve_memory_rule(db, uid, tags_for("<#cantrip-dice#>")) is None
+
+
+async def _make_book(db, uid, *, marker, tag="", is_active=True) -> str:
+    """A one-constant-entry lorebook; the marker is its injected content."""
+    from app.models.lorebook import Lorebook
+    from app.models.lorebook_entry import LorebookEntry
+
+    lb = Lorebook(user_id=uid, name=f"Book {marker}", tag=tag, is_active=is_active)
+    lb.entries.append(LorebookEntry(name=marker, content=marker, is_constant=True))
+    db.add(lb)
+    await db.flush()
+    return lb.id
+
+
+async def _injected(uid, marker, *, tags=None, headers=None, internal_chat_id=""):
+    """Run the real lorebook loader/injector and report whether the marker
+    reached the outgoing messages."""
+    from app.services.proxy import _apply_lorebook_injection
+
+    body = {"messages": [{"role": "user", "content": "hello"}]}
+    out = await _apply_lorebook_injection(
+        body, uid, tags=tags, request_headers=headers,
+        internal_chat_id=internal_chat_id,
+    )
+    return marker in json.dumps(out.get("messages", []))
+
+
+@pytest.mark.asyncio
+class TestFifthSourceConversationBinding:
+    """The conversation binding (Phase 29): a per-chat lorebook bound by
+    conversation identity. A pure union source -- it only ever adds, so it
+    activates in its own chat regardless of tag or Active flag and nothing can
+    switch it off."""
+
+    async def _user(self, client) -> str:
+        return (await client.get("/api/auth/me")).json()["id"]
+
+    async def test_a_bound_lorebook_injects_in_its_own_chat(self, admin_client):
+        from app.models.conversation_lorebook_binding import ConversationLorebookBinding
+
+        client, _, _ = admin_client
+        uid = await self._user(client)
+
+        async with TestSessionLocal() as db:
+            # Inactive and untagged: without the binding nothing could ever
+            # turn this book on (rules 1 and 4).
+            lb_id = await _make_book(db, uid, marker="BOUND-MARKER",
+                                     tag="", is_active=False)
+            db.add(ConversationLorebookBinding(
+                user_id=uid, conversation_id="chat-1", lorebook_id=lb_id))
+            await db.commit()
+
+        assert await _injected(
+            uid, "BOUND-MARKER", headers={"x-conversation-id": "chat-1"}
+        )
+
+    async def test_a_bound_lorebook_does_not_leak_to_other_chats(
+        self, admin_client
+    ):
+        from app.models.conversation_lorebook_binding import ConversationLorebookBinding
+
+        client, _, _ = admin_client
+        uid = await self._user(client)
+
+        async with TestSessionLocal() as db:
+            lb_id = await _make_book(db, uid, marker="BOUND-MARKER",
+                                     tag="", is_active=False)
+            db.add(ConversationLorebookBinding(
+                user_id=uid, conversation_id="chat-1", lorebook_id=lb_id))
+            await db.commit()
+
+        assert not await _injected(
+            uid, "BOUND-MARKER", headers={"x-conversation-id": "chat-2"}
+        )
+        assert not await _injected(uid, "BOUND-MARKER")
+
+    async def test_no_tag_can_switch_off_a_bound_lorebook(self, admin_client):
+        from app.models.conversation_lorebook_binding import ConversationLorebookBinding
+
+        client, _, _ = admin_client
+        uid = await self._user(client)
+
+        async with TestSessionLocal() as db:
+            lb_id = await _make_book(db, uid, marker="BOUND-MARKER",
+                                     tag="", is_active=False)
+            db.add(ConversationLorebookBinding(
+                user_id=uid, conversation_id="chat-1", lorebook_id=lb_id))
+            await db.commit()
+
+        # Union semantics: an unrelated tag is present and the lorebook is
+        # inactive/untagged, yet the binding still speaks.
+        assert await _injected(
+            uid, "BOUND-MARKER", tags=tags_for("<#cantrip-dice#>"),
+            headers={"x-conversation-id": "chat-1"},
+        )
+
+
+@pytest.mark.asyncio
+class TestLorebookLoopAsksUnconditionally:
+    """The lorebook loop calls should_activate_resource for every unbound
+    candidate with no caller-side pre-check. The old `if lb.tag and tags:`
+    shape duplicated the hierarchy at the call site and only happened to
+    agree with it; these pin the actual loop behaviour for rules 1, 3 and 4."""
+
+    async def _user(self, client) -> str:
+        return (await client.get("/api/auth/me")).json()["id"]
+
+    async def test_an_active_tagged_lorebook_injects_without_its_tag(
+        self, admin_client
+    ):
+        client, _, _ = admin_client
+        uid = await self._user(client)
+        async with TestSessionLocal() as db:
+            await _make_book(db, uid, marker="MARKET", tag="market", is_active=True)
+            await db.commit()
+
+        assert await _injected(uid, "MARKET")
+
+    async def test_an_inactive_tagged_lorebook_injects_only_with_its_tag(
+        self, admin_client
+    ):
+        client, _, _ = admin_client
+        uid = await self._user(client)
+        async with TestSessionLocal() as db:
+            await _make_book(db, uid, marker="MARKET", tag="market", is_active=False)
+            await db.commit()
+
+        assert not await _injected(uid, "MARKET")
+        assert not await _injected(uid, "MARKET", tags=tags_for("<#cantrip-dice#>"))
+        assert await _injected(uid, "MARKET", tags=tags_for("<#lore-market#>"))
+
+    async def test_an_inactive_untagged_lorebook_never_injects(self, admin_client):
+        client, _, _ = admin_client
+        uid = await self._user(client)
+        async with TestSessionLocal() as db:
+            await _make_book(db, uid, marker="GHOST", tag="", is_active=False)
+            await db.commit()
+
+        assert not await _injected(uid, "GHOST")
+        assert not await _injected(uid, "GHOST", tags=tags_for("<#lore-market#>"))

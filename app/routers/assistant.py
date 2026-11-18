@@ -367,6 +367,87 @@ async def list_conversations(
     return {"conversations": await store.list_conversations(current_user.id)}
 
 
+# Phase 29b: cantrip drafts queued from chat via <CANTRIP:description>. The
+# pane lists them, seeds a conversation from request + context, and the
+# existing validate/test/create tools do the work. These routes live under
+# /api/assistant so the assistant itself can never tool-call them.
+
+
+class DraftItem(BaseModel):
+    id: str
+    conversation_id: str
+    request_text: str
+    context_text: str
+    status: str
+    outcome_note: str
+    created_at: str
+    updated_at: str
+
+
+class DraftUpdate(BaseModel):
+    status: str
+
+
+def _draft_to_item(row: Any) -> DraftItem:
+    return DraftItem(
+        id=row.id,
+        conversation_id=row.conversation_id,
+        request_text=row.request_text,
+        context_text=row.context_text,
+        status=row.status,
+        outcome_note=row.outcome_note,
+        created_at=row.created_at.isoformat() if row.created_at else "",
+        updated_at=row.updated_at.isoformat() if row.updated_at else "",
+    )
+
+
+@router.get("/drafts")
+async def list_drafts(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    from app.models.cantrip_request import CantripRequest
+
+    rows = (
+        await db.execute(
+            select(CantripRequest)
+            .where(CantripRequest.user_id == current_user.id)
+            .order_by(CantripRequest.created_at.desc())
+            .limit(50)
+        )
+    ).scalars().all()
+    return {"drafts": [_draft_to_item(r) for r in rows]}
+
+
+@router.patch("/drafts/{draft_id}")
+async def update_draft(
+    draft_id: str,
+    req: DraftUpdate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    from app.models.cantrip_request import CantripRequest
+
+    if req.status not in {"started", "installed", "dismissed", "failed"}:
+        raise HTTPException(status_code=422, detail="Invalid draft status")
+
+    row = (
+        await db.execute(
+            select(CantripRequest).where(
+                CantripRequest.id == draft_id,
+                CantripRequest.user_id == current_user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Draft not found")
+
+    row.status = req.status
+    await db.commit()
+    await db.refresh(row)
+    return _draft_to_item(row)
+
+
 @router.post("/conversations", status_code=status.HTTP_201_CREATED)
 async def create_conversation(
     current_user: Annotated[User, Depends(get_current_user)],

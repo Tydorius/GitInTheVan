@@ -25,7 +25,7 @@ _MIGRATION_LOCK_ID = 784523
 MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
     (
         "001_add_lorebook_is_active",
-        "ALTER TABLE lorebooks ADD COLUMN is_active BOOLEAN DEFAULT 1 NOT NULL;",
+        "ALTER TABLE lorebooks ADD COLUMN is_active BOOLEAN DEFAULT TRUE NOT NULL;",
     ),
     (
         "002_add_endpoint_api_base_path",
@@ -34,7 +34,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
     (
         "003_add_user_settings_verification_fields",
         """
-        ALTER TABLE user_settings ADD COLUMN verification_enabled BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN verification_enabled BOOLEAN DEFAULT FALSE NOT NULL;
         ALTER TABLE user_settings ADD COLUMN verification_endpoint_id VARCHAR(36);
         ALTER TABLE user_settings ADD COLUMN verification_model VARCHAR(128) DEFAULT '' NOT NULL;
         """,
@@ -42,8 +42,8 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
     (
         "004_add_user_settings_ux_fields",
         """
-        ALTER TABLE user_settings ADD COLUMN preserve_thinking BOOLEAN DEFAULT 1 NOT NULL;
-        ALTER TABLE user_settings ADD COLUMN gitv_status BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN preserve_thinking BOOLEAN DEFAULT TRUE NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN gitv_status BOOLEAN DEFAULT FALSE NOT NULL;
         ALTER TABLE user_settings ADD COLUMN simulated_streaming_speed INTEGER DEFAULT 0 NOT NULL;
         """,
     ),
@@ -129,7 +129,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
     (
         "008_add_user_settings_summarization_fields",
         """
-        ALTER TABLE user_settings ADD COLUMN summarization_enabled BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN summarization_enabled BOOLEAN DEFAULT FALSE NOT NULL;
         ALTER TABLE user_settings ADD COLUMN summarization_endpoint_id VARCHAR(36);
         ALTER TABLE user_settings ADD COLUMN summarization_model VARCHAR(128) DEFAULT '' NOT NULL;
         ALTER TABLE user_settings ADD COLUMN summarization_token_threshold INTEGER DEFAULT 8000 NOT NULL;
@@ -145,26 +145,26 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
     (
         "010_add_cantrip_position_flags",
         """
-        ALTER TABLE cantrips ADD COLUMN run_pre_driver BOOLEAN DEFAULT 1 NOT NULL;
-        ALTER TABLE cantrips ADD COLUMN run_driver_callable BOOLEAN DEFAULT 0 NOT NULL;
-        ALTER TABLE cantrips ADD COLUMN run_pre_navigator BOOLEAN DEFAULT 0 NOT NULL;
-        ALTER TABLE cantrips ADD COLUMN run_post_navigator BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE cantrips ADD COLUMN run_pre_driver BOOLEAN DEFAULT TRUE NOT NULL;
+        ALTER TABLE cantrips ADD COLUMN run_driver_callable BOOLEAN DEFAULT FALSE NOT NULL;
+        ALTER TABLE cantrips ADD COLUMN run_pre_navigator BOOLEAN DEFAULT FALSE NOT NULL;
+        ALTER TABLE cantrips ADD COLUMN run_post_navigator BOOLEAN DEFAULT FALSE NOT NULL;
         """,
     ),
     (
         "011_add_lorebook_position_flags",
         """
-        ALTER TABLE lorebooks ADD COLUMN run_pre_driver BOOLEAN DEFAULT 1 NOT NULL;
-        ALTER TABLE lorebooks ADD COLUMN run_driver_callable BOOLEAN DEFAULT 0 NOT NULL;
-        ALTER TABLE lorebooks ADD COLUMN run_pre_navigator BOOLEAN DEFAULT 0 NOT NULL;
-        ALTER TABLE lorebooks ADD COLUMN run_post_navigator BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE lorebooks ADD COLUMN run_pre_driver BOOLEAN DEFAULT TRUE NOT NULL;
+        ALTER TABLE lorebooks ADD COLUMN run_driver_callable BOOLEAN DEFAULT FALSE NOT NULL;
+        ALTER TABLE lorebooks ADD COLUMN run_pre_navigator BOOLEAN DEFAULT FALSE NOT NULL;
+        ALTER TABLE lorebooks ADD COLUMN run_post_navigator BOOLEAN DEFAULT FALSE NOT NULL;
         """,
     ),
     (
         "012_add_user_settings_forbidden_words_fields",
         """
-        ALTER TABLE user_settings ADD COLUMN forbidden_words_enabled BOOLEAN DEFAULT 0 NOT NULL;
-        ALTER TABLE user_settings ADD COLUMN forbidden_words_case_sensitive BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN forbidden_words_enabled BOOLEAN DEFAULT FALSE NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN forbidden_words_case_sensitive BOOLEAN DEFAULT FALSE NOT NULL;
         ALTER TABLE user_settings ADD COLUMN driver_callable_turns INTEGER DEFAULT 1 NOT NULL;
         """,
     ),
@@ -175,7 +175,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             id VARCHAR(36) PRIMARY KEY,
             user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             phrase TEXT NOT NULL,
-            is_regex BOOLEAN DEFAULT 0 NOT NULL,
+            is_regex BOOLEAN DEFAULT FALSE NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
         """,
@@ -183,7 +183,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
     (
         "014_add_user_is_disabled",
         """
-        ALTER TABLE users ADD COLUMN is_disabled BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE users ADD COLUMN is_disabled BOOLEAN DEFAULT FALSE NOT NULL;
         """,
     ),
     (
@@ -197,7 +197,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
         "016_add_bypass_and_prefill_settings",
         """
         ALTER TABLE user_settings ADD COLUMN bypass_method VARCHAR(32) DEFAULT 'none' NOT NULL;
-        ALTER TABLE user_settings ADD COLUMN prefill_enabled BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN prefill_enabled BOOLEAN DEFAULT FALSE NOT NULL;
         """,
     ),
     (
@@ -217,13 +217,13 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             name VARCHAR(128) NOT NULL,
             description TEXT DEFAULT '' NOT NULL,
-            summarization_enabled BOOLEAN DEFAULT 1 NOT NULL,
+            summarization_enabled BOOLEAN DEFAULT TRUE NOT NULL,
             token_threshold INTEGER DEFAULT 0 NOT NULL,
             keep_recent INTEGER DEFAULT 0 NOT NULL,
             prompt TEXT DEFAULT '' NOT NULL,
             tag VARCHAR(128) DEFAULT '' NOT NULL,
             execution_order INTEGER DEFAULT 10 NOT NULL,
-            is_active BOOLEAN DEFAULT 1 NOT NULL,
+            is_active BOOLEAN DEFAULT TRUE NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
@@ -233,7 +233,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
     (
         "019_add_debug_mode_fields",
         """
-        ALTER TABLE user_settings ADD COLUMN debug_mode BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN debug_mode BOOLEAN DEFAULT FALSE NOT NULL;
         CREATE TABLE IF NOT EXISTS debug_exchanges (
             id VARCHAR(36) PRIMARY KEY,
             user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -258,7 +258,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
         "021_add_api_key_endpoint_mapping",
         """
         ALTER TABLE api_keys ADD COLUMN endpoint_id VARCHAR(36) REFERENCES endpoints(id) ON DELETE SET NULL;
-        ALTER TABLE api_keys ADD COLUMN is_active BOOLEAN DEFAULT 1 NOT NULL;
+        ALTER TABLE api_keys ADD COLUMN is_active BOOLEAN DEFAULT TRUE NOT NULL;
         ALTER TABLE api_keys ADD COLUMN last_used_at TIMESTAMP;
         """,
     ),
@@ -339,8 +339,8 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             name VARCHAR(128) NOT NULL,
             description TEXT DEFAULT '' NOT NULL,
             tag VARCHAR(128) DEFAULT '' NOT NULL,
-            is_public BOOLEAN DEFAULT 0 NOT NULL,
-            is_active BOOLEAN DEFAULT 1 NOT NULL,
+            is_public BOOLEAN DEFAULT FALSE NOT NULL,
+            is_active BOOLEAN DEFAULT TRUE NOT NULL,
             version VARCHAR(32) DEFAULT '1.0' NOT NULL,
             author VARCHAR(128) DEFAULT '' NOT NULL,
             global_llm_instructions TEXT DEFAULT '' NOT NULL,
@@ -358,7 +358,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             endpoint_id VARCHAR(36) REFERENCES endpoints(id) ON DELETE SET NULL,
             model_override VARCHAR(128) DEFAULT '' NOT NULL,
             driver_callable_turns INTEGER DEFAULT 0 NOT NULL,
-            verification_enabled BOOLEAN DEFAULT 0 NOT NULL,
+            verification_enabled BOOLEAN DEFAULT FALSE NOT NULL,
             verification_endpoint_id VARCHAR(36) REFERENCES endpoints(id) ON DELETE SET NULL,
             verification_model VARCHAR(128) DEFAULT '' NOT NULL,
             verification_max_retries INTEGER DEFAULT 2 NOT NULL,
@@ -373,7 +373,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             resource_type VARCHAR(16) NOT NULL,
             resource_id VARCHAR(36) NOT NULL,
             position VARCHAR(32) DEFAULT 'pre_driver' NOT NULL,
-            sticky BOOLEAN DEFAULT 0 NOT NULL,
+            sticky BOOLEAN DEFAULT FALSE NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
         CREATE INDEX IF NOT EXISTS ix_map_stage_resources_stage_id ON map_stage_resources (map_stage_id);
@@ -533,8 +533,8 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
     (
         "034_add_repo_local_global",
         """
-        ALTER TABLE linked_repos ADD COLUMN is_local BOOLEAN DEFAULT 0 NOT NULL;
-        ALTER TABLE linked_repos ADD COLUMN is_global BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE linked_repos ADD COLUMN is_local BOOLEAN DEFAULT FALSE NOT NULL;
+        ALTER TABLE linked_repos ADD COLUMN is_global BOOLEAN DEFAULT FALSE NOT NULL;
         """,
     ),
     (
@@ -588,7 +588,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
     (
         "039_add_backup_settings",
         """
-        ALTER TABLE admin_settings ADD COLUMN backup_schedule_enabled BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE admin_settings ADD COLUMN backup_schedule_enabled BOOLEAN DEFAULT FALSE NOT NULL;
         ALTER TABLE admin_settings ADD COLUMN backup_schedule_days VARCHAR(32) DEFAULT '' NOT NULL;
         ALTER TABLE admin_settings ADD COLUMN backup_schedule_time VARCHAR(8) DEFAULT '03:00' NOT NULL;
         ALTER TABLE admin_settings ADD COLUMN backup_retention_count INTEGER DEFAULT 7 NOT NULL;
@@ -940,9 +940,9 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
         ALTER TABLE user_settings ADD COLUMN assistant_parameters_json TEXT DEFAULT '[]' NOT NULL;
         ALTER TABLE user_settings ADD COLUMN assistant_permissions_json TEXT DEFAULT '{}' NOT NULL;
         ALTER TABLE user_settings ADD COLUMN assistant_context_tokens INTEGER DEFAULT 64000 NOT NULL;
-        ALTER TABLE admin_settings ADD COLUMN assistant_enabled BOOLEAN DEFAULT 1 NOT NULL;
-        ALTER TABLE admin_settings ADD COLUMN assistant_admin_reads_enabled BOOLEAN DEFAULT 0 NOT NULL;
-        ALTER TABLE admin_settings ADD COLUMN assistant_packs_enabled BOOLEAN DEFAULT 0 NOT NULL;
+        ALTER TABLE admin_settings ADD COLUMN assistant_enabled BOOLEAN DEFAULT TRUE NOT NULL;
+        ALTER TABLE admin_settings ADD COLUMN assistant_admin_reads_enabled BOOLEAN DEFAULT FALSE NOT NULL;
+        ALTER TABLE admin_settings ADD COLUMN assistant_packs_enabled BOOLEAN DEFAULT FALSE NOT NULL;
         ALTER TABLE admin_settings ADD COLUMN max_assistant_tool_calls_per_turn INTEGER DEFAULT 16 NOT NULL;
         ALTER TABLE admin_settings ADD COLUMN max_assistant_conversations INTEGER DEFAULT 20 NOT NULL;
         ALTER TABLE admin_settings ADD COLUMN max_assistant_tool_result_kb INTEGER DEFAULT 32 NOT NULL;
@@ -1026,7 +1026,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
     (
         "053_streaming_post_processing",
         """
-        ALTER TABLE user_settings ADD COLUMN streaming_post_processing_enabled BOOLEAN DEFAULT 1 NOT NULL;
+        ALTER TABLE user_settings ADD COLUMN streaming_post_processing_enabled BOOLEAN DEFAULT TRUE NOT NULL;
         """,
     ),
     # 0.31.0. Token metrics tracking: per-object prompt deltas and per-call LLM
@@ -1048,7 +1048,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
                 post_tokens INTEGER DEFAULT 0 NOT NULL,
                 difference INTEGER DEFAULT 0 NOT NULL,
                 context VARCHAR(16) DEFAULT 'live' NOT NULL,
-                is_retry BOOLEAN DEFAULT 0 NOT NULL,
+                is_retry BOOLEAN DEFAULT FALSE NOT NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             CREATE INDEX IF NOT EXISTS ix_prompt_object_metrics_lookup
@@ -1072,7 +1072,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
                 tokens_source VARCHAR(16) DEFAULT '' NOT NULL,
                 rule_id VARCHAR(36) DEFAULT '' NOT NULL,
                 context VARCHAR(16) DEFAULT 'live' NOT NULL,
-                is_retry BOOLEAN DEFAULT 0 NOT NULL,
+                is_retry BOOLEAN DEFAULT FALSE NOT NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             CREATE INDEX IF NOT EXISTS ix_llm_call_metrics_user_created
@@ -1093,7 +1093,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
                 post_tokens INTEGER DEFAULT 0 NOT NULL,
                 difference INTEGER DEFAULT 0 NOT NULL,
                 context VARCHAR(16) DEFAULT 'live' NOT NULL,
-                is_retry BOOLEAN DEFAULT 0 NOT NULL,
+                is_retry BOOLEAN DEFAULT FALSE NOT NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             CREATE INDEX IF NOT EXISTS ix_prompt_object_metrics_lookup
@@ -1117,7 +1117,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
                 tokens_source VARCHAR(16) DEFAULT '' NOT NULL,
                 rule_id VARCHAR(36) DEFAULT '' NOT NULL,
                 context VARCHAR(16) DEFAULT 'live' NOT NULL,
-                is_retry BOOLEAN DEFAULT 0 NOT NULL,
+                is_retry BOOLEAN DEFAULT FALSE NOT NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             CREATE INDEX IF NOT EXISTS ix_llm_call_metrics_user_created
@@ -1138,7 +1138,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
                 post_tokens INTEGER DEFAULT 0 NOT NULL,
                 difference INTEGER DEFAULT 0 NOT NULL,
                 context VARCHAR(16) DEFAULT 'live' NOT NULL,
-                is_retry BOOLEAN DEFAULT 0 NOT NULL,
+                is_retry BOOLEAN DEFAULT FALSE NOT NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
@@ -1163,7 +1163,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
                 tokens_source VARCHAR(16) DEFAULT '' NOT NULL,
                 rule_id VARCHAR(36) DEFAULT '' NOT NULL,
                 context VARCHAR(16) DEFAULT 'live' NOT NULL,
-                is_retry BOOLEAN DEFAULT 0 NOT NULL,
+                is_retry BOOLEAN DEFAULT FALSE NOT NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
@@ -1172,6 +1172,114 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             CREATE INDEX ix_llm_call_metrics_chat
                 ON llm_call_metrics (chat_id);
             ALTER TABLE admin_settings ADD COLUMN metrics_retention_days INTEGER DEFAULT 30 NOT NULL;
+            """,
+        },
+    ),
+    # 0.32.0. Phase 29: Chat Lexicon & Cantrip Drafts. Conversation bindings
+    # (fifth activation source -- one lexicon lorebook per chat, see
+    # app/models/conversation_lorebook_binding.py), the cantrip draft queue,
+    # the lexicon settings block and the doubly-gated auto-install flags.
+    (
+        "055_phase29_lexicon_and_drafts",
+        {
+            "sqlite": """
+            CREATE TABLE IF NOT EXISTS conversation_lorebook_bindings (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                conversation_id VARCHAR(256) NOT NULL,
+                identity_source VARCHAR(16) DEFAULT 'rolling_hash' NOT NULL,
+                lorebook_id VARCHAR(36) NOT NULL REFERENCES lorebooks(id) ON DELETE CASCADE,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, conversation_id)
+            );
+            CREATE INDEX IF NOT EXISTS ix_conversation_lorebook_bindings_user_id
+                ON conversation_lorebook_bindings (user_id);
+            CREATE INDEX IF NOT EXISTS ix_conversation_lorebook_bindings_conversation_id
+                ON conversation_lorebook_bindings (conversation_id);
+            CREATE TABLE IF NOT EXISTS cantrip_requests (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                conversation_id VARCHAR(256) DEFAULT '' NOT NULL,
+                request_text TEXT DEFAULT '' NOT NULL,
+                context_text TEXT DEFAULT '' NOT NULL,
+                status VARCHAR(16) DEFAULT 'pending' NOT NULL,
+                outcome_note TEXT DEFAULT '' NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS ix_cantrip_requests_user_status
+                ON cantrip_requests (user_id, status);
+            ALTER TABLE user_settings ADD COLUMN lexicon_enabled BOOLEAN DEFAULT TRUE NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN lexicon_endpoint_id VARCHAR(36);
+            ALTER TABLE user_settings ADD COLUMN lexicon_parameters_json TEXT DEFAULT '[]' NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN cantrip_auto_install_enabled BOOLEAN DEFAULT FALSE NOT NULL;
+            ALTER TABLE admin_settings ADD COLUMN assistant_cantrip_auto_install_allowed BOOLEAN DEFAULT FALSE NOT NULL;
+            """,
+            "postgresql": """
+            CREATE TABLE IF NOT EXISTS conversation_lorebook_bindings (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                conversation_id VARCHAR(256) NOT NULL,
+                identity_source VARCHAR(16) DEFAULT 'rolling_hash' NOT NULL,
+                lorebook_id VARCHAR(36) NOT NULL REFERENCES lorebooks(id) ON DELETE CASCADE,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, conversation_id)
+            );
+            CREATE INDEX IF NOT EXISTS ix_conversation_lorebook_bindings_user_id
+                ON conversation_lorebook_bindings (user_id);
+            CREATE INDEX IF NOT EXISTS ix_conversation_lorebook_bindings_conversation_id
+                ON conversation_lorebook_bindings (conversation_id);
+            CREATE TABLE IF NOT EXISTS cantrip_requests (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                conversation_id VARCHAR(256) DEFAULT '' NOT NULL,
+                request_text TEXT DEFAULT '' NOT NULL,
+                context_text TEXT DEFAULT '' NOT NULL,
+                status VARCHAR(16) DEFAULT 'pending' NOT NULL,
+                outcome_note TEXT DEFAULT '' NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS ix_cantrip_requests_user_status
+                ON cantrip_requests (user_id, status);
+            ALTER TABLE user_settings ADD COLUMN lexicon_enabled BOOLEAN DEFAULT TRUE NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN lexicon_endpoint_id VARCHAR(36);
+            ALTER TABLE user_settings ADD COLUMN lexicon_parameters_json TEXT DEFAULT '[]' NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN cantrip_auto_install_enabled BOOLEAN DEFAULT FALSE NOT NULL;
+            ALTER TABLE admin_settings ADD COLUMN assistant_cantrip_auto_install_allowed BOOLEAN DEFAULT FALSE NOT NULL;
+            """,
+            "mysql": """
+            CREATE TABLE IF NOT EXISTS conversation_lorebook_bindings (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL,
+                conversation_id VARCHAR(256) NOT NULL,
+                identity_source VARCHAR(16) DEFAULT 'rolling_hash' NOT NULL,
+                lorebook_id VARCHAR(36) NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, conversation_id),
+                KEY ix_conversation_lorebook_bindings_user_id (user_id),
+                KEY ix_conversation_lorebook_bindings_conversation_id (conversation_id),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (lorebook_id) REFERENCES lorebooks(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS cantrip_requests (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL,
+                conversation_id VARCHAR(256) DEFAULT '' NOT NULL,
+                request_text TEXT NOT NULL,
+                context_text TEXT NOT NULL,
+                status VARCHAR(16) DEFAULT 'pending' NOT NULL,
+                outcome_note TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                KEY ix_cantrip_requests_user_status (user_id, status),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            ALTER TABLE user_settings ADD COLUMN lexicon_enabled BOOLEAN DEFAULT TRUE NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN lexicon_endpoint_id VARCHAR(36);
+            ALTER TABLE user_settings ADD COLUMN lexicon_parameters_json TEXT DEFAULT '[]' NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN cantrip_auto_install_enabled BOOLEAN DEFAULT FALSE NOT NULL;
+            ALTER TABLE admin_settings ADD COLUMN assistant_cantrip_auto_install_allowed BOOLEAN DEFAULT FALSE NOT NULL;
             """,
         },
     ),

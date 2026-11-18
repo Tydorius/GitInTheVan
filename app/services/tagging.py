@@ -118,10 +118,15 @@ def should_activate_resource(
     4. **The Active flag is the blanket source.** It applies when no tag has
        spoken for this resource.
 
-    Every activation decision in the codebase must route through here. A caller
-    that decides for itself -- for example by filtering `is_active` in its query
-    before asking -- removes rule 3, because a resource excluded before the
-    question is asked can never be activated by its tag.
+    Every tag-vs-Active activation decision in the codebase routes through
+    here. A caller that decides for itself -- for example by filtering
+    `is_active` in its query before asking, or pre-checking
+    ``if resource.tag and tags:`` -- removes rule 3, because a resource excluded
+    before the question is asked can never be activated by its tag. The one
+    sanctioned exception: union sources that no tag can express (the Phase 29
+    conversation binding) resolve separately and OR their result in -- they only
+    ever add, so they cannot violate rules 1-4, and each is documented in
+    repo rule 19 and pinned in tests/test_activation_hierarchy.py.
     """
     for tag in tags:
         # A group tag stands in for the tags of everything in the group; the

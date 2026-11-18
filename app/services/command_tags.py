@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -31,12 +32,35 @@ VALID_COMMANDS = {"VERIFY", "SUMMARY", "FORBIDDEN", "MEMORY", "DRIVER", "MAP"}
 PERSIST_PREFIX = "__cmd_persist_"
 PERSIST_OVERRIDE_PREFIX = "__cmd_override_"
 
+# Phase 29 action commands: unlike the boolean switches above, these carry a
+# free-text argument (`<LEXICON:Ironhold>`, `<CANTRIP:a dice roller>`). The
+# argument may not contain angle brackets; first occurrence per command wins,
+# matching switch-command behaviour.
+ACTION_COMMAND_PATTERN = re.compile(r"<(LEXICON|CANTRIP):([^<>]*)>", re.IGNORECASE)
+
+# OOC notices GitV appends to replies so the player sees a pipeline result.
+# Only notices carrying this marker are stripped from later requests -- a
+# blanket "[OOC: ...]" strip would eat player-authored OOC notes, which are
+# common in roleplay and must reach the model.
+GITV_NOTICE_MARKER = "GitV:"
+GITV_NOTICE_PATTERN = re.compile(r"\[OOC: GitV:[^\]]*\]")
+
 
 @dataclass
 class ParsedCommand:
     command: str
     setting: str
     persist: bool
+
+    @property
+    def key(self) -> str:
+        return self.command.upper()
+
+
+@dataclass
+class ParsedActionCommand:
+    command: str
+    text: str
 
     @property
     def key(self) -> str:
@@ -87,6 +111,83 @@ def extract_command_tags_from_messages(
     return all_commands
 
 
+def parse_action_commands(text: str) -> list[ParsedActionCommand]:
+    if not text:
+        return []
+    commands: list[ParsedActionCommand] = []
+    seen: set[str] = set()
+    for match in ACTION_COMMAND_PATTERN.finditer(text):
+        cmd = match.group(1).upper()
+        if cmd in seen:
+            continue
+        seen.add(cmd)
+        commands.append(ParsedActionCommand(command=cmd, text=match.group(2).strip()))
+    return commands
+
+
+def extract_action_commands_from_messages(
+    messages: list[dict[str, Any]],
+) -> list[ParsedActionCommand]:
+    all_actions: list[ParsedActionCommand] = []
+    seen: set[str] = set()
+    for msg in messages:
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            text_parts = []
+            for item in content:
+                if isinstance(item, dict):
+                    text_parts.append(str(item.get("text", "")))
+            content = " ".join(text_parts)
+        elif not isinstance(content, str):
+            content = str(content) if content else ""
+        for action in parse_action_commands(content):
+            if action.command not in seen:
+                seen.add(action.command)
+                all_actions.append(action)
+    return all_actions
+
+
+def strip_action_commands(text: str) -> str:
+    if not text:
+        return text
+    return ACTION_COMMAND_PATTERN.sub("", text)
+
+
+def strip_gitv_notices(text: str) -> str:
+    if not text:
+        return text
+    return GITV_NOTICE_PATTERN.sub("", text)
+
+
+def _strip_from_messages(
+    messages: list[dict[str, Any]], strip_fn: Callable[[str], str]
+) -> list[dict[str, Any]]:
+    """Apply `strip_fn` to message text, including content-parts lists.
+
+    A client that sends structured content (JanitorAI image parts, tool parts)
+    has its text inside [{"type": ..., "text": ...}] dicts. Strippers that
+    rewrite only string content leave tags in those parts, leaking them
+    upstream -- load-bearing since action commands started carrying free text.
+    Parts without a text field (images) pass through untouched.
+    """
+    result = []
+    for msg in messages:
+        new_msg = msg.copy()
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            new_msg["content"] = strip_fn(content)
+        elif isinstance(content, list):
+            new_parts = []
+            for item in content:
+                if isinstance(item, dict) and isinstance(item.get("text"), str):
+                    new_parts.append({**item, "text": strip_fn(item["text"])})
+                else:
+                    new_parts.append(item)
+            new_msg["content"] = new_parts
+        result.append(new_msg)
+    return result
+
+
 def strip_command_tags(text: str) -> str:
     if not text:
         return text
@@ -94,14 +195,15 @@ def strip_command_tags(text: str) -> str:
 
 
 def strip_command_tags_from_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    result = []
-    for msg in messages:
-        new_msg = msg.copy()
-        content = msg.get("content", "")
-        if isinstance(content, str):
-            new_msg["content"] = strip_command_tags(content)
-        result.append(new_msg)
-    return result
+    return _strip_from_messages(messages, strip_command_tags)
+
+
+def strip_action_commands_from_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return _strip_from_messages(messages, strip_action_commands)
+
+
+def strip_gitv_notices_from_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return _strip_from_messages(messages, strip_gitv_notices)
 
 
 async def load_persistent_overrides(
