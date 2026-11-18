@@ -20,7 +20,7 @@ from app.services.llm_params import (
     parse_params,
     resolve,
 )
-from app.services.lorebook import inject_entries, match_entries
+from app.services.lorebook import inject_entries
 from app.services.routing import FailoverEndpoint, resolve_routing
 from app.services.verification import run_verification_loop
 
@@ -387,6 +387,29 @@ async def _forward_request_impl(
         # store writes from header-less clients silently dropped.
         body_json["_gitv_chat_id"] = internal_chat_id
 
+        # Monotonic turn index (0.35.0): message_count stalls once the client
+        # trims history, so stateful cantrips get a counter that only goes
+        # up. Keyed by the Phase-29 identity (client header wins, internal
+        # id fallback). Replays are excluded -- a replay must hold the
+        # conversation still between A and B, not advance it. A sandbox bumps
+        # its own forked id, like every other sandbox write. A counter
+        # failure must never fail the request.
+        from app.services.lexicon import resolve_action_identity
+
+        turn_conversation_id, _turn_id_src = resolve_action_identity(
+            request_headers or {}, internal_chat_id
+        )
+        if turn_conversation_id and not body_json.get("_gitv_replay"):
+            try:
+                from app.services.conversation import bump_turn_counter
+
+                body_json["_gitv_turn_index"] = await bump_turn_counter(
+                    user_id, turn_conversation_id
+                )
+            except Exception:
+                logger.exception("Turn counter bump failed; cantrips see turn_index 0")
+                body_json["_gitv_turn_index"] = 0
+
         # Phase 29b: <CANTRIP:description> queues a draft for the Assistant
         # pane (or auto-installs when both gates are on). Handled before the
         # map branch so drafts queue on map requests too; the resulting OOC
@@ -576,6 +599,44 @@ async def _forward_request_impl(
             _capture_cantrip_pass(
                 body_json, "pre_driver",
                 "Cantrips (Global Pass, Pre-Map)" if map_active else "Cantrips (Pre-Driver)",
+            )
+
+        # 0.35.0: lorebooks marked inject-after-cantrips are applied here,
+        # after the cantrip pass (cantrips could not read their entries) and
+        # before the map branch and conversation summarization, so Full-mode
+        # stage snapshots and the summarizer both still see them.
+        deferred_pending = body_json.pop("_gitv_deferred_lorebook_pending", False)
+        deferred_entries = body_json.pop("_gitv_deferred_lorebook_entries", None)
+        if deferred_entries:
+            await _flag_injection_content(
+                user_id, "\n".join(e.content for e in deferred_entries), "lorebook_injection"
+            )
+            body_json["messages"] = inject_entries(
+                body_json["messages"], deferred_entries
+            )
+            logger.info(
+                "Lorebook injection (post-cantrip): %d entries matched for user %s",
+                len(deferred_entries), user_id,
+            )
+        if debug_on and (deferred_pending or deferred_entries):
+            debug_capture(
+                body_json, "lorebook_injection_deferred", "Lorebook Injection (Post-Cantrip)",
+                detail=(
+                    f"{len(deferred_entries or [])} deferred entr"
+                    f"{'y' if len(deferred_entries or []) == 1 else 'ies'} injected after cantrips"
+                    if deferred_entries
+                    else "Deferred books active, no entries matched"
+                ),
+                metadata={
+                    "entries": [
+                        {
+                            "lorebook_name": e.lorebook_name,
+                            "entry_name": e.name,
+                            "position": e.position,
+                        }
+                        for e in (deferred_entries or [])
+                    ]
+                },
             )
 
         if map_active:
@@ -1089,64 +1150,96 @@ async def _apply_lorebook_injection(
                 ):
                     active_lorebooks.append(lb)
 
-            all_entries: list[dict] = []
-            for lb in active_lorebooks:
-                for entry in lb.entries:
-                    all_entries.append(
-                        {
-                            # Provenance for the debug trace's matched-entry
-                            # metadata and the per-entry metrics rows. Absent
-                            # since the lorebook engine shipped, which left
-                            # MatchedEntry.lorebook_id/entry_id always empty.
-                            "lorebook_id": lb.id,
-                            "lorebook_name": lb.name,
-                            "entry_id": entry.id,
-                            "name": entry.name,
-                            "keys": entry.keys,
-                            "secondary_keys": entry.secondary_keys,
-                            "content": entry.content,
-                            "position": entry.position,
-                            "insertion_order": entry.insertion_order,
-                            "is_constant": entry.is_constant,
-                            "is_selective": entry.is_selective,
-                            "is_disabled": entry.is_disabled,
-                            "character_limit": entry.character_limit,
-                        }
-                    )
-
-            if not all_entries:
+            if not any(lb.entries for lb in active_lorebooks):
                 return body_json
 
+            # Per-book matching (0.35.0): scan depth is a book property, and
+            # books marked inject-after-cantrips must be kept out of this
+            # pass's injection. Both buckets still sort by insertion_order
+            # (stable) so cross-book ordering matches the old flattened
+            # single-pass behavior exactly.
+            from app.services.lorebook import match_book_entries
+
             messages = body_json.get("messages", [])
-            matched = match_entries(messages, all_entries)
-            if matched:
+            pre_matched: list = []
+            deferred_matched: list = []
+            deferred_pending = False
+            for lb in active_lorebooks:
+                book_entries = [
+                    {
+                        # Provenance for the debug trace's matched-entry
+                        # metadata and the per-entry metrics rows. Absent
+                        # since the lorebook engine shipped, which left
+                        # MatchedEntry.lorebook_id/entry_id always empty.
+                        "lorebook_id": lb.id,
+                        "lorebook_name": lb.name,
+                        "entry_id": entry.id,
+                        "name": entry.name,
+                        "keys": entry.keys,
+                        "secondary_keys": entry.secondary_keys,
+                        "content": entry.content,
+                        "position": entry.position,
+                        "insertion_order": entry.insertion_order,
+                        "is_constant": entry.is_constant,
+                        "is_selective": entry.is_selective,
+                        "is_disabled": entry.is_disabled,
+                        "character_limit": entry.character_limit,
+                    }
+                    for entry in lb.entries
+                ]
+                book_matched = match_book_entries(messages, book_entries, lb.scan_depth)
+                if lb.inject_after_cantrips:
+                    deferred_pending = True
+                    deferred_matched.extend(book_matched)
+                else:
+                    pre_matched.extend(book_matched)
+
+            pre_matched.sort(key=lambda m: m.insertion_order)
+            deferred_matched.sort(key=lambda m: m.insertion_order)
+
+            if pre_matched:
                 await _flag_injection_content(
-                    user_id, "\n".join(e.content for e in matched), "lorebook_injection"
+                    user_id, "\n".join(e.content for e in pre_matched), "lorebook_injection"
                 )
-                body_json["messages"] = inject_entries(messages, matched)
+                body_json["messages"] = inject_entries(messages, pre_matched)
                 logger.info(
-                    "Lorebook injection: %d entries matched for user %s", len(matched), user_id
+                    "Lorebook injection: %d entries matched for user %s", len(pre_matched), user_id
                 )
+
+            if deferred_matched:
+                # Applied by the caller right after the global cantrip pass:
+                # cantrips read context.chat.last_messages, so entries not yet
+                # injected at cantrip time are invisible to them -- which is
+                # the entire point of the flag.
+                body_json["_gitv_deferred_lorebook_entries"] = deferred_matched
+            if deferred_pending:
+                body_json["_gitv_deferred_lorebook_pending"] = True
 
             # Which entries matched was computed here and thrown away, so the
             # Debug timeline could only report a tag list. Stash it for the
             # caller's capture rather than widening the return type, which has
             # several call sites.
-            matched_detail = [
-                {
+            def _detail(e, deferred: bool) -> dict:
+                return {
                     "lorebook_id": e.lorebook_id,
                     "lorebook_name": e.lorebook_name,
                     "entry_id": e.entry_id,
                     "entry_name": e.name,
                     "position": e.position,
                     "tokens": max(1, len(e.content) // 4),
+                    "deferred": deferred,
                 }
-                for e in matched
-            ]
+
+            matched_detail = (
+                [_detail(e, False) for e in pre_matched]
+                + [_detail(e, True) for e in deferred_matched]
+            )
             body_json["_gitv_matched_entries"] = matched_detail
 
             # Per-entry prompt metrics (settled decision: granularity is the
             # entry, with the book id on parent_id so aggregates roll up).
+            # Deferred entries are recorded here too: they reach the prompt a
+            # few stages later, but they reach it.
             from app.services.metrics import record_prompt_object
             for e in matched_detail:
                 record_prompt_object(

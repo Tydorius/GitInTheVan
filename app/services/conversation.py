@@ -197,3 +197,81 @@ async def save_memories_for_chat(
                 )
 
         await db.commit()
+
+
+async def bump_turn_counter(user_id: str, conversation_id: str) -> int:
+    """Advance and return the monotonic per-conversation turn index.
+
+    `context.chat.message_count` is len(messages) of the client request, so
+    it stops growing once the client trims history. This counts client
+    requests instead and only ever goes up. One client request = one
+    increment; internal rounds (verification retries, driver-callable loops,
+    map stages) never call it. Keyed by the Phase-29 conversation identity,
+    the same id lexicon bindings and chat_data scoping use.
+
+    Concurrency: the increment is a single atomic UPDATE. Two truly parallel
+    requests in one chat can observe the same index under a race; that never
+    decreases the counter and is acceptable for roleplay, where one chat has
+    one writer.
+    """
+    from datetime import UTC, datetime
+
+    from sqlalchemy import update
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models.conversation_turn_counter import ConversationTurnCounter
+
+    async with async_session() as db:
+        await db.execute(
+            update(ConversationTurnCounter)
+            .where(
+                ConversationTurnCounter.user_id == user_id,
+                ConversationTurnCounter.conversation_id == conversation_id,
+            )
+            .values(
+                turn_count=ConversationTurnCounter.turn_count + 1,
+                updated_at=datetime.now(UTC),
+            )
+        )
+        row = (await db.execute(
+            select(ConversationTurnCounter.turn_count).where(
+                ConversationTurnCounter.user_id == user_id,
+                ConversationTurnCounter.conversation_id == conversation_id,
+            )
+        )).scalar_one_or_none()
+
+        if row is None:
+            # First request in this conversation. A concurrent first request
+            # can win the insert; the loser retries the update path once.
+            db.add(
+                ConversationTurnCounter(
+                    user_id=user_id, conversation_id=conversation_id, turn_count=1
+                )
+            )
+            try:
+                await db.commit()
+                return 1
+            except IntegrityError:
+                await db.rollback()
+                await db.execute(
+                    update(ConversationTurnCounter)
+                    .where(
+                        ConversationTurnCounter.user_id == user_id,
+                        ConversationTurnCounter.conversation_id == conversation_id,
+                    )
+                    .values(
+                        turn_count=ConversationTurnCounter.turn_count + 1,
+                        updated_at=datetime.now(UTC),
+                    )
+                )
+                await db.commit()
+                row = (await db.execute(
+                    select(ConversationTurnCounter.turn_count).where(
+                        ConversationTurnCounter.user_id == user_id,
+                        ConversationTurnCounter.conversation_id == conversation_id,
+                    )
+                )).scalar_one()
+                return row
+
+        await db.commit()
+        return row

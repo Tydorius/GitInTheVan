@@ -1291,6 +1291,65 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
         ALTER TABLE map_stages ADD COLUMN condition_json TEXT DEFAULT '' NOT NULL;
         """,
     ),
+    (
+        "057_lorebook_ordering_scan_depth_turn_counters",
+        # Lorebook & Chat Context (0.35.0): inject-after-cantrips ordering,
+        # per-book scan depth, and the monotonic per-conversation turn
+        # counter. PostgreSQL needs TRUE/FALSE boolean defaults (no implicit
+        # int-to-bool cast); MySQL declares its keys inline.
+        {
+            "sqlite": """
+            ALTER TABLE lorebooks ADD COLUMN inject_after_cantrips BOOLEAN DEFAULT 0 NOT NULL;
+            ALTER TABLE lorebooks ADD COLUMN scan_depth INTEGER DEFAULT 0 NOT NULL;
+            CREATE TABLE IF NOT EXISTS conversation_turn_counters (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                conversation_id VARCHAR(256) NOT NULL,
+                turn_count INTEGER DEFAULT 0 NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, conversation_id)
+            );
+            CREATE INDEX IF NOT EXISTS ix_conversation_turn_counters_user_id
+                ON conversation_turn_counters (user_id);
+            CREATE INDEX IF NOT EXISTS ix_conversation_turn_counters_conversation_id
+                ON conversation_turn_counters (conversation_id);
+            """,
+            "postgresql": """
+            ALTER TABLE lorebooks ADD COLUMN inject_after_cantrips BOOLEAN DEFAULT FALSE NOT NULL;
+            ALTER TABLE lorebooks ADD COLUMN scan_depth INTEGER DEFAULT 0 NOT NULL;
+            CREATE TABLE IF NOT EXISTS conversation_turn_counters (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                conversation_id VARCHAR(256) NOT NULL,
+                turn_count INTEGER DEFAULT 0 NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, conversation_id)
+            );
+            CREATE INDEX IF NOT EXISTS ix_conversation_turn_counters_user_id
+                ON conversation_turn_counters (user_id);
+            CREATE INDEX IF NOT EXISTS ix_conversation_turn_counters_conversation_id
+                ON conversation_turn_counters (conversation_id);
+            """,
+            "mysql": """
+            ALTER TABLE lorebooks ADD COLUMN inject_after_cantrips BOOLEAN DEFAULT 0 NOT NULL;
+            ALTER TABLE lorebooks ADD COLUMN scan_depth INTEGER DEFAULT 0 NOT NULL;
+            CREATE TABLE IF NOT EXISTS conversation_turn_counters (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL,
+                conversation_id VARCHAR(256) NOT NULL,
+                turn_count INTEGER DEFAULT 0 NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, conversation_id),
+                KEY ix_conversation_turn_counters_user_id (user_id),
+                KEY ix_conversation_turn_counters_conversation_id (conversation_id),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            """,
+        },
+    ),
 ]
 
 

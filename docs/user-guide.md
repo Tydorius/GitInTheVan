@@ -18,8 +18,9 @@ GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:
 > except the Metrics page, which dates from **2026-11-18 against 0.31.0**, the
 > Chat Lexicon settings card, the cantrip auto-install admin toggle and the
 > Assistant pane's cantrip drafts list, which date from **2026-11-18 against
-> 0.32.0**, and the Maps stage-editor options, which date from
-> **2026-11-18 against 0.33.0**.
+> 0.32.0**, the Maps stage-editor options, which date from **2026-11-18
+> against 0.33.0**, and the lorebook Positions editor, which dates from
+> **2026-11-18 against 0.35.0**.
 > A few images of individual dialogs and panels still date from **2026-07-08,
 > against 0.16.x** — those show the tool working the same way, but the
 > surrounding UI may have moved on.
@@ -458,6 +459,11 @@ Cantrips have access to the JanitorAI context object:
 const lastMessage = context.chat.last_message;
 const messageCount = context.chat.message_count;
 
+// A turn counter that only ever goes up, unlike message_count:
+// clients that trim history stall message_count, but every client
+// request still advances turn_index by one.
+const turn = context.chat.turn_index;
+
 // Append to the card's fields...
 context.character.scenario += " Additional world context.";
 context.character.personality += ", additional trait";
@@ -465,6 +471,13 @@ context.character.personality += ", additional trait";
 // ...or replace them wholesale, exactly like on JanitorAI
 context.character.scenario = "The storm has arrived.";
 ```
+
+**`turn_index` details.** It counts client requests in this conversation: one per
+request, whether or not the model regenerated, and never during internal rounds
+(verification retries, driver-callable tool loops, map stages). Replays hold it
+still; sandbox forks have their own counter starting at 1. It is `0` when no
+conversation identity could be resolved. The counter is server-side state —
+cantrips cannot write it.
 
 **How character fields behave.** On requests from JanitorAI, the system prompt carries the character card in tagged sections (`<Char's Persona>`, `<Scenario>`, `<example_dialogs>`). GitInTheVan seeds the three mutable fields with the card's **real values** — your cantrip reads the actual personality/scenario/example dialogs, and its final value is spliced back into the card's own section:
 
@@ -657,6 +670,27 @@ Lorebooks inject at one point in the pipeline: **Pre-Driver**, before the reques
 The four position toggles shown on some older installs (Pre-Driver, Driver-Callable,
 Pre-Navigator, Post-Navigator) were never wired up for lorebooks and have no effect; only
 cantrips run at the other positions.
+
+![Lorebook Positions Editor](media/gitv-lorebook-positions.png)
+
+*The Positions editor with the 0.35.0 options (Inject After Cantrips, Scan only the newest N), captured 2026-11-18.*
+
+Two options on the Pipeline Positions editor (the **Edit Positions** button on a lorebook)
+*are* wired:
+
+- **Inject After Cantrips**: cantrips read the message list (via `context.chat.last_messages`)
+  before it reaches the model. With this on, the book's entries are injected *after* cantrips
+  run — the entries still reach the model in the same request, but cantrips cannot read them.
+  Use it for entries with spoilers or mechanics that scripts should not see. The injection
+  happens before conversation summarization and before map stage snapshots, so nothing else
+  changes. The option is per-install: map exports and packs do not carry it (imported copies
+  start with it off), matching every other book-level setting.
+- **Scan only the newest N messages**: off by default (the whole conversation is scanned).
+  When on (the field pre-fills 10), this book's keywords match against only the newest N
+  messages — a keyword mentioned in ancient history no longer triggers the entry, and long
+  chats stop paying a full-history scan per key. Constant entries always apply regardless of
+  the window. The window counts messages of the request as the book sees it, including
+  earlier injections on map stages.
 
 ---
 

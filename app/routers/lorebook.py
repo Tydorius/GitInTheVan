@@ -73,6 +73,8 @@ class LorebookCreate(BaseModel):
     run_driver_callable: bool = False
     run_pre_navigator: bool = False
     run_post_navigator: bool = False
+    inject_after_cantrips: bool = False
+    scan_depth: int = 0
     budget_weight: float = 1.0
 
 
@@ -87,6 +89,8 @@ class LorebookUpdate(BaseModel):
     run_driver_callable: bool | None = None
     run_pre_navigator: bool | None = None
     run_post_navigator: bool | None = None
+    inject_after_cantrips: bool | None = None
+    scan_depth: int | None = None
     budget_weight: float | None = None
 
 
@@ -102,6 +106,8 @@ class LorebookResponse(BaseModel):
     run_driver_callable: bool
     run_pre_navigator: bool
     run_post_navigator: bool
+    inject_after_cantrips: bool
+    scan_depth: int
     budget_weight: float
     entries: list[EntryResponse]
 
@@ -118,6 +124,8 @@ class LorebookListItem(BaseModel):
     run_driver_callable: bool
     run_pre_navigator: bool
     run_post_navigator: bool
+    inject_after_cantrips: bool
+    scan_depth: int
     budget_weight: float
     entry_count: int
 
@@ -201,6 +209,8 @@ async def list_lorebooks(
                 run_pre_navigator=lb.run_pre_navigator,
                 run_post_navigator=lb.run_post_navigator,
                 budget_weight=lb.budget_weight,
+                inject_after_cantrips=lb.inject_after_cantrips,
+                scan_depth=lb.scan_depth,
                 entry_count=len(lb.entries),
             )
             for lb in lorebooks
@@ -234,6 +244,8 @@ async def list_public_lorebooks(
                 run_pre_navigator=lb.run_pre_navigator,
                 run_post_navigator=lb.run_post_navigator,
                 budget_weight=lb.budget_weight,
+                inject_after_cantrips=lb.inject_after_cantrips,
+                scan_depth=lb.scan_depth,
                 entry_count=len(lb.entries),
             )
             for lb in lorebooks
@@ -271,6 +283,8 @@ async def get_lorebook(
         run_pre_navigator=lorebook.run_pre_navigator,
         run_post_navigator=lorebook.run_post_navigator,
         budget_weight=lorebook.budget_weight,
+        inject_after_cantrips=lorebook.inject_after_cantrips,
+        scan_depth=lorebook.scan_depth,
         entries=[_entry_to_response(e) for e in lorebook.entries],
     )
 
@@ -294,6 +308,8 @@ async def create_lorebook(
         run_pre_navigator=req.run_pre_navigator,
         run_post_navigator=req.run_post_navigator,
         budget_weight=req.budget_weight,
+        inject_after_cantrips=req.inject_after_cantrips,
+        scan_depth=max(0, req.scan_depth),
     )
     db.add(lorebook)
     await db.commit()
@@ -311,6 +327,8 @@ async def create_lorebook(
         run_pre_navigator=lorebook.run_pre_navigator,
         run_post_navigator=lorebook.run_post_navigator,
         budget_weight=lorebook.budget_weight,
+        inject_after_cantrips=lorebook.inject_after_cantrips,
+        scan_depth=lorebook.scan_depth,
         entries=[],
     )
 
@@ -358,6 +376,10 @@ async def update_lorebook(
         lorebook.run_post_navigator = req.run_post_navigator
     if req.llm_instructions is not None:
         lorebook.llm_instructions = req.llm_instructions
+    if req.inject_after_cantrips is not None:
+        lorebook.inject_after_cantrips = req.inject_after_cantrips
+    if req.scan_depth is not None:
+        lorebook.scan_depth = max(0, req.scan_depth)
     if req.budget_weight is not None:
         lorebook.budget_weight = req.budget_weight
 
@@ -376,6 +398,8 @@ async def update_lorebook(
         run_pre_navigator=lorebook.run_pre_navigator,
         run_post_navigator=lorebook.run_post_navigator,
         budget_weight=lorebook.budget_weight,
+        inject_after_cantrips=lorebook.inject_after_cantrips,
+        scan_depth=lorebook.scan_depth,
         entries=[],
     )
 
@@ -633,6 +657,8 @@ async def import_lorebook(
         run_pre_navigator=lorebook.run_pre_navigator,
         run_post_navigator=lorebook.run_post_navigator,
         budget_weight=lorebook.budget_weight,
+        inject_after_cantrips=lorebook.inject_after_cantrips,
+        scan_depth=lorebook.scan_depth,
         entries=[_entry_to_response(e) for e in lorebook.entries],
     )
 

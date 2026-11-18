@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -31,6 +31,14 @@ class Lorebook(Base):
     run_driver_callable: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     run_pre_navigator: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     run_post_navigator: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # 0.35.0: defer this book's injection until after the pre-driver cantrip
+    # pass, so cantrips cannot read its entries via context.chat.last_messages.
+    inject_after_cantrips: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
+    # 0.35.0: 0 = scan the whole conversation (previous behavior); N > 0 =
+    # match this book's keys against only the newest N messages.
+    scan_depth: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     budget_weight: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False

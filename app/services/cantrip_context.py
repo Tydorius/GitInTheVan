@@ -163,6 +163,7 @@ def build_context(
     first_message: str = "",
     alternate_greetings: list[str] | None = None,
     request: dict[str, Any] | None = None,
+    turn_index: int = 0,
 ) -> dict[str, Any]:
     last_messages = []
     for msg in messages:
@@ -193,6 +194,10 @@ def build_context(
             "last_message": last_message,
             "last_messages": last_messages,
             "message_count": message_count,
+            # Monotonic per-conversation request counter (0.35.0).
+            # message_count stalls once the client trims history; turn_index
+            # only ever goes up. 0 when no counter could be resolved.
+            "turn_index": turn_index,
             "conversation_id": conversation_id,
             "user_name": user_name,
             "message_created_at": message_created_at,
@@ -254,6 +259,10 @@ def extract_context_params(body: dict[str, Any], request_headers: dict[str, str]
         "map_stage_name": stage_info.get("name", ""),
         "map_stage_endpoint": stage_info.get("endpoint", ""),
     }
+
+    # The monotonic turn index, stamped by the proxy before the first cantrip
+    # pass. 0 when no counter could be resolved (replays, unauthenticated).
+    params["turn_index"] = int(body.get("_gitv_turn_index", 0) or 0)
 
     return params
 
