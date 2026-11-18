@@ -39,6 +39,19 @@ notes, in `Planning/security-control-document.md` (2026-11-18 section).
 
 ### Fixed
 
+- **Every internal LLM call failed on keyless endpoints** (local LLMs, LAN
+  gateways): the judge, both summarizers, the scenario summarizer, lexicon
+  compiles and both map-stage forwards built
+  `Authorization: Bearer <key>` unconditionally, and `Bearer ` with an empty
+  credential is an illegal header value — httpcore rejected it before the
+  request left the machine. Since Phase 24 unified these calls, keyless
+  endpoints silently lost summarization, verification judging and lexicon
+  compiles, and keyless map stages failed their whole chain. All six sites
+  now share one guarded `auth_headers()` helper (the driver path always had
+  the guard). Found by the cross-platform harness log scan — its first run
+  since 0.20.2; keyless endpoints are now part of its coverage by
+  construction. Mutation-verified; keyless + keyed control pairs added for
+  the summarizer and the judge.
 - **`cryptography` was an undeclared direct dependency** — `ssl_manager.py`
   imports it directly, but it only rode in via
   `python-jose[cryptography]`. Removing jose surfaced it; it is now a

@@ -204,7 +204,7 @@ async def _side_llm_call(
     """
     from app.services.debug import debug_capture, debug_capture_response
     from app.services.debug_metrics import PURPOSE_LEXICON, record_llm_call
-    from app.services.proxy import _build_upstream_url, _do_forward
+    from app.services.proxy import _build_upstream_url, _do_forward, auth_headers
 
     for attempt, endpoint in enumerate(chain):
         model = endpoint.default_model or "gpt-4"
@@ -212,10 +212,7 @@ async def _side_llm_call(
         url = _build_upstream_url(
             endpoint.base_url, "/v1/chat/completions", endpoint.api_base_path or ""
         )
-        headers = {
-            "Authorization": f"Bearer {endpoint.api_key}",
-            "Content-Type": "application/json",
-        }
+        headers = auth_headers(endpoint.api_key)
         body: dict[str, Any] = {
             "model": model,
             "messages": messages,

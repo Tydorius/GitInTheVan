@@ -555,14 +555,11 @@ async def _verify_stage(
 
     from app.services.debug_metrics import PURPOSE_VERIFICATION, record_llm_call
     from app.services.metrics import set_metrics_retry
-    from app.services.proxy import _build_upstream_url, _do_forward
+    from app.services.proxy import _build_upstream_url, _do_forward, auth_headers
 
     messages = await _build_stage_verification_body(content, stage)
 
-    headers = {
-        "Authorization": f"Bearer {v_endpoint.api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = auth_headers(v_endpoint.api_key)
     url = _build_upstream_url(
         v_endpoint.base_url, "/v1/chat/completions", v_endpoint.api_base_path or ""
     )
@@ -719,17 +716,14 @@ async def _forward_stage_llm(
     forward_body = apply_to_body(forward_body, configured or {})
 
     from app.services.debug_metrics import PURPOSE_MAP_STAGE, record_llm_call
-    from app.services.proxy import _build_upstream_url, _do_forward
+    from app.services.proxy import _build_upstream_url, _do_forward, auth_headers
 
     for idx, endpoint in enumerate(endpoints):
         url = _build_upstream_url(
             endpoint.base_url, "/v1/chat/completions", endpoint.api_base_path or ""
         )
 
-        headers = {
-            "Authorization": f"Bearer {endpoint.api_key}",
-            "Content-Type": "application/json",
-        }
+        headers = auth_headers(endpoint.api_key)
 
         body_bytes = json.dumps(forward_body).encode()
 

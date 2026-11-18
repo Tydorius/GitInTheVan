@@ -86,6 +86,18 @@ def _build_forward_headers(request: Request, api_key: str) -> dict[str, str]:
     return headers
 
 
+def auth_headers(api_key: str) -> dict[str, str]:
+    """Headers for internal LLM calls (judges, summarizers, map stages,
+    lexicon compiles). A keyless endpoint (local LLMs, LAN gateways) must
+    not get an Authorization header at all: httpcore rejects `Bearer ` with
+    an empty credential as an illegal header value, so the unconditional
+    form failed every internal call on keyless endpoints."""
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
+
+
 def _build_upstream_url(base_url: str, path: str, api_base_path: str = "") -> str:
     if api_base_path:
         if api_base_path.endswith("/chat/completions"):

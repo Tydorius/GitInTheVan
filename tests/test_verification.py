@@ -192,6 +192,33 @@ class TestCheckResponse:
         assert calls[0]["body"]["model"] == "gemini-2.0-flash"
 
     @pytest.mark.asyncio
+    async def test_a_keyless_endpoint_sends_no_authorization_header(self):
+        """`Bearer ` with an empty credential is an illegal header value in
+        httpcore, so the judge call raised before reaching the network on
+        keyless endpoints (local LLMs, LAN gateways) — the rule then reported
+        as failed rather than approved, correctly, but could never actually
+        run. Found by the harness log scan, 2026-11-18."""
+        rule = _mock_rule()
+        endpoint = _mock_endpoint(api_key="")
+
+        patcher, calls = _forward_returning((_mock_verification_response(violation=False), 200))
+        with patcher:
+            await check_response("Clean response", [rule], endpoint, "test-model")
+
+        assert "Authorization" not in calls[0]["headers"]
+
+    @pytest.mark.asyncio
+    async def test_a_keyed_endpoint_still_sends_its_key(self):
+        rule = _mock_rule()
+        endpoint = _mock_endpoint(api_key="sk-real-key")
+
+        patcher, calls = _forward_returning((_mock_verification_response(violation=False), 200))
+        with patcher:
+            await check_response("Clean response", [rule], endpoint, "test-model")
+
+        assert calls[0]["headers"]["Authorization"] == "Bearer sk-real-key"
+
+    @pytest.mark.asyncio
     async def test_the_raw_path_is_unchanged_without_a_provider(self):
         """The control case: an endpoint on raw passthrough must still send
         exactly what it sent before, to the same URL."""

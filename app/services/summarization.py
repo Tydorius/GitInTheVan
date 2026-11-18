@@ -196,7 +196,7 @@ async def summarize_messages(
     """
     from app.services.debug import debug_capture
     from app.services.debug_metrics import PURPOSE_SUMMARIZER, record_llm_call
-    from app.services.proxy import _build_upstream_url, _do_forward
+    from app.services.proxy import _build_upstream_url, _do_forward, auth_headers
 
     def _degraded(detail: str) -> str:
         logger.warning("Summarization did not run: %s", detail)
@@ -224,10 +224,7 @@ async def summarize_messages(
     url = _build_upstream_url(
         endpoint.base_url, "/v1/chat/completions", endpoint.api_base_path or ""
     )
-    headers = {
-        "Authorization": f"Bearer {endpoint.api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = auth_headers(endpoint.api_key)
     # `temperature` is a default here, not a fixed value -- a configured
     # parameter at any layer overrides it.
     body: dict[str, Any] = {

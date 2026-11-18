@@ -117,7 +117,7 @@ async def _call_summarization_llm(
     body_json: dict[str, Any] | None = None,
 ) -> str | None:
     """Call a navigator LLM to summarize the scenario content."""
-    from app.services.proxy import _build_upstream_url, _do_forward, _do_forward_litellm
+    from app.services.proxy import _build_upstream_url, _do_forward, _do_forward_litellm, auth_headers
 
     async with async_session() as db:
         routing = await resolve_routing_by_rule(rule, user_id, db)
@@ -162,7 +162,7 @@ async def _call_summarization_llm(
         else:
             api_base_path = ""
             upstream_url = _build_upstream_url(base_url, "/v1/chat/completions", api_base_path)
-            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+            headers = auth_headers(api_key)
             response_data, status_code = await _do_forward(
                 "POST", upstream_url, headers, body_bytes, timeout, configured=params
             )

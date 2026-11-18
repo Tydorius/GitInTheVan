@@ -255,7 +255,7 @@ async def check_response(
     now marked `errored` and carries a note saying the rule did not run.
     """
     from app.services.debug_metrics import PURPOSE_VERIFICATION, record_llm_call
-    from app.services.proxy import _build_upstream_url, _do_forward
+    from app.services.proxy import _build_upstream_url, _do_forward, auth_headers
 
     judgments: list[VerificationJudgment] = []
     violations: list[VerificationJudgment] = []
@@ -310,10 +310,7 @@ async def check_response(
             url = _build_upstream_url(
                 candidate.base_url, "/v1/chat/completions", candidate.api_base_path
             )
-            headers = {
-                "Authorization": f"Bearer {candidate.api_key}",
-                "Content-Type": "application/json",
-            }
+            headers = auth_headers(candidate.api_key)
 
             started = time.monotonic()
             try:

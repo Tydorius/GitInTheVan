@@ -221,6 +221,35 @@ class TestSummarizeMessages:
         assert result == "The summary text."
 
     @pytest.mark.asyncio
+    async def test_a_keyless_endpoint_sends_no_authorization_header(self):
+        """`Bearer ` with an empty credential is an illegal header value in
+        httpcore, so the unconditional header failed every internal LLM call
+        on keyless endpoints (local LLMs, LAN gateways). Found by the
+        harness log scan, 2026-11-18; summarization had been silently
+        degrading to "return the old summary" on such endpoints."""
+        endpoint = _mock_endpoint(api_key="")
+
+        patcher, calls = _forward_returning((_mock_llm_response("Summary."), 200))
+        with patcher:
+            await summarize_messages(
+                [{"role": "user", "content": "hello"}], endpoint, "model-x", DEFAULT_PROMPT
+            )
+
+        assert "Authorization" not in calls[0]["headers"]
+
+    @pytest.mark.asyncio
+    async def test_a_keyed_endpoint_still_sends_its_key(self):
+        endpoint = _mock_endpoint(api_key="sk-real-key")
+
+        patcher, calls = _forward_returning((_mock_llm_response("Summary."), 200))
+        with patcher:
+            await summarize_messages(
+                [{"role": "user", "content": "hello"}], endpoint, "model-x", DEFAULT_PROMPT
+            )
+
+        assert calls[0]["headers"]["Authorization"] == "Bearer sk-real-key"
+
+    @pytest.mark.asyncio
     async def test_returns_existing_on_http_error(self):
         endpoint = _mock_endpoint()
         patcher, _ = _forward_returning(({"error": {"message": "boom"}}, 500))
