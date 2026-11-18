@@ -171,10 +171,16 @@ def check_for_updates(
 
 
 def _auto_scan_repo(repo_path: Path) -> list[dict[str, Any]]:
+    # Folder names match what Pack Creator publishes. `skills` and
+    # `scenario_rules` were missing from this map even though packs write
+    # those folders, so a repo without a manifest never listed them.
     type_folders = {
         "cantrips": "cantrip",
         "lorebooks": "lorebook",
         "rules": "rule",
+        "memory_rules": "memory_rule",
+        "skills": "skill",
+        "scenario_rules": "scenario_rule",
         "maps": "map",
     }
 

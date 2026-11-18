@@ -2,6 +2,21 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.30.1] - 2026-11-17
+
+### Added
+
+- **Memory rules are packable.** The one resource type the pack system could
+  not carry now round-trips: serializable into a pack (`memory_rules/`
+  folder), installable from a repo (created disabled, like every pack
+  install), toggleable, uninstallable, and deduplicated by a type-aware
+  content hash (`summarization_enabled` counts as behavior, not cosmetics).
+  The Pack Creator lists memory rules alongside the other types — filter to
+  Memory Rules and **Select All** exports every one in a click.
+- Repo auto-scan (the no-manifest fallback) now also recognizes the `skills`
+  and `scenario_rules` folders, which Pack Creator has always written but the
+  scanner never listed.
+
 ## [0.30.0] - 2026-11-17
 
 Phase 28: Snapshot Completion. Maps join the version-history system, and the

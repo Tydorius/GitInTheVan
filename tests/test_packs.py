@@ -695,3 +695,90 @@ class TestExportModes:
         linked = (await client.get(f"/api/maps/{map_id}/export?mode=linked")).json()
         res = linked["stages"][0]["resources"][0]
         assert res["resource_content"]["code"] == DICE_CODE
+
+
+# ---------------------------------------------------------------------------
+# Memory rules in packs (0.30.1)
+#
+# Memory rules were the one type the pack system could not carry: not in the
+# Pack Creator, not serializable into a pack, not installable from a repo.
+# ---------------------------------------------------------------------------
+
+
+class TestMemoryRulesInPacks:
+    def test_hash_ignores_description_but_tracks_behavior(self):
+        from app.services.resource_identity import content_hash
+
+        base = {
+            "name": "R", "prompt": "P", "token_threshold": 100, "keep_recent": 2,
+            "summarization_enabled": True, "description": "d1",
+        }
+        cosmetic = dict(base, description="d2")
+        flipped = dict(base, summarization_enabled=False)
+        assert content_hash("memory_rule", base) == content_hash("memory_rule", cosmetic)
+        assert content_hash("memory_rule", base) != content_hash("memory_rule", flipped)
+
+    @pytest.mark.asyncio
+    async def test_pack_create_includes_memory_rule(self, admin_client):
+        import io
+        import zipfile
+
+        client, _, _ = admin_client
+        rule = await client.post("/api/memory-rules", json={
+            "name": "Battle chat", "prompt": "Track the battle.",
+            "token_threshold": 4000, "keep_recent": 4,
+        })
+        assert rule.status_code in (200, 201), rule.text
+
+        resp = await client.post("/api/packs/create", json={
+            "pack_name": "With Memory Rule",
+            "resources": [{"type": "memory_rule", "id": rule.json()["id"]}],
+        })
+        assert resp.status_code == 200, resp.text
+
+        zf = zipfile.ZipFile(io.BytesIO(resp.content))
+        assert "memory_rules/battle_chat.json" in zf.namelist(), zf.namelist()
+        data = json.loads(zf.read("memory_rules/battle_chat.json"))
+        assert data["prompt"] == "Track the battle."
+        assert data["token_threshold"] == 4000
+        assert data["keep_recent"] == 4
+        manifest = json.loads(zf.read("descriptions.json"))
+        assert any(f["type"] == "memory_rule" for f in manifest["files"])
+
+    @pytest.mark.asyncio
+    async def test_memory_rule_installs_toggles_and_uninstalls(
+        self, admin_client, tmp_path
+    ):
+        client, _, _ = admin_client
+        pack = LocalPack(tmp_path / "mrpack")
+        pack.write("memory_rules/battle.json", {
+            "name": "Battle chat", "description": "",
+            "summarization_enabled": True, "token_threshold": 4000,
+            "keep_recent": 4, "prompt": "Track the battle.",
+            "author": "T", "version": "1.0.0",
+        })
+        repo_id = await _link_repo(client, pack)
+
+        installed = await _install(client, repo_id, "memory_rules/battle.json")
+        assert installed["type"] == "memory_rule"
+        assert installed["scan"]["safe"] is True
+
+        rules = (await client.get("/api/memory-rules")).json()["rules"]
+        match = next(r for r in rules if r["name"] == "Battle chat")
+        assert match["is_active"] is False
+        # The list view is a summary; the detail view carries the prompt.
+        detail = (await client.get(f"/api/memory-rules/{match['id']}")).json()
+        assert detail["token_threshold"] == 4000
+        assert detail["keep_recent"] == 4
+        assert detail["prompt"] == "Track the battle."
+
+        toggled = await client.put(f"/api/packs/installed/{installed['id']}/toggle")
+        assert toggled.status_code == 200, toggled.text
+        rules = (await client.get("/api/memory-rules")).json()["rules"]
+        assert next(r for r in rules if r["id"] == match["id"])["is_active"] is True
+
+        assert (
+            await client.delete(f"/api/packs/installed/{installed['id']}")
+        ).status_code == 204
+        rules = (await client.get("/api/memory-rules")).json()["rules"]
+        assert not any(r["id"] == match["id"] for r in rules)

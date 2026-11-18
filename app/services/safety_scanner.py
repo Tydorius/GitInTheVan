@@ -171,7 +171,7 @@ def scan_json_content(raw_json: str, resource_type: str) -> ScanResult:
             entries = list(entries.values())
         return scan_lorebook(entries)
 
-    if resource_type == "rule":
+    if resource_type in ("rule", "memory_rule"):
         prompt = data.get("prompt", "")
         if len(prompt) > MAX_CONTENT_SIZE:
             return ScanResult(
