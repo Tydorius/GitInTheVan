@@ -2,6 +2,52 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.34.0] - 2026-11-18
+
+Security review (dependency wave 2). Every pip-audit and npm-audit finding is
+resolved — nothing accepted this pass. Full detail, including reachability
+notes, in `Planning/security-control-document.md` (2026-11-18 section).
+
+### Security
+
+- **python-jose retired** (PYSEC-2026-4298, critical, no fix upstream) —
+  replaced by **PyJWT 2.15.1**. HS256 tokens are standard JWS, so existing
+  login sessions survive the swap; the decode allowlist is unchanged. Its
+  departure also removes `ecdsa` (retiring the 2026-08-17 accepted-risk
+  entry), `rsa` and `pyasn1` from the tree entirely.
+- **litellm 1.89.4 → 1.100.4** (PYSEC-2026-4066, GHSA-g5ff-637f-6q2m,
+  GHSA-7hp6-4w63-5g45). The intermediate 1.96.2 cleared the first two but
+  sat inside the third — a regression introduced after 1.89.4; re-auditing
+  after the bump caught it.
+- **dulwich 1.2.6 → 1.2.9** — path traversal class (GHSA-35mr et al.);
+  directly relevant to Local Repos, which parse repositories from arbitrary
+  sources.
+- **aiohttp 3.14.3 → 3.14.4** (11 advisories; the client path against
+  upstream LLM endpoints is the reachable one).
+- **aiomysql 0.2.0 → 0.3.0** (PYSEC-2026-1110, docker extra). MariaDB/MySQL
+  users: please smoke-test your instance after updating — this dependency
+  has no local test coverage here.
+- **vite 8.0.16 → 8.3.8** — clears five high advisories including
+  launch-editor arbitrary command execution on Windows; new `overrides` pin
+  `devalue` 5.9.4 (three advisories, via svelte) and `source-map-js` 1.2.3
+  (event-loop DoS, via vite). `npm audit`: 0.
+- **Deno v2.8.3 → v2.9.8** in the Dockerfile and all three deploy scripts —
+  the deploy-path binary no local auditor sees.
+- Vulnerable transitives (filelock, certifi, urllib3, multidict) and the
+  idna 3.18/3.19 lockfile drift resolved by full lockfile regeneration;
+  pip bootstrap in all six deploy/update scripts moved to 26.3 to match.
+
+### Fixed
+
+- **`cryptography` was an undeclared direct dependency** — `ssl_manager.py`
+  imports it directly, but it only rode in via
+  `python-jose[cryptography]`. Removing jose surfaced it; it is now a
+  declared, pinned dependency (50.0.2).
+- Rule 17's lockfile-regeneration commands now include `--upgrade`:
+  without it, `uv pip compile` reuses the versions already in the output
+  file, so regeneration silently retained old transitive versions (found
+  when four vulnerable transitives survived the first regeneration).
+
 ## [0.33.2] - 2026-11-18
 
 ### Documentation

@@ -89,7 +89,7 @@ def test_stored_placeholder_is_not_trusted(key_store):
 
 def test_forged_token_is_rejected_once_a_real_key_is_set(key_store):
     """The concrete attack: a token signed with the public placeholder."""
-    from jose import jwt
+    import jwt
 
     from app.services.auth import JWT_ALGORITHM, decode_access_token
 

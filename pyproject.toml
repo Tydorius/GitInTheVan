@@ -1,6 +1,6 @@
 [project]
 name = "gitinthevan"
-version = "0.33.2"
+version = "0.34.0"
 description = "Self-hostable MITM LLM router/proxy for roleplay services"
 readme = "README.md"
 license = "MPL-2.0"
@@ -13,29 +13,31 @@ dependencies = [
     "aiosqlite==0.22.1",
     "pydantic==2.13.4",
     "pydantic-settings==2.14.2",
-    "python-jose[cryptography]==3.5.0",
+    "pyjwt==2.15.1",
+    # Declared directly: ssl_manager.py imports it for certificate work. It
+    # previously rode in undeclared via python-jose[cryptography] — the jose
+    # removal in the 2026-11-18 audit surfaced that.
+    "cryptography==50.0.2",
     "bcrypt==5.0.0",
-    "dulwich==1.2.6",
-    "litellm==1.89.4",
+    "dulwich==1.2.9",
+    "litellm==1.100.4",
     # Transitive deps pinned explicitly to patched versions per pip-audit findings
-    # (2026-07-11, re-audited 2026-08-17 — see Planning/security-control-document.md).
-    # Remove an explicit pin once the direct dependency that pulls it in
-    # (fastapi -> starlette, python-jose -> cryptography/pyasn1, litellm -> aiohttp)
+    # (2026-07-11, re-audited 2026-08-17 and 2026-11-18 — see
+    # Planning/security-control-document.md). Remove an explicit pin once the
+    # direct dependency that pulls it in (fastapi -> starlette, litellm -> aiohttp)
     # bumps its own floor past these versions.
     #
-    # ecdsa is deliberately absent: python-jose requires it, but this app signs JWTs
-    # with HS256 only (app/services/auth.py) so no ECDSA code path is reachable, and
-    # upstream considers the Minerva timing attack (PYSEC-2026-1325) out of scope with
-    # no planned fix. Revisit if JWT_ALGORITHM ever changes to an EC algorithm.
+    # pyjwt is pinned without extras: JWTs are signed with HS256 only
+    # (app/services/auth.py), which needs none. The former python-jose
+    # dependency (and its ecdsa/pyasn1 chain, including the accepted-risk
+    # ecdsa note) was removed in the 2026-11-18 audit — see the changelog.
     "starlette==1.3.1",
-    "cryptography==50.0.0",  # PYSEC-2026-3552/-3553/-3554
-    "aiohttp==3.14.3",       # PYSEC-2026-3545/-3546/-3547
-    "pyasn1==0.6.4",         # PYSEC-2026-3455/-3456/-3457
+    "aiohttp==3.14.4",       # PYSEC-2026-4371 + 10 GHSAs (fix: 3.14.4)
 ]
 
 [project.optional-dependencies]
 postgres = ["asyncpg==0.30.0"]
-mysql = ["aiomysql==0.2.0"]
+mysql = ["aiomysql==0.3.0"]
 dev = [
     "pytest==9.0.3",
     "pytest-asyncio==1.4.0",

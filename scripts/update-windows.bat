@@ -249,7 +249,7 @@ echo [4/6] Reinstalling Python dependencies... >> "%LOG_FILE%"
 if exist "%GITV_ROOT%\.venv\Scripts\python.exe" (
     REM Pinned like every other dependency (exact pins only, never ranges) - an unpinned
     REM `--upgrade pip` is an unreviewed network fetch on every single update.
-    "%GITV_ROOT%\.venv\Scripts\python" -m pip install "pip==26.2.1" -q >> "%LOG_FILE%" 2>&1
+    "%GITV_ROOT%\.venv\Scripts\python" -m pip install "pip==26.3" -q >> "%LOG_FILE%" 2>&1
     REM End users get requirements\main.txt; --dev adds the test/lint tooling that
     REM only contributors need. Nothing in app\ imports pytest, ruff or pip-audit,
     REM so the smaller tree is a complete install.

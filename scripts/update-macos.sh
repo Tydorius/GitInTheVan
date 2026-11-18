@@ -224,7 +224,7 @@ echo "[4/6] Reinstalling Python dependencies..."
 if [ -f "$GITV_ROOT/.venv/bin/python" ]; then
     # Pinned like every other dependency (exact pins only, never ranges) - an unpinned
     # `--upgrade pip` is an unreviewed network fetch on every single update.
-    "$GITV_ROOT/.venv/bin/python" -m pip install "pip==26.2.1" -q
+    "$GITV_ROOT/.venv/bin/python" -m pip install "pip==26.3" -q
     # End users get requirements/main.txt; --dev adds the test/lint tooling that
     # only contributors need. Nothing in app/ imports pytest, ruff or pip-audit,
     # so the smaller tree is a complete install.
