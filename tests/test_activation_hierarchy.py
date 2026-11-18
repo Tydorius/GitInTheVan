@@ -455,7 +455,6 @@ class TestCantripMapNomination:
 
     @pytest.mark.asyncio
     async def test_a_nominated_tag_selects_an_inactive_tagged_map(self, admin_client):
-        from sqlalchemy import select
 
         from app.models.map import Map
         from app.services.map_pipeline import resolve_map
@@ -474,7 +473,6 @@ class TestCantripMapNomination:
     async def test_a_nomination_matching_nothing_keeps_the_default(
         self, admin_client
     ):
-        from sqlalchemy import select
 
         from app.models.map import Map
         from app.models.user_settings import UserSettings
