@@ -73,10 +73,35 @@
       verification_max_retries: 2,
       verification_instructions: '',
       output_mode: 'persist',
+      base_prompt_mode: 'full',
+      condition_json: '',
       parameters: [],
       verification_parameters: [],
       resources: [],
     }
+  }
+
+  // The condition editor works on a parsed {path, op, value} object and
+  // re-serializes into condition_json on every change, so the saved payload
+  // is always the JSON the backend validates.
+  function condParts(stage: any) {
+    if (!stage._cond) {
+      let parsed: any = null
+      try { parsed = stage.condition_json ? JSON.parse(stage.condition_json) : null } catch { parsed = null }
+      stage._cond = parsed && parsed.path
+        ? { path: parsed.path, op: parsed.op || 'exists', value: parsed.value ?? '' }
+        : { path: '', op: 'exists', value: '' }
+    }
+    return stage._cond
+  }
+
+  function syncCond(stage: any) {
+    const c = condParts(stage)
+    if (!c.path) { stage.condition_json = ''; return }
+    const cond: any = c.op === 'exists' || c.op === 'not_exists'
+      ? { path: c.path, op: c.op }
+      : { path: c.path, op: c.op, value: c.value }
+    stage.condition_json = JSON.stringify(cond)
   }
 
   // A stage names two models -- one to generate with, one to check with -- so
@@ -116,10 +141,20 @@
   async function saveMap() {
     error = ''
     try {
+      // _cond is the condition editor's transient state; the payload carries
+      // the serialized condition_json only.
+      const payload = {
+        ...editForm,
+        stages: editForm.stages.map(({ _cond, ...s }: any) => {
+          if (!s.base_prompt_mode) s.base_prompt_mode = 'full'
+          if (s.condition_json === undefined) s.condition_json = ''
+          return s
+        }),
+      }
       if (selectedMap) {
-        await api.updateMap(selectedMap.id, editForm)
+        await api.updateMap(selectedMap.id, payload)
       } else {
-        await api.createMap(editForm)
+        await api.createMap(payload)
       }
       editing = false
       selectedMap = null
@@ -320,7 +355,45 @@
             <option value="persist">Persist (output feeds next stage as context)</option>
             <option value="sanitize">Sanitize (output as system context block)</option>
             <option value="discard">Discard (output not passed forward)</option>
+            <option value="capture">Capture (output goes to this stage's cantrips)</option>
           </select>
+        </div>
+        <div class="form-group">
+          <label>Base Prompt</label>
+          <select bind:value={stage.base_prompt_mode}>
+            <option value="full">Full (client prompt + injections)</option>
+            <option value="blank">Blank (stage instructions only)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Run Condition (optional)</label>
+          {#if true}
+            {@const c = condParts(stage)}
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input bind:value={c.path} oninput={() => syncCond(stage)}
+                placeholder="chat_data path, e.g. world.day" style="flex: 1;" />
+              <select bind:value={c.op} onchange={() => syncCond(stage)}>
+                <option value="exists">exists</option>
+                <option value="not_exists">is missing</option>
+                <option value="==">==</option>
+                <option value="!=">!=</option>
+                <option value=">=">&ge;</option>
+                <option value=">">&gt;</option>
+                <option value="<=">&le;</option>
+                <option value="<">&lt;</option>
+              </select>
+              {#if c.op !== 'exists' && c.op !== 'not_exists'}
+                <input bind:value={c.value} oninput={() => syncCond(stage)}
+                  placeholder="value" style="width: 120px;" />
+              {/if}
+            </div>
+          {/if}
+          <div style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+            The stage runs only when the chat's stored data satisfies this. Blank = always run. Checked before anything the stage would spend.
+          </div>
         </div>
       </div>
 
