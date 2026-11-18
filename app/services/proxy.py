@@ -992,6 +992,13 @@ async def _apply_lorebook_injection(
     try:
         from app.services.tagging import should_activate_resource
 
+        # The signature allows tags=None (meaning "no tags"); normalize so the
+        # unconditional should_activate_resource call below never iterates
+        # None. The old `if lb.tag and tags:` guard hid this -- with the
+        # guard gone, None would raise inside this try and silently disable
+        # lorebook injection for whichever caller relied on the default.
+        tags = tags or []
+
         async with async_session() as db:
             result = await db.execute(
                 select(Lorebook)
@@ -1021,16 +1028,14 @@ async def _apply_lorebook_injection(
 
             active_lorebooks = []
             for lb in lorebooks:
-                if lb.id in bound_lorebook_ids:
-                    active_lorebooks.append(lb)
-                    continue
-                if lb.tag and tags:
-                    activate = should_activate_resource(
-                        lb.tag, "lore", lb.is_active, lb.is_public, lb.user_id, user_id, tags
-                    )
-                    if activate:
-                        active_lorebooks.append(lb)
-                elif lb.is_active:
+                # Bound lorebooks join unconditionally (fifth source,
+                # union-only). Every other candidate goes through
+                # should_activate_resource with no caller-side pre-check: the
+                # old `if lb.tag and tags:` shape duplicated the hierarchy
+                # here and only happened to agree with it.
+                if lb.id in bound_lorebook_ids or should_activate_resource(
+                    lb.tag, "lore", lb.is_active, lb.is_public, lb.user_id, user_id, tags
+                ):
                     active_lorebooks.append(lb)
 
             all_entries: list[dict] = []
