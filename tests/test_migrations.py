@@ -511,6 +511,7 @@ class TestAdvisoryLock:
         0.31.0 and broke only PostgreSQL -- unseen by every SQLite test.
         Boolean defaults must be TRUE/FALSE."""
         import re
+
         from app.services import migrations as migrations_module
 
         src = inspect.getsource(migrations_module)
