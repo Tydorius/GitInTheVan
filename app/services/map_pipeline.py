@@ -87,6 +87,87 @@ def stage_bound_cantrip_ids(map_obj: Map) -> set[str]:
     }
 
 
+_CONDITION_OPS = {"exists", "not_exists", "==", "!=", ">", ">=", "<", "<="}
+
+
+def _resolve_path(chat_data: dict, path: str):
+    """Walk a dot-separated path through chat_data JSON. Missing -> None."""
+    node = chat_data
+    for part in path.split("."):
+        if isinstance(node, dict) and part in node:
+            node = node[part]
+        else:
+            return None
+    return node
+
+
+def evaluate_stage_condition(condition_json: str, chat_data: dict) -> tuple[bool, str]:
+    """Decide whether a stage runs, from its stored condition and the chat's
+    chat_data snapshot.
+
+    The condition is a run-when: ``{"path": "world.day", "op": ">=", "value":
+    30}`` runs the stage once world.day reaches 30. Deliberately tiny (repo
+    rule 12 -- no general expression engine): one dot-path, one operator, one
+    literal. Returns ``(run_stage, reason)`` and never raises -- a malformed
+    condition runs the stage (fail-open to unconditional behaviour) with the
+    reason saying what was wrong, so a typo can never silently disable a
+    stage.
+    """
+    import json as _json
+
+    try:
+        cond = _json.loads(condition_json)
+    except (ValueError, TypeError):
+        return True, f"condition is not valid JSON ({condition_json[:60]!r}); running"
+    if not isinstance(cond, dict):
+        return True, "condition is not an object; running"
+
+    path = cond.get("path")
+    op = cond.get("op")
+    expected = cond.get("value")
+    if not isinstance(path, str) or not path:
+        return True, "condition has no path; running"
+    if op not in _CONDITION_OPS:
+        return True, f"unknown op {op!r}; running"
+
+    actual = _resolve_path(chat_data, path)
+
+    if op == "exists":
+        return (actual is not None), f"{path} exists" if actual is not None else f"{path} is missing"
+    if op == "not_exists":
+        return (actual is None), f"{path} is missing" if actual is None else f"{path} exists"
+
+    # Numeric comparison when both sides parse as numbers; ordering ops are
+    # numeric-only and politely fail (run) on anything else.
+    def as_number(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    a_num, e_num = as_number(actual), as_number(expected)
+    if op in (">", ">=", "<", "<="):
+        if a_num is None or e_num is None:
+            return True, f"{path}={actual!r} vs {expected!r} not both numeric; running"
+        ok = {
+            ">": a_num > e_num, ">=": a_num >= e_num,
+            "<": a_num < e_num, "<=": a_num <= e_num,
+        }[op]
+        return ok, f"{path}={actual} {op} {expected}: {'running' if ok else 'skipping'}"
+
+    # == / !=: numbers compare numerically, strings as strings; a missing
+    # path only ever equals another missing path, never the literal "None".
+    if a_num is not None and e_num is not None:
+        equal = a_num == e_num
+    elif actual is None or expected is None:
+        equal = actual is None and expected is None
+    else:
+        equal = str(actual) == str(expected)
+    if op == "==":
+        return equal, f"{path}={actual!r} == {expected!r}: {'running' if equal else 'skipping'}"
+    return (not equal), f"{path}={actual!r} != {expected!r}: {'running' if not equal else 'skipping'}"
+
+
 async def stage_parameters(
     db, stage: MapStage, endpoint: Endpoint | None, model: str, user_id: str
 ) -> tuple[dict[str, Any], dict[str, str]]:
@@ -802,12 +883,47 @@ async def run_map_pipeline(
         is_last_stage = stage_idx == len(stages) - 1
         logger.info("Map stage %d/%d: '%s'", stage_idx + 1, len(stages), stage.name)
 
+        # Maps QoL: the optional run condition is checked before anything the
+        # stage could spend -- endpoints, injections, cantrips, an LLM call.
+        # A skipped stage contributes nothing: no sticky carry, no metrics
+        # rows, no capture.
+        if stage.condition_json:
+            from app.services.cantrip import _load_chat_data
+
+            conversation_id = body_json.get("_gitv_chat_id", "")
+            async with async_session() as db:
+                chat_data = await _load_chat_data(db, user_id, conversation_id)
+            run_stage, reason = evaluate_stage_condition(stage.condition_json, chat_data)
+            if not run_stage:
+                logger.info("Map stage '%s' skipped: %s", stage.name, reason)
+                if debug_on:
+                    debug_capture(
+                        body_json, "map_stage_skipped",
+                        f"Map Stage {stage_idx + 1} Skipped: {stage.name}",
+                        item_id=stage.id, item_name=stage.name,
+                        detail=reason,
+                        metadata={
+                            "stage_index": stage_idx,
+                            "condition": stage.condition_json,
+                        },
+                    )
+                continue
+
         # Prompt-object rows recorded inside this iteration (stage cantrips)
         # attribute to this stage's map.
         from app.services.metrics import clear_metrics_stage_ref, set_metrics_stage_ref
         set_metrics_stage_ref(body_json, map_obj.id, stage_idx)
 
         body_json["messages"] = copy.deepcopy(base_messages)
+        if stage.base_prompt_mode == "blank":
+            # Prompt isolation for utility stages: drop every system-role
+            # message from this stage's copy -- the client's persona block and
+            # whatever was injected pre-map (memory, global lorebooks). The
+            # stage instructions injected below become the system message, so
+            # a blank stage is instructions + history, nothing else.
+            body_json["messages"] = [
+                m for m in body_json["messages"] if m.get("role") != "system"
+            ]
 
         async with async_session() as db:
             endpoints, model = await _resolve_stage_endpoint(db, stage, user_id)
@@ -910,6 +1026,8 @@ async def run_map_pipeline(
                     "endpoint_resolved": endpoints[0].name if endpoints else "",
                     "model_override": model or "",
                     "output_mode": stage.output_mode,
+                    "base_prompt_mode": stage.base_prompt_mode,
+                    "condition": stage.condition_json or None,
                     "verification_enabled": stage.verification_enabled,
                     "driver_callable_turns": stage.driver_callable_turns,
                     "resources": [
@@ -1019,6 +1137,35 @@ async def run_map_pipeline(
                 else:
                     sticky_context.append({"role": "system", "content": notice})
 
+        # Capture mode (Maps QoL): the stage's output goes to its own cantrips
+        # instead of into the prompt. They run post-driver -- context.response
+        # holds the stage output -- and whatever they write to their stores is
+        # the capture. The returned content is ignored: a capture stage's
+        # output never re-enters the conversation (that is discard's job if
+        # you also want it gone from sticky; capture implies it).
+        if stage.output_mode == "capture" and stage_cantrip_ids:
+            from app.services.cantrip import process_cantrips_post_driver
+
+            try:
+                await process_cantrips_post_driver(
+                    content, body_json, user_id, request_headers or {},
+                    tags=tags, position="pre_navigator",
+                    only_ids=stage_cantrip_ids,
+                )
+            except Exception:
+                logger.exception(
+                    "Map stage '%s': capture pass failed; the stage output was "
+                    "not captured", stage.name,
+                )
+            if debug_on:
+                debug_capture_response(
+                    body_json, "map_stage_capture",
+                    f"Stage {stage_idx + 1} Capture: {stage.name}",
+                    content_after=content,
+                    detail=f"Stage output handed to {len(stage_cantrip_ids)} attached cantrip(s)",
+                    metadata={"stage_index": stage_idx, "output_mode": "capture"},
+                )
+
         if not is_last_stage:
             if stage.output_mode == "persist":
                 sticky_context.append({"role": "assistant", "content": content})
@@ -1027,7 +1174,7 @@ async def run_map_pipeline(
                     "role": "system",
                     "content": f"[STAGE {stage_idx + 1} OUTPUT: {stage.name}]\n{content}\n[/STAGE OUTPUT]",
                 })
-            elif stage.output_mode == "discard":
+            elif stage.output_mode in ("discard", "capture"):
                 pass
 
             sticky_resources.extend(r for r in stage.resources if r.sticky)

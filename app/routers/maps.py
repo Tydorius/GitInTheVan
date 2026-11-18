@@ -2,7 +2,7 @@ import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -58,9 +58,58 @@ class StageInput(BaseModel):
     verification_max_retries: int = 2
     verification_instructions: str = ""
     output_mode: str = "persist"
+    base_prompt_mode: str = "full"
+    condition_json: str = ""
     parameters: list[ParameterDef] = []
     verification_parameters: list[ParameterDef] = []
     resources: list[ResourceInput] = []
+
+    @field_validator("output_mode")
+    @classmethod
+    def _validate_output_mode(cls, v: str) -> str:
+        allowed = {"persist", "sanitize", "discard", "capture"}
+        if v not in allowed:
+            raise ValueError(f"output_mode must be one of {sorted(allowed)}")
+        return v
+
+    @field_validator("base_prompt_mode")
+    @classmethod
+    def _validate_base_prompt_mode(cls, v: str) -> str:
+        allowed = {"full", "blank"}
+        if v not in allowed:
+            raise ValueError(f"base_prompt_mode must be one of {sorted(allowed)}")
+        return v
+
+    @field_validator("condition_json")
+    @classmethod
+    def _validate_condition(cls, v: str) -> str:
+        """Reject conditions the evaluator would fail-open on.
+
+        The pipeline never raises on a bad condition (it runs the stage), so
+        the write path is where a typo has to be caught. Anything that parses
+        as a no-op or malformed object is rejected rather than stored.
+        """
+        import json as _json
+
+        if not v or not v.strip():
+            return ""
+        try:
+            cond = _json.loads(v)
+        except ValueError as exc:
+            raise ValueError(f"condition_json is not valid JSON: {exc}") from exc
+        if not isinstance(cond, dict):
+            raise ValueError("condition_json must be a JSON object")
+        from app.services.map_pipeline import _CONDITION_OPS
+
+        if cond.get("op") not in _CONDITION_OPS:
+            raise ValueError(
+                f"condition op must be one of {sorted(_CONDITION_OPS)}"
+            )
+        if not isinstance(cond.get("path"), str) or not cond.get("path"):
+            raise ValueError("condition must have a non-empty 'path'")
+        if cond.get("op") not in ("exists", "not_exists") and "value" not in cond:
+            raise ValueError(f"condition op {cond.get('op')!r} needs a 'value'")
+        return v
 
 
 class MapCreate(BaseModel):
@@ -111,6 +160,8 @@ class StageResponse(BaseModel):
     verification_max_retries: int
     verification_instructions: str
     output_mode: str
+    base_prompt_mode: str
+    condition_json: str
     parameters: list[ParameterDef]
     verification_parameters: list[ParameterDef]
     resources: list[ResourceResponse]
@@ -166,6 +217,8 @@ def _stage_to_response(s: MapStage) -> StageResponse:
         verification_max_retries=s.verification_max_retries,
         verification_instructions=s.verification_instructions,
         output_mode=s.output_mode,
+        base_prompt_mode=s.base_prompt_mode,
+        condition_json=s.condition_json,
         parameters=params_to_api(s.parameters_json),
         verification_parameters=params_to_api(s.verification_parameters_json),
         resources=[_resource_to_response(r) for r in s.resources],
@@ -266,6 +319,8 @@ def _build_stage(stage_input: StageInput, stage_order: int, map_id: str) -> MapS
         verification_max_retries=stage_input.verification_max_retries,
         verification_instructions=stage_input.verification_instructions,
         output_mode=stage_input.output_mode,
+        base_prompt_mode=stage_input.base_prompt_mode,
+        condition_json=stage_input.condition_json,
         parameters_json=params_from_api(
             stage_input.parameters, f"stage '{stage_input.name}' parameters"
         ),

@@ -448,3 +448,91 @@ class TestMapSafetyScan:
         result = scan_json_content(payload, "map")
         assert result.safe is True
         assert result.findings == []
+
+
+# ---------------------------------------------------------------------------
+# Capture output mode (0.33.0 Maps QoL)
+# ---------------------------------------------------------------------------
+
+CAPTURE_CANTRIP = """
+const text = (context.response && context.response.content) || "";
+context.chat_data.set('world_log', text);
+"""
+
+
+def _capture_cantrip_resource(name):
+    # Capture runs the stage's cantrips post-driver (position pre_navigator),
+    # so the embedded content must carry that flag; pre_driver stays off so
+    # the cantrip does not also run before the forward.
+    return {
+        "resource_type": "cantrip",
+        "position": "pre_driver",
+        "sticky": False,
+        "resource_name": name,
+        "resource_content": {
+            "name": name, "description": "", "llm_instructions": "", "code": CAPTURE_CANTRIP,
+            "timeout_ms": CANTRIP_TIMEOUT_MS,
+            "run_pre_driver": False, "run_pre_navigator": True,
+        },
+    }
+
+
+class TestCaptureOutputMode:
+    @needs_deno
+    @pytest.mark.asyncio
+    async def test_capture_hands_stage_output_to_its_cantrip(
+        self, admin_client, httpx_mock
+    ):
+        """The World Ledger shape: a stage whose output goes to its own
+        cantrip instead of into the prompt. The cantrip sees the output as
+        context.response.content, its store writes persist, and the output
+        never reaches the next stage's prompt (that would be persist)."""
+        from sqlalchemy import select
+
+        from app.models.chat_data import ChatData
+        from tests.conftest import TestSessionLocal
+
+        client, _, api_key = admin_client
+
+        await _endpoint(client, "One", "one.test", "one")
+        await _endpoint(client, "Two", "two.test", "two")
+
+        created = await client.post("/api/maps/import", json={"data": {
+            "name": "WorldCapture",
+            "stages": [
+                _stage(1, "World", "one", "capture",
+                       [_capture_cantrip_resource("Ledger")]),
+                _stage(2, "Story", "two", "persist"),
+            ],
+        }})
+        assert created.status_code == 201, created.text
+        await client.put("/api/settings", json={"default_map_id": created.json()["id"]})
+
+        httpx_mock.add_response(url="http://one.test/v1/chat/completions",
+                                json={"choices": [{"message": {"content": "WORLD_STATE_DELTA"}}]})
+        httpx_mock.add_response(url="http://two.test/v1/chat/completions",
+                                json={"choices": [{"message": {"content": "THE_STORY"}}]})
+
+        resp = await client.post("/v1/chat/completions", json={
+            "model": "test", "messages": [{"role": "user", "content": "Go"}],
+        }, headers={"Authorization": f"Bearer {api_key}"})
+        assert resp.status_code == 200, resp.text
+
+        # The final reply is the last stage's output, untouched by the
+        # capture pass.
+        assert resp.json()["choices"][0]["message"]["content"] == "THE_STORY"
+
+        # The stage's cantrip ran on the stage output and its store write
+        # persisted -- this row IS the ledger capture.
+        uid = (await client.get("/api/auth/me")).json()["id"]
+        async with TestSessionLocal() as db:
+            rows = (await db.execute(
+                select(ChatData).where(ChatData.user_id == uid, ChatData.key == "world_log")
+            )).scalars().all()
+        assert len(rows) == 1
+        assert json.loads(rows[0].value_json) == "WORLD_STATE_DELTA"
+
+        # Capture is not persist: the captured output never entered the next
+        # stage's prompt.
+        two = json.dumps(_bodies_for(httpx_mock, "two.test")[0])
+        assert "WORLD_STATE_DELTA" not in two

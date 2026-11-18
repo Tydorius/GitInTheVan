@@ -217,6 +217,8 @@ async def build_map_from_export(
             verification_max_retries=stage_data.get("verification_max_retries", 2),
             verification_instructions=stage_data.get("verification_instructions", ""),
             output_mode=stage_data.get("output_mode", "persist"),
+            base_prompt_mode=stage_data.get("base_prompt_mode", "full"),
+            condition_json=stage_data.get("condition_json", ""),
             # A pack is untrusted input, so its parameters are re-validated
             # rather than stored as given -- this is where a `stream` or
             # `_gitv` key would otherwise enter. Absent on pre-0.24 packs.
@@ -628,6 +630,13 @@ def _content_of_row(res_type: str, row) -> dict:
             "timeout_ms": row.timeout_ms,
             "execution_order": row.execution_order,
             "run_driver_callable": row.run_driver_callable,
+            # Position flags: a capture-stage cantrip lives or dies by its
+            # pre_navigator flag, so exports must carry all of them. Not part
+            # of the content hash (name/code/llm_instructions only), so this
+            # is dedup-neutral for existing packs.
+            "run_pre_driver": row.run_pre_driver,
+            "run_pre_navigator": row.run_pre_navigator,
+            "run_post_navigator": row.run_post_navigator,
         }
     if res_type == "lorebook":
         return {
@@ -694,6 +703,9 @@ async def _create_resource(
             execution_order=content.get("execution_order", 10),
             is_active=is_active,
             run_driver_callable=content.get("run_driver_callable", True),
+            run_pre_driver=content.get("run_pre_driver", True),
+            run_pre_navigator=content.get("run_pre_navigator", False),
+            run_post_navigator=content.get("run_post_navigator", False),
         )
         db.add(c)
         await db.flush()
@@ -840,6 +852,8 @@ async def serialize_map_to_export(
             "verification_max_retries": stage.verification_max_retries,
             "verification_instructions": stage.verification_instructions,
             "output_mode": stage.output_mode,
+            "base_prompt_mode": stage.base_prompt_mode,
+            "condition_json": stage.condition_json,
             "parameters": _export_parameters(stage.parameters_json),
             "verification_parameters": _export_parameters(stage.verification_parameters_json),
             "resources": [],
@@ -899,6 +913,9 @@ def _export_content(res_type: str, content: dict) -> dict:
             "timeout_ms": content.get("timeout_ms", 5000),
             "execution_order": content.get("execution_order", 10),
             "run_driver_callable": content.get("run_driver_callable", True),
+            "run_pre_driver": content.get("run_pre_driver", True),
+            "run_pre_navigator": content.get("run_pre_navigator", False),
+            "run_post_navigator": content.get("run_post_navigator", False),
         }
     return {
         "name": content.get("name", ""),

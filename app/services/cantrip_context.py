@@ -214,6 +214,14 @@ def extract_context_params(body: dict[str, Any], request_headers: dict[str, str]
     conversation_id = request_headers.get("x-conversation-id", "")
     if not conversation_id:
         conversation_id = request_headers.get("x-chat-id", "")
+    if not conversation_id:
+        # Clients that send no conversation header still have an internal
+        # rolling-hash chat id. Without this fallback, post-driver cantrips
+        # (including map stage capture) silently dropped their chat_data
+        # writes: the store save is keyed on this value and skipped when
+        # empty, while pre-driver cantrips persisted fine because their
+        # caller passes the internal id explicitly.
+        conversation_id = body.get("_gitv_chat_id", "")
     params["conversation_id"] = conversation_id
 
     user_name = request_headers.get("x-user-name", "User")

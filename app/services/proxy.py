@@ -369,6 +369,11 @@ async def _forward_request_impl(
         from app.services.budget import estimate_tokens as _est_tokens
         from app.services.metrics import record_prompt_object, set_metrics_chat
         set_metrics_chat(body_json, internal_chat_id)
+        # Every cantrip position reads the chat id from here (via
+        # extract_context_params) when the client sends no conversation
+        # header -- previously only the map branch set it, so post-driver
+        # store writes from header-less clients silently dropped.
+        body_json["_gitv_chat_id"] = internal_chat_id
 
         # Phase 29b: <CANTRIP:description> queues a draft for the Assistant
         # pane (or auto-installs when both gates are on). Handled before the
