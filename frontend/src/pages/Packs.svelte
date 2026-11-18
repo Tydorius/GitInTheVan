@@ -180,9 +180,10 @@
 
   async function loadAllResources() {
     try {
-      const [cantrips, lorebooks, skills, scenarioRules, verifyRules, maps] = await Promise.all([
+      const [cantrips, lorebooks, skills, scenarioRules, verifyRules, memoryRules, maps] = await Promise.all([
         api.listCantrips(), api.listLorebooks(), api.listSkills(),
-        api.listScenarioRules(), api.listVerificationRules(), api.listMaps(),
+        api.listScenarioRules(), api.listVerificationRules(), api.listMemoryRules(),
+        api.listMaps(),
       ])
       allResources = [
         ...cantrips.cantrips.map((c: any) => ({ id: c.id, type: 'cantrip', name: c.name, description: c.description || '' })),
@@ -190,6 +191,7 @@
         ...skills.skills.map((s: any) => ({ id: s.id, type: 'skill', name: s.name, description: s.description || '' })),
         ...scenarioRules.rules.map((r: any) => ({ id: r.id, type: 'scenario_rule', name: r.name, description: '' })),
         ...verifyRules.rules.map((r: any) => ({ id: r.id, type: 'rule', name: r.name, description: r.description || '' })),
+        ...memoryRules.rules.map((r: any) => ({ id: r.id, type: 'memory_rule', name: r.name, description: r.description || '' })),
         ...maps.maps.map((m: any) => ({ id: m.id, type: 'map', name: m.name, description: m.description || '' })),
       ]
     } catch (e: any) { error = e.message }
@@ -244,6 +246,7 @@
       else if (type === 'skill') await api.updateSkill(id, updates)
       else if (type === 'scenario_rule') await api.updateScenarioRule(id, updates)
       else if (type === 'rule') await api.updateVerificationRule(id, updates)
+      else if (type === 'memory_rule') await api.updateMemoryRule(id, updates)
       else if (type === 'map') await api.updateMap(id, updates)
       editingResource = null
       await loadAllResources()
@@ -266,6 +269,7 @@
       else if (type === 'skill') previewData = await api.getSkill(id)
       else if (type === 'scenario_rule') previewData = await api.getScenarioRule(id)
       else if (type === 'rule') previewData = await api.getVerificationRule(id)
+      else if (type === 'memory_rule') previewData = await api.getMemoryRule(id)
       else if (type === 'map') previewData = await api.getMap(id)
     } catch (e: any) { error = e.message }
     finally { previewLoading = false }
@@ -277,6 +281,7 @@
     skill: '/skills',
     scenario_rule: '/memories',
     rule: '/verification',
+    memory_rule: '/memories',
     map: '/maps',
   }
 
@@ -350,8 +355,11 @@
         <option value="skill">Skills</option>
         <option value="scenario_rule">Scenario Rules</option>
         <option value="rule">Verification Rules</option>
+        <option value="memory_rule">Memory Rules</option>
         <option value="map">Maps</option>
       </select>
+      <!-- Select All acts on the filtered list, so filter-to-type then Select
+           All exports every object of that type in one click. -->
       <button type="button" onclick={() => { for (const r of filteredResources) selectedResources[`${r.type}:${r.id}`] = true }}>Select All</button>
       <button type="button" onclick={() => { selectedResources = {} }}>Clear</button>
       <span style="font-size: 11px; color: var(--text-dim);">

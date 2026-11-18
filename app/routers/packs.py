@@ -1029,6 +1029,28 @@ async def _serialize_resource(
         slug = obj.name.lower().replace(" ", "_")[:64]
         return data, f"rules/{slug}.json", {"path": f"rules/{slug}.json", "type": "rule", **data}
 
+    if rtype == "memory_rule":
+        from app.models.memory_rule import MemoryRule
+        result = await db.execute(
+            select(MemoryRule).where(MemoryRule.id == rid, MemoryRule.user_id == user_id)
+        )
+        obj = result.scalar_one_or_none()
+        if not obj:
+            return None, "", {}
+        data = {
+            "name": obj.name, "description": obj.description or "",
+            "summarization_enabled": obj.summarization_enabled,
+            "token_threshold": obj.token_threshold,
+            "keep_recent": obj.keep_recent,
+            "prompt": obj.prompt or "",
+            "author": "", "version": "1.0.0",
+            "updated": obj.created_at.isoformat() if obj.created_at else "",
+        }
+        slug = obj.name.lower().replace(" ", "_")[:64]
+        return data, f"memory_rules/{slug}.json", {
+            "path": f"memory_rules/{slug}.json", "type": "memory_rule", **data,
+        }
+
     if rtype == "map":
         from sqlalchemy.orm import selectinload
 
@@ -1116,6 +1138,22 @@ async def _create_local_resource(
         await db.flush()
         return rule.id
 
+    if resource_type == "memory_rule":
+        from app.models.memory_rule import MemoryRule
+        memory_rule = MemoryRule(
+            user_id=user_id,
+            name=data.get("name", "Imported"),
+            description=data.get("description", ""),
+            summarization_enabled=bool(data.get("summarization_enabled", True)),
+            token_threshold=data.get("token_threshold", 0),
+            keep_recent=data.get("keep_recent", 0),
+            prompt=data.get("prompt", ""),
+            is_active=False,
+        )
+        db.add(memory_rule)
+        await db.flush()
+        return memory_rule.id
+
     if resource_type == "scenario_rule":
         from app.models.scenario_rule import ScenarioRule
         sr = ScenarioRule(
@@ -1179,6 +1217,12 @@ async def _toggle_local_resource(
         obj = result.scalar_one_or_none()
         if obj:
             obj.is_active = enabled
+    elif resource_type == "memory_rule":
+        from app.models.memory_rule import MemoryRule
+        result = await db.execute(select(MemoryRule).where(MemoryRule.id == local_id))
+        obj = result.scalar_one_or_none()
+        if obj:
+            obj.is_active = enabled
     elif resource_type == "scenario_rule":
         from app.models.scenario_rule import ScenarioRule
         result = await db.execute(select(ScenarioRule).where(ScenarioRule.id == local_id))
@@ -1209,6 +1253,12 @@ async def _delete_local_resource(
             await db.delete(obj)
     elif resource_type == "rule":
         result = await db.execute(select(VerificationRule).where(VerificationRule.id == local_id))
+        obj = result.scalar_one_or_none()
+        if obj:
+            await db.delete(obj)
+    elif resource_type == "memory_rule":
+        from app.models.memory_rule import MemoryRule
+        result = await db.execute(select(MemoryRule).where(MemoryRule.id == local_id))
         obj = result.scalar_one_or_none()
         if obj:
             await db.delete(obj)

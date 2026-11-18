@@ -1070,8 +1070,10 @@ The **Create Pack** tab lets you export your own resources as a git-ready pack:
 
 1. Switch to the **Create Pack** tab
 2. Enter pack name, author, and description
-3. Filter by type and check the resources you want to include
+3. Filter by type and check the resources you want to include — **Select All** acts on the filtered list, so filtering to one type and clicking it selects every object of that type (a one-click "export all my cantrips")
 4. Click **Export Pack**
+
+Cantrips, lorebooks, skills and samples, verification rules, memory rules, scenario rules and maps are all packable (memory rules since 0.30.1).
 
 The downloaded zip contains:
 - Serialized JSON files for each resource (in type folders)
@@ -1086,7 +1088,7 @@ The README includes notes about NSFW-friendly platforms (Gitea, Forgejo) since s
 
 After linking or syncing, the browser shows all available files with:
 
-- **Filter by Type**: All, Cantrips, Lorebooks, Rules, Maps
+- **Filter by Type**: All, Cantrips, Lorebooks, Skills, Rules, Memory Rules, Scenario Rules, Maps
 - **Filter by Author**: Filter to specific creators
 - **Sort by**: Name, Recently Updated, or Type
 

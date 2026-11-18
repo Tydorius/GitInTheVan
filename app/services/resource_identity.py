@@ -29,6 +29,7 @@ RESOURCE_FOLDERS = (
     "lorebooks",
     "skills",
     "rules",
+    "memory_rules",
     "scenario_rules",
     "maps",
 )
@@ -182,6 +183,17 @@ def canonical_payload(resource_type: str, content: dict) -> dict:
         return {
             "name": (content.get("name") or "").strip(),
             "prompt": (content.get("prompt") or "").strip(),
+        }
+
+    if resource_type == "memory_rule":
+        # `summarization_enabled` is behavior, not presentation: a rule that
+        # turns summarization off is a different rule even with the same prompt.
+        return {
+            "name": (content.get("name") or "").strip(),
+            "prompt": (content.get("prompt") or "").strip(),
+            "summarization_enabled": bool(content.get("summarization_enabled", True)),
+            "token_threshold": content.get("token_threshold") or 0,
+            "keep_recent": content.get("keep_recent") or 0,
         }
 
     if resource_type == "scenario_rule":
