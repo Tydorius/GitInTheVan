@@ -68,6 +68,36 @@ drafts and installs it in-request).
   validator similarly moved from the router into `deno_runner.py` and is shared
   with auto-install.
 
+### Fixed (post-release adversarial review, same branch)
+
+- **The action-command stage and the OOC-notice append are now debug-captured**
+  (rule 16). Both shipped invisible to the Debug timeline. `init_debug` runs
+  before the action-command strip so the original-messages snapshot predates
+  it and the capture shows a real before/after delta; the notice append
+  captures its failure case (notices the player will never see) too.
+- **Migration 055's upgrade path is genuinely tested.** The upgrade test now
+  drops the four droppable 055 columns before migrating (`lexicon_endpoint_id`
+  cannot be dropped on SQLite — FK-referenced — documented in the test) and
+  exercises all of them through the ORM post-migration. Previously skipped
+  with a false "cannot be dropped on SQLite" justification — the exact
+  `skills.budget_weight` bug class, since `user_settings` is not covered by
+  `TestMigrationCoverage`. Mutation-verified.
+- **Local pack repos list `memory_rules/` again.** 0.30.1 fixed the remote
+  auto-scan but not the local one, so the headline feature was invisible when
+  browsing a local repo. Both scanners now share one folder map
+  (`FOLDER_RESOURCE_TYPES` in `resource_identity.py`) from which the install
+  allow-list derives; both scanners' outputs are tested.
+- **Rule 19 reconciled with its intent.** Provenance: the four principles are
+  the maintainer's mandate; the "routes through `should_activate_resource()`"
+  sentence was the enforcement mechanism against that day's subtractor bugs.
+  The conversation binding is now documented in the rule as the fifth
+  activation source (a pure union source, like the selection-resources
+  exception it follows), the rule's executable test covers it, and the
+  lorebook loop calls `should_activate_resource()` unconditionally — the last
+  `if resource.tag and tags:` pre-check is gone. `tags=None` is normalized
+  first (the removed guard had hidden that None raised inside the try and
+  silently disabled all lorebook injection).
+
 ### Migration
 
 - `055_phase29_lexicon_and_drafts`: creates `conversation_lorebook_bindings`
