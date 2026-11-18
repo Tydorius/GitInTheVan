@@ -45,6 +45,12 @@ addendum in the project planning docs), three requests in one release.
 test with vacuity check included, and the lorebook hot-path query is
 exercised against an upgraded database.
 
+### Documentation
+
+- User guide: both lorebook options documented with a screenshot of the
+  Positions editor (captured 2026-11-18), and `context.chat.turn_index`
+  added to the Cantrip Context API section with its semantics.
+
 ## [0.34.0] - 2026-11-18
 
 Security review (dependency wave 2). Every pip-audit and npm-audit finding is

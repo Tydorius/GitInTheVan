@@ -18,8 +18,9 @@ GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:
 > except the Metrics page, which dates from **2026-11-18 against 0.31.0**, the
 > Chat Lexicon settings card, the cantrip auto-install admin toggle and the
 > Assistant pane's cantrip drafts list, which date from **2026-11-18 against
-> 0.32.0**, and the Maps stage-editor options, which date from
-> **2026-11-18 against 0.33.0**.
+> 0.32.0**, the Maps stage-editor options, which date from **2026-11-18
+> against 0.33.0**, and the lorebook Positions editor, which dates from
+> **2026-11-18 against 0.35.0**.
 > A few images of individual dialogs and panels still date from **2026-07-08,
 > against 0.16.x** — those show the tool working the same way, but the
 > surrounding UI may have moved on.
@@ -669,6 +670,10 @@ Lorebooks inject at one point in the pipeline: **Pre-Driver**, before the reques
 The four position toggles shown on some older installs (Pre-Driver, Driver-Callable,
 Pre-Navigator, Post-Navigator) were never wired up for lorebooks and have no effect; only
 cantrips run at the other positions.
+
+![Lorebook Positions Editor](media/gitv-lorebook-positions.png)
+
+*The Positions editor with the 0.35.0 options (Inject After Cantrips, Scan only the newest N), captured 2026-11-18.*
 
 Two options on the Pipeline Positions editor (the **Edit Positions** button on a lorebook)
 *are* wired:
