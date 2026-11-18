@@ -15,10 +15,11 @@ GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:
 > **About the screenshots**
 >
 > Screenshots of the main pages were captured on **2026-08-31 against 0.24.0**,
-> except the Metrics page, which dates from **2026-11-18 against 0.31.0**, and
-> the Chat Lexicon settings card, the cantrip auto-install admin toggle and the
+> except the Metrics page, which dates from **2026-11-18 against 0.31.0**, the
+> Chat Lexicon settings card, the cantrip auto-install admin toggle and the
 > Assistant pane's cantrip drafts list, which date from **2026-11-18 against
-> 0.32.0**.
+> 0.32.0**, and the Maps stage-editor options, which date from
+> **2026-11-18 against 0.33.0**.
 > A few images of individual dialogs and panels still date from **2026-07-08,
 > against 0.16.x** — those show the tool working the same way, but the
 > surrounding UI may have moved on.
@@ -1011,6 +1012,10 @@ Each subsequent card is a **stage**:
 - **Run Condition**: Optional. The stage runs only when the chat's stored data (`context.chat_data`) satisfies a small condition: a dot-path (`world.day`), an operator (`exists`, `is missing`, `==`, `!=`, `>=`, `>`, `<=`, `<`) and a value. Checked before anything the stage would spend — a skipped stage costs nothing and shows as *Map Stage Skipped* in the Debug timeline. Blank runs always.
 - **Attached Lorebooks**: Lorebooks injected before this stage's LLM call
 - **Attached Cantrips**: Cantrips run before this stage's LLM call (with a **Sticky** option)
+
+![Map Editor - Stage Options](media/gitv-maps-stage-qol.png)
+
+*The stage editor with the 0.33.0 options (Base Prompt, Output Mode including Capture, Run Condition), captured 2026-11-18.*
 
 ![Map Editor - Verification](media/gitv-maps-edit-3.png)
 
