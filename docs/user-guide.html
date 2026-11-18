@@ -463,6 +463,16 @@ context.memory.set('weather', 'stormy');
 // Context budget (when budgeting is enabled in Settings)
 const budget = context.budget;  // {total, remaining, weight, share, detail_level}
 
+// Read-only facts about the current request (which model, streaming, and
+// inside a map: which map and stage)
+if (context.request.is_map) {
+    console.log(`Running in stage ${context.request.map_stage_name}`);
+}
+
+// Ask for a map by tag (pre-driver positions); a nomination competes in
+// normal map selection, it never stacks maps
+context.maps.activate('world');
+
 console.log('Debug output visible in cantrip tester');
 </code></pre>
 <p>Pre-Navigator and Post-Navigator cantrips can modify the Driver's response:</p>
@@ -878,8 +888,10 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <li><strong>System Instructions</strong>: Instructions specific to this stage's LLM (prepended to its call)</li>
 <li><strong>Endpoint</strong>: Which endpoint to use for this stage (blank = your default endpoint)</li>
 <li><strong>Model Override</strong>: Force a specific model for this stage (blank = endpoint default)</li>
-<li><strong>Driver-Callable Turns</strong>: Maximum tool-call rounds for this stage (0 = disabled)</li>
-<li><strong>Output Mode</strong>: How this stage's output feeds the next stage</li>
+<li><strong>Driver-Callable Turns</strong>: Maximum tool-call rounds for this stage (0 = disabled). The stage offers <strong>its own</strong> attached cantrips as tools: the model is told they exist, a <code>&lt;call:tool_name&gt;</code> tag executes the tool, and the loop re-forwards through the stage's endpoint until the model answers without calling.</li>
+<li><strong>Output Mode</strong>: How this stage's output feeds the next stage (see below)</li>
+<li><strong>Base Prompt</strong>: <strong>Full</strong> (default) rebuilds the stage from the client's prompt and all pre-map injections. <strong>Blank</strong> drops every system message from the stage's copy — the stage instructions become the system message — so lightweight utility stages (summarize, extract, judge) run without persona/scenario noise.</li>
+<li><strong>Run Condition</strong>: Optional. The stage runs only when the chat's stored data (<code>context.chat_data</code>) satisfies a small condition: a dot-path (<code>world.day</code>), an operator (<code>exists</code>, <code>is missing</code>, <code>==</code>, <code>!=</code>, <code>&gt;=</code>, <code>&gt;</code>, <code>&lt;=</code>, <code>&lt;</code>) and a value. Checked before anything the stage would spend — a skipped stage costs nothing and shows as <em>Map Stage Skipped</em> in the Debug timeline. Blank runs always.</li>
 <li><strong>Attached Lorebooks</strong>: Lorebooks injected before this stage's LLM call</li>
 <li><strong>Attached Cantrips</strong>: Cantrips run before this stage's LLM call (with a <strong>Sticky</strong> option)</li>
 </ul>
@@ -908,8 +920,16 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <td><strong>Discard</strong></td>
 <td>Stage output is dropped entirely (only used for verification within its own stage)</td>
 </tr>
+<tr>
+<td><strong>Capture</strong></td>
+<td>Stage output goes to this stage's own cantrips instead of the prompt: they run post-driver with the output as <code>context.response.content</code>, and whatever they write to their stores persists — the ledger-capture pattern (a "World" stage that files its output into <code>chat_data</code>). Like discard, the output never feeds later stages.</td>
+</tr>
 </tbody>
 </table>
+<h3 id="cantrip-nominated-maps">Cantrip-Nominated Maps</h3>
+<p>A pre-driver cantrip can ask for a map by tag: <code>context.maps.activate("world")</code>. The nominated tag competes in normal map selection — it can select a tagged (even inactive) map nothing else would have chosen, but it never stacks maps, and <code>&lt;MAP:off&gt;</code> suppresses it like any other map activation. One caution: the nomination is resolved after the global cantrip pass, so a cantrip that both runs globally and is bound to a stage of the nominated map will run twice in that request.</p>
+<h3 id="request-facts-for-cantrips">Request Facts for Cantrips</h3>
+<p>Every cantrip context now carries <code>context.request</code> — read-only facts about the current request: <code>model</code>, <code>stream</code>, and, inside a map, <code>is_map</code>, <code>map_name</code>, <code>map_stage_index</code>, <code>map_stage_name</code> and <code>map_stage_endpoint</code>. A stage cantrip can branch on which stage it is in instead of guessing from timing.</p>
 <h3 id="sticky-vs-stage-only-resources">Sticky vs Stage-Only Resources</h3>
 <p>Cantrip and lorebook attachments have a <strong>Sticky</strong> option:
 - <strong>Sticky</strong>: The injection persists through all subsequent stages

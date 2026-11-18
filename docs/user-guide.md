@@ -487,6 +487,16 @@ context.memory.set('weather', 'stormy');
 // Context budget (when budgeting is enabled in Settings)
 const budget = context.budget;  // {total, remaining, weight, share, detail_level}
 
+// Read-only facts about the current request (which model, streaming, and
+// inside a map: which map and stage)
+if (context.request.is_map) {
+    console.log(`Running in stage ${context.request.map_stage_name}`);
+}
+
+// Ask for a map by tag (pre-driver positions); a nomination competes in
+// normal map selection, it never stacks maps
+context.maps.activate('world');
+
 console.log('Debug output visible in cantrip tester');
 ```
 
@@ -988,8 +998,10 @@ Each subsequent card is a **stage**:
 - **System Instructions**: Instructions specific to this stage's LLM (prepended to its call)
 - **Endpoint**: Which endpoint to use for this stage (blank = your default endpoint)
 - **Model Override**: Force a specific model for this stage (blank = endpoint default)
-- **Driver-Callable Turns**: Maximum tool-call rounds for this stage (0 = disabled)
-- **Output Mode**: How this stage's output feeds the next stage
+- **Driver-Callable Turns**: Maximum tool-call rounds for this stage (0 = disabled). The stage offers **its own** attached cantrips as tools: the model is told they exist, a `<call:tool_name>` tag executes the tool, and the loop re-forwards through the stage's endpoint until the model answers without calling.
+- **Output Mode**: How this stage's output feeds the next stage (see below)
+- **Base Prompt**: **Full** (default) rebuilds the stage from the client's prompt and all pre-map injections. **Blank** drops every system message from the stage's copy — the stage instructions become the system message — so lightweight utility stages (summarize, extract, judge) run without persona/scenario noise.
+- **Run Condition**: Optional. The stage runs only when the chat's stored data (`context.chat_data`) satisfies a small condition: a dot-path (`world.day`), an operator (`exists`, `is missing`, `==`, `!=`, `>=`, `>`, `<=`, `<`) and a value. Checked before anything the stage would spend — a skipped stage costs nothing and shows as *Map Stage Skipped* in the Debug timeline. Blank runs always.
 - **Attached Lorebooks**: Lorebooks injected before this stage's LLM call
 - **Attached Cantrips**: Cantrips run before this stage's LLM call (with a **Sticky** option)
 
@@ -1008,6 +1020,15 @@ Each stage's output is handled before the next stage runs:
 | **Persist** (default) | Stage output is added to the conversation as an assistant message before the next stage runs |
 | **Sanitize** | Stage output is converted to a system context block (e.g., `[STAGE N OUTPUT]`) and stripped from message history |
 | **Discard** | Stage output is dropped entirely (only used for verification within its own stage) |
+| **Capture** | Stage output goes to this stage's own cantrips instead of the prompt: they run post-driver with the output as `context.response.content`, and whatever they write to their stores persists — the ledger-capture pattern (a "World" stage that files its output into `chat_data`). Like discard, the output never feeds later stages. |
+
+### Cantrip-Nominated Maps
+
+A pre-driver cantrip can ask for a map by tag: `context.maps.activate("world")`. The nominated tag competes in normal map selection — it can select a tagged (even inactive) map nothing else would have chosen, but it never stacks maps, and `<MAP:off>` suppresses it like any other map activation. One caution: the nomination is resolved after the global cantrip pass, so a cantrip that both runs globally and is bound to a stage of the nominated map will run twice in that request.
+
+### Request Facts for Cantrips
+
+Every cantrip context now carries `context.request` — read-only facts about the current request: `model`, `stream`, and, inside a map, `is_map`, `map_name`, `map_stage_index`, `map_stage_name` and `map_stage_endpoint`. A stage cantrip can branch on which stage it is in instead of guessing from timing.
 
 ### Sticky vs Stage-Only Resources
 
