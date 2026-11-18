@@ -9,6 +9,7 @@ These tests verify:
 - Advisory lock no-op for SQLite
 """
 
+import inspect
 import re
 
 import pytest
@@ -501,6 +502,24 @@ class TestAdvisoryLock:
                         f"Migration {name} is a plain string but contains '{kw}' "
                         f"(should be a dialect-specific dict)"
                     )
+
+    async def test_postgresql_blocks_never_default_booleans_to_integers(self):
+        """PostgreSQL rejects `BOOLEAN DEFAULT 0/1` (no implicit integer-to-
+        boolean cast in DEFAULT expressions) and the failure is not a
+        tolerable migration error, so startup raises. SQLite accepts anything
+        and MySQL treats BOOLEAN as TINYINT, which is why 054 shipped in
+        0.31.0 and broke only PostgreSQL -- unseen by every SQLite test.
+        Boolean defaults must be TRUE/FALSE."""
+        import re
+        from app.services import migrations as migrations_module
+
+        src = inspect.getsource(migrations_module)
+        for block in re.finditer(r'"postgresql":\s*"""(.*?)"""', src, re.DOTALL):
+            offenders = re.findall(r"BOOLEAN DEFAULT [01]\b", block.group(1))
+            assert not offenders, (
+                f"postgresql DDL uses integer boolean defaults ({offenders}); "
+                "use DEFAULT TRUE / DEFAULT FALSE"
+            )
 
 
 class TestUserSettingsStreamingColumnUpgrade:

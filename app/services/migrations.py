@@ -1048,7 +1048,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
                 post_tokens INTEGER DEFAULT 0 NOT NULL,
                 difference INTEGER DEFAULT 0 NOT NULL,
                 context VARCHAR(16) DEFAULT 'live' NOT NULL,
-                is_retry BOOLEAN DEFAULT 0 NOT NULL,
+                is_retry BOOLEAN DEFAULT FALSE NOT NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             CREATE INDEX IF NOT EXISTS ix_prompt_object_metrics_lookup
@@ -1072,7 +1072,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
                 tokens_source VARCHAR(16) DEFAULT '' NOT NULL,
                 rule_id VARCHAR(36) DEFAULT '' NOT NULL,
                 context VARCHAR(16) DEFAULT 'live' NOT NULL,
-                is_retry BOOLEAN DEFAULT 0 NOT NULL,
+                is_retry BOOLEAN DEFAULT FALSE NOT NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             CREATE INDEX IF NOT EXISTS ix_llm_call_metrics_user_created
@@ -1093,7 +1093,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
                 post_tokens INTEGER DEFAULT 0 NOT NULL,
                 difference INTEGER DEFAULT 0 NOT NULL,
                 context VARCHAR(16) DEFAULT 'live' NOT NULL,
-                is_retry BOOLEAN DEFAULT 0 NOT NULL,
+                is_retry BOOLEAN DEFAULT FALSE NOT NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             CREATE INDEX IF NOT EXISTS ix_prompt_object_metrics_lookup
@@ -1117,7 +1117,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
                 tokens_source VARCHAR(16) DEFAULT '' NOT NULL,
                 rule_id VARCHAR(36) DEFAULT '' NOT NULL,
                 context VARCHAR(16) DEFAULT 'live' NOT NULL,
-                is_retry BOOLEAN DEFAULT 0 NOT NULL,
+                is_retry BOOLEAN DEFAULT FALSE NOT NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             CREATE INDEX IF NOT EXISTS ix_llm_call_metrics_user_created
@@ -1138,7 +1138,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
                 post_tokens INTEGER DEFAULT 0 NOT NULL,
                 difference INTEGER DEFAULT 0 NOT NULL,
                 context VARCHAR(16) DEFAULT 'live' NOT NULL,
-                is_retry BOOLEAN DEFAULT 0 NOT NULL,
+                is_retry BOOLEAN DEFAULT FALSE NOT NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
@@ -1163,7 +1163,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
                 tokens_source VARCHAR(16) DEFAULT '' NOT NULL,
                 rule_id VARCHAR(36) DEFAULT '' NOT NULL,
                 context VARCHAR(16) DEFAULT 'live' NOT NULL,
-                is_retry BOOLEAN DEFAULT 0 NOT NULL,
+                is_retry BOOLEAN DEFAULT FALSE NOT NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
@@ -1209,11 +1209,11 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             );
             CREATE INDEX IF NOT EXISTS ix_cantrip_requests_user_status
                 ON cantrip_requests (user_id, status);
-            ALTER TABLE user_settings ADD COLUMN lexicon_enabled BOOLEAN DEFAULT 1 NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN lexicon_enabled BOOLEAN DEFAULT TRUE NOT NULL;
             ALTER TABLE user_settings ADD COLUMN lexicon_endpoint_id VARCHAR(36);
             ALTER TABLE user_settings ADD COLUMN lexicon_parameters_json TEXT DEFAULT '[]' NOT NULL;
-            ALTER TABLE user_settings ADD COLUMN cantrip_auto_install_enabled BOOLEAN DEFAULT 0 NOT NULL;
-            ALTER TABLE admin_settings ADD COLUMN assistant_cantrip_auto_install_allowed BOOLEAN DEFAULT 0 NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN cantrip_auto_install_enabled BOOLEAN DEFAULT FALSE NOT NULL;
+            ALTER TABLE admin_settings ADD COLUMN assistant_cantrip_auto_install_allowed BOOLEAN DEFAULT FALSE NOT NULL;
             """,
             "postgresql": """
             CREATE TABLE IF NOT EXISTS conversation_lorebook_bindings (
@@ -1242,11 +1242,11 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             );
             CREATE INDEX IF NOT EXISTS ix_cantrip_requests_user_status
                 ON cantrip_requests (user_id, status);
-            ALTER TABLE user_settings ADD COLUMN lexicon_enabled BOOLEAN DEFAULT 1 NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN lexicon_enabled BOOLEAN DEFAULT TRUE NOT NULL;
             ALTER TABLE user_settings ADD COLUMN lexicon_endpoint_id VARCHAR(36);
             ALTER TABLE user_settings ADD COLUMN lexicon_parameters_json TEXT DEFAULT '[]' NOT NULL;
-            ALTER TABLE user_settings ADD COLUMN cantrip_auto_install_enabled BOOLEAN DEFAULT 0 NOT NULL;
-            ALTER TABLE admin_settings ADD COLUMN assistant_cantrip_auto_install_allowed BOOLEAN DEFAULT 0 NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN cantrip_auto_install_enabled BOOLEAN DEFAULT FALSE NOT NULL;
+            ALTER TABLE admin_settings ADD COLUMN assistant_cantrip_auto_install_allowed BOOLEAN DEFAULT FALSE NOT NULL;
             """,
             "mysql": """
             CREATE TABLE IF NOT EXISTS conversation_lorebook_bindings (
@@ -1275,11 +1275,11 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
                 KEY ix_cantrip_requests_user_status (user_id, status),
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
-            ALTER TABLE user_settings ADD COLUMN lexicon_enabled BOOLEAN DEFAULT 1 NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN lexicon_enabled BOOLEAN DEFAULT TRUE NOT NULL;
             ALTER TABLE user_settings ADD COLUMN lexicon_endpoint_id VARCHAR(36);
             ALTER TABLE user_settings ADD COLUMN lexicon_parameters_json TEXT DEFAULT '[]' NOT NULL;
-            ALTER TABLE user_settings ADD COLUMN cantrip_auto_install_enabled BOOLEAN DEFAULT 0 NOT NULL;
-            ALTER TABLE admin_settings ADD COLUMN assistant_cantrip_auto_install_allowed BOOLEAN DEFAULT 0 NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN cantrip_auto_install_enabled BOOLEAN DEFAULT FALSE NOT NULL;
+            ALTER TABLE admin_settings ADD COLUMN assistant_cantrip_auto_install_allowed BOOLEAN DEFAULT FALSE NOT NULL;
             """,
         },
     ),
