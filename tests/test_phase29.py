@@ -546,16 +546,32 @@ class TestPhase29UpgradePath:
         from app.services.migrations import run_migrations
 
         # Simulate the pre-055 database: create_all from current models, then
-        # drop what only migration 055 provides. (The 055 column additions
-        # already exist in a create_all schema and cannot be dropped on
-        # SQLite; the migration's ALTERs are tolerant of that, and column
-        # coverage is enforced statically by TestMigrationCoverage.)
+        # drop everything only migration 055 provides. SQLite has supported
+        # DROP COLUMN since 3.35 (see the 053 upgrade test for the precedent),
+        # and user_settings/admin_settings are NOT migration-created tables,
+        # so TestMigrationCoverage cannot catch a missing 055 ALTER for them
+        # -- only this test can (the skills.budget_weight bug class, rule 10).
+        # The one exception: lexicon_endpoint_id cannot be dropped on SQLite
+        # because create_all emits a FOREIGN KEY clause naming it, and SQLite
+        # rejects DROP COLUMN for FK-referenced columns. The migration runner
+        # tolerates the resulting duplicate ALTER ("duplicate column name" is
+        # in _TOLERATED_ERRORS), and the ORM insert below still exercises the
+        # column end to end.
         engine = create_async_engine("sqlite+aiosqlite://", echo=False)
         try:
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
                 await conn.execute(text("DROP TABLE conversation_lorebook_bindings"))
                 await conn.execute(text("DROP TABLE cantrip_requests"))
+                for col in (
+                    "lexicon_enabled",
+                    "lexicon_parameters_json",
+                    "cantrip_auto_install_enabled",
+                ):
+                    await conn.execute(text(f"ALTER TABLE user_settings DROP COLUMN {col}"))
+                await conn.execute(text(
+                    "ALTER TABLE admin_settings DROP COLUMN assistant_cantrip_auto_install_allowed"
+                ))
 
             # Vacuity check: this really reproduces the old schema.
             async with engine.connect() as conn:
@@ -563,14 +579,27 @@ class TestPhase29UpgradePath:
                     text("SELECT name FROM sqlite_master WHERE type='table'")
                 )
                 table_names = {r[0] for r in names.all()}
+                user_cols = await conn.execute(text("PRAGMA table_info(user_settings)"))
+                user_col_names = {r[1] for r in user_cols.all()}
+                admin_cols = await conn.execute(text("PRAGMA table_info(admin_settings)"))
+                admin_col_names = {r[1] for r in admin_cols.all()}
             assert "conversation_lorebook_bindings" not in table_names
             assert "cantrip_requests" not in table_names
+            assert "lexicon_enabled" not in user_col_names
+            assert "lexicon_parameters_json" not in user_col_names
+            assert "cantrip_auto_install_enabled" not in user_col_names
+            assert "assistant_cantrip_auto_install_allowed" not in admin_col_names
+            # lexicon_endpoint_id survives the drop (see comment above); it is
+            # exercised through the ORM insert below instead.
 
             await run_migrations(engine)
 
             # The proxy hot path selects bindings at lorebook injection time;
             # the query itself must work against the migrated table.
             from sqlalchemy import insert, select
+
+            from app.models.admin_settings import AdminSettings
+            from app.models.user_settings import UserSettings
             async with engine.begin() as conn:
                 # Bare binding row: the query under test touches only this
                 # table, and the FK targets are irrelevant to it.
@@ -581,6 +610,38 @@ class TestPhase29UpgradePath:
                         ConversationLorebookBinding.user_id == "u1",
                         ConversationLorebookBinding.conversation_id == "c1",
                     ))).scalars().all()
+                # The settings reads run on every request (user settings) and
+                # on every auto-install decision (admin gate); exercise the
+                # migrated columns through the ORM, where a missing ALTER
+                # surfaces as "no such column".
+                await conn.execute(insert(UserSettings).values(
+                    user_id="u1", lexicon_enabled=True,
+                    lexicon_endpoint_id="ep1",
+                    lexicon_parameters_json='[{"k":"temperature","v":0.3}]',
+                    cantrip_auto_install_enabled=True))
+                settings = (await conn.execute(
+                    select(UserSettings.lexicon_enabled,
+                           UserSettings.lexicon_endpoint_id,
+                           UserSettings.lexicon_parameters_json,
+                           UserSettings.cantrip_auto_install_enabled).where(
+                        UserSettings.user_id == "u1"))).one()
+                assert settings.lexicon_enabled is True
+                assert settings.lexicon_endpoint_id == "ep1"
+                assert "temperature" in settings.lexicon_parameters_json
+                assert settings.cantrip_auto_install_enabled is True
+                # admin_settings is a singleton (id=1) that earlier migrations
+                # seed; update it if present, insert it if not.
+                from sqlalchemy import update
+                seeded = (await conn.execute(select(AdminSettings.id))).scalars().all()
+                if seeded:
+                    await conn.execute(update(AdminSettings).values(
+                        assistant_cantrip_auto_install_allowed=True))
+                else:
+                    await conn.execute(insert(AdminSettings).values(
+                        id=1, assistant_cantrip_auto_install_allowed=True))
+                allowed = (await conn.execute(
+                    select(AdminSettings.assistant_cantrip_auto_install_allowed))).scalar_one()
+                assert allowed is True
             assert rows == ["lb1"]
         finally:
             await engine.dispose()

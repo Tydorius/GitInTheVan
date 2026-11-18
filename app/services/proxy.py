@@ -271,6 +271,15 @@ async def _forward_request_impl(
             ])
             body_json["messages"] = strip_command_tags_from_messages(body_json["messages"])
 
+        from app.services.debug import debug_capture, init_debug, is_debug_mode
+        debug_on = await is_debug_mode(user_id)
+        if debug_on:
+            init_debug(body_json, tags)
+            # Wall-clock start. summarize_run subtracts the summed upstream
+            # latency from this to get the pipeline's own overhead, which is the
+            # one cost figure nothing else in the product surfaces.
+            body_json["_gitv_request_started"] = time.monotonic()
+
         # Phase 29 action commands (<LEXICON:name>, <CANTRIP:description>) are
         # parsed here and acted on later in the pipeline; their free-text
         # argument never reaches the upstream model. GitV OOC notices from a
@@ -287,16 +296,26 @@ async def _forward_request_impl(
             ]
         body_json["messages"] = strip_gitv_notices_from_messages(body_json["messages"])
 
-        body_json["_gitv_tags"] = tags
-
-        from app.services.debug import debug_capture, init_debug, is_debug_mode
-        debug_on = await is_debug_mode(user_id)
+        # Debug init runs before this stage so its original-messages snapshot
+        # predates the strip; the capture then shows a real before/after delta
+        # for the removed commands and notices instead of a no-op entry.
         if debug_on:
-            init_debug(body_json, tags)
-            # Wall-clock start. summarize_run subtracts the summed upstream
-            # latency from this to get the pipeline's own overhead, which is the
-            # one cost figure nothing else in the product surfaces.
-            body_json["_gitv_request_started"] = time.monotonic()
+            debug_capture(
+                body_json, "action_commands", "Action Commands",
+                detail=(
+                    f"{len(action_commands)} action command(s) extracted; GitV notices stripped"
+                    if action_commands
+                    else "No action commands; GitV notices stripped"
+                ),
+                metadata={
+                    "commands": [
+                        {"command": a["command"], "text": a["text"][:200]}
+                        for a in body_json.get("_gitv_action_commands", [])
+                    ]
+                },
+            )
+
+        body_json["_gitv_tags"] = tags
 
         from app.services.group_resolver import resolve_group_tags
         async with async_session() as group_db:
@@ -862,15 +881,42 @@ def _append_pending_notices(response_data: Any, body_json: dict[str, Any]) -> An
     notices = body_json.get("_gitv_pending_notices") or []
     if not notices or not isinstance(response_data, dict):
         return response_data
+    content_before = ""
+    appended = False
     try:
         choices = response_data.get("choices") or []
         if choices and isinstance(choices[0].get("message"), dict):
             message = choices[0]["message"]
-            content = str(message.get("content") or "")
+            content_before = str(message.get("content") or "")
             joined = "\n".join(notices)
-            message["content"] = f"{content}\n\n{joined}".strip() if content else joined
+            message["content"] = f"{content_before}\n\n{joined}".strip() if content_before else joined
+            appended = True
     except Exception:
         logger.exception("Failed to append pending notices")
+
+    # Captured here rather than at the call sites so every path -- including a
+    # future one -- reports the stage, and so a failed append (the player never
+    # sees the notice) is visible in the Debug timeline instead of only the log.
+    from app.services.debug import debug_capture_response
+    if appended:
+        debug_capture_response(
+            body_json, "pending_notices", "Pending Notices",
+            content_before=content_before,
+            content_after=str(
+                (response_data.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+            ),
+            detail=f"Appended {len(notices)} OOC notice(s) to the reply",
+            metadata={"notices": [n[:200] for n in notices]},
+        )
+    else:
+        debug_capture_response(
+            body_json, "pending_notices", "Pending Notices",
+            detail=(
+                f"{len(notices)} notice(s) pending but NOT appended "
+                "(no parseable message content; the player will not see them)"
+            ),
+            metadata={"notices": [n[:200] for n in notices]},
+        )
     return response_data
 
 

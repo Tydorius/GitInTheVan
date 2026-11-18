@@ -782,3 +782,66 @@ class TestMemoryRulesInPacks:
         ).status_code == 204
         rules = (await client.get("/api/memory-rules")).json()["rules"]
         assert not any(r["id"] == match["id"] for r in rules)
+
+
+# ---------------------------------------------------------------------------
+# Repo auto-discovery (0.30.1 follow-up)
+# ---------------------------------------------------------------------------
+
+
+class TestRepoAutoDiscovery:
+    """0.30.1 shipped memory rules in packs with the LOCAL repo scanner
+    missing the memory_rules folder: remote auto-scan listed the file, local
+    browse did not, and no test looked at either scanner's output. These
+    tests pin both scanners to the shared folder map."""
+
+    @pytest.mark.asyncio
+    async def test_local_repo_browse_lists_memory_rules(self, admin_client, tmp_path):
+        client, _, _ = admin_client
+        pack = LocalPack(tmp_path / "mrdisco")
+        # LocalPack's manifest has files: [], which forces discovery -- the
+        # exact path where memory_rules was invisible.
+        pack.write("memory_rules/battle.json", {
+            "name": "Battle chat", "description": "",
+            "summarization_enabled": True, "token_threshold": 4000,
+            "keep_recent": 4, "prompt": "Track the battle.",
+            "author": "T", "version": "1.0.0",
+        })
+        resp = await client.post("/api/packs/repos/local", json={
+            "name": "Test Pack", "path": str(pack.root),
+        })
+        assert resp.status_code in (200, 201), resp.text
+        files = resp.json().get("files") or []
+        match = [f for f in files if f["path"] == "memory_rules/battle.json"]
+        assert match, files
+        assert match[0]["type"] == "memory_rule"
+
+    def test_both_scanners_discover_every_resource_folder(self, tmp_path):
+        """Drift-proof: each scanner must return every folder the install
+        allow-list accepts, with the right resource type -- the test that
+        would have caught both the remote skills/scenario_rules miss and the
+        local memory_rules miss."""
+        from app.routers.packs import _discover_local_files
+        from app.services.git_sync import _auto_scan_repo
+        from app.services.resource_identity import FOLDER_RESOURCE_TYPES
+
+        root = tmp_path / "repo"
+        for folder, resource_type in FOLDER_RESOURCE_TYPES.items():
+            d = root / folder
+            d.mkdir(parents=True)
+            (d / "one.json").write_text(
+                json.dumps({"name": f"{resource_type} one", "description": ""}),
+                encoding="utf-8",
+            )
+
+        expected = {
+            f"{folder}/one.json": resource_type
+            for folder, resource_type in FOLDER_RESOURCE_TYPES.items()
+        }
+        for scanner in (_discover_local_files, _auto_scan_repo):
+            found = {f["path"]: f["type"] for f in scanner(root)}
+            assert found == expected, scanner.__name__
+        # The equality above is derived from the same constant the scanners
+        # use, so it proves scanner/map linkage but not map completeness --
+        # anchor the shipped regression folder explicitly.
+        assert found["memory_rules/one.json"] == "memory_rule"

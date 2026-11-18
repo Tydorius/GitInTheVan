@@ -444,6 +444,77 @@ class TestRetentionUnderRealTraffic:
 
 
 @pytest.mark.asyncio
+class TestPhase29StageCapture:
+    """0.32.0 follow-up (rule 16): the two Phase 29 pipeline stages must appear
+    in the Debug timeline. Both shipped uncaptured -- the action-command rewrite
+    of every message and the OOC-notice append on the reply were invisible, the
+    same blind spot that hid the Maps outage for two weeks."""
+
+    async def test_action_command_and_notice_stages_are_captured(
+        self, admin_client, httpx_mock
+    ):
+        client, _, api_key = admin_client
+        uid = await enable_debug(client)
+        await make_endpoint(client)
+        httpx_mock.add_response(json=upstream_response())
+
+        resp = await client.post(
+            "/v1/chat/completions",
+            json={"model": "test-model", "messages": [
+                # A resent reply carrying last turn's notice, plus a new
+                # action command: both must be stripped and captured.
+                {"role": "assistant",
+                 "content": "The gates open.\n\n[OOC: GitV: cantrip draft queued — review it in the Assistant pane.]"},
+                {"role": "user", "content": "Please <CANTRIP:a dice roller>"},
+            ], "stream": False},
+            headers={"Authorization": f"Bearer {api_key}",
+                     "x-conversation-id": "chat-capture"},
+        )
+        assert resp.status_code == 200
+
+        run = await latest_run(uid)
+        stages = run["pipeline_data"]["stages"]
+        by_name = {s["name"]: s for s in stages}
+
+        action = by_name.get("action_commands")
+        assert action is not None, [s["name"] for s in stages]
+        # The before/after delta is real: command and stale notice present in
+        # the before snapshot, absent after. A capture placed after the strip
+        # ran (or an init_debug that snapshot post-strip) shows an empty delta.
+        assert "<CANTRIP:" in action["messages_before"]
+        assert "[OOC: GitV:" in action["messages_before"]
+        assert "<CANTRIP:" not in action["messages_after"]
+        assert "[OOC: GitV:" not in action["messages_after"]
+        assert action["metadata"]["commands"] == [
+            {"command": "CANTRIP", "text": "a dice roller"}]
+        # init_debug runs before the strip, so the original snapshot is the
+        # client's actual input, not a post-strip copy.
+        assert "<CANTRIP:" in run["pipeline_data"]["original_messages"]
+
+        notices = by_name.get("pending_notices")
+        assert notices is not None, [s["name"] for s in stages]
+        assert "cantrip draft queued" in notices["content_after"]
+        assert "cantrip draft queued" not in notices["content_before"]
+
+    async def test_pending_notices_failure_is_captured(self):
+        """A notice that cannot be delivered (no parseable message content)
+        must be visible in the timeline, not only in the server log."""
+        from app.services.debug import init_debug
+        from app.services.proxy import _append_pending_notices
+
+        body = {"messages": [{"role": "user", "content": "hi"}]}
+        init_debug(body, [])
+        body["_gitv_pending_notices"] = ["[OOC: GitV: something important]"]
+
+        out = _append_pending_notices({"choices": []}, body)
+        assert out == {"choices": []}
+        stage = body["_gitv_debug"]["stages"][-1]
+        assert stage["name"] == "pending_notices"
+        assert "NOT appended" in stage["detail"]
+        assert stage["content_after"] == ""
+
+
+@pytest.mark.asyncio
 class TestReplay:
     async def test_replay_reruns_the_original_messages_and_links_back(
         self, admin_client, httpx_mock

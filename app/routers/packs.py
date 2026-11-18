@@ -129,14 +129,8 @@ def _discover_local_files(repo_path) -> list[dict]:
     """Auto-discover JSON files in recognized subdirectories."""
     import os
 
-    type_folders = {
-        "cantrips": "cantrip",
-        "lorebooks": "lorebook",
-        "rules": "rule",
-        "scenario_rules": "scenario_rule",
-        "skills": "skill",
-        "maps": "map",
-    }
+    from app.services.resource_identity import FOLDER_RESOURCE_TYPES
+    type_folders = FOLDER_RESOURCE_TYPES
 
     files = []
     for folder, resource_type in type_folders.items():
