@@ -38,6 +38,20 @@ Phase 20b — the passenger-driven RAG half of Dynamic Lorebooks.
 No database changes; existing installs need no migration step for this
 release.
 
+### Fixed
+
+- **`deploy-windows.bat` probed a hard-coded port 8000 for its
+  already-running check, ignoring `GITV_PORT` from `.env`.** A custom-port
+  install was checked against a port it never binds, and anything else
+  occupying 8000 — another service, or a second GitInTheVan on its default
+  port — made a fresh deploy print the "port already in use" warning and
+  exit without starting the server (exit code 0, so scripts and the test
+  harness saw success). The probe now resolves the configured port from
+  `.env` and checks the port the server will actually bind. Found by the
+  cross-platform harness with a live instance holding 8000; pinned by a
+  static guard in `tests/test_dependency_pinning.py`. Existing installs are
+  unaffected until they next run the deploy script.
+
 ## [0.37.1] - 2026-11-19
 
 ### Fixed

@@ -280,3 +280,30 @@ class TestUpdateScriptDelayedExpansion:
             "every use after the set: percent-form uses inside the dependency "
             f"if-block expand at parse time. Offenders: {offenders}"
         )
+
+
+class TestDeployScriptPortProbe:
+    """deploy-windows.bat's instance-conflict probe hard-coded port 8000,
+    ignoring GITV_PORT from .env. A custom-port install was therefore probed
+    on a port it never binds, and anything else occupying 8000 (here: the
+    user's live server, started after the harness last ran) false-positived
+    the warning and the deploy never started the server -- while still
+    exiting 0 (found by the harness 2026-11-19). The probe must resolve the
+    configured port from .env."""
+
+    def test_probe_reads_gitv_port_from_env_file(self):
+        src = (ROOT / "scripts" / "deploy-windows.bat").read_text(
+            encoding="utf-8", errors="replace"
+        )
+        probes = [line.strip() for line in src.splitlines() if "connect_ex" in line]
+        assert probes, "port probe line not found in deploy-windows.bat"
+        for line in probes:
+            assert "GITV_PORT=" in line, (
+                "deploy-windows.bat's port probe must resolve GITV_PORT from "
+                ".env rather than assume 8000: a custom-port install is "
+                f"probed on a port it never binds. Probe: {line}"
+            )
+            assert "'127.0.0.1',8000" not in line, (
+                "hard-coded 8000 in the port probe: custom-port installs "
+                f"are checked against the wrong port. Probe: {line}"
+            )

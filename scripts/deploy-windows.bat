@@ -749,11 +749,16 @@ echo Installer log saved to: %LOG_FILE%
 echo.
 
 cd /d "%GITV_ROOT%"
-REM Check if port 8000 is already in use (another instance running)
-"!GITV_ROOT!\.venv\Scripts\python" -c "import socket; s=socket.socket(); s.settimeout(1); r=s.connect_ex(('127.0.0.1',8000)); s.close(); exit(0 if r==0 else 1)" >nul 2>&1
+REM Check if the configured port is already in use (another instance
+REM running). The port comes from .env (GITV_PORT, default 8000) so a
+REM custom-port install is probed on the port it will actually bind --
+REM a hard-coded probe missed custom-port instances and false-positived
+REM on anything else occupying 8000 (found by the harness 2026-11-19
+REM while the live install held 8000).
+"!GITV_ROOT!\.venv\Scripts\python" -c "import os,socket; v='8000'; p=os.path.join(os.environ.get('GITV_ROOT','.'),'.env'); v=next((l.split('=',1)[1].strip() for l in open(p,encoding='utf-8',errors='ignore') if l.startswith('GITV_PORT=')),v) if os.path.exists(p) else v; port=int(v) if v.isdigit() else 8000; s=socket.socket(); s.settimeout(1); r=s.connect_ex(('127.0.0.1',port)); s.close(); exit(0 if r==0 else 1)" >nul 2>&1
 if not errorlevel 1 (
     echo ============================================
-    echo WARNING: Port 8000 is already in use.
+    echo WARNING: The configured port is already in use.
     echo A GitInTheVan server may already be running.
     echo Close the other instance first, then re-run.
     echo ============================================
