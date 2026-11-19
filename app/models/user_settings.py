@@ -78,6 +78,21 @@ class UserSettings(Base):
     cantrip_auto_install_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="0", nullable=False
     )
+    # Phase 17: Passenger scripted LLM calls. Installing a cantrip is the
+    # opt-in, so the user half defaults on (refresh doc, open question 1).
+    # passenger_call_budget is the user half of the rule-22 two-half cap:
+    # 0 means no self-imposed limit, effective = min(admin, user) at use.
+    passenger_calling_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="1", nullable=False
+    )
+    passenger_call_budget: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    # The newest model-naming scope (rule 20): the blanket layer for every
+    # Passenger call, regardless of which endpoint the tag resolves to.
+    passenger_parameters_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]", server_default="[]"
+    )
     context_budget_percent: Mapped[float] = mapped_column(Float, default=10.0, nullable=False)
     context_window_override: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     debug_mode: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

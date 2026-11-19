@@ -558,6 +558,56 @@ if (!budget) {
     context.character.scenario += `\nThe weather is ${weather}.`;
 }
 </code></pre>
+<p><a id="passenger"></a></p>
+<h3 id="passenger-scripted-llm-calls-0360">Passenger: Scripted LLM Calls (0.36.0)</h3>
+<p>Cantrips run in a sandbox with no network access — that is what makes them
+safe to install. <strong>Passenger</strong> is the one sanctioned exception: a script can
+ask GitV itself to make a side LLM call on its behalf. The host holds the
+credentials, picks the endpoint, applies your parameter layers and records
+the call in Debug and Metrics; the script only ever handles text.</p>
+<pre><code class="language-javascript">if (!context.passenger.enabled) {
+    // Script's own fallback — the host injects nothing when Passenger is off.
+    context.character.personality = 'quiet and watchful';
+} else {
+    const npc = await context.passenger.call({
+        tag: 'tool_use',                        // endpoint role tag; '' = your default chain
+        instructions: 'Generate a one-line NPC description.',  // becomes the system message
+        context: 'A fantasy tavern on a stormy night.',        // becomes the user message
+        model: '',                              // '' = the endpoint's default model
+    });
+    // npc is the generated text, or null when the call could not run.
+    context.character.personality = (npc === null) ? '' : npc;
+}
+</code></pre>
+<p>Top-level <code>await</code> works in cantrips (the runner wraps your code in an async
+function); purely synchronous scripts are unaffected.</p>
+<p><img alt="Passenger settings card" src="media/gitv-settings-passenger.png"></p>
+<p><em>The Settings → Passenger card, captured 2026-11-18.</em></p>
+<p>How calls behave:</p>
+<ul>
+<li><strong>Every failure resolves to <code>null</code></strong> — Passenger off, no matching endpoint,
+  all endpoints failing, over the per-request cap, oversized payloads, a
+  timeout, or empty model output. The request always forwards; nothing is
+  injected or stripped when a call fails. Check <code>context.passenger.enabled</code>
+  before calling if you want your own fallback text.</li>
+<li><strong>One budget per request</strong>, shared by every cantrip at every position
+  (including each map stage). The cap is the lower of the admin's
+  <em>Max Passenger Calls Per Request</em> (Admin → Global Caps, default 3) and
+  your own <em>Call Budget Per Request</em> (Settings → Passenger, 0 = no
+  self-imposed limit).</li>
+<li><strong>Endpoint resolution by tag</strong>: the call goes to your enabled endpoints
+  carrying that role tag, in priority order, with automatic failover — the
+  same treatment the Driver gets. An empty or unmatched tag falls back to
+  your default endpoint chain.</li>
+<li><strong>A wait is a wait</strong>: a call you never <code>await</code> cannot deliver its result.
+  Results are capped at 64 KB (truncated with a marker).</li>
+<li><strong>Fully instrumented</strong>: every attempt appears in the Debug timeline
+  (<code>passenger_call_N</code> / <code>passenger_result_N</code> / <code>passenger_error_N</code>) and in
+  Metrics under the <em>Passenger</em> purpose, with per-map-stage attribution.</li>
+</ul>
+<p>The Cantrip Tester runs Passenger too, against your own endpoints and
+budgets; those test calls are recorded as sandbox traffic so they never
+pollute your live Metrics aggregates.</p>
 <hr>
 <p><a id="lorebooks"></a></p>
 <h2 id="6-lorebooks">6. Lorebooks</h2>
@@ -1344,11 +1394,16 @@ needs a restart.</p>
 <p>The Admin page provides system-wide management with seven tabs: <strong>Global Caps</strong>, <strong>Users</strong>, <strong>Update</strong>, <strong>Audit Logs</strong>, <strong>Server Logs</strong>, <strong>Network</strong>, and <strong>Backup</strong>. Debug is available as a tab on the Dashboard. A red badge appears on the Admin sidebar button when an update is available.</p>
 <h3 id="global-caps-tab">Global Caps Tab</h3>
 <p>Prevents users from causing internal denial-of-service by setting absurdly high turn or retry counts. The effective limit is the lower of the user's setting and the global cap — user preferences are not overwritten.</p>
+<p><img alt="Admin Global Caps" src="media/gitv-admin-passenger-caps.png"></p>
+<p><em>The Global Limits card with the Passenger caps, captured 2026-11-18.</em></p>
 <ul>
 <li><strong>Max Driver-Callable Turns</strong>: Global cap for driver-callable tool turns per request (default 2)</li>
 <li><strong>Max Verification Retries</strong>: Global cap for verification resubmission retries (default 3)</li>
 <li><strong>Rate Limit: Proxy</strong>: Max proxy requests per minute (default 60)</li>
 <li><strong>Rate Limit: Management API</strong>: Max management API requests per minute (default 120)</li>
+<li><strong>Passenger Calling Enabled</strong>: Server-wide kill switch for scripted LLM calls from cantrips (0.36.0; default on). With it off, <code>context.passenger.call()</code> returns null for every user — see <a href="#passenger">Passenger</a></li>
+<li><strong>Max Passenger Calls Per Request</strong>: Ceiling shared by every cantrip and map stage in one request (default 3). A user's own budget in Settings can lower it, never raise it</li>
+<li><strong>Passenger Call Timeout</strong>: Per-call upstream timeout in seconds (default 60)</li>
 </ul>
 <h3 id="runtime-log-level">Runtime Log Level</h3>
 <p>The Global Caps tab also includes a Runtime Log Level override. Temporarily change the server log level without restarting — changes take effect immediately.</p>

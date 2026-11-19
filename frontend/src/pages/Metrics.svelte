@@ -33,6 +33,8 @@
     summarizer: 'Summarizer',
     map_stage: 'Map Stage',
     assistant: 'Assistant',
+    lexicon: 'Lexicon',
+    passenger: 'Passenger',
   }
 
   const TYPE_LABELS: Record<string, string> = {

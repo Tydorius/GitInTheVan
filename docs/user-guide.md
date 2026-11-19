@@ -610,6 +610,65 @@ if (context.response) {
 }
 ```
 
+<a id="passenger"></a>
+
+### Passenger: Scripted LLM Calls (0.36.0)
+
+Cantrips run in a sandbox with no network access — that is what makes them
+safe to install. **Passenger** is the one sanctioned exception: a script can
+ask GitV itself to make a side LLM call on its behalf. The host holds the
+credentials, picks the endpoint, applies your parameter layers and records
+the call in Debug and Metrics; the script only ever handles text.
+
+```javascript
+if (!context.passenger.enabled) {
+    // Script's own fallback — the host injects nothing when Passenger is off.
+    context.character.personality = 'quiet and watchful';
+} else {
+    const npc = await context.passenger.call({
+        tag: 'tool_use',                        // endpoint role tag; '' = your default chain
+        instructions: 'Generate a one-line NPC description.',  // becomes the system message
+        context: 'A fantasy tavern on a stormy night.',        // becomes the user message
+        model: '',                              // '' = the endpoint's default model
+    });
+    // npc is the generated text, or null when the call could not run.
+    context.character.personality = (npc === null) ? '' : npc;
+}
+```
+
+Top-level `await` works in cantrips (the runner wraps your code in an async
+function); purely synchronous scripts are unaffected.
+
+![Passenger settings card](media/gitv-settings-passenger.png)
+
+*The Settings → Passenger card, captured 2026-11-18.*
+
+How calls behave:
+
+- **Every failure resolves to `null`** — Passenger off, no matching endpoint,
+  all endpoints failing, over the per-request cap, oversized payloads, a
+  timeout, or empty model output. The request always forwards; nothing is
+  injected or stripped when a call fails. Check `context.passenger.enabled`
+  before calling if you want your own fallback text.
+- **One budget per request**, shared by every cantrip at every position
+  (including each map stage). The cap is the lower of the admin's
+  *Max Passenger Calls Per Request* (Admin → Global Caps, default 3) and
+  your own *Call Budget Per Request* (Settings → Passenger, 0 = no
+  self-imposed limit).
+- **Endpoint resolution by tag**: the call goes to your enabled endpoints
+  carrying that role tag, in priority order, with automatic failover — the
+  same treatment the Driver gets. An empty or unmatched tag falls back to
+  your default endpoint chain.
+- **A wait is a wait**: a call you never `await` cannot deliver its result.
+  Results are capped at 64 KB (truncated with a marker).
+- **Fully instrumented**: every attempt appears in the Debug timeline
+  (`passenger_call_N` / `passenger_result_N` / `passenger_error_N`) and in
+  Metrics under the *Passenger* purpose, with per-map-stage attribution.
+
+The Cantrip Tester runs Passenger too, against your own endpoints and
+budgets; those test calls are recorded as sandbox traffic so they never
+pollute your live Metrics aggregates.
+
 ---
 
 <a id="lorebooks"></a>
@@ -1461,10 +1520,17 @@ The Admin page provides system-wide management with seven tabs: **Global Caps**,
 
 Prevents users from causing internal denial-of-service by setting absurdly high turn or retry counts. The effective limit is the lower of the user's setting and the global cap — user preferences are not overwritten.
 
+![Admin Global Caps](media/gitv-admin-passenger-caps.png)
+
+*The Global Limits card with the Passenger caps, captured 2026-11-18.*
+
 - **Max Driver-Callable Turns**: Global cap for driver-callable tool turns per request (default 2)
 - **Max Verification Retries**: Global cap for verification resubmission retries (default 3)
 - **Rate Limit: Proxy**: Max proxy requests per minute (default 60)
 - **Rate Limit: Management API**: Max management API requests per minute (default 120)
+- **Passenger Calling Enabled**: Server-wide kill switch for scripted LLM calls from cantrips (0.36.0; default on). With it off, `context.passenger.call()` returns null for every user — see [Passenger](#passenger)
+- **Max Passenger Calls Per Request**: Ceiling shared by every cantrip and map stage in one request (default 3). A user's own budget in Settings can lower it, never raise it
+- **Passenger Call Timeout**: Per-call upstream timeout in seconds (default 60)
 
 ### Runtime Log Level
 

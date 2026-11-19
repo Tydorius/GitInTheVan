@@ -43,6 +43,9 @@ async def get_caps() -> dict[str, int | bool]:
         "max_assistant_tool_calls_per_turn": s.max_assistant_tool_calls_per_turn,
         "max_assistant_conversations": s.max_assistant_conversations,
         "max_assistant_tool_result_kb": s.max_assistant_tool_result_kb,
+        "passenger_calling_enabled": s.passenger_calling_enabled,
+        "max_passenger_calls_per_request": s.max_passenger_calls_per_request,
+        "passenger_timeout_seconds": s.passenger_timeout_seconds,
     }
 
 

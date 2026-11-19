@@ -17,6 +17,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
+async def _passenger_effective_cap(user_settings: UserSettings) -> int:
+    """min(admin ceiling, user budget when set) -- the rule-22 clamp, shown
+    next to the budget field so the effective cap is visible."""
+    from app.services.admin import get_admin_settings
+
+    admin = await get_admin_settings()
+    cap = max(0, admin.max_passenger_calls_per_request)
+    budget = user_settings.passenger_call_budget
+    if budget and budget > 0:
+        cap = min(cap, budget)
+    return cap
+
+
 class SettingsResponse(BaseModel):
     default_endpoint_id: str | None
     default_model: str
@@ -36,12 +49,22 @@ class SettingsResponse(BaseModel):
     lexicon_enabled: bool = True
     lexicon_endpoint_id: str | None = None
     cantrip_auto_install_enabled: bool = False
+    # Phase 17: Passenger scripted LLM calls. passenger_call_budget is the
+    # user half of the rule-22 cap: 0 = no self-imposed limit, effective =
+    # min(admin cap, user budget).
+    passenger_calling_enabled: bool = True
+    passenger_call_budget: int = 0
+    # Read-only: the effective per-request Passenger call cap after the
+    # rule-22 clamp (min of the admin ceiling and this user's budget when
+    # set). Surfaced so the clamp is visible where the budget is edited.
+    passenger_effective_cap: int = 0
     # One parameter set per LLM role, matching the three model fields. These are
     # the blanket layer: broader than the endpoint, narrower than the client.
     parameters: list[ParameterDef] = Field(default_factory=list)
     verification_parameters: list[ParameterDef] = Field(default_factory=list)
     summarization_parameters: list[ParameterDef] = Field(default_factory=list)
     lexicon_parameters: list[ParameterDef] = Field(default_factory=list)
+    passenger_parameters: list[ParameterDef] = Field(default_factory=list)
 
 
 class SettingsUpdate(BaseModel):
@@ -61,10 +84,13 @@ class SettingsUpdate(BaseModel):
     lexicon_enabled: bool | None = None
     lexicon_endpoint_id: str | None = None
     cantrip_auto_install_enabled: bool | None = None
+    passenger_calling_enabled: bool | None = None
+    passenger_call_budget: int | None = None
     parameters: list[ParameterDef] | None = None
     verification_parameters: list[ParameterDef] | None = None
     summarization_parameters: list[ParameterDef] | None = None
     lexicon_parameters: list[ParameterDef] | None = None
+    passenger_parameters: list[ParameterDef] | None = None
 
 
 @router.get("")
@@ -97,10 +123,14 @@ async def get_settings(
         lexicon_enabled=user_settings.lexicon_enabled,
         lexicon_endpoint_id=user_settings.lexicon_endpoint_id,
         cantrip_auto_install_enabled=user_settings.cantrip_auto_install_enabled,
+        passenger_calling_enabled=user_settings.passenger_calling_enabled,
+        passenger_call_budget=user_settings.passenger_call_budget,
+        passenger_effective_cap=await _passenger_effective_cap(user_settings),
         parameters=params_to_api(user_settings.parameters_json),
         verification_parameters=params_to_api(user_settings.verification_parameters_json),
         summarization_parameters=params_to_api(user_settings.summarization_parameters_json),
         lexicon_parameters=params_to_api(user_settings.lexicon_parameters_json),
+        passenger_parameters=params_to_api(user_settings.passenger_parameters_json),
     )
 
 
@@ -148,6 +178,10 @@ async def update_settings(
         user_settings.lexicon_endpoint_id = req.lexicon_endpoint_id or None
     if req.cantrip_auto_install_enabled is not None:
         user_settings.cantrip_auto_install_enabled = req.cantrip_auto_install_enabled
+    if req.passenger_calling_enabled is not None:
+        user_settings.passenger_calling_enabled = req.passenger_calling_enabled
+    if req.passenger_call_budget is not None:
+        user_settings.passenger_call_budget = max(0, req.passenger_call_budget)
     if req.parameters is not None:
         user_settings.parameters_json = params_from_api(req.parameters, "driver parameters")
     if req.verification_parameters is not None:
@@ -161,6 +195,10 @@ async def update_settings(
     if req.lexicon_parameters is not None:
         user_settings.lexicon_parameters_json = params_from_api(
             req.lexicon_parameters, "lexicon parameters"
+        )
+    if req.passenger_parameters is not None:
+        user_settings.passenger_parameters_json = params_from_api(
+            req.passenger_parameters, "passenger parameters"
         )
 
     await db.commit()
@@ -183,8 +221,12 @@ async def update_settings(
         lexicon_enabled=user_settings.lexicon_enabled,
         lexicon_endpoint_id=user_settings.lexicon_endpoint_id,
         cantrip_auto_install_enabled=user_settings.cantrip_auto_install_enabled,
+        passenger_calling_enabled=user_settings.passenger_calling_enabled,
+        passenger_call_budget=user_settings.passenger_call_budget,
+        passenger_effective_cap=await _passenger_effective_cap(user_settings),
         parameters=params_to_api(user_settings.parameters_json),
         verification_parameters=params_to_api(user_settings.verification_parameters_json),
         summarization_parameters=params_to_api(user_settings.summarization_parameters_json),
         lexicon_parameters=params_to_api(user_settings.lexicon_parameters_json),
+        passenger_parameters=params_to_api(user_settings.passenger_parameters_json),
     )

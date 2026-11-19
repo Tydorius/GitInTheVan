@@ -2,6 +2,101 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.36.0] - 2026-11-18
+
+Phase 17 — Passenger: scripted LLM calls.
+
+> **Headline change: Passenger's built-in disabled/failure fallback is gone.**
+> The original design injected an `<ADDITIONAL INSTRUCTIONS>` block and
+> stripped it before the next LLM stage when Passenger was off or a call
+> failed. Nothing is injected or stripped now, on any path. Before: a failed
+> call silently altered the prompt. After: `context.passenger.enabled` tells
+> the script whether calling is possible (`false` → `call()` returns `null`
+> with zero protocol traffic) and the script decides its own fallback. No
+> shipped script can depend on the old behavior (Phase 17 never shipped
+> before); the note stands because the original design was published.
+
+### Added
+
+- **`context.passenger.call()` — the sanctioned LLM egress from cantrips.**
+  A script calls `await context.passenger.call({tag, instructions, context,
+  model})`; the host resolves an endpoint chain, holds the credentials, and
+  returns the generated text (or `null` on any failure — disabled, no
+  endpoint, all candidates failed, over cap, oversized payload, timeout,
+  empty output). Every failure mode forwards the request untouched. Top-level
+  `await` now works in cantrips (async wrapper; synchronous scripts
+  unaffected), and the syntax validator parses the same wrapper so errors
+  surface at write time. Protocol: sentinel-framed JSON lines on
+  stderr/stdin with id-matched replies — Deno diagnostics can never be
+  mistaken for protocol traffic.
+- **Phase 24 transport everywhere**: every Passenger call goes through
+  `_do_forward` over a failover chain (any status ≠ 200 or exception advances
+  to the next candidate), provider/LiteLLM endpoints work, and parameters
+  re-resolve **per attempt** — user Passenger layer (new
+  `passenger_parameters_json`, rule 20) → endpoint layer → per-model layer,
+  with `stream: false` owned by the pipeline.
+- **Rule-22 budgets**: per-request call cap = `min(admin
+  max_passenger_calls_per_request`, user `passenger_call_budget` when set)`,
+  one budget shared by every cantrip at every position including each map
+  stage — the cap is what stops stage-bound cantrips from multiplying side
+  call cost N+1 times. The effective cap is shown next to the user's budget
+  field. Per-call timeout is admin-set (`passenger_timeout_seconds`, 60s
+  default); the cantrip process watchdog extends to
+  `timeout_ms + cap × timeout + slack` so a default 5s cantrip is not killed
+  mid-call.
+- **Instrumentation (rules 16, 30)**: `passenger` is the seventh LLM purpose
+  (`PURPOSE_PASSENGER`); every attempt records a metrics row (failover index,
+  per-map-stage attribution via `stage_index`) and the Debug timeline gains
+  `passenger_call_N` / `passenger_result_N` / `passenger_error_N` captures on
+  every path. Injection-flag auditing applies to call payloads (same
+  flag-only treatment as lorebook injections).
+- **Settings & Admin UI**: Settings → *Passenger (Scripted LLM Calls)*
+  (enable toggle, call budget with visible clamp, parameter editor) and
+  Admin → Global Caps (kill switch, call cap, timeout).
+- **Cantrip Tester support**: the Tester runs Passenger against the user's
+  real gates and endpoints on a sandbox-marked body — test calls are recorded
+  but excluded from default aggregates. Auto-install smoke runs stay
+  Passenger-off by design (no LLM side effects during install).
+- **Metrics page**: `lexicon` and `passenger` purpose labels added (the
+  lexicon label was missing since 0.32.0).
+
+### Migration
+
+058 adds three `user_settings` and three `admin_settings` columns
+(dialect-aware; PostgreSQL boolean defaults as TRUE). Both gates default on
+— installing a cantrip is the opt-in. Upgrade-path test with vacuity check
+included; `user_settings` is on the proxy hot path.
+
+### Documentation
+
+- User guide: Passenger section with the call API and semantics (Settings
+  card captured 2026-11-18), the three admin caps documented under Global
+  Caps (captured 2026-11-18), and the Cantrip Context API section updated
+  for `context.passenger` and top-level `await`.
+
+### Fixed
+
+- **Chat continuity broke whenever an injection landed in the hash window
+  (since 0.33.0).** The conversation post-hash anchor was captured *after*
+  lorebook injection and cantrips — messages the client never stores — so a
+  lorebook entry at `before_last_message` (or writing samples) inside the
+  4-message hash window made every following request resolve as a brand-new
+  conversation: `chat_data`, memories and summaries silently lost each turn.
+  The anchor is now captured from the pre-injection message list, exactly
+  what `resolve_conversation` hashes from the client's raw history. E2E
+  regression test included (memory written in turn 1 must surface in turn 2
+  while a tail-position entry injects); mutation-verified.
+- **Non-ASCII cantrip code and stored data were mojibake.** The runner
+  template decoded its base64 payloads with `atob()` alone, which yields a
+  Latin-1 byte string — every multi-byte UTF-8 character corrupted. Curly
+  quotes and em-dashes in cantrip code (common LLM-authored punctuation)
+  were the everyday hit; emoji and accents in `chat_data` likewise. All five
+  payloads now decode through `TextDecoder`. Round-trip test included;
+  mutation-verified.
+- Cantrip execution no longer risks hanging on inherited stdin: the reply
+  reader only exists when Passenger is enabled for the run, and the template
+  closes stdin when user code completes so the process can always exit.
+
 ## [0.35.0] - 2026-11-18
 
 Lorebook & Chat Context bundle — the second feature-request batch (evaluation

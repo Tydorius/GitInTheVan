@@ -50,6 +50,9 @@
     max_snapshots_per_object: 20,
     metrics_retention_days: 30,
     assistant_cantrip_auto_install_allowed: false,
+    passenger_calling_enabled: true,
+    max_passenger_calls_per_request: 3,
+    passenger_timeout_seconds: 60,
     url_blocklist: '',
     runtime_log_level: '',
     assistant_enabled: true,
@@ -113,6 +116,9 @@
         max_snapshots_per_object: adminSettings.max_snapshots_per_object,
         metrics_retention_days: adminSettings.metrics_retention_days,
         assistant_cantrip_auto_install_allowed: (adminSettings as any).assistant_cantrip_auto_install_allowed ?? false,
+        passenger_calling_enabled: (adminSettings as any).passenger_calling_enabled ?? true,
+        max_passenger_calls_per_request: (adminSettings as any).max_passenger_calls_per_request ?? 3,
+        passenger_timeout_seconds: (adminSettings as any).passenger_timeout_seconds ?? 60,
         url_blocklist: adminSettings.url_blocklist || '',
         runtime_log_level: adminSettings.runtime_log_level || '',
         assistant_enabled: adminSettings.assistant_enabled,
@@ -487,6 +493,30 @@
       <div class="form-group">
         <label for="cap-api-rl">Rate Limit: Management API (req/min)</label>
         <input id="cap-api-rl" type="number" bind:value={capsForm.rate_limit_api_per_min} min="0" />
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="cap-psg-on">
+          <input id="cap-psg-on" type="checkbox" bind:checked={capsForm.passenger_calling_enabled} style="width: auto;" />
+          Passenger Calling Enabled
+        </label>
+        <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+          The server-wide kill switch for scripted LLM calls from cantrips. With it off,
+          <code>context.passenger.call()</code> returns null for every user.
+        </p>
+      </div>
+      <div class="form-group">
+        <label for="cap-psg-calls">Max Passenger Calls Per Request</label>
+        <input id="cap-psg-calls" type="number" bind:value={capsForm.max_passenger_calls_per_request} min="0" />
+        <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+          Ceiling shared by every cantrip and map stage in one request. A user's own budget
+          (Settings) can lower it, never raise it.
+        </p>
+      </div>
+      <div class="form-group">
+        <label for="cap-psg-timeout">Passenger Call Timeout (seconds)</label>
+        <input id="cap-psg-timeout" type="number" bind:value={capsForm.passenger_timeout_seconds} min="1" />
       </div>
     </div>
     <button class="primary" onclick={saveCaps}>Save</button>
