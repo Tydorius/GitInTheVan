@@ -9,11 +9,17 @@ console.log = (...args) => {
 };
 console.error = console.warn = console.log;
 
-const context = JSON.parse(atob("__GITV_CONTEXT__"));
-const __chatData = JSON.parse(atob("__GITV_CHATDATA__"));
-const __userData = JSON.parse(atob("__GITV_USERDATA__"));
-const __cantripData = JSON.parse(atob("__GITV_CANTRIPDATA__"));
-const __userCode = atob("__GITV_USERCODE__");
+// Base64 payloads are UTF-8 bytes. atob() alone yields a Latin-1 "binary
+// string" (one char per byte), which mojibakes every multi-byte character --
+// curly quotes and em-dashes in cantrip code, accents and emoji in stored
+// data. Decode the byte string through TextDecoder instead.
+const __b64 = (s) => new TextDecoder().decode(Uint8Array.from(atob(s), c => c.charCodeAt(0)));
+
+const context = JSON.parse(__b64("__GITV_CONTEXT__"));
+const __chatData = JSON.parse(__b64("__GITV_CHATDATA__"));
+const __userData = JSON.parse(__b64("__GITV_USERDATA__"));
+const __cantripData = JSON.parse(__b64("__GITV_CANTRIPDATA__"));
+const __userCode = __b64("__GITV_USERCODE__");
 
 context.chat_data = {
     get: (key) => key in __chatData ? __chatData[key] : null,

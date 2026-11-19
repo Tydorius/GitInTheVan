@@ -211,3 +211,101 @@ class TestRecordPostHash:
                 )
             )).scalars().all()
             assert len(rows) == 1
+
+
+# ============================================================================
+# Conversation continuity under prompt injection (0.36.0 regression fix)
+# ============================================================================
+
+
+class TestContinuityUnderInjection:
+    """0.33.0 regression: the post-hash anchor was captured AFTER lorebook
+    injection and cantrips, so any injection landing inside the 4-message
+    hash window (a before_last_message entry, writing samples) made the next
+    request resolve as a brand-new conversation -- chat_data, memories and
+    summaries silently lost every turn. The anchor is now captured from the
+    pre-injection message list, exactly what resolve_conversation hashes.
+    """
+
+    async def test_before_last_message_injection_does_not_orphan_the_chat(
+        self, admin_client, httpx_mock
+    ):
+        import json as _json
+
+        client, _, gitv_key = admin_client
+        resp = await client.post("/api/endpoints", json={
+            "name": "Cont", "base_url": "http://continuity.test", "api_key": "sk-test",
+        })
+        assert resp.status_code in (200, 201)
+
+        lb_resp = await client.post("/api/lorebooks", json={
+            "name": "Tail Lore", "is_active": True,
+        })
+        lb_id = lb_resp.json()["id"]
+        await client.post(f"/api/lorebooks/{lb_id}/entries", json={
+            "name": "AlwaysHere",
+            "keys": ["meadow"],
+            "content": "The meadow smells of rain.",
+            "position": "before_last_message",
+            "insertion_order": 10,
+            "is_constant": False,
+            "is_selective": False,
+        })
+
+        def _upstream(content: str) -> dict:
+            return {
+                "id": "chatcmpl-test", "object": "chat.completion", "created": 1,
+                "model": "test-model",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": content},
+                             "finish_reason": "stop"}],
+            }
+
+        # Turn 1: the reply carries a memory write. The client sees the
+        # cleaned text, so turn 2's history contains the cleaned assistant
+        # message -- exactly like a real client.
+        reply1 = ("<memstore key=\"flower\">a red tulip</memstore>\n"
+                  "You walk into the meadow.")
+        httpx_mock.add_response(url="http://continuity.test/v1/chat/completions",
+                                json=_upstream(reply1))
+        turn1 = {
+            "model": "test-model",
+            "messages": [
+                {"role": "system", "content": "You are a narrator."},
+                {"role": "user", "content": "We walk to the meadow."},
+            ],
+            "stream": False,
+        }
+        resp1 = await client.post("/v1/chat/completions", json=turn1,
+                                  headers={"Authorization": f"Bearer {gitv_key}"})
+        assert resp1.status_code == 200
+        # The entry injected inside the hash window on turn 1 (proof the
+        # bug's precondition held in this run).
+        sent1 = _json.loads(httpx_mock.get_requests()[0].content)
+        assert "The meadow smells of rain." in _json.dumps(sent1["messages"])
+
+        # Turn 2: same conversation, next user message. If the anchor
+        # matched, the memory written in turn 1 is injected into this
+        # request as [PERSISTENT MEMORY] -- the observable that the chat
+        # was NOT orphaned.
+        httpx_mock.add_response(url="http://continuity.test/v1/chat/completions",
+                                json=_upstream("The tulip is still there."))
+        turn2 = {
+            "model": "test-model",
+            "messages": [
+                {"role": "system", "content": "You are a narrator."},
+                {"role": "user", "content": "We walk to the meadow."},
+                {"role": "assistant", "content": "You walk into the meadow."},
+                {"role": "user", "content": "What do I see?"},
+            ],
+            "stream": False,
+        }
+        resp2 = await client.post("/v1/chat/completions", json=turn2,
+                                  headers={"Authorization": f"Bearer {gitv_key}"})
+        assert resp2.status_code == 200
+
+        sent2 = _json.loads(httpx_mock.get_requests()[-1].content)
+        sent2_text = _json.dumps(sent2["messages"])
+        assert "a red tulip" in sent2_text, (
+            "Memory from turn 1 missing: the conversation was orphaned by "
+            "in-window injection (the 0.33.0 regression)"
+        )

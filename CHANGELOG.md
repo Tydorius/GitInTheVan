@@ -69,6 +69,23 @@ included; `user_settings` is on the proxy hot path.
 
 ### Fixed
 
+- **Chat continuity broke whenever an injection landed in the hash window
+  (since 0.33.0).** The conversation post-hash anchor was captured *after*
+  lorebook injection and cantrips — messages the client never stores — so a
+  lorebook entry at `before_last_message` (or writing samples) inside the
+  4-message hash window made every following request resolve as a brand-new
+  conversation: `chat_data`, memories and summaries silently lost each turn.
+  The anchor is now captured from the pre-injection message list, exactly
+  what `resolve_conversation` hashes from the client's raw history. E2E
+  regression test included (memory written in turn 1 must surface in turn 2
+  while a tail-position entry injects); mutation-verified.
+- **Non-ASCII cantrip code and stored data were mojibake.** The runner
+  template decoded its base64 payloads with `atob()` alone, which yields a
+  Latin-1 byte string — every multi-byte UTF-8 character corrupted. Curly
+  quotes and em-dashes in cantrip code (common LLM-authored punctuation)
+  were the everyday hit; emoji and accents in `chat_data` likewise. All five
+  payloads now decode through `TextDecoder`. Round-trip test included;
+  mutation-verified.
 - Cantrip execution no longer risks hanging on inherited stdin: the reply
   reader only exists when Passenger is enabled for the run, and the template
   closes stdin when user code completes so the process can always exit.

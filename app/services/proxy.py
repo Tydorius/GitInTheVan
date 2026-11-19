@@ -348,6 +348,22 @@ async def _forward_request_impl(
         from app.services.memory import build_memory_context_block as _build_mem_block
 
         messages_for_conv = body_json.get("messages", [])
+
+        # Conversation-hash anchor, captured BEFORE any prompt work (lorebook/
+        # skill injection, cantrips, writing samples) touches the message list
+        # -- exactly the list resolve_conversation hashed a moment ago and will
+        # hash from the client's raw history on the next request. The old
+        # capture point (post-injection, later in this function) recorded
+        # messages the client never stores, so any injection landing inside
+        # the 4-message hash window -- a before_last_message entry, writing
+        # samples -- made every following request resolve as a brand-new
+        # conversation, silently losing chat_data, memories and summaries.
+        # Deep copy: stages may mutate message dicts in place, and this anchor
+        # must outlive all of them untouched.
+        body_json["_gitv_messages_for_hash"] = json.loads(
+            json.dumps(messages_for_conv, default=str)
+        )
+
         internal_chat_id, is_new_conv = await resolve_conversation(messages_for_conv, user_id)
 
         if body_json.get("_gitv_sandbox"):
@@ -687,8 +703,10 @@ async def _forward_request_impl(
 
         # The global pre-driver pass already ran above (before map selection,
         # so cantrip nominations could be counted). Anything between here and
-        # the forward is post-cantrip prompt work.
-        body_json["_gitv_messages_for_hash"] = body_json.get("messages", [])
+        # the forward is post-cantrip prompt work. The conversation-hash
+        # anchor was captured pre-injection at resolve_conversation time;
+        # re-capturing here would reintroduce the 0.33.0 continuity bug
+        # (injections inside the hash window orphaning every conversation).
 
         from app.services.summarization import maybe_summarize
         if body_json.get("_gitv_command_overrides", {}).get("summary") is not False:

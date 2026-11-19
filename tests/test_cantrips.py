@@ -90,6 +90,21 @@ class TestDenoRunnerBasic:
         assert result.example_dialogs == ""
         assert not result.has_modifications
 
+    @pytest.mark.asyncio
+    async def test_non_ascii_round_trips_through_base64(self):
+        """atob() alone decodes base64 as Latin-1, mojibaking every multi-byte
+        character -- curly quotes and em-dashes in cantrip code are the common
+        real-world hit. The template must decode the byte string through
+        TextDecoder, and the data blobs must round-trip the same way."""
+        code = (
+            'context.character.personality = "\u201ccurly quotes\u201d \u2014 caf\u00e9 \u2603 \U0001f3f5";'
+            '\ncontext.chat_data.set("motto", "Vive la diff\u00e9rence \u2014 \u00e0 bient\u00f4t");'
+        )
+        result = await run_cantrip(code, _make_context(), chat_data={})
+        assert result.error is None, result.error
+        assert result.personality == "\u201ccurly quotes\u201d \u2014 caf\u00e9 \u2603 \U0001f3f5"
+        assert result.chat_data["motto"] == "Vive la diff\u00e9rence \u2014 \u00e0 bient\u00f4t"
+
 
 # ============================================================================
 # Deno Runner: JanitorAI compatibility patterns
