@@ -45,6 +45,18 @@ class AdminSettings(Base):
     assistant_cantrip_auto_install_allowed: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="0", nullable=False
     )
+    # Phase 17: Passenger scripted LLM calls. The admin ceiling halves of the
+    # rule-22 budgets (per-request call cap, per-call timeout) plus the
+    # instance kill-switch. A user budget above the cap clamps to the cap.
+    passenger_calling_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="1", nullable=False
+    )
+    max_passenger_calls_per_request: Mapped[int] = mapped_column(
+        Integer, default=3, server_default="3", nullable=False
+    )
+    passenger_timeout_seconds: Mapped[int] = mapped_column(
+        Integer, default=60, server_default="60", nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=text("CURRENT_TIMESTAMP"), nullable=False,
         onupdate=lambda: datetime.now(UTC),

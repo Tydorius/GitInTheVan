@@ -53,6 +53,9 @@ class AdminSettingsResponse(BaseModel):
     max_snapshots_per_object: int
     metrics_retention_days: int
     assistant_cantrip_auto_install_allowed: bool
+    passenger_calling_enabled: bool
+    max_passenger_calls_per_request: int
+    passenger_timeout_seconds: int
 
 
 class AdminSettingsUpdate(BaseModel):
@@ -85,6 +88,9 @@ class AdminSettingsUpdate(BaseModel):
     max_snapshots_per_object: int | None = None
     metrics_retention_days: int | None = None
     assistant_cantrip_auto_install_allowed: bool | None = None
+    passenger_calling_enabled: bool | None = None
+    max_passenger_calls_per_request: int | None = None
+    passenger_timeout_seconds: int | None = None
 
 
 def _settings_response(s: AdminSettings, effective: str) -> AdminSettingsResponse:
@@ -125,6 +131,9 @@ def _settings_response(s: AdminSettings, effective: str) -> AdminSettingsRespons
         max_snapshots_per_object=s.max_snapshots_per_object,
         metrics_retention_days=s.metrics_retention_days,
         assistant_cantrip_auto_install_allowed=s.assistant_cantrip_auto_install_allowed,
+        passenger_calling_enabled=s.passenger_calling_enabled,
+        max_passenger_calls_per_request=s.max_passenger_calls_per_request,
+        passenger_timeout_seconds=s.passenger_timeout_seconds,
     )
 
 
@@ -235,6 +244,12 @@ async def update_settings(
         updates["metrics_retention_days"] = max(1, req.metrics_retention_days)
     if req.assistant_cantrip_auto_install_allowed is not None:
         updates["assistant_cantrip_auto_install_allowed"] = req.assistant_cantrip_auto_install_allowed
+    if req.passenger_calling_enabled is not None:
+        updates["passenger_calling_enabled"] = req.passenger_calling_enabled
+    if req.max_passenger_calls_per_request is not None:
+        updates["max_passenger_calls_per_request"] = max(0, req.max_passenger_calls_per_request)
+    if req.passenger_timeout_seconds is not None:
+        updates["passenger_timeout_seconds"] = max(1, req.passenger_timeout_seconds)
 
     s = await update_admin_settings(updates)
     from app.services.admin import get_effective_log_level

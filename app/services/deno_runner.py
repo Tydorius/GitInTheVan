@@ -8,8 +8,10 @@ import os
 import shutil
 import subprocess
 import tempfile
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +80,12 @@ class CantripExecutionError(Exception):
 
 
 def _build_runner_script(
-    context: dict, chat_data: dict, user_data: dict, cantrip_data: dict, user_code: str
+    context: dict,
+    chat_data: dict,
+    user_data: dict,
+    cantrip_data: dict,
+    user_code: str,
+    passenger_cfg: dict | None = None,
 ) -> str:
     template = _TEMPLATE_PATH.read_text(encoding="utf-8")
     context_b64 = base64.b64encode(json.dumps(context).encode("utf-8")).decode("ascii")
@@ -94,6 +101,7 @@ def _build_runner_script(
         .replace("__GITV_USERDATA__", userdata_b64)
         .replace("__GITV_CANTRIPDATA__", cantripdata_b64)
         .replace("__GITV_USERCODE__", usercode_b64)
+        .replace("__GITV_PASSENGER__", json.dumps(passenger_cfg) if passenger_cfg else "null")
     )
 
 
@@ -104,6 +112,7 @@ async def run_cantrip(
     user_data: dict | None = None,
     cantrip_data: dict | None = None,
     timeout_ms: int = 5000,
+    passenger_handler: Any | None = None,
 ) -> CantripResult:
     if not DENO_PATH:
         raise CantripExecutionError(
@@ -113,7 +122,25 @@ async def run_cantrip(
     chat_data = chat_data or {}
     user_data = user_data or {}
     cantrip_data = cantrip_data or {}
-    runner_script = _build_runner_script(context, chat_data, user_data, cantrip_data, code)
+
+    # Passenger rides only when a handler exists AND its gates are on; a
+    # disabled handler produces the same template as no handler at all
+    # (enabled=false, call() -> null, zero protocol traffic).
+    passenger_cfg: dict | None = None
+    watchdog_ms = timeout_ms
+    if passenger_handler is not None and getattr(passenger_handler, "enabled", False):
+        passenger_cfg = {
+            "enabled": True,
+            "maxCalls": max(0, int(passenger_handler.max_calls)),
+        }
+        # The script's own budget plus every Passenger call's upstream
+        # timeout, plus slack: the plain cantrip timeout would kill every
+        # Passenger run before the first call completes.
+        watchdog_ms = passenger_handler.watchdog_ms(timeout_ms)
+
+    runner_script = _build_runner_script(
+        context, chat_data, user_data, cantrip_data, code, passenger_cfg
+    )
 
     fd, temp_path = tempfile.mkstemp(suffix=".mjs", prefix="gitv_cantrip_")
     try:
@@ -121,10 +148,15 @@ async def run_cantrip(
             f.write(runner_script)
 
         try:
-            stdout_bytes, return_code = await _execute_deno(temp_path, timeout_ms)
+            if passenger_cfg is not None:
+                stdout_bytes, return_code = await _execute_deno_interactive(
+                    temp_path, watchdog_ms, passenger_handler
+                )
+            else:
+                stdout_bytes, return_code = await _execute_deno(temp_path, timeout_ms)
         except TimeoutError:
             raise CantripTimeoutError(
-                f"Script timed out after {timeout_ms}ms"
+                f"Script timed out after {watchdog_ms if passenger_cfg else timeout_ms}ms"
             )
 
         stdout = stdout_bytes.decode("utf-8", errors="replace").strip()
@@ -209,8 +241,120 @@ async def _execute_deno(script_path: str, timeout_ms: int) -> tuple[bytes, int]:
     return stdout, return_code
 
 
+# Sentinel prefixing protocol traffic on the child's stderr. Deno diagnostics
+# never carry it, so the two cannot be confused. Must match deno_template.mjs.
+_MSG_PREFIX = "__GITV_MSG__ "
+
+
+async def _execute_deno_interactive(
+    script_path: str, watchdog_ms: int, passenger_handler: Any
+) -> tuple[bytes, int]:
+    """Run a cantrip with the Passenger protocol attached.
+
+    Same command line and deny flags as the plain path; stdin/stdout/stderr
+    are pipes driven by an asyncio read/write loop instead of
+    ``subprocess.run``. Requires subprocess support on the event loop, which
+    on Windows means the Proactor policy -- uvicorn's default. The watchdog
+    covers the script budget plus every Passenger call's upstream timeout;
+    on expiry the process is killed and the caller sees ``TimeoutError``.
+    """
+    try:
+        return await asyncio.wait_for(
+            _run_deno_interactive(script_path, passenger_handler),
+            timeout=watchdog_ms / 1000,
+        )
+    except TimeoutError:
+        raise TimeoutError(f"Deno timed out after {watchdog_ms}ms") from None
+
+
+async def _run_deno_interactive(script_path: str, passenger_handler: Any) -> tuple[bytes, int]:
+    proc = await asyncio.create_subprocess_exec(
+        DENO_PATH, "run", "--quiet", *_DENO_DENY_FLAGS, script_path,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout_task = asyncio.create_task(proc.stdout.read())
+    answers: set[asyncio.Task] = set()
+    try:
+        while True:
+            raw = await proc.stderr.readline()
+            if not raw:
+                break  # stderr closed: the process is exiting
+            line = raw.decode("utf-8", errors="replace").rstrip("\n")
+            if not line.startswith(_MSG_PREFIX):
+                if line.strip():
+                    logger.debug("Deno stderr: %s", line[:300])
+                continue
+            try:
+                msg = json.loads(line[len(_MSG_PREFIX):])
+            except json.JSONDecodeError:
+                logger.debug("Passenger: unparseable protocol line: %s", line[:200])
+                continue
+            if not isinstance(msg, dict) or msg.get("type") != "passenger_call":
+                continue
+            task = asyncio.create_task(_answer_passenger_call(proc, passenger_handler, msg))
+            answers.add(task)
+            task.add_done_callback(answers.discard)
+
+        stdout_bytes = await stdout_task
+        await proc.wait()
+        return stdout_bytes, proc.returncode or 0
+    except asyncio.CancelledError:
+        # Watchdog fired (or the server is shutting down): take the process
+        # down and let in-flight answers fail on their broken pipes.
+        stdout_task.cancel()
+        for task in answers:
+            task.cancel()
+        with suppress(ProcessLookupError):
+            proc.kill()
+        await proc.wait()
+        raise
+    finally:
+        # The template closes its own stdin when the user code completes; this
+        # covers any exit path that skipped it, so a blocked reply reader can
+        # never hold the process open past its own completion.
+        if proc.stdin is not None:
+            proc.stdin.close()
+
+
+async def _answer_passenger_call(
+    proc: asyncio.subprocess.Process, passenger_handler: Any, msg: dict
+) -> None:
+    """Execute one Passenger request from the sandbox and reply on stdin.
+
+    ``PassengerHandler.call`` never raises; a reply is always written unless
+    the process died first (broken pipe -- the script abandoned the call or
+    the watchdog fired).
+    """
+    text, outcome = await passenger_handler.call(
+        tag=str(msg.get("tag") or ""),
+        instructions=str(msg.get("instructions") or ""),
+        context=str(msg.get("context") or ""),
+        model=str(msg.get("model") or ""),
+    )
+    reply: dict[str, Any] = {"type": "passenger_result", "id": msg.get("id")}
+    if text is not None:
+        reply["ok"] = True
+        reply["text"] = text
+    else:
+        reply["ok"] = False
+        reply["error"] = outcome
+    try:
+        proc.stdin.write(json.dumps(reply).encode("utf-8") + b"\n")
+        await proc.stdin.drain()
+    except (BrokenPipeError, ConnectionResetError):
+        pass
+
+
 def _validate_syntax_sync(code: str) -> str:
-    """Parse-check cantrip code with `new Function` in a bare Deno run.
+    """Parse-check cantrip code with the runner's async wrapper in a bare Deno run.
+
+    Parses exactly what the template will compile -- ``new Function`` around
+    the user code wrapped in an async IIFE, with the same trailing-brace trim
+    fallback -- so a syntax error surfaces at write time, not first run. The
+    async wrapper only adds capability (top-level ``await``), so code valid
+    under the old bare check stays valid.
 
     Returns "" when the code parses, else the parse error. Without a Deno
     binary there is nothing to check and the result is "" (valid) -- matching
@@ -225,8 +369,13 @@ def _validate_syntax_sync(code: str) -> str:
     wrapper = (
         f"const __userCode = {code!r};\n"
         "try {\n"
-        "    new Function('context', __userCode);\n"
-        "} catch(e) {\n"
+        "    try {\n"
+        "        new Function('context', 'return (async () => {\\n' + __userCode + '\\n})();');\n"
+        "    } catch (e1) {\n"
+        "        const trimmed = __userCode.replace(/\\n\\s*\\}\\s*$/, '');\n"
+        "        new Function('context', 'return (async () => {\\n' + trimmed + '\\n})();');\n"
+        "    }\n"
+        "} catch (e) {\n"
         "    Deno.stdout.writeSync(new TextEncoder().encode(JSON.stringify({error: e.message})));\n"
         "    Deno.exit(1);\n"
         "}\n"

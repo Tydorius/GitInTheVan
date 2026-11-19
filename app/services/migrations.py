@@ -1350,6 +1350,40 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             """,
         },
     ),
+    (
+        "058_passenger_calls",
+        # Phase 17 (0.36.0): Passenger scripted LLM calls. The admin columns
+        # are the ceiling halves of the rule-22 budgets; passenger_call_budget
+        # on user_settings is the optional user half (0 = no self-imposed
+        # limit, effective = min(admin, user)). PostgreSQL needs TRUE/FALSE
+        # boolean defaults.
+        {
+            "sqlite": """
+            ALTER TABLE user_settings ADD COLUMN passenger_calling_enabled BOOLEAN DEFAULT 1 NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN passenger_call_budget INTEGER DEFAULT 0 NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN passenger_parameters_json TEXT DEFAULT '[]' NOT NULL;
+            ALTER TABLE admin_settings ADD COLUMN passenger_calling_enabled BOOLEAN DEFAULT 1 NOT NULL;
+            ALTER TABLE admin_settings ADD COLUMN max_passenger_calls_per_request INTEGER DEFAULT 3 NOT NULL;
+            ALTER TABLE admin_settings ADD COLUMN passenger_timeout_seconds INTEGER DEFAULT 60 NOT NULL;
+            """,
+            "postgresql": """
+            ALTER TABLE user_settings ADD COLUMN passenger_calling_enabled BOOLEAN DEFAULT TRUE NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN passenger_call_budget INTEGER DEFAULT 0 NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN passenger_parameters_json TEXT DEFAULT '[]' NOT NULL;
+            ALTER TABLE admin_settings ADD COLUMN passenger_calling_enabled BOOLEAN DEFAULT TRUE NOT NULL;
+            ALTER TABLE admin_settings ADD COLUMN max_passenger_calls_per_request INTEGER DEFAULT 3 NOT NULL;
+            ALTER TABLE admin_settings ADD COLUMN passenger_timeout_seconds INTEGER DEFAULT 60 NOT NULL;
+            """,
+            "mysql": """
+            ALTER TABLE user_settings ADD COLUMN passenger_calling_enabled BOOLEAN DEFAULT 1 NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN passenger_call_budget INTEGER DEFAULT 0 NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN passenger_parameters_json TEXT DEFAULT '[]' NOT NULL;
+            ALTER TABLE admin_settings ADD COLUMN passenger_calling_enabled BOOLEAN DEFAULT 1 NOT NULL;
+            ALTER TABLE admin_settings ADD COLUMN max_passenger_calls_per_request INTEGER DEFAULT 3 NOT NULL;
+            ALTER TABLE admin_settings ADD COLUMN passenger_timeout_seconds INTEGER DEFAULT 60 NOT NULL;
+            """,
+        },
+    ),
 ]
 
 

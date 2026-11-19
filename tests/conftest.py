@@ -24,6 +24,7 @@ import app.services.lexicon as _lexicon_module
 import app.services.map_pipeline as _map_pipeline_module
 import app.services.memory as _memory_module
 import app.services.metrics as _metrics_module
+import app.services.passenger as _passenger_module
 import app.services.proxy as _proxy_module
 import app.services.scenario_summarizer as _scenario_summarizer_module
 import app.services.summarization as _summarization_module
@@ -64,6 +65,7 @@ _SESSION_MODULES = [
     _map_pipeline_module,
     _memory_module,
     _metrics_module,
+    _passenger_module,
     _proxy_module,
     _scenario_summarizer_module,
     _summarization_module,

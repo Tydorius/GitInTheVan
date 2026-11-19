@@ -81,7 +81,16 @@
   let lexiconParams: any[] = []
   let cantripAutoInstall = false
 
-  let collapse = new CollapseController('settings', ['proxy', 'streaming', 'summarization', 'assistant', 'driver', 'prefill', 'budget', 'lexicon'])
+  // Phase 17: Passenger scripted LLM calls from cantrips. The user half of
+  // the rule-22 call budget lives here; passengerEffectiveCap is read-only
+  // from the server so the clamp is visible next to the field.
+  let passengerEnabled = true
+  let passengerBudget = 0
+  let passengerParams: any[] = []
+  let passengerEffectiveCap = 0
+  let passengerSaved = false
+
+  let collapse = new CollapseController('settings', ['proxy', 'streaming', 'summarization', 'assistant', 'driver', 'prefill', 'budget', 'lexicon', 'passenger'])
 
   async function load() {
     try {
@@ -98,6 +107,10 @@
       lexiconForm.lexicon_endpoint_id = s.lexicon_endpoint_id || ''
       lexiconParams = structuredClone(s.lexicon_parameters || [])
       cantripAutoInstall = s.cantrip_auto_install_enabled ?? false
+      passengerEnabled = s.passenger_calling_enabled ?? true
+      passengerBudget = s.passenger_call_budget ?? 0
+      passengerParams = structuredClone(s.passenger_parameters || [])
+      passengerEffectiveCap = s.passenger_effective_cap ?? 0
       endpoints = e.endpoints
       const mapData = await api.listMaps()
       maps = mapData.maps
@@ -175,6 +188,19 @@
         cantrip_auto_install_enabled: cantripAutoInstall,
       } as any)
       lexSaved = true
+    } catch (e: any) { error = e.message }
+  }
+
+  async function savePassenger() {
+    error = ''; passengerSaved = false
+    try {
+      const s = await api.updateSettings({
+        passenger_calling_enabled: passengerEnabled,
+        passenger_call_budget: passengerBudget,
+        passenger_parameters: passengerParams,
+      } as any)
+      passengerEffectiveCap = (s as any).passenger_effective_cap ?? passengerEffectiveCap
+      passengerSaved = true
     } catch (e: any) { error = e.message }
   }
 
@@ -413,6 +439,47 @@
     </p>
   </div>
   <button class="primary" onclick={saveLexicon}>Save Lexicon Settings</button>
+</CollapsibleCard>
+
+<CollapsibleCard title="Passenger (Scripted LLM Calls)" cardKey="passenger" {collapse}>
+  <p style="color: var(--text-dim); font-size: 12px; margin-top: 12px; margin-bottom: 16px;">
+    Lets cantrips make side LLM calls with <code>await context.passenger.call(...)</code> —
+    the only network egress a sandboxed script ever gets. Calls go through your own
+    endpoints with failover, are budgeted per request, and show in Debug and Metrics as
+    Passenger calls. See the
+    <a class="help-link" href="/help/user-guide.html#passenger" target="_blank" title="Open documentation">?</a>
+    guide for the call API.
+  </p>
+  {#if passengerSaved}<div class="success-msg">Passenger settings saved.</div>{/if}
+  <div class="form-group">
+    <label>
+      <input type="checkbox" bind:checked={passengerEnabled} style="width: auto;">
+      Passenger Calling Enabled
+    </label>
+    <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+      Installing a cantrip is the opt-in, so this defaults to on. When off (here or server-wide),
+      <code>context.passenger.enabled</code> is false and <code>call()</code> returns null —
+      scripts are expected to branch on that.
+    </p>
+  </div>
+  <div class="form-group">
+    <label for="psg-budget">Call Budget Per Request</label>
+    <input id="psg-budget" type="number" min="0" bind:value={passengerBudget} style="width: 140px;" />
+    <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+      Your own cap on Passenger calls per request, shared by every cantrip and map stage in
+      that request. 0 means no self-imposed limit. Effective cap now:
+      <strong>{passengerEffectiveCap} call(s)</strong> per request (the lower of this budget
+      and the server's <code>max_passenger_calls_per_request</code>).
+    </p>
+  </div>
+  <div class="form-group">
+    <ParameterEditor
+      bind:params={passengerParams}
+      title="Default Parameters (passenger calls)"
+      hint="Merged under endpoint and per-model parameters on every Passenger call."
+    />
+  </div>
+  <button class="primary" onclick={savePassenger}>Save Passenger Settings</button>
 </CollapsibleCard>
 
 <CollapsibleCard title="Assistant" cardKey="assistant" {collapse}>

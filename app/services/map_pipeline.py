@@ -999,6 +999,7 @@ async def run_map_pipeline(
                 tags=tags,
                 internal_chat_id=body_json.get("_gitv_chat_id", ""),
                 only_ids=stage_cantrip_ids,
+                stage_index=stage_idx,
             )
             if debug_on:
                 ran = [
@@ -1132,6 +1133,7 @@ async def run_map_pipeline(
                 body_json, "POST", "", {}, timeout, user_id, request_headers or {},
                 forward=_stage_forward,
                 tool_only_ids=stage_cantrip_ids or None,
+                stage_index=stage_idx,
             )
             if loop_result is not None:
                 response_data, status_code = loop_result, 200
@@ -1233,6 +1235,7 @@ async def run_map_pipeline(
                     content, body_json, user_id, request_headers or {},
                     tags=tags, position="pre_navigator",
                     only_ids=stage_cantrip_ids,
+                    stage_index=stage_idx,
                 )
             except Exception:
                 logger.exception(

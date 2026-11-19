@@ -233,6 +233,7 @@ async def process_cantrips(
     internal_chat_id: str = "",
     only_ids: set[str] | None = None,
     exclude_ids: set[str] | None = None,
+    stage_index: int | None = None,
 ) -> dict[str, Any]:
     """Run cantrips at a pipeline position.
 
@@ -242,6 +243,10 @@ async def process_cantrips(
     stage runs only the cantrips attached to it. Without that split a cantrip
     with side effects -- a dice roll, a balance change, a counter -- fires once
     globally and again on every stage of the map.
+
+    ``stage_index`` names the map stage this pass belongs to, so Passenger
+    LLM-call rows can attribute their cost to the stage (None everywhere
+    else).
     """
     messages = body_json.get("messages", [])
     if not messages:
@@ -318,6 +323,14 @@ async def process_cantrips(
 
         from app.services.budget import estimate_tokens as _est_tokens
         from app.services.metrics import record_prompt_object
+        from app.services.passenger import get_passenger_handler
+
+        # One Passenger handler per request, shared by every cantrip at every
+        # position (and every map stage) so the call budget is per-request,
+        # never per-cantrip. stage_index attributes LLM-call rows to the map
+        # stage this pass belongs to (None resets it between passes).
+        passenger_handler = await get_passenger_handler(body_json, user_id)
+        passenger_handler.stage_index = stage_index
 
         for cantrip in cantrips:
             if budget_allocations:
@@ -339,6 +352,7 @@ async def process_cantrips(
                     user_data=user_data,
                     cantrip_data=cantrip_data,
                     timeout_ms=cantrip.timeout_ms,
+                    passenger_handler=passenger_handler,
                 )
             except Exception as exc:
                 logger.exception("Script '%s' failed to execute", cantrip.name)
@@ -463,13 +477,23 @@ async def process_cantrips(
 
 async def test_cantrip(
     code: str,
-    context: dict[str, Any],
-    chat_data: dict[str, Any] | None = None,
-    user_data: dict[str, Any] | None = None,
-    cantrip_data: dict[str, Any] | None = None,
+    context: dict,
+    chat_data: dict | None = None,
+    user_data: dict | None = None,
+    cantrip_data: dict | None = None,
     timeout_ms: int = 5000,
+    passenger_handler: Any | None = None,
 ) -> CantripResult:
-    return await run_cantrip(code, context, chat_data, user_data, cantrip_data, timeout_ms)
+    """Run one cantrip outside the pipeline (Cantrip Tester, smoke runs).
+
+    Passenger is opt-in here: the Tester passes a handler built against a
+    sandbox-marked synthetic body; the auto-install smoke run passes nothing,
+    so a smoke test never makes real LLM calls.
+    """
+    return await run_cantrip(
+        code, context, chat_data, user_data, cantrip_data, timeout_ms,
+        passenger_handler=passenger_handler,
+    )
 
 
 async def process_cantrips_post_driver(
@@ -480,6 +504,7 @@ async def process_cantrips_post_driver(
     tags: list | None = None,
     position: str = "pre_navigator",
     only_ids: set[str] | None = None,
+    stage_index: int | None = None,
 ) -> str:
     """Run post-Driver cantrips that can modify the response content.
 
@@ -487,6 +512,7 @@ async def process_cantrips_post_driver(
     (final formatting) positions. Cantrips at these positions have access to
     context.response.content. ``only_ids`` restricts the pass to specific
     cantrips (map stage capture mode runs just the stage's own).
+    ``stage_index`` attributes Passenger LLM-call rows to a map stage.
     """
     messages = body_json.get("messages", [])
     if not messages:
@@ -529,6 +555,10 @@ async def process_cantrips_post_driver(
 
         from app.services.budget import estimate_tokens as _est_tokens
         from app.services.metrics import record_prompt_object
+        from app.services.passenger import get_passenger_handler
+
+        passenger_handler = await get_passenger_handler(body_json, user_id)
+        passenger_handler.stage_index = stage_index
 
         for cantrip in cantrips:
             cantrip_data = await _load_cantrip_data(db, user_id, cantrip.id)
@@ -542,6 +572,7 @@ async def process_cantrips_post_driver(
                     user_data=user_data,
                     cantrip_data=cantrip_data,
                     timeout_ms=cantrip.timeout_ms,
+                    passenger_handler=passenger_handler,
                 )
             except Exception:
                 logger.exception("Post-driver cantrip '%s' failed", cantrip.name)

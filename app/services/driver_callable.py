@@ -166,6 +166,7 @@ async def execute_tool_call(
     user_id: str,
     conversation_id: str = "",
     persist_shared: bool = True,
+    passenger_handler: Any | None = None,
 ) -> str:
     from app.services.cantrip import (
         _load_cantrip_data,
@@ -211,6 +212,7 @@ async def execute_tool_call(
                 user_data=user_data,
                 cantrip_data=cantrip_data,
                 timeout_ms=tool.timeout_ms,
+                passenger_handler=passenger_handler,
             )
         except Exception:
             logger.exception("Driver-callable cantrip '%s' failed", tool.name)

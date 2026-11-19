@@ -1327,6 +1327,7 @@ async def _run_driver_callable_loop(
     request_headers: dict[str, str],
     forward=None,
     tool_only_ids: set[str] | None = None,
+    stage_index: int | None = None,
 ) -> dict[str, Any] | None:
     """Run the Driver-Callable tool loop.
 
@@ -1338,7 +1339,8 @@ async def _run_driver_callable_loop(
     their failover-chain forwarder here); it receives the loop's body dict
     and returns ``(response_data, status_code)``, recording its own LLM
     calls. ``tool_only_ids`` restricts which cantrips are offered as tools
-    (a map stage offers only its own).
+    (a map stage offers only its own). ``stage_index`` attributes Passenger
+    LLM calls made by tool cantrips to the map stage running the loop.
     """
     if not body_json.get("_gitv_driver_callable"):
         return None
@@ -1365,6 +1367,13 @@ async def _run_driver_callable_loop(
 
     loop_messages = [msg.copy() for msg in body_json.get("messages", [])]
     conversation_id = body_json.get("_gitv_chat_id", "")
+
+    # The per-request Passenger handler, so tool cantrips share the same call
+    # budget as every other cantrip position.
+    from app.services.passenger import get_passenger_handler
+
+    passenger_handler = await get_passenger_handler(body_json, user_id)
+    passenger_handler.stage_index = stage_index
 
     loop_body = {k: v for k, v in body_json.items() if not k.startswith("_gitv")}
     loop_body["stream"] = False
@@ -1441,6 +1450,7 @@ async def _run_driver_callable_loop(
                     persist_shared=not (
                         body_json.get("_gitv_sandbox") or body_json.get("_gitv_replay")
                     ),
+                    passenger_handler=passenger_handler,
                 )
 
             tool_msg = format_tool_result(call.name, result_text)

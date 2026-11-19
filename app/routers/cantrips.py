@@ -15,13 +15,35 @@ from app.services.admin import get_admin_settings
 from app.services.cantrip import test_cantrip
 from app.services.cantrip_context import build_context
 from app.services.content_guard import check_size, gate_scan_findings, log_scan_findings
-from app.services.deno_runner import CantripExecutionError, CantripTimeoutError
+from app.services.deno_runner import CantripExecutionError, CantripResult, CantripTimeoutError
 from app.services.safety_scanner import scan_cantrip
 from app.templates.cantrip_templates import get_templates
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/cantrips", tags=["cantrips"])
+
+
+async def _test_with_passenger(
+    code: str, context: dict, chat_data: dict | None, timeout_ms: int, user_id: str
+) -> CantripResult:
+    """Run a test cantrip with Passenger available, as the pipeline would run
+    it: the caller's own gates, endpoints and budgets, against a synthetic
+    body marked sandbox -- Passenger calls are recorded but excluded from the
+    default aggregates, because a Tester run is not live traffic."""
+    from app.services.metrics import flush_metrics, init_metrics
+    from app.services.passenger import get_passenger_handler
+
+    body_json: dict[str, Any] = {"_gitv_sandbox": True, "messages": []}
+    init_metrics(body_json, user_id)
+    handler = await get_passenger_handler(body_json, user_id)
+    try:
+        return await test_cantrip(
+            code=code, context=context, chat_data=chat_data,
+            timeout_ms=timeout_ms, passenger_handler=handler,
+        )
+    finally:
+        await flush_metrics(body_json)
 
 
 async def _check_and_scan_cantrip_code(
@@ -417,11 +439,12 @@ async def test_cantrip_endpoint(
     )
 
     try:
-        result = await test_cantrip(
+        result = await _test_with_passenger(
             code=code,
             context=context,
             chat_data=req.chat_data,
             timeout_ms=req.timeout_ms,
+            user_id=current_user.id,
         )
     except CantripTimeoutError:
         raise HTTPException(
@@ -477,11 +500,12 @@ async def test_stored_cantrip(
     code = req.code if req.code is not None else cantrip.code
 
     try:
-        test_result = await test_cantrip(
+        test_result = await _test_with_passenger(
             code=code,
             context=context,
             chat_data=req.chat_data,
             timeout_ms=req.timeout_ms or cantrip.timeout_ms,
+            user_id=current_user.id,
         )
     except CantripTimeoutError:
         raise HTTPException(
