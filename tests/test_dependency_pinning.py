@@ -247,3 +247,36 @@ class TestHashPinnedLockfiles:
         assert not re.search(r'install[^\n]*-e\s+"?\.\[', text), (
             "Dockerfile installs extras editably, re-resolving the tree unhashed"
         )
+
+
+class TestUpdateScriptDelayedExpansion:
+    """update-windows.bat sets GITV_REQ *inside* a parenthesised if-block, and
+    cmd expands %VAR% for the whole block at parse time -- before the set has
+    run. The percent form therefore tested an empty path, failed the
+    `if not exist` check, and aborted every unattended Windows update at
+    [4/6] since 0.20.0 (found by running the real update path 2026-11-19).
+    Every post-set use must be delayed expansion. deploy-windows.bat's copy
+    of these lines is at top level, outside any block, where the percent form
+    is correct -- which is why fresh deploys passed the harness while updates
+    silently failed."""
+
+    def test_update_script_gitv_req_uses_delayed_expansion(self):
+        src = (ROOT / "scripts" / "update-windows.bat").read_text(
+            encoding="utf-8", errors="replace"
+        )
+        offenders = []
+        for line in src.splitlines():
+            if "GITV_REQ" not in line:
+                continue
+            stripped = line.strip()
+            # Assignments (plain or under a leading `if`) only read
+            # GITV_ROOT, which is set before the block; REM lines are prose.
+            if "GITV_REQ=" in stripped or stripped.startswith("REM"):
+                continue
+            if "%GITV_REQ%" in stripped or "!GITV_REQ!" not in stripped:
+                offenders.append(stripped)
+        assert not offenders, (
+            "update-windows.bat must use !GITV_REQ! (delayed expansion) for "
+            "every use after the set: percent-form uses inside the dependency "
+            f"if-block expand at parse time. Offenders: {offenders}"
+        )

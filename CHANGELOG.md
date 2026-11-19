@@ -2,6 +2,27 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.37.1] - 2026-11-19
+
+### Fixed
+
+- **The Windows auto-update script aborted at [4/6] on every run since
+  0.20.0.** `update-windows.bat` sets `GITV_REQ` inside one parenthesised
+  `if exist` block but read it back in percent form — and cmd expands
+  `%VAR%` for the whole block at *parse* time, before the `set` runs. The
+  dependency-lockfile existence check therefore tested an empty string,
+  failed, and exited: every unattended Windows update ended at "ERROR: not
+  found" with the maintenance page left holding the port. Fresh installs
+  were unaffected (deploy-windows.bat's copy of the same lines sits at top
+  level, outside any block), which is why the harness never caught it.
+  Found by running the real update path against a real install. All
+  post-set uses now use delayed expansion (`!GITV_REQ!`), and a static guard
+  in `tests/test_dependency_pinning.py` pins the pattern. macOS and Linux
+  update scripts are unaffected (no parse-time expansion in sh).
+  If your Windows install has been stuck on an old version, this is why:
+  update to 0.37.1 manually once (download the release zip over your
+  install), and in-app updates work again from there.
+
 ## [0.37.0] - 2026-11-18
 
 Phase 20 — Dynamic Lorebooks: scripts create and edit lorebooks at runtime.

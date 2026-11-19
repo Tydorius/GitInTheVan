@@ -255,8 +255,15 @@ if exist "%GITV_ROOT%\.venv\Scripts\python.exe" (
     REM so the smaller tree is a complete install.
     set "GITV_REQ=%GITV_ROOT%\requirements\main.txt"
     if "%GITV_INSTALL_DEV%"=="1" set "GITV_REQ=%GITV_ROOT%\requirements\dev.txt"
-    if not exist "%GITV_REQ%" (
-        echo ERROR: %GITV_REQ% not found. This file pins every third-party package
+    REM Delayed expansion is load-bearing here: this whole dependency section
+    REM sits inside one parenthesised `if exist` block, and cmd expands %VAR%
+    REM for the entire block when it is PARSED -- before the set above has run.
+    REM The percent form therefore tested an empty string and failed every
+    REM unattended Windows update since 0.20.0 (found by running the real
+    REM update path, 2026-11-19). deploy-windows.bat keeps the percent form
+    REM legitimately: its copy of these lines is at top level, outside any block.
+    if not exist "!GITV_REQ!" (
+        echo ERROR: !GITV_REQ! not found. This file pins every third-party package
         echo to an exact version and hash; refusing to install an unverified
         echo dependency tree. Regenerate it -- see the Dependency Lockfiles section in README.md.
         exit /b 1
@@ -266,7 +273,7 @@ if exist "%GITV_ROOT%\.venv\Scripts\python.exe" (
     REM or compromised package cannot land silently. The app itself installs
     REM separately -- --require-hashes cannot be combined with an editable install
     REM -- and --no-deps stops pip re-resolving the tree it just verified.
-    "%GITV_ROOT%\.venv\Scripts\python" -m pip install --require-hashes -r "%GITV_REQ%" -q >> "%LOG_FILE%" 2>&1
+    "%GITV_ROOT%\.venv\Scripts\python" -m pip install --require-hashes -r "!GITV_REQ!" -q >> "%LOG_FILE%" 2>&1
     "%GITV_ROOT%\.venv\Scripts\python" -m pip install -e "%GITV_ROOT%" --no-deps -q >> "%LOG_FILE%" 2>&1
     if errorlevel 1 (
         echo WARNING: Some dependencies may not have installed correctly. >> "%LOG_FILE%"
