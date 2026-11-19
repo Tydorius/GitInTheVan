@@ -740,6 +740,11 @@ endpoint, and does nothing at all when Passenger is off or the call fails.
 The thresholds are constants at the top of the template's code — edit them
 after install to taste.
 
+![Cantrip templates](media/gitv-cantrips-templates-rag.png)
+
+*The Cantrips → Templates list with both Dynamic Lorebook entries,
+captured 2026-11-19.*
+
 ### jslorebook Scripts (0.37.0)
 
 `<jslorebook>...</jslorebook>` blocks embedded in messages are executed
