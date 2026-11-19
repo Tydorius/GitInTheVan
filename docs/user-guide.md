@@ -52,6 +52,7 @@ GitInTheVan uses van-themed terminology for the LLM roles in the pipeline:
 19. [The Activation Hierarchy](#19-the-activation-hierarchy)
 20. [Snapshots and Restore](#snapshots)
 21. [Metrics](#metrics)
+22. [Storage](#storage)
 
 ---
 
@@ -437,6 +438,54 @@ The results show:
 - **Personality Output**: The final value of `context.character.personality`
 - **Debug Logs**: Output from `console.log()` calls in the cantrip
 - **Chat Data Result**: The final state of `context.chat_data` after execution
+
+### Sequence Tester (0.40.0)
+
+The one-shot tester runs a single cantrip against a single context. The
+**Sequence Tester** runs a whole *script of turns* through the real cantrip
+pipeline — the tool for stateful scripts that only misbehave on turn 30:
+
+1. Open **Cantrips → Sequence Tester**
+2. Choose **Cantrips to Run** — "All" exercises real tag/Active activation
+   across everything, or narrow to one cantrip
+3. Optionally set a **conversation label** and a **start turn index**
+4. Write the **turns** as a JSON array — each turn is a user message plus
+   the canned reply that stands in for the LLM:
+
+```json
+[
+  {"user_message": "Good morning.", "reply": "The innkeeper nods. <deed>served breakfast</deed>"},
+  {"user_message": "What day is it?", "reply": "The twelfth."},
+  {"user_message": "Same question again.", "reply": "Still the twelfth.", "is_regenerate": true}
+]
+```
+
+5. Optionally seed **chat data** the script should start from
+6. Click **Run Sequence**
+
+Each turn runs exactly what a live request runs, in the live order: tag and
+command-tag stripping, the pre-Driver pass, the pre-Navigator pass, response
+tag extraction (registered `<deed>`-style tags in your canned replies are
+extracted and stripped, and delivered to post-Navigator scripts the same
+turn), and the post-Navigator pass. `context.chat.turn_index` increments per
+turn, `is_regenerate` seeds `context.request.is_regenerate`, and
+`<#cantrip-...#>` tags in your script messages activate tag-gated cantrips
+exactly as live.
+
+**Nothing is persisted.** State chains from turn to turn in memory only —
+`chat_data`, `user_data` and `cantrip_data` thread through the run, no rows
+are written to the database, and your live stores are untouched. Passenger
+calls made by the script are real (recorded as sandbox traffic); the driver
+itself makes zero LLM calls because replies are canned.
+
+The per-turn results show every cantrip that was *considered* (with its
+trigger/skip reason and any error), the extracted response tags, the
+client-visible reply, and the store state after the turn. A run that exceeds
+the total time budget (600 s) stops and returns partial results.
+
+**Not covered** (the canned replies never reach a forward): maps and map
+stages, verification, and Driver-Callable tool loops. Those need the real
+endpoint path.
 
 ### Adding/Editing a Cantrip
 
@@ -2214,3 +2263,56 @@ on the Admin page) and pruned automatically. Metrics are per-user: your tables s
 only.
 
 ![Metrics retention setting on the Admin page](media/gitv-admin-metrics-retention.png)
+
+---
+
+<a id="storage"></a>
+
+## 22. Storage (0.40.0)
+
+The cantrip persistent stores — `context.chat_data` (per conversation),
+`context.cantrip_data` (per cantrip) and `context.user_data` (global to you)
+— used to be write-only from the UI: scripts could read and write them, but
+there was no way to see what had accumulated, fix a value, or move a
+conversation's state elsewhere. The **Storage** page is that window.
+
+### Chat Data
+
+Grouped by conversation. Pick a conversation to see its keys and values;
+each row shows its size and last-update time. Click a row to expand its full
+value, **Edit** to change the key or value (values are JSON — an edit that
+does not parse is refused), **Copy** to duplicate the row into another
+conversation, **Delete** to remove it.
+
+Conversation-level actions: **Export** downloads the conversation's rows as
+a JSON bundle, **Copy To…** duplicates every row into a target conversation
+(keys that already exist there are skipped and reported), and **Clear**
+deletes every row for that conversation.
+
+### Cantrip Data
+
+Pick a cantrip to browse its per-cantrip store — the one that persists
+across all chats. Same row actions; **Export** downloads that cantrip's
+rows.
+
+### User Data
+
+Your global store, shared across all chats and cantrips. Same row actions,
+plus **Export All**.
+
+### Import
+
+Each card's **Import…** accepts a previously exported bundle. Imports are
+upserts: a row whose key already exists is updated, never duplicated, and
+anything refused (too large, invalid key) is reported per-row rather than
+silently dropped. Chat bundles that carry no conversation id import into the
+conversation id you name in the field beside the button; cantrip bundles
+import into the cantrip selected on the card.
+
+### Limits and safety
+
+Values are content: edits are size-checked against the admin memory-rule cap
+and sanitized like every other content write. Every stored value is JSON by
+construction, so the editor validates before saving — a broken value cannot
+corrupt a store a script later reads. All routes are scoped to your account;
+another user's rows are invisible.

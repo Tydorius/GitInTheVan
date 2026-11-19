@@ -514,6 +514,41 @@ export const api = {
     request<any>('/api/cantrips/test', { method: 'POST', body: JSON.stringify(data) }),
   testCantripById: (id: string, data: any) =>
     request<any>(`/api/cantrips/${id}/test`, { method: 'POST', body: JSON.stringify(data) }),
+  testCantripSequence: (data: any) =>
+    request<any>('/api/cantrips/test-sequence', { method: 'POST', body: JSON.stringify(data) }),
+
+  // Storage browser
+  listStorageChats: (search = '', limit = 100, offset = 0) =>
+    request<{ conversations: any[]; total: number }>(`/api/storage/chats?search=${encodeURIComponent(search)}&limit=${limit}&offset=${offset}`),
+  listStorageRows: (scope: 'chat-data' | 'user-data' | 'cantrip-data', params: { conversation_id?: string; cantrip_id?: string; search?: string; limit?: number; offset?: number } = {}) => {
+    const q = new URLSearchParams()
+    if (params.conversation_id) q.set('conversation_id', params.conversation_id)
+    if (params.cantrip_id) q.set('cantrip_id', params.cantrip_id)
+    if (params.search) q.set('search', params.search)
+    q.set('limit', String(params.limit ?? 100))
+    q.set('offset', String(params.offset ?? 0))
+    return request<{ rows: any[]; total: number }>(`/api/storage/${scope}?${q.toString()}`)
+  },
+  getStorageRow: (scope: 'chat-data' | 'user-data' | 'cantrip-data', id: string) =>
+    request<any>(`/api/storage/${scope}/${id}`),
+  putStorageRow: (scope: 'chat-data' | 'user-data' | 'cantrip-data', id: string, data: { key?: string; value: string }) =>
+    request<any>(`/api/storage/${scope}/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteStorageRow: (scope: 'chat-data' | 'user-data' | 'cantrip-data', id: string) =>
+    request<void>(`/api/storage/${scope}/${id}`, { method: 'DELETE' }),
+  copyStorageRow: (id: string, targetConversationId: string) =>
+    request<any>(`/api/storage/chat-data/${id}/copy`, { method: 'POST', body: JSON.stringify({ target_conversation_id: targetConversationId }) }),
+  clearStorageConversation: (conversationId: string) =>
+    request<void>(`/api/storage/chats/${encodeURIComponent(conversationId)}`, { method: 'DELETE' }),
+  copyStorageConversation: (conversationId: string, target: string) =>
+    request<{ copied: number; skipped: string[] }>(`/api/storage/chats/${encodeURIComponent(conversationId)}/copy`, { method: 'POST', body: JSON.stringify({ target_conversation_id: target }) }),
+  exportStorage: (scope: 'chats' | 'chat' | 'user' | 'cantrip' | 'all', conversationId = '', cantripId = '') => {
+    const q = new URLSearchParams({ scope })
+    if (conversationId) q.set('conversation_id', conversationId)
+    if (cantripId) q.set('cantrip_id', cantripId)
+    return request<any>(`/api/storage/export?${q.toString()}`)
+  },
+  importStorage: (payload: any, targetConversationId = '', targetCantripId = '') =>
+    request<{ imported: number; skipped: string[] }>('/api/storage/import', { method: 'POST', body: JSON.stringify({ payload, target_conversation_id: targetConversationId, target_cantrip_id: targetCantripId }) }),
   validateCantrip: (code: string) =>
     request<{ valid: boolean; error: string | null }>('/api/cantrips/validate', { method: 'POST', body: JSON.stringify({ code }) }),
   listTemplates: () =>

@@ -332,6 +332,7 @@ async def process_cantrips(
     exclude_ids: set[str] | None = None,
     stage_index: int | None = None,
     embedded_scripts: list[EmbeddedScriptCantrip] | None = None,
+    store_seeds: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run cantrips at a pipeline position.
 
@@ -346,6 +347,13 @@ async def process_cantrips(
     LLM-call rows can attribute their cost to the stage (None everywhere
     else). ``embedded_scripts`` adds <jslorebook> scripts from the message
     text to this pass (Phase 20); they run after the DB cantrips.
+
+    ``store_seeds`` (sequence tester) replaces the DB stores with an
+    in-memory holder: keys ``chat_data`` / ``user_data`` / ``cantrip_data``
+    (the last keyed by cantrip id). When present, nothing is loaded from or
+    written to the DB -- the mutated dicts are written back into the holder
+    so the caller can thread them through the next pass. ``None`` (every
+    pipeline call site) keeps today's load/save behavior exactly.
     """
     messages = body_json.get("messages", [])
     if not messages:
@@ -409,8 +417,15 @@ async def process_cantrips(
 
         conversation_id = params.get("conversation_id", "")
         isolated = _store_writes_isolated(body_json)
-        chat_data = await _load_chat_data(db, user_id, conversation_id)
-        user_data = await _load_user_data(db, user_id)
+        if store_seeds is not None:
+            store_seeds.setdefault("chat_data", {})
+            store_seeds.setdefault("user_data", {})
+            store_seeds.setdefault("cantrip_data", {})
+            chat_data = dict(store_seeds["chat_data"])
+            user_data = dict(store_seeds["user_data"])
+        else:
+            chat_data = await _load_chat_data(db, user_id, conversation_id)
+            user_data = await _load_user_data(db, user_id)
 
         lorebook_seed, lorebook_always, binding_conv_id = await _prepare_lorebook_seeding(
             db, body_json, user_id, request_headers, internal_chat_id, cantrips
@@ -466,9 +481,12 @@ async def process_cantrips(
             # An embedded script owns no cantrip_data: its id is per-request,
             # not stable identity, so persisting under it would collide
             # across scripts and requests.
-            cantrip_data = (
-                {} if ephemeral else await _load_cantrip_data(db, user_id, cantrip.id)
-            )
+            if ephemeral:
+                cantrip_data = {}
+            elif store_seeds is not None:
+                cantrip_data = dict(store_seeds["cantrip_data"].get(cantrip.id, {}))
+            else:
+                cantrip_data = await _load_cantrip_data(db, user_id, cantrip.id)
 
             started = time.monotonic()
             try:
@@ -562,7 +580,10 @@ async def process_cantrips(
             chat_data = result.chat_data
             user_data = result.user_data
 
-            if result.cantrip_data != cantrip_data and not isolated and not ephemeral:
+            if store_seeds is not None:
+                if not ephemeral:
+                    store_seeds["cantrip_data"][cantrip.id] = result.cantrip_data
+            elif result.cantrip_data != cantrip_data and not isolated and not ephemeral:
                 await _save_cantrip_data(db, user_id, cantrip.id, result.cantrip_data)
 
             # Phase 20: apply this cantrip's lorebook ops now, not after the
@@ -596,13 +617,19 @@ async def process_cantrips(
                 if request_rows and position == "pre_driver":
                     body_json.setdefault(DELTA_KEY, []).extend(request_rows)
 
-        # A sandbox writes chat_data into its forked id (isolated); a replay
-        # would write the live conversation's store, so it does not.
-        if conversation_id and not body_json.get("_gitv_replay"):
-            await _save_chat_data(db, user_id, conversation_id, chat_data)
+        if store_seeds is not None:
+            # The seeds holder IS the store for this run: write the final
+            # pass state back so the caller threads it into the next pass.
+            store_seeds["chat_data"] = chat_data
+            store_seeds["user_data"] = user_data
+        else:
+            # A sandbox writes chat_data into its forked id (isolated); a replay
+            # would write the live conversation's store, so it does not.
+            if conversation_id and not body_json.get("_gitv_replay"):
+                await _save_chat_data(db, user_id, conversation_id, chat_data)
 
-        if not isolated:
-            await _save_user_data(db, user_id, user_data)
+            if not isolated:
+                await _save_user_data(db, user_id, user_data)
 
     if internal_chat_id and accumulated_memories:
         from app.services.conversation import save_memories_for_chat
@@ -783,6 +810,7 @@ async def process_cantrips_post_driver(
     only_ids: set[str] | None = None,
     stage_index: int | None = None,
     embedded_scripts: list[EmbeddedScriptCantrip] | None = None,
+    store_seeds: dict[str, Any] | None = None,
 ) -> str:
     """Run post-Driver cantrips that can modify the response content.
 
@@ -792,6 +820,11 @@ async def process_cantrips_post_driver(
     cantrips (map stage capture mode runs just the stage's own).
     ``stage_index`` attributes Passenger LLM-call rows to a map stage.
     ``embedded_scripts`` adds <jslorebook> scripts detected for this position.
+
+    ``store_seeds`` (sequence tester) mirrors the pre-forward pass: an
+    in-memory store holder that replaces DB loads and saves, mutated dicts
+    written back for the caller to thread onward. ``None`` keeps today's
+    behavior.
     """
     messages = body_json.get("messages", [])
     if not messages:
@@ -835,8 +868,15 @@ async def process_cantrips_post_driver(
 
         conversation_id = params.get("conversation_id", "")
         isolated = _store_writes_isolated(body_json)
-        chat_data = await _load_chat_data(db, user_id, conversation_id)
-        user_data = await _load_user_data(db, user_id)
+        if store_seeds is not None:
+            store_seeds.setdefault("chat_data", {})
+            store_seeds.setdefault("user_data", {})
+            store_seeds.setdefault("cantrip_data", {})
+            chat_data = dict(store_seeds["chat_data"])
+            user_data = dict(store_seeds["user_data"])
+        else:
+            chat_data = await _load_chat_data(db, user_id, conversation_id)
+            user_data = await _load_user_data(db, user_id)
 
         # Phase 20: same seeding/ops as the pre-forward pass, minus the
         # same-turn injection (the prompt has already been sent; entries
@@ -873,9 +913,12 @@ async def process_cantrips_post_driver(
                 lorebook_seed, lorebook_always, parse_reads(cantrip.lorebook_reads)
             )
 
-            cantrip_data = (
-                {} if ephemeral else await _load_cantrip_data(db, user_id, cantrip.id)
-            )
+            if ephemeral:
+                cantrip_data = {}
+            elif store_seeds is not None:
+                cantrip_data = dict(store_seeds["cantrip_data"].get(cantrip.id, {}))
+            else:
+                cantrip_data = await _load_cantrip_data(db, user_id, cantrip.id)
 
             try:
                 context["response"]["content"] = current_content
@@ -915,7 +958,10 @@ async def process_cantrips_post_driver(
             chat_data = result.chat_data
             user_data = result.user_data
 
-            if result.cantrip_data != cantrip_data and not isolated and not ephemeral:
+            if store_seeds is not None:
+                if not ephemeral:
+                    store_seeds["cantrip_data"][cantrip.id] = result.cantrip_data
+            elif result.cantrip_data != cantrip_data and not isolated and not ephemeral:
                 await _save_cantrip_data(db, user_id, cantrip.id, result.cantrip_data)
 
             if result.lorebook_ops:
@@ -928,14 +974,20 @@ async def process_cantrips_post_driver(
                     body_json.get("_gitv_chat_id", ""), cantrips, capture=False,
                 )
 
-        # Same isolation rules as process_cantrips: the fork owns chat_data for
-        # a sandbox, a replay writes nothing, and user/cantrip-scoped stores are
-        # never written from an isolated run.
-        if conversation_id and not body_json.get("_gitv_replay"):
-            await _save_chat_data(db, user_id, conversation_id, chat_data)
+        if store_seeds is not None:
+            # The seeds holder IS the store for this run (same as the
+            # pre-forward pass): write the final state back for threading.
+            store_seeds["chat_data"] = chat_data
+            store_seeds["user_data"] = user_data
+        else:
+            # Same isolation rules as process_cantrips: the fork owns chat_data
+            # for a sandbox, a replay writes nothing, and user/cantrip-scoped
+            # stores are never written from an isolated run.
+            if conversation_id and not body_json.get("_gitv_replay"):
+                await _save_chat_data(db, user_id, conversation_id, chat_data)
 
-        if not isolated:
-            await _save_user_data(db, user_id, user_data)
+            if not isolated:
+                await _save_user_data(db, user_id, user_data)
 
     if current_content != response_content:
         logger.info(

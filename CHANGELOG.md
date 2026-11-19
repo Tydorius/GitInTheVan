@@ -2,6 +2,48 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.40.0] - 2026-11-19
+
+Tooling package: the multi-turn Sequence Tester and a Storage browser
+over the cantrip persistent stores.
+
+### Added
+
+- **Sequence Tester (Cantrips → Sequence Tester).** A script of turns —
+  each a user message plus a canned model reply — driven through the
+  *real* cantrip passes with store state chained turn-to-turn entirely in
+  memory: ladders, clocks and chains (the "thirty in-world days" case)
+  are testable with zero LLM calls and zero persistence. Every turn runs
+  the proxy's own order (tag/command/jslorebook strip → pre-Driver →
+  pre-Navigator → response-tag capture → post-Navigator), so tag
+  activation (`<#...#>` in script messages), card-field splicing,
+  `context.chat.turn_index`, `context.request.is_regenerate` and
+  same-turn `context.response_tags` all behave exactly as live. State
+  threads through the three stores (`chat_data`, `user_data`,
+  `cantrip_data`) via a new `store_seeds` mechanism on the pass functions
+  — no rows are written to or read from the database, Passenger calls are
+  sandbox-flagged, and dynamic-lorebook ops drop. Per-turn results show
+  every cantrip considered (triggered or not, with reason), extracted
+  response tags, the client-visible reply and store snapshots. Caps: 50
+  turns, 64 KB per message/reply, a 600 s total wall-clock budget that
+  returns partial results with `stopped_at_turn` rather than erroring.
+  Scope (deliberate, shape-1 decision): maps/stages, verification and the
+  driver-callable tool loop are not exercised — the tester runs the
+  cantrip passes, not the forward path.
+- **Storage browser (new Storage page).** CRUD over the three persistent
+  stores that previously had no API at all: chat data grouped by
+  conversation, per-cantrip data, and global user data. Search,
+  pagination, inline JSON-validated editing (values must parse — every
+  stored value is JSON by construction), delete, copy a row or a whole
+  conversation to another conversation (existing keys skipped and
+  reported), clear a conversation, and export/import as JSON bundles
+  (upsert-only import with per-row refusal reporting). Writes are content
+  writes: size-checked against the admin memory-rule cap with a hard
+  60 000-char ceiling (inside every dialect's TEXT bound) and run through
+  the sanitizer. Export filenames are allow-listed — quotes and emoji in
+  a conversation id cannot break the download header. All routes are
+  owner-scoped; another user's row is a 404, never visible.
+
 ## [0.39.0] - 2026-11-19
 
 Package 3 — Response Capture & Data Access: response tags, script

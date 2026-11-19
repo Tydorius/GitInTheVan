@@ -10,7 +10,7 @@
   import CollapsibleCard from '../lib/CollapsibleCard.svelte'
   import { CollapseController } from '../lib/collapse'
 
-  let collapse = new CollapseController('cantrips', ['tester', 'templates'])
+  let collapse = new CollapseController('cantrips', ['tester', 'templates', 'sequence'])
 
   let collapsedCards: { [key: string]: boolean } = {}
 
@@ -63,6 +63,52 @@
     messages: '[{"role": "user", "content": "Hello"}]',
     character_name: '',
     chat_data: '{}',
+  }
+
+  let showSequence = false
+  let seqTesting = false
+  let seqResults: any = null
+  let seqConfig = {
+    selectedCantripId: '',
+    conversation_id: '',
+    turns: '[\n  {"user_message": "Hello", "reply": "Hi there."}\n]',
+    seed_chat_data: '{}',
+    start_turn_index: 0,
+  }
+
+  function cantripPositions(turn: any): [string, any[]][] {
+    return Object.entries(turn?.cantrips ?? {}) as [string, any[]][]
+  }
+
+  async function runSequence() {
+    error = ''
+    let turns: any[]
+    let seeds: any
+    try {
+      turns = JSON.parse(seqConfig.turns)
+      if (!Array.isArray(turns)) throw new Error('Turns must be a JSON array')
+      seeds = JSON.parse(seqConfig.seed_chat_data || '{}')
+      if (typeof seeds !== 'object' || seeds === null || Array.isArray(seeds)) {
+        throw new Error('Seed chat data must be a JSON object')
+      }
+    } catch (e: any) {
+      error = `Invalid JSON: ${e.message}`
+      return
+    }
+    seqTesting = true
+    seqResults = null
+    try {
+      seqResults = await api.testCantripSequence({
+        turns,
+        conversation_id: seqConfig.conversation_id.trim(),
+        seed_chat_data: seeds,
+        start_turn_index: Number(seqConfig.start_turn_index) || 0,
+        ...(seqConfig.selectedCantripId
+          ? { only_cantrip_ids: [seqConfig.selectedCantripId] }
+          : {}),
+      })
+    } catch (e: any) { error = e.message }
+    finally { seqTesting = false }
   }
 
   async function load() {
@@ -262,6 +308,7 @@
     {/if}
     <button onclick={() => { loadTemplates(); showTemplates = !showTemplates; }}>Templates</button>
     <button onclick={() => { showTest = !showTest; testResults = null; }}>Test Panel</button>
+    <button onclick={() => { showSequence = !showSequence; seqResults = null; }}>Sequence Tester</button>
     <button class="primary" onclick={() => { resetForm(); showForm = true; }}>+ Add Cantrip</button>
   </div>
 </div>
@@ -333,6 +380,94 @@
         {/if}
         {#if testResults.chat_data && Object.keys(testResults.chat_data).length > 0}
           <div class="form-group"><label>Chat Data Result</label><div class="debug-output">{JSON.stringify(testResults.chat_data, null, 2)}</div></div>
+        {/if}
+      </div>
+    {/if}
+  </CollapsibleCard>
+{/if}
+
+{#if showSequence}
+  <CollapsibleCard title="Sequence Tester" cardKey="sequence" {collapse}>
+    <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 12px;">
+      Drive a script of turns (user message + canned reply) through the real cantrip pipeline with state chained in memory — ladders, clocks and chains over many turns, no LLM calls, nothing persisted.
+    </p>
+    <div class="form-group">
+      <label for="seq-scope">Cantrips to Run</label>
+      <select id="seq-scope" bind:value={seqConfig.selectedCantripId}>
+        <option value="">All (real tag/Active activation)</option>
+        {#each cantrips as s}<option value={s.id}>{s.name}</option>{/each}
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="seq-conv">Conversation Label (optional)</label>
+        <input id="seq-conv" bind:value={seqConfig.conversation_id} placeholder="tester: my-scenario" />
+      </div>
+      <div class="form-group">
+        <label for="seq-turn">Start Turn Index</label>
+        <input id="seq-turn" type="number" bind:value={seqConfig.start_turn_index} />
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="seq-turns">Turns (JSON array)</label>
+      <textarea id="seq-turns" bind:value={seqConfig.turns} style="min-height: 120px; font-family: monospace;"></textarea>
+    </div>
+    <div class="form-group">
+      <label for="seq-seeds">Seed Chat Data (JSON object)</label>
+      <input id="seq-seeds" bind:value={seqConfig.seed_chat_data} placeholder={'{}'} />
+    </div>
+    <button class="primary" onclick={runSequence} disabled={seqTesting}>
+      {seqTesting ? 'Running...' : 'Run Sequence'}
+    </button>
+
+    {#if seqResults}
+      <div style="margin-top: 16px;">
+        {#if seqResults.stop_reason}
+          <div class="error-msg">Stopped at turn {seqResults.stopped_at_turn}: {seqResults.stop_reason}</div>
+        {/if}
+        {#each seqResults.turns as turn (turn.index)}
+          <details style="margin-bottom: 8px; border: 1px solid var(--border); border-radius: 4px; padding: 8px;">
+            <summary style="cursor: pointer;">
+              <strong>Turn {turn.index}</strong>
+              {#if turn.tags?.length}<span class="badge" style="margin-left: 6px;">tags: {turn.tags.join(', ')}</span>{/if}
+              {#if turn.is_regenerate}<span class="badge" style="margin-left: 6px;">regenerate</span>{/if}
+            </summary>
+            <div style="margin-top: 8px;">
+              {#each cantripPositions(turn) as [position, records] (position)}
+                {#if records.length}
+                  <div class="form-group">
+                    <label>{position}</label>
+                    {#each records as r}
+                      <div style="font-size: 12px; padding: 2px 0; {r.triggered ? '' : 'opacity: 0.6;'}">
+                        {r.triggered ? '▶' : '·'} {r.name}
+                        {#if r.error}<span style="color: var(--danger, #c0392b);"> — {r.error}</span>{/if}
+                        {#if !r.triggered && r.reason}<span style="color: var(--text-dim);"> — {r.reason}</span>{/if}
+                      </div>
+                      {#if r.debug_logs?.length}
+                        <div class="debug-output" style="font-size: 11px;">{r.debug_logs.join('\n')}</div>
+                      {/if}
+                    {/each}
+                  </div>
+                {/if}
+              {/each}
+              {#if Object.keys(turn.response_tags || {}).length}
+                <div class="form-group"><label>Response Tags</label><div class="debug-output">{JSON.stringify(turn.response_tags)}</div></div>
+              {/if}
+              <div class="form-group"><label>Reply (client-visible)</label><div class="debug-output">{turn.reply}</div></div>
+              {#if Object.keys(turn.chat_data || {}).length}
+                <div class="form-group"><label>Chat Data After Turn</label><div class="debug-output">{JSON.stringify(turn.chat_data, null, 2)}</div></div>
+              {/if}
+            </div>
+          </details>
+        {/each}
+        {#if Object.keys(seqResults.final_chat_data || {}).length}
+          <div class="form-group"><label>Final Chat Data</label><div class="debug-output">{JSON.stringify(seqResults.final_chat_data, null, 2)}</div></div>
+        {/if}
+        {#if Object.keys(seqResults.final_user_data || {}).length}
+          <div class="form-group"><label>Final User Data</label><div class="debug-output">{JSON.stringify(seqResults.final_user_data, null, 2)}</div></div>
+        {/if}
+        {#if Object.keys(seqResults.final_cantrip_data || {}).length}
+          <div class="form-group"><label>Final Cantrip Data</label><div class="debug-output">{JSON.stringify(seqResults.final_cantrip_data, null, 2)}</div></div>
         {/if}
       </div>
     {/if}

@@ -73,6 +73,7 @@ surrounding UI may have moved on.</p>
 <li><a href="#19-the-activation-hierarchy">The Activation Hierarchy</a></li>
 <li><a href="#snapshots">Snapshots and Restore</a></li>
 <li><a href="#metrics">Metrics</a></li>
+<li><a href="#storage">Storage</a></li>
 </ol>
 <hr>
 <p><a id="login"></a></p>
@@ -422,6 +423,48 @@ verification judge and the verification retry.</p>
 - <strong>Personality Output</strong>: The final value of <code>context.character.personality</code>
 - <strong>Debug Logs</strong>: Output from <code>console.log()</code> calls in the cantrip
 - <strong>Chat Data Result</strong>: The final state of <code>context.chat_data</code> after execution</p>
+<h3 id="sequence-tester-0400">Sequence Tester (0.40.0)</h3>
+<p>The one-shot tester runs a single cantrip against a single context. The
+<strong>Sequence Tester</strong> runs a whole <em>script of turns</em> through the real cantrip
+pipeline — the tool for stateful scripts that only misbehave on turn 30:</p>
+<ol>
+<li>Open <strong>Cantrips → Sequence Tester</strong></li>
+<li>Choose <strong>Cantrips to Run</strong> — "All" exercises real tag/Active activation
+   across everything, or narrow to one cantrip</li>
+<li>Optionally set a <strong>conversation label</strong> and a <strong>start turn index</strong></li>
+<li>Write the <strong>turns</strong> as a JSON array — each turn is a user message plus
+   the canned reply that stands in for the LLM:</li>
+</ol>
+<pre><code class="language-json">[
+  {&quot;user_message&quot;: &quot;Good morning.&quot;, &quot;reply&quot;: &quot;The innkeeper nods. &lt;deed&gt;served breakfast&lt;/deed&gt;&quot;},
+  {&quot;user_message&quot;: &quot;What day is it?&quot;, &quot;reply&quot;: &quot;The twelfth.&quot;},
+  {&quot;user_message&quot;: &quot;Same question again.&quot;, &quot;reply&quot;: &quot;Still the twelfth.&quot;, &quot;is_regenerate&quot;: true}
+]
+</code></pre>
+<ol>
+<li>Optionally seed <strong>chat data</strong> the script should start from</li>
+<li>Click <strong>Run Sequence</strong></li>
+</ol>
+<p>Each turn runs exactly what a live request runs, in the live order: tag and
+command-tag stripping, the pre-Driver pass, the pre-Navigator pass, response
+tag extraction (registered <code>&lt;deed&gt;</code>-style tags in your canned replies are
+extracted and stripped, and delivered to post-Navigator scripts the same
+turn), and the post-Navigator pass. <code>context.chat.turn_index</code> increments per
+turn, <code>is_regenerate</code> seeds <code>context.request.is_regenerate</code>, and
+<code>&lt;#cantrip-...#&gt;</code> tags in your script messages activate tag-gated cantrips
+exactly as live.</p>
+<p><strong>Nothing is persisted.</strong> State chains from turn to turn in memory only —
+<code>chat_data</code>, <code>user_data</code> and <code>cantrip_data</code> thread through the run, no rows
+are written to the database, and your live stores are untouched. Passenger
+calls made by the script are real (recorded as sandbox traffic); the driver
+itself makes zero LLM calls because replies are canned.</p>
+<p>The per-turn results show every cantrip that was <em>considered</em> (with its
+trigger/skip reason and any error), the extracted response tags, the
+client-visible reply, and the store state after the turn. A run that exceeds
+the total time budget (600 s) stops and returns partial results.</p>
+<p><strong>Not covered</strong> (the canned replies never reach a forward): maps and map
+stages, verification, and Driver-Callable tool loops. Those need the real
+endpoint path.</p>
 <h3 id="addingediting-a-cantrip">Adding/Editing a Cantrip</h3>
 <ul>
 <li><strong>Name</strong>: A label for the cantrip</li>
@@ -2201,5 +2244,43 @@ enough to spot a lorebook entry that adds a thousand tokens per message; they ar
 on the Admin page) and pruned automatically. Metrics are per-user: your tables show your traffic
 only.</p>
 <p><img alt="Metrics retention setting on the Admin page" src="media/gitv-admin-metrics-retention.png"></p>
+<hr>
+<p><a id="storage"></a></p>
+<h2 id="22-storage-0400">22. Storage (0.40.0)</h2>
+<p>The cantrip persistent stores — <code>context.chat_data</code> (per conversation),
+<code>context.cantrip_data</code> (per cantrip) and <code>context.user_data</code> (global to you)
+— used to be write-only from the UI: scripts could read and write them, but
+there was no way to see what had accumulated, fix a value, or move a
+conversation's state elsewhere. The <strong>Storage</strong> page is that window.</p>
+<h3 id="chat-data">Chat Data</h3>
+<p>Grouped by conversation. Pick a conversation to see its keys and values;
+each row shows its size and last-update time. Click a row to expand its full
+value, <strong>Edit</strong> to change the key or value (values are JSON — an edit that
+does not parse is refused), <strong>Copy</strong> to duplicate the row into another
+conversation, <strong>Delete</strong> to remove it.</p>
+<p>Conversation-level actions: <strong>Export</strong> downloads the conversation's rows as
+a JSON bundle, <strong>Copy To…</strong> duplicates every row into a target conversation
+(keys that already exist there are skipped and reported), and <strong>Clear</strong>
+deletes every row for that conversation.</p>
+<h3 id="cantrip-data">Cantrip Data</h3>
+<p>Pick a cantrip to browse its per-cantrip store — the one that persists
+across all chats. Same row actions; <strong>Export</strong> downloads that cantrip's
+rows.</p>
+<h3 id="user-data">User Data</h3>
+<p>Your global store, shared across all chats and cantrips. Same row actions,
+plus <strong>Export All</strong>.</p>
+<h3 id="import">Import</h3>
+<p>Each card's <strong>Import…</strong> accepts a previously exported bundle. Imports are
+upserts: a row whose key already exists is updated, never duplicated, and
+anything refused (too large, invalid key) is reported per-row rather than
+silently dropped. Chat bundles that carry no conversation id import into the
+conversation id you name in the field beside the button; cantrip bundles
+import into the cantrip selected on the card.</p>
+<h3 id="limits-and-safety">Limits and safety</h3>
+<p>Values are content: edits are size-checked against the admin memory-rule cap
+and sanitized like every other content write. Every stored value is JSON by
+construction, so the editor validates before saving — a broken value cannot
+corrupt a store a script later reads. All routes are scoped to your account;
+another user's rows are invisible.</p>
 </body>
 </html>

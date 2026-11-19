@@ -3,7 +3,7 @@ import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -185,6 +185,42 @@ class CantripTestResponse(BaseModel):
     chat_data: dict[str, Any]
     debug_logs: list[str]
     error: str | None
+
+
+class SequenceTurnInput(BaseModel):
+    """One turn of a sequence-tester script: the user message the client
+    would send and the canned model reply standing in for the forward.
+    ``messages_override`` replaces the accumulated history for this turn
+    (trimming / swipe scenarios) and becomes the new baseline for later
+    turns."""
+
+    user_message: str = Field(default="", max_length=65536)
+    reply: str = Field(default="", max_length=65536)
+    messages_override: list[TestMessageInput] | None = None
+    is_regenerate: bool = False
+
+
+class SequenceTestRequest(BaseModel):
+    conversation_id: str = ""
+    user_name: str = "User"
+    model: str = ""
+    initial_messages: list[TestMessageInput] | None = None
+    seed_chat_data: dict[str, Any] | None = None
+    seed_user_data: dict[str, Any] | None = None
+    seed_cantrip_data: dict[str, dict[str, Any]] | None = None
+    start_turn_index: int = 0
+    only_cantrip_ids: list[str] | None = None
+    turns: list[SequenceTurnInput] = Field(max_length=50)
+
+
+class SequenceTestResponse(BaseModel):
+    conversation_id: str
+    turns: list[dict[str, Any]]
+    stopped_at_turn: int | None
+    stop_reason: str
+    final_chat_data: dict[str, Any]
+    final_user_data: dict[str, Any]
+    final_cantrip_data: dict[str, dict[str, Any]]
 
 
 def _normalize_reads(names: list[str] | None) -> list[str]:
@@ -612,6 +648,47 @@ async def test_stored_cantrip(
         debug_logs=test_result.debug_logs,
         error=test_result.error,
     )
+
+
+@router.post("/test-sequence", response_model=SequenceTestResponse)
+async def test_sequence_endpoint(
+    req: SequenceTestRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """Multi-turn whole-stack tester: a script of turns (user message plus
+    canned reply) through the real cantrip passes, with store state threaded
+    in memory. Nothing persists -- no rows in chat_data / user_data /
+    cantrip_data, dynamic-lorebook ops drop, Passenger calls are
+    sandbox-flagged. Runs stored cantrips only (real activation; optionally
+    narrowed with only_cantrip_ids)."""
+    from app.services.sequence_tester import run_sequence
+
+    result = await run_sequence(
+        current_user.id,
+        conversation_id=req.conversation_id,
+        user_name=req.user_name,
+        model=req.model,
+        initial_messages=(
+            [m.model_dump() for m in req.initial_messages]
+            if req.initial_messages is not None else None
+        ),
+        seed_chat_data=req.seed_chat_data,
+        seed_user_data=req.seed_user_data,
+        seed_cantrip_data=req.seed_cantrip_data,
+        start_turn_index=req.start_turn_index,
+        only_cantrip_ids=set(req.only_cantrip_ids) if req.only_cantrip_ids else None,
+        turns=[
+            {
+                **t.model_dump(),
+                "messages_override": (
+                    [m.model_dump() for m in t.messages_override]
+                    if t.messages_override is not None else None
+                ),
+            }
+            for t in req.turns
+        ],
+    )
+    return SequenceTestResponse(**result)
 
 
 @router.get("/{cantrip_id}/export")

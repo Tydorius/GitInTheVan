@@ -16,6 +16,7 @@
   import Packs from './pages/Packs.svelte'
   import Metrics from './pages/Metrics.svelte'
   import Settings from './pages/Settings.svelte'
+  import Storage from './pages/Storage.svelte'
   import Admin from './pages/Admin.svelte'
   import Compare from './pages/Compare.svelte'
   import AssistantSecurity from './pages/AssistantSecurity.svelte'
@@ -31,6 +32,7 @@
     { path: '/tags', label: 'Tags and Groups', icon: '🏷' },
     { path: '/verification', label: 'Verification', icon: '✓' },
     { path: '/memories', label: 'Memory', icon: '🧠' },
+    { path: '/storage', label: 'Storage', icon: '🗄' },
     { path: '/maps', label: 'Maps', icon: '🗺' },
     { path: '/packs', label: 'Content Packs', icon: '📦' },
     { path: '/metrics', label: 'Metrics', icon: '📊' },
@@ -185,6 +187,8 @@
         <Verification />
       {:else if page === '/memories'}
         <Memories />
+      {:else if page === '/storage'}
+        <Storage />
       {:else if page === '/maps'}
         <Maps />
       {:else if page === '/packs'}
