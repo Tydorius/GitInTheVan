@@ -639,6 +639,10 @@ if (!context.passenger.enabled) {
 Top-level `await` works in cantrips (the runner wraps your code in an async
 function); purely synchronous scripts are unaffected.
 
+![Passenger settings card](media/gitv-settings-passenger.png)
+
+*The Settings → Passenger card, captured 2026-11-18.*
+
 How calls behave:
 
 - **Every failure resolves to `null`** — Passenger off, no matching endpoint,
@@ -1516,10 +1520,17 @@ The Admin page provides system-wide management with seven tabs: **Global Caps**,
 
 Prevents users from causing internal denial-of-service by setting absurdly high turn or retry counts. The effective limit is the lower of the user's setting and the global cap — user preferences are not overwritten.
 
+![Admin Global Caps](media/gitv-admin-passenger-caps.png)
+
+*The Global Limits card with the Passenger caps, captured 2026-11-18.*
+
 - **Max Driver-Callable Turns**: Global cap for driver-callable tool turns per request (default 2)
 - **Max Verification Retries**: Global cap for verification resubmission retries (default 3)
 - **Rate Limit: Proxy**: Max proxy requests per minute (default 60)
 - **Rate Limit: Management API**: Max management API requests per minute (default 120)
+- **Passenger Calling Enabled**: Server-wide kill switch for scripted LLM calls from cantrips (0.36.0; default on). With it off, `context.passenger.call()` returns null for every user — see [Passenger](#passenger)
+- **Max Passenger Calls Per Request**: Ceiling shared by every cantrip and map stage in one request (default 3). A user's own budget in Settings can lower it, never raise it
+- **Passenger Call Timeout**: Per-call upstream timeout in seconds (default 60)
 
 ### Runtime Log Level
 

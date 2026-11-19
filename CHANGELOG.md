@@ -67,6 +67,13 @@ Phase 17 — Passenger: scripted LLM calls.
 — installing a cantrip is the opt-in. Upgrade-path test with vacuity check
 included; `user_settings` is on the proxy hot path.
 
+### Documentation
+
+- User guide: Passenger section with the call API and semantics (Settings
+  card captured 2026-11-18), the three admin caps documented under Global
+  Caps (captured 2026-11-18), and the Cantrip Context API section updated
+  for `context.passenger` and top-level `await`.
+
 ### Fixed
 
 - **Chat continuity broke whenever an injection landed in the hash window

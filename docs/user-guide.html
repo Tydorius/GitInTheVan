@@ -581,6 +581,8 @@ the call in Debug and Metrics; the script only ever handles text.</p>
 </code></pre>
 <p>Top-level <code>await</code> works in cantrips (the runner wraps your code in an async
 function); purely synchronous scripts are unaffected.</p>
+<p><img alt="Passenger settings card" src="media/gitv-settings-passenger.png"></p>
+<p><em>The Settings → Passenger card, captured 2026-11-18.</em></p>
 <p>How calls behave:</p>
 <ul>
 <li><strong>Every failure resolves to <code>null</code></strong> — Passenger off, no matching endpoint,
@@ -1392,11 +1394,16 @@ needs a restart.</p>
 <p>The Admin page provides system-wide management with seven tabs: <strong>Global Caps</strong>, <strong>Users</strong>, <strong>Update</strong>, <strong>Audit Logs</strong>, <strong>Server Logs</strong>, <strong>Network</strong>, and <strong>Backup</strong>. Debug is available as a tab on the Dashboard. A red badge appears on the Admin sidebar button when an update is available.</p>
 <h3 id="global-caps-tab">Global Caps Tab</h3>
 <p>Prevents users from causing internal denial-of-service by setting absurdly high turn or retry counts. The effective limit is the lower of the user's setting and the global cap — user preferences are not overwritten.</p>
+<p><img alt="Admin Global Caps" src="media/gitv-admin-passenger-caps.png"></p>
+<p><em>The Global Limits card with the Passenger caps, captured 2026-11-18.</em></p>
 <ul>
 <li><strong>Max Driver-Callable Turns</strong>: Global cap for driver-callable tool turns per request (default 2)</li>
 <li><strong>Max Verification Retries</strong>: Global cap for verification resubmission retries (default 3)</li>
 <li><strong>Rate Limit: Proxy</strong>: Max proxy requests per minute (default 60)</li>
 <li><strong>Rate Limit: Management API</strong>: Max management API requests per minute (default 120)</li>
+<li><strong>Passenger Calling Enabled</strong>: Server-wide kill switch for scripted LLM calls from cantrips (0.36.0; default on). With it off, <code>context.passenger.call()</code> returns null for every user — see <a href="#passenger">Passenger</a></li>
+<li><strong>Max Passenger Calls Per Request</strong>: Ceiling shared by every cantrip and map stage in one request (default 3). A user's own budget in Settings can lower it, never raise it</li>
+<li><strong>Passenger Call Timeout</strong>: Per-call upstream timeout in seconds (default 60)</li>
 </ul>
 <h3 id="runtime-log-level">Runtime Log Level</h3>
 <p>The Global Caps tab also includes a Runtime Log Level override. Temporarily change the server log level without restarting — changes take effect immediately.</p>
