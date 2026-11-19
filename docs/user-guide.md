@@ -676,6 +676,10 @@ pattern per line, max 20.
 
 ### Pre-Forward Order (0.41.0)
 
+![Pre-Forward Order](media/gitv-settings-pipeline-order.png)
+
+*The Pre-Forward Order card with an interleaved order: the Prompt Janitor cantrip first, then a lorebook, then another cantrip. Captured 2026-11-19.*
+
 By default the pipeline runs all lorebook injections, then all pre-Driver
 cantrips — two batches. This card replaces that window with **one exact
 interleaved order you define**: Cantrip 1, Lorebook 1, Lorebook 2,
