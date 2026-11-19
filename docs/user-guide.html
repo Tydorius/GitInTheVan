@@ -424,6 +424,8 @@ verification judge and the verification retry.</p>
 - <strong>Debug Logs</strong>: Output from <code>console.log()</code> calls in the cantrip
 - <strong>Chat Data Result</strong>: The final state of <code>context.chat_data</code> after execution</p>
 <h3 id="sequence-tester-0400">Sequence Tester (0.40.0)</h3>
+<p><img alt="Sequence Tester" src="media/gitv-cantrips-sequence-tester.png"></p>
+<p><em>The Sequence Tester card with a three-turn script run: per-turn cantrip records, extracted response tags and the final store state. Captured 2026-11-19.</em></p>
 <p>The one-shot tester runs a single cantrip against a single context. The
 <strong>Sequence Tester</strong> runs a whole <em>script of turns</em> through the real cantrip
 pipeline — the tool for stateful scripts that only misbehave on turn 30:</p>
@@ -2252,6 +2254,8 @@ only.</p>
 — used to be write-only from the UI: scripts could read and write them, but
 there was no way to see what had accumulated, fix a value, or move a
 conversation's state elsewhere. The <strong>Storage</strong> page is that window.</p>
+<p><img alt="The Storage page" src="media/gitv-storage-page.png"></p>
+<p><em>The Storage page: the chat-data card with a conversation selected (left) and the global user-data card. Captured 2026-11-19.</em></p>
 <h3 id="chat-data">Chat Data</h3>
 <p>Grouped by conversation. Pick a conversation to see its keys and values;
 each row shows its size and last-update time. Click a row to expand its full

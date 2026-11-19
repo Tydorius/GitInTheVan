@@ -441,6 +441,10 @@ The results show:
 
 ### Sequence Tester (0.40.0)
 
+![Sequence Tester](media/gitv-cantrips-sequence-tester.png)
+
+*The Sequence Tester card with a three-turn script run: per-turn cantrip records, extracted response tags and the final store state. Captured 2026-11-19.*
+
 The one-shot tester runs a single cantrip against a single context. The
 **Sequence Tester** runs a whole *script of turns* through the real cantrip
 pipeline — the tool for stateful scripts that only misbehave on turn 30:
@@ -2275,6 +2279,10 @@ The cantrip persistent stores — `context.chat_data` (per conversation),
 — used to be write-only from the UI: scripts could read and write them, but
 there was no way to see what had accumulated, fix a value, or move a
 conversation's state elsewhere. The **Storage** page is that window.
+
+![The Storage page](media/gitv-storage-page.png)
+
+*The Storage page: the chat-data card with a conversation selected (left) and the global user-data card. Captured 2026-11-19.*
 
 ### Chat Data
 
