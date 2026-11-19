@@ -7,11 +7,9 @@ import httpx
 from fastapi import Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.database import async_session
-from app.models.lorebook import Lorebook
 from app.services.cantrip import process_cantrips
 from app.services.llm_params import (
     RESERVED_NAMES,
@@ -507,23 +505,56 @@ async def _forward_request_impl(
                     setting="scenario_summary_enabled", setting_value=True,
                     metadata={"changed": did_change})
 
-        body_json = await _apply_lorebook_injection(
-            body_json, user_id, tags, request_headers, internal_chat_id
+        # Map candidacy is resolved here (hoisted from the cantrip-pass site
+        # below) because the manual pipeline order needs it before deciding
+        # whether to replace the lorebook-injection + cantrip-pass window.
+        # Nothing between here and the pass mutates tags or maps, so the
+        # hoist is behavior-neutral for the default path.
+        from app.services.map_pipeline import (
+            resolve_map,
+            run_map_pipeline,
+            stage_bound_cantrip_ids,
         )
-        if debug_on:
-            entries = body_json.pop("_gitv_matched_entries", [])
-            debug_capture(body_json, "lorebook_injection", "Lorebook Injection",
-                detail=(
-                    f"{len(entries)} entr{'y' if len(entries) == 1 else 'ies'} matched"
-                    if entries else "No entries matched"
-                ),
-                metadata={
-                    "tags": [t.get("raw", "") for t in (tags or [])],
-                    "entries": entries,
-                    "tokens": sum(e.get("tokens", 0) for e in entries),
-                })
+
+        cmd_overrides_map = body_json.get("_gitv_command_overrides", {})
+        map_candidate = None
+        if cmd_overrides_map.get("map") is not False:
+            map_candidate = await resolve_map(user_id, tags)
+
+        # Pipeline ordering (0.41.0): manual interleaved order replaces the
+        # [lorebook injection → global cantrip pass] window -- non-map
+        # requests only (map stages keep their own attachment machinery).
+        manual_order_plan = None
+        if map_candidate is None and user_id:
+            from app.services.pipeline_order import load_plan
+
+            _order_plan = await load_plan(user_id)
+            if _order_plan["enabled"]:
+                manual_order_plan = _order_plan
+
+        if manual_order_plan is not None:
+            if debug_on:
+                debug_capture(body_json, "lorebook_injection", "Lorebook Injection",
+                    detail="Handled per-slot by the manual pipeline order",
+                    metadata={"tags": [t.get("raw", "") for t in (tags or [])]})
         else:
-            body_json.pop("_gitv_matched_entries", None)
+            body_json = await _apply_lorebook_injection(
+                body_json, user_id, tags, request_headers, internal_chat_id
+            )
+            if debug_on:
+                entries = body_json.pop("_gitv_matched_entries", [])
+                debug_capture(body_json, "lorebook_injection", "Lorebook Injection",
+                    detail=(
+                        f"{len(entries)} entr{'y' if len(entries) == 1 else 'ies'} matched"
+                        if entries else "No entries matched"
+                    ),
+                    metadata={
+                        "tags": [t.get("raw", "") for t in (tags or [])],
+                        "entries": entries,
+                        "tokens": sum(e.get("tokens", 0) for e in entries),
+                    })
+            else:
+                body_json.pop("_gitv_matched_entries", None)
 
         if user_id and endpoint_id:
             from app.services.skills import (
@@ -573,31 +604,42 @@ async def _forward_request_impl(
                 detail="Context budget allocated",
                 metadata={"budget": body_json.get("_gitv_budget", {})})
 
-        from app.services.map_pipeline import (
-            resolve_map,
-            run_map_pipeline,
-            stage_bound_cantrip_ids,
-        )
-        cmd_overrides_map = body_json.get("_gitv_command_overrides", {})
-        map_candidate = None
-        if cmd_overrides_map.get("map") is not False:
-            map_candidate = await resolve_map(user_id, tags)
-
-        # The global cantrip pass runs before map selection is finalized so a
-        # cantrip can nominate a map (context.maps.activate). It excludes the
-        # candidate map's stage-bound cantrips exactly as before; those run on
-        # their own stage inside run_map_pipeline. <jslorebook> scripts
-        # detected as pre_driver run here too (Phase 20) — always, since they
-        # arrived in the chat; map stages inherit their effects through the
-        # prompt rather than re-running them.
+        # Map candidacy was resolved above the lorebook-injection site (the
+        # manual pipeline order needs it early; the hoist is
+        # behavior-neutral). The global cantrip pass runs before map
+        # selection is finalized so a cantrip can nominate a map
+        # (context.maps.activate). It excludes the candidate map's
+        # stage-bound cantrips exactly as before; those run on their own
+        # stage inside run_map_pipeline. <jslorebook> scripts detected as
+        # pre_driver run here too (Phase 20) — always, since they arrived in
+        # the chat; map stages inherit their effects through the prompt
+        # rather than re-running them.
         from app.services.cantrip import embedded_jslb_scripts
 
-        body_json = await process_cantrips(
-            body_json, user_id, request_headers, tags,
-            internal_chat_id=internal_chat_id,
-            exclude_ids=stage_bound_cantrip_ids(map_candidate) if map_candidate else None,
-            embedded_scripts=embedded_jslb_scripts(body_json, "pre_driver"),
-        )
+        if manual_order_plan is not None:
+            from app.services.pipeline_order import run_pre_forward_ordered
+
+            await run_pre_forward_ordered(
+                manual_order_plan, body_json, user_id, request_headers, tags,
+                internal_chat_id=internal_chat_id,
+                embedded_scripts=embedded_jslb_scripts(body_json, "pre_driver"),
+            )
+        else:
+            body_json = await process_cantrips(
+                body_json, user_id, request_headers, tags,
+                internal_chat_id=internal_chat_id,
+                exclude_ids=stage_bound_cantrip_ids(map_candidate) if map_candidate else None,
+                embedded_scripts=embedded_jslb_scripts(body_json, "pre_driver"),
+            )
+            # Pipeline ordering (0.41.0), default mode: strips collected by
+            # the pass apply here -- before deferred lorebook entries are
+            # matched and injected, so inject-after-cantrips books see
+            # cleaned text too. Never touches the conversation-hash anchor.
+            pending_strips = body_json.pop("_gitv_prompt_strips", None)
+            if pending_strips:
+                from app.services.cantrip import apply_prompt_strips
+
+                apply_prompt_strips(body_json, pending_strips)
 
         map_active = map_candidate
         nominations = body_json.pop("_gitv_map_nominations", [])
@@ -1190,66 +1232,21 @@ async def _apply_lorebook_injection(
     internal_chat_id: str = "",
 ) -> dict[str, Any]:
     try:
-        from app.services.tagging import should_activate_resource
-
-        # The signature allows tags=None (meaning "no tags"); normalize so the
-        # unconditional should_activate_resource call below never iterates
-        # None. The old `if lb.tag and tags:` guard hid this -- with the
-        # guard gone, None would raise inside this try and silently disable
-        # lorebook injection for whichever caller relied on the default.
+        # The signature allows tags=None (meaning "no tags"); normalize so
+        # downstream activation never iterates None. The old `if lb.tag and
+        # tags:` guard hid this -- with the guard gone, None would raise
+        # inside this try and silently disable lorebook injection for
+        # whichever caller relied on the default.
         tags = tags or []
 
         async with async_session() as db:
-            result = await db.execute(
-                select(Lorebook)
-                .where(Lorebook.user_id == user_id)
-                .options(selectinload(Lorebook.entries))
+            # Shared loader (also feeds the manual-order orchestrator), so
+            # both orderings activate lorebooks through one code path.
+            from app.services.lorebook import load_active_lorebooks
+
+            active_lorebooks = await load_active_lorebooks(
+                db, user_id, tags, request_headers, internal_chat_id
             )
-            lorebooks = result.scalars().all()
-
-            # Fifth activation source (Phase 29a): the conversation binding.
-            # A union source -- it only ever adds. A bound lorebook joins the
-            # candidates regardless of its tag or Active flag, so a lexicon
-            # lorebook (created inactive, untagged) injects in its own chat
-            # and in no other. No prompt tag can switch it off.
-            from app.models.conversation_dynamic_lorebook import ConversationDynamicLorebook
-            from app.models.conversation_lorebook_binding import ConversationLorebookBinding
-            from app.services.lexicon import resolve_action_identity
-
-            conversation_id, _ = resolve_action_identity(request_headers or {}, internal_chat_id)
-            bound_lorebook_ids: set[str] = set()
-            if conversation_id:
-                lex_rows = await db.execute(
-                    select(ConversationLorebookBinding.lorebook_id).where(
-                        ConversationLorebookBinding.user_id == user_id,
-                        ConversationLorebookBinding.conversation_id == conversation_id,
-                    )
-                )
-                bound_lorebook_ids = set(lex_rows.scalars().all())
-                # Phase 20: script-created books bind through the companion
-                # table (multi-book per conversation). Same union, same
-                # semantics — the "" sentinel rows never match a real
-                # conversation id, so unbound tagged books stay tag-activated
-                # only (rule 19 source 3).
-                dyn_rows = await db.execute(
-                    select(ConversationDynamicLorebook.lorebook_id).where(
-                        ConversationDynamicLorebook.user_id == user_id,
-                        ConversationDynamicLorebook.conversation_id == conversation_id,
-                    )
-                )
-                bound_lorebook_ids |= set(dyn_rows.scalars().all())
-
-            active_lorebooks = []
-            for lb in lorebooks:
-                # Bound lorebooks join unconditionally (fifth source,
-                # union-only). Every other candidate goes through
-                # should_activate_resource with no caller-side pre-check: the
-                # old `if lb.tag and tags:` shape duplicated the hierarchy
-                # here and only happened to agree with it.
-                if lb.id in bound_lorebook_ids or should_activate_resource(
-                    lb.tag, "lore", lb.is_active, lb.is_public, lb.user_id, user_id, tags
-                ):
-                    active_lorebooks.append(lb)
 
             if not any(lb.entries for lb in active_lorebooks):
                 return body_json

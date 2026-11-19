@@ -439,8 +439,6 @@ async def process_cantrips(
             memory_map = await load_memories_for_chat(internal_chat_id, user_id)
             context["__memories"] = memory_map
 
-        from app.services.budget import build_cantrip_budget_context
-
         budget_allocations = body_json.get("_gitv_budget_allocations")
 
         accumulated_memories: dict[str, str] = {}
@@ -454,8 +452,6 @@ async def process_cantrips(
             "example_dialogs": context["character"]["example_dialogs"],
         }
 
-        from app.services.budget import estimate_tokens as _est_tokens
-        from app.services.metrics import record_prompt_object
         from app.services.passenger import get_passenger_handler
 
         # One Passenger handler per request, shared by every cantrip at every
@@ -465,157 +461,58 @@ async def process_cantrips(
         passenger_handler = await get_passenger_handler(body_json, user_id)
         passenger_handler.stage_index = stage_index
 
+        # Mutable pass state threaded through the per-cantrip steps. The
+        # manual-order orchestrator (pipeline_order.py) threads the same
+        # shape through the shared _execute_cantrip_step, so both orderings
+        # execute cantrips through ONE code path and cannot drift.
+        state: dict[str, Any] = {
+            "chat_data": chat_data,
+            "user_data": user_data,
+            "accumulated_memories": accumulated_memories,
+            "lorebook_seed": lorebook_seed,
+            "lorebook_always": lorebook_always,
+        }
+
         for cantrip in cantrips:
-            ephemeral = getattr(cantrip, "ephemeral", False)
-            if budget_allocations and not ephemeral:
-                context["budget"] = build_cantrip_budget_context(
-                    budget_allocations, cantrip.id, cantrip.budget_weight
-                )
-
-            # Per-cantrip lorebook seed: bound books for everyone, this
-            # cantrip's configured reads for it alone.
-            context["__lorebook"] = _seed_for_cantrip(
-                lorebook_seed, lorebook_always, parse_reads(cantrip.lorebook_reads)
+            result, request_rows = await _execute_cantrip_step(
+                cantrip,
+                db=db,
+                body_json=body_json,
+                user_id=user_id,
+                request_headers=request_headers,
+                position=position,
+                context=context,
+                state=state,
+                binding_conv_id=binding_conv_id,
+                internal_chat_id=internal_chat_id,
+                isolated=isolated,
+                store_seeds=store_seeds,
+                passenger_handler=passenger_handler,
+                budget_allocations=budget_allocations,
+                cantrips_for_seeding=cantrips,
             )
-
-            # An embedded script owns no cantrip_data: its id is per-request,
-            # not stable identity, so persisting under it would collide
-            # across scripts and requests.
-            if ephemeral:
-                cantrip_data = {}
-            elif store_seeds is not None:
-                cantrip_data = dict(store_seeds["cantrip_data"].get(cantrip.id, {}))
-            else:
-                cantrip_data = await _load_cantrip_data(db, user_id, cantrip.id)
-
-            started = time.monotonic()
-            try:
-                if internal_chat_id and accumulated_memories:
-                    context["__memories"] = {**context.get("__memories", {}), **accumulated_memories}
-
-                result = await run_cantrip(
-                    code=cantrip.code,
-                    context=context,
-                    chat_data=chat_data,
-                    user_data=user_data,
-                    cantrip_data=cantrip_data,
-                    timeout_ms=cantrip.timeout_ms,
-                    passenger_handler=passenger_handler,
-                )
-            except Exception as exc:
-                logger.exception("Script '%s' failed to execute", cantrip.name)
-                record_cantrip(
-                    body_json, cantrip_id=cantrip.id, name=cantrip.name, position=position,
-                    triggered=True, tag=cantrip.tag or "", code=cantrip.code,
-                    execution_order=cantrip.execution_order, timeout_ms=cantrip.timeout_ms,
-                    duration_ms=(time.monotonic() - started) * 1000.0,
-                    error=f"{type(exc).__name__}: {exc}"[:500],
-                )
+            if result is None:
                 continue
-
-            if result.has_error:
-                logger.warning("Script '%s' returned error: %s", cantrip.name, result.error)
-
-            if result.debug_logs:
-                logger.debug(
-                    "Script '%s' logs: %s", cantrip.name, " | ".join(result.debug_logs)
-                )
-
-            # The whole CantripResult used to be discarded once its fields were
-            # accumulated, so the Debug timeline could not name a single cantrip
-            # that had run. This is the record the comparison view diffs.
-            #
-            # The data stores are captured as before/after deltas rather than as
-            # output fields, because cantrips at the same position run in
-            # sequence against a shared chat_data and user_data: the second
-            # cantrip reads what the first one wrote. Recording only the final
-            # state would attribute every change to whichever ran last.
-            record_cantrip(
-                body_json, cantrip_id=cantrip.id, name=cantrip.name, position=position,
-                triggered=True, tag=cantrip.tag or "", code=cantrip.code,
-                execution_order=cantrip.execution_order, timeout_ms=cantrip.timeout_ms,
-                duration_ms=(time.monotonic() - started) * 1000.0,
-                debug_logs=result.debug_logs, error=result.error or "",
-                output={
-                    "personality": result.personality,
-                    "scenario": result.scenario,
-                    "example_dialogs": result.example_dialogs,
-                    "memories": result.memories,
-                    "tool_result": result.tool_result,
-                },
-                data_changes={
-                    "chat_data": _diff_store(chat_data, result.chat_data),
-                    "user_data": _diff_store(user_data, result.user_data),
-                    "cantrip_data": _diff_store(cantrip_data, result.cantrip_data),
-                    **({"lorebook_ops": result.lorebook_ops} if result.lorebook_ops else {}),
-                },
-            )
-
-            # Per-cantrip prompt delta: attribute the character-field change to
-            # the cantrip that made it, measured against the values in place
-            # before it ran (the previous cantrip's output, or the card's own).
-            record_prompt_object(
-                body_json, "cantrip", cantrip.id,
-                _est_tokens(context["character"]["personality"])
-                + _est_tokens(context["character"]["scenario"])
-                + _est_tokens(context["character"]["example_dialogs"]),
-                _est_tokens(result.personality)
-                + _est_tokens(result.scenario)
-                + _est_tokens(result.example_dialogs),
-            )
-
-            context["character"]["personality"] = result.personality
-            context["character"]["scenario"] = result.scenario
-            context["character"]["example_dialogs"] = result.example_dialogs
-            accumulated_memories.update(result.memories)
-
-            # Map nominations ride the body like memories do; the proxy's map
-            # branch merges them into selection after the cantrip pass.
-            if result.maps_nominated:
-                nominations = body_json.setdefault("_gitv_map_nominations", [])
-                for tag in result.maps_nominated:
-                    if tag not in nominations:
-                        nominations.append(tag)
-
-            chat_data = result.chat_data
-            user_data = result.user_data
-
-            if store_seeds is not None:
-                if not ephemeral:
-                    store_seeds["cantrip_data"][cantrip.id] = result.cantrip_data
-            elif result.cantrip_data != cantrip_data and not isolated and not ephemeral:
-                await _save_cantrip_data(db, user_id, cantrip.id, result.cantrip_data)
-
-            # Phase 20: apply this cantrip's lorebook ops now, not after the
-            # pass, so the next cantrip's seed reflects them (the shared
-            # chat_data merge, mirrored). Refusals degrade inside apply_ops.
-            if result.lorebook_ops:
-                delta_rows = await apply_ops(
-                    db, body_json, user_id, binding_conv_id,
-                    result.lorebook_ops, source=cantrip.name,
-                )
-                # Same-turn injection only exists before the forward: the
-                # pre_driver position and map stage passes (which run
-                # pre_driver). Response-side passes write for next turn.
-                if delta_rows and position == "pre_driver":
-                    body_json.setdefault(DELTA_KEY, []).extend(delta_rows)
-                lorebook_seed, lorebook_always, _ = await _prepare_lorebook_seeding(
-                    db, body_json, user_id, request_headers, internal_chat_id,
-                    cantrips, capture=False,
-                )
 
             # Package 3 (items 8 + 4): prompt-side requests. Like the op
             # delta, they only land before the forward; on response-side
             # passes there is no injection point left, so they are dropped
             # (the facade is a pre-forward tool by contract).
-            if result.book_activations or result.injections:
-                request_rows = await _apply_prompt_requests(
-                    db, user_id, body_json,
-                    result.book_activations, result.injections,
-                    source=cantrip.name,
+            if request_rows and position == "pre_driver":
+                body_json.setdefault(DELTA_KEY, []).extend(request_rows)
+
+            # Pipeline ordering (0.41.0): strips collected on a pre-driver
+            # pass ride the body for the proxy to apply right after the
+            # pass -- before deferred lorebook entries match, so
+            # inject-after-cantrips books see cleaned text. Response-side
+            # strips are dropped the same way (no prompt left to rewrite).
+            if result.prompt_strips and position == "pre_driver":
+                body_json.setdefault("_gitv_prompt_strips", []).extend(
+                    {**s, "source": cantrip.name} for s in result.prompt_strips
                 )
-                if request_rows and position == "pre_driver":
-                    body_json.setdefault(DELTA_KEY, []).extend(request_rows)
+
+        chat_data = state["chat_data"]
+        user_data = state["user_data"]
 
         if store_seeds is not None:
             # The seeds holder IS the store for this run: write the final
@@ -631,10 +528,13 @@ async def process_cantrips(
             if not isolated:
                 await _save_user_data(db, user_id, user_data)
 
-    if internal_chat_id and accumulated_memories:
+    if internal_chat_id and state["accumulated_memories"]:
         from app.services.conversation import save_memories_for_chat
-        await save_memories_for_chat(internal_chat_id, user_id, accumulated_memories)
-        logger.info("Cantrip memory updates: %d keys for chat %s", len(accumulated_memories), internal_chat_id[:12])
+        await save_memories_for_chat(internal_chat_id, user_id, state["accumulated_memories"])
+        logger.info(
+            "Cantrip memory updates: %d keys for chat %s",
+            len(state["accumulated_memories"]), internal_chat_id[:12],
+        )
 
     final_personality = context["character"]["personality"]
     final_scenario = context["character"]["scenario"]
@@ -662,6 +562,280 @@ async def process_cantrips(
         )
 
     return body_json
+
+
+async def _execute_cantrip_step(
+    cantrip: Any,
+    *,
+    db: AsyncSession,
+    body_json: dict[str, Any],
+    user_id: str,
+    request_headers: dict[str, str],
+    position: str,
+    context: dict[str, Any],
+    state: dict[str, Any],
+    binding_conv_id: str,
+    internal_chat_id: str,
+    isolated: bool,
+    store_seeds: dict[str, Any] | None,
+    passenger_handler: Any,
+    budget_allocations: dict[str, Any] | None,
+    cantrips_for_seeding: list[Any],
+) -> tuple[CantripResult | None, list]:
+    """Run ONE cantrip of a pass: the extracted body of the process_cantrips
+    loop, shared verbatim with the manual-order orchestrator
+    (pipeline_order.py) so the two orderings execute cantrips through one
+    code path and cannot drift.
+
+    Mutates ``state`` (chat_data / user_data / accumulated_memories /
+    lorebook seed) and ``context`` (character fields, memories, budget,
+    per-cantrip lorebook read seed). Returns ``(result, prompt_request_rows)``;
+    ``result is None`` means the cantrip raised and was recorded -- the
+    caller skips its request handling, exactly as the loop's ``continue``
+    did. The CALLER decides what the request rows and prompt strips do:
+    DELTA_KEY / body-key in the default pass, at-slot application in manual
+    order.
+    """
+    from app.services.budget import build_cantrip_budget_context
+    from app.services.budget import estimate_tokens as _est_tokens
+    from app.services.debug_metrics import record_cantrip
+    from app.services.metrics import record_prompt_object
+
+    ephemeral = getattr(cantrip, "ephemeral", False)
+    if budget_allocations and not ephemeral:
+        context["budget"] = build_cantrip_budget_context(
+            budget_allocations, cantrip.id, cantrip.budget_weight
+        )
+
+    # Per-cantrip lorebook seed: bound books for everyone, this cantrip's
+    # configured reads for it alone.
+    context["__lorebook"] = _seed_for_cantrip(
+        state["lorebook_seed"], state["lorebook_always"], parse_reads(cantrip.lorebook_reads)
+    )
+
+    # An embedded script owns no cantrip_data: its id is per-request,
+    # not stable identity, so persisting under it would collide
+    # across scripts and requests.
+    if ephemeral:
+        cantrip_data = {}
+    elif store_seeds is not None:
+        cantrip_data = dict(store_seeds["cantrip_data"].get(cantrip.id, {}))
+    else:
+        cantrip_data = await _load_cantrip_data(db, user_id, cantrip.id)
+
+    started = time.monotonic()
+    try:
+        if internal_chat_id and state["accumulated_memories"]:
+            context["__memories"] = {
+                **context.get("__memories", {}), **state["accumulated_memories"]
+            }
+
+        result = await run_cantrip(
+            code=cantrip.code,
+            context=context,
+            chat_data=state["chat_data"],
+            user_data=state["user_data"],
+            cantrip_data=cantrip_data,
+            timeout_ms=cantrip.timeout_ms,
+            passenger_handler=passenger_handler,
+        )
+    except Exception as exc:
+        logger.exception("Script '%s' failed to execute", cantrip.name)
+        record_cantrip(
+            body_json, cantrip_id=cantrip.id, name=cantrip.name, position=position,
+            triggered=True, tag=cantrip.tag or "", code=cantrip.code,
+            execution_order=cantrip.execution_order, timeout_ms=cantrip.timeout_ms,
+            duration_ms=(time.monotonic() - started) * 1000.0,
+            error=f"{type(exc).__name__}: {exc}"[:500],
+        )
+        return None, []
+
+    if result.has_error:
+        logger.warning("Script '%s' returned error: %s", cantrip.name, result.error)
+
+    if result.debug_logs:
+        logger.debug(
+            "Script '%s' logs: %s", cantrip.name, " | ".join(result.debug_logs)
+        )
+
+    # The whole CantripResult used to be discarded once its fields were
+    # accumulated, so the Debug timeline could not name a single cantrip
+    # that had run. This is the record the comparison view diffs.
+    #
+    # The data stores are captured as before/after deltas rather than as
+    # output fields, because cantrips at the same position run in
+    # sequence against a shared chat_data and user_data: the second
+    # cantrip reads what the first one wrote. Recording only the final
+    # state would attribute every change to whichever ran last.
+    record_cantrip(
+        body_json, cantrip_id=cantrip.id, name=cantrip.name, position=position,
+        triggered=True, tag=cantrip.tag or "", code=cantrip.code,
+        execution_order=cantrip.execution_order, timeout_ms=cantrip.timeout_ms,
+        duration_ms=(time.monotonic() - started) * 1000.0,
+        debug_logs=result.debug_logs, error=result.error or "",
+        output={
+            "personality": result.personality,
+            "scenario": result.scenario,
+            "example_dialogs": result.example_dialogs,
+            "memories": result.memories,
+            "tool_result": result.tool_result,
+        },
+        data_changes={
+            "chat_data": _diff_store(state["chat_data"], result.chat_data),
+            "user_data": _diff_store(state["user_data"], result.user_data),
+            "cantrip_data": _diff_store(cantrip_data, result.cantrip_data),
+            **({"lorebook_ops": result.lorebook_ops} if result.lorebook_ops else {}),
+        },
+    )
+
+    # Per-cantrip prompt delta: attribute the character-field change to
+    # the cantrip that made it, measured against the values in place
+    # before it ran (the previous cantrip's output, or the card's own).
+    record_prompt_object(
+        body_json, "cantrip", cantrip.id,
+        _est_tokens(context["character"]["personality"])
+        + _est_tokens(context["character"]["scenario"])
+        + _est_tokens(context["character"]["example_dialogs"]),
+        _est_tokens(result.personality)
+        + _est_tokens(result.scenario)
+        + _est_tokens(result.example_dialogs),
+    )
+
+    context["character"]["personality"] = result.personality
+    context["character"]["scenario"] = result.scenario
+    context["character"]["example_dialogs"] = result.example_dialogs
+    state["accumulated_memories"].update(result.memories)
+
+    # Map nominations ride the body like memories do; the proxy's map
+    # branch merges them into selection after the cantrip pass.
+    if result.maps_nominated:
+        nominations = body_json.setdefault("_gitv_map_nominations", [])
+        for tag in result.maps_nominated:
+            if tag not in nominations:
+                nominations.append(tag)
+
+    state["chat_data"] = result.chat_data
+    state["user_data"] = result.user_data
+
+    if store_seeds is not None:
+        if not ephemeral:
+            store_seeds["cantrip_data"][cantrip.id] = result.cantrip_data
+    elif result.cantrip_data != cantrip_data and not isolated and not ephemeral:
+        await _save_cantrip_data(db, user_id, cantrip.id, result.cantrip_data)
+
+    # Phase 20: apply this cantrip's lorebook ops now, not after the
+    # pass, so the next cantrip's seed reflects them (the shared
+    # chat_data merge, mirrored). Refusals degrade inside apply_ops.
+    if result.lorebook_ops:
+        delta_rows = await apply_ops(
+            db, body_json, user_id, binding_conv_id,
+            result.lorebook_ops, source=cantrip.name,
+        )
+        # Same-turn injection only exists before the forward: the
+        # pre_driver position and map stage passes (which run
+        # pre_driver). Response-side passes write for next turn.
+        if delta_rows and position == "pre_driver":
+            body_json.setdefault(DELTA_KEY, []).extend(delta_rows)
+        state["lorebook_seed"], state["lorebook_always"], _ = (
+            await _prepare_lorebook_seeding(
+                db, body_json, user_id, request_headers, internal_chat_id,
+                cantrips_for_seeding, capture=False,
+            )
+        )
+
+    request_rows: list = []
+    if result.book_activations or result.injections:
+        request_rows = await _apply_prompt_requests(
+            db, user_id, body_json,
+            result.book_activations, result.injections,
+            source=cantrip.name,
+        )
+    return result, request_rows
+
+
+def apply_prompt_strips(
+    body_json: dict[str, Any],
+    strips: list[dict],
+    cantrip_id: str = "",
+    cantrip_name: str = "",
+) -> int:
+    """Apply context.strip() requests (pipeline ordering, 0.41.0).
+
+    Rewrites message content in place -- string contents and text parts --
+    honoring each strip's scope ('all' / 'system' / 'messages'). A pattern
+    that does not compile degrades to skipped-with-capture, never an
+    error. Every applied strip is debug-captured and recorded as a
+    negative prompt-object delta. Returns the number applied.
+
+    Deliberately never touches the conversation-hash anchor: identity was
+    resolved before any cantrip ran, and the same strips fire on the same
+    bytes every turn, so stripping is continuity-neutral by construction.
+    """
+    import re as _re
+
+    from app.services.budget import estimate_tokens as _est_tokens
+    from app.services.debug import debug_capture
+    from app.services.metrics import record_prompt_object
+
+    messages = body_json.get("messages", [])
+    source = cantrip_name or cantrip_id or "unknown"
+    applied = 0
+    for raw in strips[:20]:
+        pattern = str((raw or {}).get("pattern", ""))[:256]
+        scope = (raw or {}).get("scope", "all")
+        if scope not in ("all", "system", "messages"):
+            scope = "all"
+        if not pattern:
+            continue
+        try:
+            matcher = _re.compile(pattern)
+        except _re.error as exc:
+            logger.warning(
+                "prompt strip from '%s' did not compile, skipped: %s", source, exc
+            )
+            debug_capture(
+                body_json, "prompt_strip", "Prompt Strip",
+                detail=f"pattern from '{source}' refused (compile error): {exc}",
+                metadata={"source": source, "scope": scope, "applied": False},
+            )
+            continue
+
+        removed_chars = 0
+        for msg in messages:
+            role = msg.get("role", "")
+            if scope == "system" and role != "system":
+                continue
+            if scope == "messages" and role == "system":
+                continue
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                new_content = matcher.sub("", content)
+                if new_content != content:
+                    removed_chars += len(content) - len(new_content)
+                    msg["content"] = new_content
+            elif isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and isinstance(item.get("text"), str):
+                        new_text = matcher.sub("", item["text"])
+                        if new_text != item["text"]:
+                            removed_chars += len(item["text"]) - len(new_text)
+                            item["text"] = new_text
+        applied += 1
+        debug_capture(
+            body_json, f"prompt_strip_{applied}", "Prompt Strip",
+            detail=f"'{source}' stripped ~{removed_chars} chars (scope {scope})",
+            metadata={
+                "source": source,
+                "scope": scope,
+                "pattern": pattern[:80],
+                "removed_chars": removed_chars,
+            },
+        )
+        record_prompt_object(
+            body_json, "prompt_strip", cantrip_id or source,
+            0, -max(1, _est_tokens("x" * removed_chars)),
+        )
+    return applied
 
 
 async def test_cantrip(

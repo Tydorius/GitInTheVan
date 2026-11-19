@@ -25,6 +25,7 @@ import app.services.map_pipeline as _map_pipeline_module
 import app.services.memory as _memory_module
 import app.services.metrics as _metrics_module
 import app.services.passenger as _passenger_module
+import app.services.pipeline_order as _pipeline_order_module
 import app.services.proxy as _proxy_module
 import app.services.response_tags as _response_tags_module
 import app.services.scenario_summarizer as _scenario_summarizer_module
@@ -67,6 +68,7 @@ _SESSION_MODULES = [
     _memory_module,
     _metrics_module,
     _passenger_module,
+    _pipeline_order_module,
     _proxy_module,
     _response_tags_module,
     _scenario_summarizer_module,

@@ -88,6 +88,67 @@
   let passengerBudget = 0
   let stripPatternsText = ''
   let stripSaved = false
+
+  // Pipeline ordering (0.41.0): the manual pre-forward order.
+  type OrderItem = { type: 'cantrip' | 'lorebook'; id: string; name: string }
+  let orderCantrips: any[] = []
+  let orderLorebooks: any[] = []
+  let orderItems: OrderItem[] = []
+  let orderEnabled = false
+  let orderSaved = false
+  let orderDragIndex = -1
+
+  function orderName(type: string, id: string): string {
+    if (type === 'cantrip') {
+      return orderCantrips.find((c: any) => c.id === id)?.name || '(deleted cantrip)'
+    }
+    return orderLorebooks.find((l: any) => l.id === id)?.name || '(deleted lorebook)'
+  }
+
+  function populateOrderDefaults() {
+    // Lorebooks first, cantrips second -- today's default window order.
+    orderItems = [
+      ...orderLorebooks.filter((l: any) => l.is_active).map((l: any) => ({ type: 'lorebook' as const, id: l.id, name: l.name })),
+      ...orderCantrips.filter((c: any) => c.is_active && c.run_pre_driver).map((c: any) => ({ type: 'cantrip' as const, id: c.id, name: c.name })),
+    ]
+  }
+
+  function moveOrderItem(index: number, delta: number) {
+    const target = index + delta
+    if (target < 0 || target >= orderItems.length) return
+    const items = [...orderItems]
+    const [moved] = items.splice(index, 1)
+    items.splice(target, 0, moved)
+    orderItems = items
+  }
+
+  function dropOrderItem(target: number) {
+    if (orderDragIndex < 0 || orderDragIndex === target) return
+    const items = [...orderItems]
+    const [moved] = items.splice(orderDragIndex, 1)
+    items.splice(target, 0, moved)
+    orderItems = items
+    orderDragIndex = -1
+  }
+
+  function removeOrderItem(index: number) {
+    orderItems = [...orderItems.slice(0, index), ...orderItems.slice(index + 1)]
+  }
+
+  async function saveOrder() {
+    error = ''
+    saved = false
+    try {
+      await api.updateSettings({
+        pipeline_order: {
+          enabled: orderEnabled,
+          items: orderItems.map(({ type, id }) => ({ type, id })),
+        },
+      })
+      orderSaved = true
+      setTimeout(() => { orderSaved = false }, 2500)
+    } catch (e: any) { error = e.message }
+  }
   let passengerParams: any[] = []
   let passengerEffectiveCap = 0
   let passengerSaved = false
@@ -96,7 +157,9 @@
 
   async function load() {
     try {
-      const [s, e, sum] = await Promise.all([api.getSettings(), api.listEndpoints(), api.getSummarizationSettings(), api.listMaps()])
+      const [s, e, sum, , cList, lList]: any[] = await Promise.all([api.getSettings(), api.listEndpoints(), api.getSummarizationSettings(), api.listMaps(), api.listCantrips(), api.listLorebooks()])
+      orderCantrips = cList.cantrips
+      orderLorebooks = lList.lorebooks
       settings.default_endpoint_id = s.default_endpoint_id || ''
       settings.preserve_thinking = s.preserve_thinking
       settings.gitv_status = s.gitv_status
@@ -112,6 +175,11 @@
       passengerEnabled = s.passenger_calling_enabled ?? true
       passengerBudget = s.passenger_call_budget ?? 0
       stripPatternsText = (s.response_strip_patterns || []).join('\n')
+      const plan = s.pipeline_order || {}
+      orderEnabled = !!plan.enabled
+      orderItems = (plan.items || []).map((it: any) => ({
+        type: it.type, id: it.id, name: orderName(it.type, it.id),
+      }))
       passengerParams = structuredClone(s.passenger_parameters || [])
       passengerEffectiveCap = s.passenger_effective_cap ?? 0
       endpoints = e.endpoints
@@ -471,6 +539,74 @@
       placeholder="SITE_FOOTER_.*&#10;^\[watermark\].*$" style="width: 100%; font-family: monospace;"></textarea>
   </div>
   <button class="primary" onclick={saveStripPatterns}>Save Strip Patterns</button>
+</CollapsibleCard>
+
+<CollapsibleCard title="Pre-Forward Order" cardKey="order" {collapse}>
+  <p style="color: var(--text-dim); font-size: 12px; margin-top: 12px; margin-bottom: 16px;">
+    By default the pipeline runs all lorebook injections, then all pre-Driver cantrips.
+    Turn this on to drag <strong>cantrips and lorebooks into one exact interleaved order</strong> —
+    Cantrip 1, Lorebook 1, Lorebook 2, Cantrip 2, anything. Each step's outputs (strips,
+    injections, activations) land before the next step runs, so a lorebook matches the
+    text an earlier cantrip stripped or wrote. Apply to non-map requests; maps keep their
+    own stage order.
+  </p>
+  {#if orderSaved}<div class="success-msg">Pipeline order saved.</div>{/if}
+  <div class="form-group">
+    <label>
+      <input type="checkbox" bind:checked={orderEnabled} style="width: auto;">
+      Manual Ordering Enabled
+    </label>
+    <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+      Off (or an empty list) keeps today's batched behavior exactly. The list orders, it
+      never activates: a resource still needs its tag or Active flag to fire.
+    </p>
+  </div>
+  {#if orderEnabled && orderItems.length === 0}
+    <div class="form-group">
+      <button onclick={populateOrderDefaults}>Populate With Current Resources</button>
+      <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+        Starts the list from every active lorebook and pre-Driver cantrip in today's order;
+        then drag to reorder.
+      </p>
+    </div>
+  {/if}
+  {#if orderItems.length > 0}
+    <div class="form-group">
+      <label>Order (drag, or use the arrows)</label>
+      <div style="display: grid; gap: 4px;">
+        {#each orderItems as item, index (item.type + ':' + item.id)}
+          <div
+            draggable="true"
+            ondragstart={() => { orderDragIndex = index }}
+            ondragover={(e) => { e.preventDefault(); }}
+            ondrop={(e) => { e.preventDefault(); dropOrderItem(index); }}
+            ondragend={() => { orderDragIndex = -1 }}
+            style="display: flex; justify-content: space-between; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; cursor: grab; background: var(--bg2, transparent);"
+          >
+            <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+              <span style="color: var(--text-dim); font-size: 11px; width: 18px; text-align: right;">{index + 1}</span>
+              <span class="badge {item.type === 'cantrip' ? 'active' : ''}" style="font-size: 10px; flex-shrink: 0;">{item.type === 'cantrip' ? 'Cantrip' : 'Lorebook'}</span>
+              <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{item.name}</span>
+            </div>
+            <div style="display: flex; gap: 2px; flex-shrink: 0;">
+              <button style="padding: 2px 6px; font-size: 12px;" onclick={() => moveOrderItem(index, -1)} disabled={index === 0} title="Move up">↑</button>
+              <button style="padding: 2px 6px; font-size: 12px;" onclick={() => moveOrderItem(index, 1)} disabled={index === orderItems.length - 1} title="Move down">↓</button>
+              <button class="danger" style="padding: 2px 6px; font-size: 12px;" onclick={() => removeOrderItem(index)} title="Remove from list">✕</button>
+            </div>
+          </div>
+        {/each}
+      </div>
+      <p style="color: var(--text-dim); font-size: 11px; margin-top: 6px;">
+        Resources that activate but are not listed (including newly created ones) run after
+        this list in their default order — nothing is silently dropped. A lorebook's
+        "inject after cantrips" setting is ignored in manual mode; its position here is the
+        truth.
+      </p>
+    </div>
+  {/if}
+  <button class="primary" onclick={saveOrder} disabled={orderEnabled && orderItems.length === 0}>
+    Save Pipeline Order
+  </button>
 </CollapsibleCard>
 
 <CollapsibleCard title="Passenger (Scripted LLM Calls)" cardKey="passenger" {collapse}>

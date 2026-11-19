@@ -99,6 +99,14 @@ class UserSettings(Base):
     response_strip_patterns: Mapped[str] = mapped_column(
         Text, nullable=False, default="[]"
     )
+    # Pipeline ordering (0.41.0): the user-defined interleaved order for the
+    # pre-forward window (cantrips and lorebooks). Empty/"" = manual
+    # ordering off, today's batched behavior. JSON: {"enabled": bool,
+    # "items": [{"type": "cantrip"|"lorebook", "id": str}]}. The list
+    # orders, it never activates (rule 19).
+    pipeline_order_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=""
+    )
     context_budget_percent: Mapped[float] = mapped_column(Float, default=10.0, nullable=False)
     context_window_override: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     debug_mode: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

@@ -486,7 +486,7 @@ class TestAdvisoryLock:
 
     async def test_migration_count(self):
         """Sanity check: verify we have the expected number of migrations."""
-        assert len(MIGRATIONS) == 60  # 060_package3_response_capture (Package 3)
+        assert len(MIGRATIONS) == 61  # 061_pipeline_order (pipeline ordering)
 
     async def test_all_migrations_have_unique_names(self):
         names = [name for name, _ in MIGRATIONS]

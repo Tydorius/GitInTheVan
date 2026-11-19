@@ -589,6 +589,20 @@ and 64k characters total; refusals degrade, never fail the request.</p>
     context.inject(&quot;The player regenerated: keep continuity with the prior attempt.&quot;, &quot;in_chat_system&quot;);
 }
 </code></pre>
+<p><strong><code>context.strip(pattern, scope)</code></strong> (0.41.0) removes regex matches from the
+prompt's message text — the inverse of <code>inject()</code>, and previously
+impossible: cantrips could add prompt text but never remove it. Scope is
+<code>all</code> (default), <code>system</code> (system-role messages only) or <code>messages</code>
+(everything else). Applied at the cantrip's step in the manual pre-forward
+order, or right after the pre-Driver pass otherwise — so later steps,
+lorebook keyword matching especially, see the cleaned prompt. Strips never
+touch conversation identity (the same request strips the same bytes every
+turn), max 20 per request / 256 characters each, and an invalid pattern
+degrades to a skipped-with-note entry in Debug. The <strong>Prompt Janitor</strong>
+template is the worked example, with its pattern list editable at runtime
+from the Storage page.</p>
+<pre><code class="language-javascript">context.strip(&quot;\[system note\][\s\S]*?\[/system note\]&quot;, &quot;messages&quot;);
+</code></pre>
 <p><strong>New request facts:</strong> <code>context.request.id</code> (a stable id for this request)
 and <code>context.request.is_regenerate</code> — true when this request has the same
 message count and trailing user message as the previous one in the chat,
@@ -601,6 +615,32 @@ cleanup, nothing captured. Site footers, watermark lines, artifacts: one
 pattern per line, max 20.</p>
 <p><img alt="Response cleanup settings" src="media/gitv-settings-strip-patterns.png"></p>
 <p><em>The Response Cleanup card, captured 2026-11-19.</em></p>
+<h3 id="pre-forward-order-0410">Pre-Forward Order (0.41.0)</h3>
+<p>By default the pipeline runs all lorebook injections, then all pre-Driver
+cantrips — two batches. This card replaces that window with <strong>one exact
+interleaved order you define</strong>: Cantrip 1, Lorebook 1, Lorebook 2,
+Cantrip 2, anything you like. Drag rows (or use the arrows); each step's
+outputs — strips, injections, activations — land before the next step
+runs, so a lorebook keyword-matches against text an earlier cantrip
+stripped or wrote.</p>
+<ul>
+<li><strong>Off (or an empty list) keeps today's behavior exactly.</strong> Enabling
+  offers to populate the list from your current active resources, in
+  today's order; reorder from there.</li>
+<li><strong>The list orders, it never activates.</strong> A resource still needs its tag
+  or Active flag to fire; listing something inactive does nothing.</li>
+<li><strong>Unlisted resources are not dropped.</strong> Anything that activates but is
+  not listed (including resources you create later) runs after the list
+  in its default order.</li>
+<li>A lorebook's <em>Inject After Cantrips</em> setting is ignored in manual mode
+  — its position in the list is the truth.</li>
+<li>Applies to non-map requests; maps keep their own stage ordering.</li>
+</ul>
+<p>Pair it with the <strong>Prompt Janitor</strong> template (Cantrips → Templates): a
+disabled-by-default cantrip that strips configurable regex patterns from
+the prompt — platform-injected system notes, watermark lines — before
+anything else sees them. Its patterns live in the cantrip's data and are
+editable at runtime from the Storage page.</p>
 <h3 id="cantrip-snippets">Cantrip Snippets</h3>
 <p>Copy-paste examples for common patterns.</p>
 <p><strong>Day counter (persistent state via <code>chat_data</code>):</strong></p>

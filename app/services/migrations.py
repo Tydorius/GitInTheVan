@@ -1477,6 +1477,24 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             """,
         },
     ),
+    (
+        "061_pipeline_order",
+        # Pipeline ordering (0.41.0): the user-defined interleaved order for
+        # the pre-forward window. Empty string = manual ordering off. MySQL
+        # TEXT follows the 055/059/060 precedent: nullable, NULL reads as
+        # empty by every reader.
+        {
+            "sqlite": """
+            ALTER TABLE user_settings ADD COLUMN pipeline_order_json TEXT DEFAULT '' NOT NULL;
+            """,
+            "postgresql": """
+            ALTER TABLE user_settings ADD COLUMN pipeline_order_json TEXT DEFAULT '' NOT NULL;
+            """,
+            "mysql": """
+            ALTER TABLE user_settings ADD COLUMN pipeline_order_json TEXT;
+            """,
+        },
+    ),
 ]
 
 

@@ -2,6 +2,48 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.41.0] - 2026-11-19
+
+Pipeline ordering: drag cantrips and lorebooks into one exact interleaved
+pre-forward order, plus the prompt-strip cantrip output it enables.
+
+### Added
+
+- **Pre-Forward Order (Settings → Pre-Forward Order).** By default the
+  pipeline runs all lorebook injections, then all pre-Driver cantrips.
+  Manual ordering replaces that window with a dragged list — Cantrip 1,
+  Lorebook 1, Lorebook 2, Cantrip 2, any interleaving. Each step's outputs
+  land before the next step runs, so a lorebook keyword-matches against
+  the text an earlier cantrip stripped or injected. Off/empty is
+  byte-identical to today's behavior. The list orders, it never activates
+  (rule 19: a listed resource still needs its tag or Active flag);
+  unlisted-but-activating resources run after the list in their default
+  order, so nothing is silently dropped and new resources self-append.
+  `inject_after_cantrips` is ignored in manual mode — position is the
+  truth. Non-map requests only; map stages keep their own attachment
+  order. Cantrips execute through the same per-cantrip step code as the
+  default pass (extracted, not duplicated), and lorebook activation runs
+  through the same loader as the default injection pass.
+- **`context.strip(pattern, scope)` — the missing prompt-rewrite output.**
+  Cantrips could add prompt text (`context.inject`) but never remove it;
+  the slot-1 "strip the platform's system note" cantrip was impossible.
+  Strips are collected like inject() requests and applied host-side at
+  the cantrip's step in manual order (or right after the pre-Driver pass
+  by default, before deferred lorebook entries match). Scope `all`
+  (default) / `system` / `messages`; caps mirror response strip patterns
+  (20 per request, 256 chars each); a pattern that does not compile
+  degrades to skipped-with-capture. Every applied strip is debug-captured
+  (scope, chars removed) and recorded as a negative prompt-object delta.
+  Strips deliberately never touch the conversation-hash anchor — the same
+  request strips the same bytes every turn, so conversation continuity is
+  unaffected (pinned by test).
+- **Prompt Janitor template** (ships disabled): the worked example of the
+  above — strips configurable regex patterns from the prompt before later
+  steps see them. Its pattern list lives in the cantrip's data (Storage →
+  Cantrip Data → Prompt Janitor, key `strip_patterns`), editable at
+  runtime with no reinstall; drag it to the first slot in Pre-Forward
+  Order and lorebooks match the cleaned prompt.
+
 ## [0.40.0] - 2026-11-19
 
 Tooling package: the multi-turn Sequence Tester and a Storage browser

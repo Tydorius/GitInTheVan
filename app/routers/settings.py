@@ -12,6 +12,7 @@ from app.dependencies import get_current_user
 from app.models.user import User
 from app.models.user_settings import UserSettings
 from app.services.llm_params import ParameterDef, params_from_api, params_to_api
+from app.services.pipeline_order import MAX_PLAN_ITEMS, parse_plan
 from app.services.response_tags import parse_strip_patterns
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,10 @@ class SettingsResponse(BaseModel):
     passenger_parameters: list[ParameterDef] = Field(default_factory=list)
     # Package 3 (item 22): regex patterns stripped from every final reply.
     response_strip_patterns: list[str] = Field(default_factory=list)
+    # Pipeline ordering (0.41.0): {"enabled": bool, "items": [{"type":
+    # "cantrip"|"lorebook", "id": str}]} -- the manual pre-forward order.
+    # Empty dict = manual ordering off.
+    pipeline_order: dict = Field(default_factory=dict)
 
 
 class SettingsUpdate(BaseModel):
@@ -96,6 +101,7 @@ class SettingsUpdate(BaseModel):
     lexicon_parameters: list[ParameterDef] | None = None
     passenger_parameters: list[ParameterDef] | None = None
     response_strip_patterns: list[str] | None = None
+    pipeline_order: dict | None = None
 
 
 @router.get("")
@@ -139,6 +145,7 @@ async def get_settings(
         response_strip_patterns=parse_strip_patterns(
             getattr(user_settings, "response_strip_patterns", None)
         ),
+        pipeline_order=parse_plan(getattr(user_settings, "pipeline_order_json", None)),
     )
 
 
@@ -201,6 +208,20 @@ async def update_settings(
                 detail=str(exc),
             ) from exc
         user_settings.response_strip_patterns = json.dumps(cleaned)
+    if req.pipeline_order is not None:
+        # Shape-validated and normalized through the same parser the
+        # pipeline uses; the ids themselves are resolved at request time
+        # (a listed item that has since been deleted simply never matches).
+        items = req.pipeline_order.get("items")
+        if not isinstance(items, list) or len(items) > MAX_PLAN_ITEMS:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"pipeline_order.items must be a list of at most {MAX_PLAN_ITEMS}",
+            )
+        plan = parse_plan(json.dumps(req.pipeline_order))
+        user_settings.pipeline_order_json = (
+            json.dumps(plan) if plan["items"] else ""
+        )
     if req.parameters is not None:
         user_settings.parameters_json = params_from_api(req.parameters, "driver parameters")
     if req.verification_parameters is not None:
@@ -251,4 +272,5 @@ async def update_settings(
         response_strip_patterns=parse_strip_patterns(
             getattr(user_settings, "response_strip_patterns", None)
         ),
+        pipeline_order=parse_plan(getattr(user_settings, "pipeline_order_json", None)),
     )

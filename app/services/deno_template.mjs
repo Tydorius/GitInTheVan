@@ -85,6 +85,24 @@ context.inject = (text, position) => {
     __injections.push({ text: text, position: pos });
 };
 
+// Pipeline ordering (0.41.0): strip(pattern, scope) asks the host to remove
+// regex matches from the prompt's message text. scope: 'all' (default),
+// 'system' (system-role messages only), 'messages' (non-system). Applied
+// host-side at this cantrip's step in manual order, or right after the
+// pre-driver pass otherwise -- later lorebook slots match the cleaned text.
+// Collection only; a pattern that does not compile degrades to
+// skipped-with-log on the host, never a failed request.
+const __promptStrips = [];
+context.strip = (pattern, scope) => {
+    if (typeof pattern !== 'string' || !pattern.trim()) return;
+    if (__promptStrips.length >= 20) {
+        __debugLogs.push('strip: refused, per-request cap (20) reached');
+        return;
+    }
+    const sc = ['all', 'system', 'messages'].indexOf(scope) !== -1 ? scope : 'all';
+    __promptStrips.push({ pattern: pattern.slice(0, 256), scope: sc });
+};
+
 // Dynamic lorebooks (Phase 20): reads are served from a host-seeded copy
 // (this conversation's script-created books always; static books named in the
 // cantrip's lorebook_reads config); writes are collected as an op log the
@@ -409,6 +427,7 @@ const __result = {
     lorebook_ops: __lorebookOps,
     book_activations: __bookActivations,
     injections: __injections,
+    prompt_strips: __promptStrips,
     debug_logs: __debugLogs,
     error: __error
 };

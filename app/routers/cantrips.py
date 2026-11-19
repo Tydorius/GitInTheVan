@@ -377,7 +377,9 @@ async def install_template(
         code=template["code"],
         hook_type=template.get("hook_type", "pre"),
         is_public=False,
-        is_active=True,
+        # A template whose defaults would actively rewrite prompts (the
+        # Prompt Janitor) ships disabled; everything else installs active.
+        is_active=template.get("is_active", True),
         execution_order=template.get("execution_order", 10),
         timeout_ms=template.get("timeout_ms", 5000),
         # Optional position flags so a template can ship response-side

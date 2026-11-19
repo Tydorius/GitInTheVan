@@ -71,6 +71,13 @@ class CantripResult:
     # Package 3 (item 4): prompt injections the script requested. dicts of
     # {text, position}; applied post-cantrip through inject_entries.
     injections: list[dict] = field(default_factory=list)
+    # Pipeline ordering (0.41.0): prompt strips the script requested via
+    # context.strip(pattern, scope). dicts of {pattern, scope}; applied
+    # host-side at the cantrip's step (manual order) or right after the
+    # pre-driver pass (default order), rewriting message content before
+    # later slots match against it. Collection only -- the sandbox never
+    # compiles or executes the pattern.
+    prompt_strips: list[dict] = field(default_factory=list)
     debug_logs: list[str] = field(default_factory=list)
     error: str | None = None
 
@@ -199,6 +206,7 @@ async def run_cantrip(
             lorebook_ops=result_data.get("lorebook_ops", []),
             book_activations=result_data.get("book_activations", []),
             injections=result_data.get("injections", []),
+            prompt_strips=result_data.get("prompt_strips", []),
             debug_logs=result_data.get("debug_logs", []),
             error=result_data.get("error"),
         )

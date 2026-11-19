@@ -190,3 +190,79 @@ def _to_matched_entry(entry: dict) -> MatchedEntry:
         lorebook_name=entry.get("lorebook_name", ""),
         entry_id=entry.get("entry_id", ""),
     )
+
+
+async def load_active_lorebooks(
+    db,
+    user_id: str,
+    tags: list | None = None,
+    request_headers: dict[str, str] | None = None,
+    internal_chat_id: str = "",
+) -> list:
+    """The activated lorebook rows for one request: every candidate through
+    the Activation Hierarchy (rule 19) plus the conversation bindings (the
+    fifth source, union-only). Shared by the default injection pass
+    (proxy._apply_lorebook_injection) and the manual-order orchestrator
+    (pipeline_order.py) so both orderings activate through ONE code path.
+
+    ``db`` is the caller's session; entries are eager-loaded.
+    """
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from app.models.conversation_dynamic_lorebook import ConversationDynamicLorebook
+    from app.models.conversation_lorebook_binding import ConversationLorebookBinding
+    from app.models.lorebook import Lorebook
+    from app.services.lexicon import resolve_action_identity
+    from app.services.tagging import should_activate_resource
+
+    # The tags parameter may be None (meaning "no tags"); normalize so the
+    # unconditional should_activate_resource call below never iterates None
+    # (the guard-shaped bug rule 19 exists to prevent).
+    tags = tags or []
+
+    result = await db.execute(
+        select(Lorebook)
+        .where(Lorebook.user_id == user_id)
+        .options(selectinload(Lorebook.entries))
+    )
+    lorebooks = result.scalars().all()
+
+    # Fifth activation source (Phase 29a): the conversation binding. A union
+    # source -- it only ever adds. A bound lorebook joins the candidates
+    # regardless of its tag or Active flag, so a lexicon lorebook (created
+    # inactive, untagged) injects in its own chat and in no other. No prompt
+    # tag can switch it off.
+    conversation_id, _ = resolve_action_identity(request_headers or {}, internal_chat_id)
+    bound_lorebook_ids: set = set()
+    if conversation_id:
+        lex_rows = await db.execute(
+            select(ConversationLorebookBinding.lorebook_id).where(
+                ConversationLorebookBinding.user_id == user_id,
+                ConversationLorebookBinding.conversation_id == conversation_id,
+            )
+        )
+        bound_lorebook_ids = set(lex_rows.scalars().all())
+        # Phase 20: script-created books bind through the companion table
+        # (multi-book per conversation). Same union, same semantics -- the ""
+        # sentinel rows never match a real conversation id, so unbound tagged
+        # books stay tag-activated only (rule 19 source 3).
+        dyn_rows = await db.execute(
+            select(ConversationDynamicLorebook.lorebook_id).where(
+                ConversationDynamicLorebook.user_id == user_id,
+                ConversationDynamicLorebook.conversation_id == conversation_id,
+            )
+        )
+        bound_lorebook_ids |= set(dyn_rows.scalars().all())
+
+    active_lorebooks = []
+    for lb in lorebooks:
+        # Bound lorebooks join unconditionally (fifth source, union-only).
+        # Every other candidate goes through should_activate_resource with no
+        # caller-side pre-check: an `if lb.tag and tags:` shape here would
+        # duplicate the hierarchy and only happen to agree with it.
+        if lb.id in bound_lorebook_ids or should_activate_resource(
+            lb.tag, "lore", lb.is_active, lb.is_public, lb.user_id, user_id, tags
+        ):
+            active_lorebooks.append(lb)
+    return active_lorebooks

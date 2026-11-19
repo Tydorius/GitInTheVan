@@ -340,6 +340,47 @@ if (context.passenger.enabled) {
     }
 }""",
     },
+    {
+        "name": "Prompt Janitor",
+        "description": "Strips configurable regex patterns from the prompt's message text BEFORE later pipeline steps see it -- platform-injected system notes, watermark lines, clutter a site appends to messages. Pair it with Settings -> Pre-Forward Order: drag it to the FIRST slot and every later step (including lorebook keyword matching) works on the cleaned prompt. Installs DISABLED so nothing is stripped until you turn it on. The pattern list lives in this cantrip's data (Storage -> Cantrip Data -> Prompt Janitor, key 'strip_patterns') -- edit it at runtime, no reinstall needed; the list below is only the first-boot default.",
+        "hook_type": "pre",
+        "run_pre_driver": True,
+        "execution_order": 1,
+        "timeout_ms": 5000,
+        "is_active": False,
+        "code": """// Prompt Janitor (pipeline ordering, 0.41.0): requests prompt strips via
+// context.strip(pattern, scope). The host applies each pattern to the
+// request's message text at THIS cantrip's step in the manual order (or
+// right after the pre-Driver pass in the default order), so later steps --
+// lorebook keyword matching especially -- see the cleaned prompt. Scope:
+// 'all' (every message), 'system' (system-role messages only),
+// 'messages' (everything except system).
+//
+// Patterns come from this cantrip's persistent data, editable at runtime:
+// Storage -> Cantrip Data -> Prompt Janitor, key "strip_patterns". The
+// array below seeds that store on first run; after that the stored list is
+// the truth -- edit it in the Storage page, not here.
+const SEED = [
+    // JavaScript regexes, applied with String.replace semantics.
+    // Bracketed blocks some platforms append to the newest user message:
+    { pattern: "\\\\[system note\\\\][\\\\s\\\\S]*?\\\\[/system note\\\\]", scope: "messages" },
+    // A decorated footer line ("-~ ... ~-") on its own line:
+    { pattern: "(?:^|\\\\n)\\\\s*-~[^\\\\n]*~-\\\\s*(?:\\\\n|$)", scope: "all" },
+];
+if (!context.cantrip_data.get("strip_patterns")) {
+    context.cantrip_data.set("strip_patterns", SEED);
+    console.log("Prompt Janitor: seeded " + SEED.length
+        + " default pattern(s) into cantrip_data -- edit them in Storage");
+}
+const RULES = context.cantrip_data.get("strip_patterns") || [];
+let requested = 0;
+for (const rule of RULES) {
+    if (!rule || typeof rule.pattern !== "string" || !rule.pattern) continue;
+    context.strip(rule.pattern, rule.scope || "all");
+    requested++;
+}
+console.log("Prompt Janitor: requested " + requested + " strip(s)");""",
+    },
 ]
 
 
