@@ -1384,6 +1384,69 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             """,
         },
     ),
+    (
+        "059_phase20_dynamic_lorebooks",
+        # Phase 20 (0.37.0): dynamic lorebooks. Script-created books
+        # (context.lorebook) are multi-book-per-conversation, which the lexicon
+        # binding table's UNIQUE (user_id, conversation_id) cannot hold, so they
+        # get their own binding-shaped table unioned into the fifth activation
+        # source. conversation_id="" rows are not bindings: they record
+        # script-created cross-conversation (tagged) books so a later request
+        # can re-find them by name. cantrips.lorebook_reads names static books
+        # seeded read-only into the sandbox; MySQL has no literal TEXT
+        # defaults, so the column is nullable there and readers treat NULL as
+        # "none configured" (055's lexicon_endpoint_id precedent).
+        {
+            "sqlite": """
+            CREATE TABLE IF NOT EXISTS conversation_dynamic_lorebooks (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                conversation_id VARCHAR(256) DEFAULT '' NOT NULL,
+                name VARCHAR(128) NOT NULL,
+                lorebook_id VARCHAR(36) NOT NULL REFERENCES lorebooks(id) ON DELETE CASCADE,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, conversation_id, name)
+            );
+            CREATE INDEX IF NOT EXISTS ix_conversation_dynamic_lorebooks_user_id
+                ON conversation_dynamic_lorebooks (user_id);
+            CREATE INDEX IF NOT EXISTS ix_conversation_dynamic_lorebooks_conversation_id
+                ON conversation_dynamic_lorebooks (conversation_id);
+            ALTER TABLE cantrips ADD COLUMN lorebook_reads TEXT DEFAULT '[]' NOT NULL;
+            """,
+            "postgresql": """
+            CREATE TABLE IF NOT EXISTS conversation_dynamic_lorebooks (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                conversation_id VARCHAR(256) DEFAULT '' NOT NULL,
+                name VARCHAR(128) NOT NULL,
+                lorebook_id VARCHAR(36) NOT NULL REFERENCES lorebooks(id) ON DELETE CASCADE,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, conversation_id, name)
+            );
+            CREATE INDEX IF NOT EXISTS ix_conversation_dynamic_lorebooks_user_id
+                ON conversation_dynamic_lorebooks (user_id);
+            CREATE INDEX IF NOT EXISTS ix_conversation_dynamic_lorebooks_conversation_id
+                ON conversation_dynamic_lorebooks (conversation_id);
+            ALTER TABLE cantrips ADD COLUMN lorebook_reads TEXT DEFAULT '[]' NOT NULL;
+            """,
+            "mysql": """
+            CREATE TABLE IF NOT EXISTS conversation_dynamic_lorebooks (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL,
+                conversation_id VARCHAR(256) DEFAULT '' NOT NULL,
+                name VARCHAR(128) NOT NULL,
+                lorebook_id VARCHAR(36) NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, conversation_id, name),
+                KEY ix_conversation_dynamic_lorebooks_user_id (user_id),
+                KEY ix_conversation_dynamic_lorebooks_conversation_id (conversation_id),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (lorebook_id) REFERENCES lorebooks(id) ON DELETE CASCADE
+            );
+            ALTER TABLE cantrips ADD COLUMN lorebook_reads TEXT;
+            """,
+        },
+    ),
 ]
 
 

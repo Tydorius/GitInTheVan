@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Annotated, Any
 
@@ -16,6 +17,7 @@ from app.services.cantrip import test_cantrip
 from app.services.cantrip_context import build_context
 from app.services.content_guard import check_size, gate_scan_findings, log_scan_findings
 from app.services.deno_runner import CantripExecutionError, CantripResult, CantripTimeoutError
+from app.services.dynamic_lorebook import parse_reads
 from app.services.safety_scanner import scan_cantrip
 from app.templates.cantrip_templates import get_templates
 
@@ -79,6 +81,9 @@ class CantripCreate(BaseModel):
     timeout_ms: int = 5000
     tag: str = ""
     budget_weight: float = 1.0
+    # Phase 20: lorebook names whose entries are seeded read-only into the
+    # sandbox (context.lorebook reads).
+    lorebook_reads: list[str] = []
     # Set by a client that has already shown the scanner findings to the user
     # and been told to proceed anyway. Not a model column.
     override_scan: bool = False
@@ -100,6 +105,7 @@ class CantripUpdate(BaseModel):
     timeout_ms: int | None = None
     tag: str | None = None
     budget_weight: float | None = None
+    lorebook_reads: list[str] | None = None
     override_scan: bool = False
 
 
@@ -120,6 +126,7 @@ class CantripResponse(BaseModel):
     timeout_ms: int
     tag: str
     budget_weight: float
+    lorebook_reads: list[str]
 
 
 class CantripListItem(BaseModel):
@@ -139,6 +146,7 @@ class CantripListItem(BaseModel):
     timeout_ms: int
     tag: str
     budget_weight: float
+    lorebook_reads: list[str]
 
 
 class CantripListResponse(BaseModel):
@@ -172,6 +180,18 @@ class CantripTestResponse(BaseModel):
     error: str | None
 
 
+def _normalize_reads(names: list[str] | None) -> list[str]:
+    """lorebook_reads as stored: stripped, de-duplicated, capped at 20 names
+    of at most 128 chars each (a config list, not content — the cap keeps the
+    column bounded, the names themselves name objects the user owns)."""
+    out: list[str] = []
+    for name in names or []:
+        cleaned = str(name).strip()[:128]
+        if cleaned and cleaned not in out:
+            out.append(cleaned)
+    return out[:20]
+
+
 def _cantrip_to_response(cantrip: Cantrip) -> CantripResponse:
     return CantripResponse(
         id=cantrip.id,
@@ -190,6 +210,7 @@ def _cantrip_to_response(cantrip: Cantrip) -> CantripResponse:
         timeout_ms=cantrip.timeout_ms,
         tag=cantrip.tag,
         budget_weight=cantrip.budget_weight,
+        lorebook_reads=parse_reads(getattr(cantrip, "lorebook_reads", None)),
     )
 
 
@@ -211,6 +232,7 @@ def _cantrip_to_list_item(cantrip: Cantrip) -> CantripListItem:
         timeout_ms=cantrip.timeout_ms,
         tag=cantrip.tag,
         budget_weight=cantrip.budget_weight,
+        lorebook_reads=parse_reads(getattr(cantrip, "lorebook_reads", None)),
     )
 
 
@@ -274,6 +296,12 @@ async def install_template(
         is_active=True,
         execution_order=template.get("execution_order", 10),
         timeout_ms=template.get("timeout_ms", 5000),
+        # Optional position flags so a template can ship response-side
+        # (pre/post-Navigator); default is the historical pre-driver-only.
+        run_pre_driver=template.get("run_pre_driver", template.get("hook_type", "pre") == "pre"),
+        run_driver_callable=template.get("run_driver_callable", False),
+        run_pre_navigator=template.get("run_pre_navigator", False),
+        run_post_navigator=template.get("run_post_navigator", False),
     )
     db.add(cantrip)
     await db.commit()
@@ -321,6 +349,7 @@ async def create_cantrip(
         timeout_ms=req.timeout_ms,
         tag=req.tag,
         budget_weight=req.budget_weight,
+        lorebook_reads=json.dumps(_normalize_reads(req.lorebook_reads)),
     )
     db.add(cantrip)
     await db.commit()
@@ -354,6 +383,9 @@ async def update_cantrip(
 
     update_data = req.model_dump(exclude_unset=True)
     update_data.pop("override_scan", None)
+    if "lorebook_reads" in update_data and update_data["lorebook_reads"] is not None:
+        # The column is JSON text; the API speaks lists.
+        update_data["lorebook_reads"] = json.dumps(_normalize_reads(update_data["lorebook_reads"]))
     if "code" in update_data and update_data["code"] is not None:
         await _check_and_scan_cantrip_code(
             current_user.id, update_data["code"], cantrip_id, override=req.override_scan

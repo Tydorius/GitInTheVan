@@ -35,6 +35,11 @@ class Cantrip(Base):
     execution_order: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
     timeout_ms: Mapped[int] = mapped_column(Integer, default=5000, nullable=False)
     budget_weight: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    # Phase 20: JSON list of lorebook names whose entries are seeded read-only
+    # into this cantrip's sandbox context (context.lorebook). The column is
+    # nullable on MySQL (no literal TEXT defaults there); readers treat NULL
+    # as "none configured" -- see parse reads helper in dynamic_lorebook.py.
+    lorebook_reads: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

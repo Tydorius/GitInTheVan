@@ -8,6 +8,7 @@ from app.models.cantrip import Cantrip
 from app.models.cantrip_data import CantripData
 from app.models.cantrip_request import CantripRequest
 from app.models.chat_data import ChatData
+from app.models.conversation_dynamic_lorebook import ConversationDynamicLorebook
 from app.models.conversation_hash import ConversationHash
 from app.models.conversation_lorebook_binding import ConversationLorebookBinding
 from app.models.conversation_summary import ConversationSummary
@@ -50,6 +51,7 @@ __all__ = [
     "CantripRequest",
     "ChatData",
     "ConversationHash",
+    "ConversationDynamicLorebook",
     "ConversationLorebookBinding",
     "ConversationSummary",
     "ConversationTurnCounter",

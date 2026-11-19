@@ -2,6 +2,85 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.37.0] - 2026-11-18
+
+Phase 20 — Dynamic Lorebooks: scripts create and edit lorebooks at runtime.
+
+### Added
+
+- **`context.lorebook` — the dynamic lorebook API.** Cantrips (and
+  `<jslorebook>` scripts) create conversation-scoped lorebooks at runtime:
+  `context.lorebook.create({name, description, tag})` / `get(name)` return a
+  book handle with `add`, `update`, `delete`, `entries()` and `search()`.
+  `create` is get-or-create (scripts run every turn; a re-run reuses its
+  book), and `add` upserts by name — a re-mentioned fact replaces its entry
+  instead of duplicating it. Entries written this turn are injected this
+  turn (same-turn injection, mechanism B), and every turn after via the
+  conversation binding — the same fifth activation source as lexicon books,
+  so a script-created book injects in its own chat and in no other.
+  `create({tag})` instead creates a **cross-conversation** book: unbound,
+  inactive, activated wherever its own `<#lore-tag#>` appears (rule 19
+  source 3).
+- **Guarded writes (rule 18).** Every op runs the same guards as the
+  lorebook editor and the lexicon compiler — sanitize, aggregate size limit,
+  safety scan — and a critical scan finding or an oversize entry **refuses
+  that op** with an audit line and a Debug capture; the request itself never
+  fails. Updates and deletes snapshot first (Phase 25 undo works on dynamic
+  books). A per-request cap of 50 ops (sandbox and host halves) bounds a
+  runaway script. Sandbox and replay runs drop all ops.
+- **Read access to static books: `lorebook_reads`.** A cantrip config field
+  (editor: "Lorebook Reads", comma-separated names) seeds named static
+  lorebooks read-only into the sandbox — `context.lorebook.get(name)` then
+  serves `entries()`/`search()` against them. Seeded size is capped per book
+  by the admin lorebook size limit (oversize books truncate from the end,
+  noted in the Debug timeline). The chat's own dynamic books and its lexicon
+  book are always seeded.
+- **`<jslorebook>` scripts now execute** (previously extracted and stripped
+  for prompt hygiene only). They run sandboxed at their detected position
+  (`<pre-user>`/`<post-llm>` comments) through the cantrip machinery, with
+  `context.lorebook` available — the JanitorAI-compat route to dynamic
+  lorebooks. Same guards, same isolation, one `jslorebook_execution` Debug
+  capture.
+- **Dynamic Lorebook Creator template** (Cantrips → Templates): files
+  `<memstore key="name">content</memstore>` tags from the response into the
+  chat's dynamic book as keyword-triggered entries, and strips the tags from
+  the visible reply. Template installs now honor position flags (this one
+  runs pre-Navigator).
+- **Debug + metrics**: three new timeline stages (`lorebook_seeding`,
+  `dynamic_lorebook_ops`, `dynamic_lorebook_injection`, plus
+  `map_stage_dynamic_lorebook` inside maps), per-entry prompt metrics with
+  real lorebook/entry provenance for dynamic entries, and cantrip records
+  carry their lorebook ops. Dynamic books are ordinary lorebooks: they
+  appear in the Lorebooks page, are snapshot-undoable, and export normally.
+
+### Migration
+
+- **059_phase20_dynamic_lorebooks** (additive): creates the
+  `conversation_dynamic_lorebooks` companion table (script-created books are
+  multi-book-per-conversation, which the lexicon binding table's one-book
+  constraint cannot hold) and adds `cantrips.lorebook_reads` (JSON name
+  list). On MySQL the column is nullable — stock MySQL rejects literal TEXT
+  defaults — and both NULL and malformed values read as "none configured".
+- Existing installs gain the two schema objects with **zero behavior change
+  until a script opts in**: nothing seeds, nothing injects, no cantrip
+  changes.
+- Existing lexicon lorebooks and their bindings are untouched and keep
+  working unchanged.
+- The original plan's `__dynamic_lorebook_{name}` chat_data keys are **not
+  migrated** — that storage mechanism never shipped, so there is no data to
+  carry over.
+
+### Fixed
+
+- **Post-driver cantrips lost four body keys on the non-map path** (both
+  Navigator passes): the `_gitv_`-stripped body copy dropped
+  `_gitv_chat_id` (header-less clients' response-side `chat_data` writes —
+  the exact thing 0.33.0 claimed to fix), the sandbox/replay isolation
+  flags (a sandboxed response-side cantrip wrote live `user_data`), the
+  shared Passenger handler (response-side positions never had Passenger),
+  and the metrics/debug accumulator (their cantrip records and prompt
+  deltas were silently discarded). Both call sites now pass the full body.
+
 ## [0.36.0] - 2026-11-18
 
 Phase 17 — Passenger: scripted LLM calls.

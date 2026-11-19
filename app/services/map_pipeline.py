@@ -1048,6 +1048,49 @@ async def run_map_pipeline(
                     },
                 )
 
+        # Phase 20 (0.37.0): entries this stage's cantrips just wrote inject
+        # into this stage's forward. Popped always, so a stage's delta can
+        # never leak into the next stage iteration.
+        stage_dynamic_delta = body_json.pop("_gitv_dynamic_lorebook_delta", None)
+        if stage_dynamic_delta:
+            from app.services.lorebook import inject_entries as _inject_entries
+            from app.services.metrics import record_prompt_object
+
+            body_json["messages"] = _inject_entries(
+                body_json["messages"], stage_dynamic_delta
+            )
+            logger.info(
+                "Map stage '%s': %d dynamic lorebook entries injected (same-turn)",
+                stage.name, len(stage_dynamic_delta),
+            )
+            for e in stage_dynamic_delta:
+                record_prompt_object(
+                    body_json, "lorebook_entry", e.entry_id,
+                    0, max(1, len(e.content) // 4), parent_id=e.lorebook_id,
+                )
+            if debug_on:
+                debug_capture(
+                    body_json, "map_stage_dynamic_lorebook",
+                    f"Stage {stage_idx + 1} Dynamic Lorebook Injection: {stage.name}",
+                    item_id=stage.id, item_name=stage.name,
+                    detail=(
+                        f"{len(stage_dynamic_delta)} entr"
+                        f"{'y' if len(stage_dynamic_delta) == 1 else 'ies'} "
+                        "written by stage cantrips injected this stage"
+                    ),
+                    metadata={
+                        "stage_index": stage_idx,
+                        "entries": [
+                            {
+                                "lorebook_name": e.lorebook_name,
+                                "entry_name": e.name,
+                                "entry_id": e.entry_id,
+                            }
+                            for e in stage_dynamic_delta
+                        ],
+                    },
+                )
+
         if debug_on:
             debug_capture(
                 body_json, "map_stage_parameters",

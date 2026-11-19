@@ -59,6 +59,10 @@ class CantripResult:
     # rule 19, so the nominated tag competes in tag_matches_resource
     # selection rather than joining the additive union.
     maps_nominated: list[str] = field(default_factory=list)
+    # Dynamic lorebook ops collected by the context.lorebook facade (Phase
+    # 20). Raw op dicts; the host validates and applies them with the
+    # lorebook_writes guards -- they are requests, not performed writes.
+    lorebook_ops: list[dict] = field(default_factory=list)
     debug_logs: list[str] = field(default_factory=list)
     error: str | None = None
 
@@ -184,6 +188,7 @@ async def run_cantrip(
             cantrip_data=result_data.get("cantrip_data", {}),
             memories=result_data.get("memories", {}),
             maps_nominated=result_data.get("maps_nominated", []),
+            lorebook_ops=result_data.get("lorebook_ops", []),
             debug_logs=result_data.get("debug_logs", []),
             error=result_data.get("error"),
         )

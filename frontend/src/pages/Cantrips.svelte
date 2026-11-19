@@ -52,6 +52,7 @@
     run_pre_driver: true, run_driver_callable: false,
     run_pre_navigator: false, run_post_navigator: false,
     execution_order: 10, timeout_ms: 5000, budget_weight: 1.0,
+    lorebook_reads_text: '',
   }
 
   let tagModal = { show: false, id: '', name: '', tag: '' }
@@ -73,7 +74,7 @@
   }
 
   function resetForm() {
-    form = { name: '', description: '', llm_instructions: '', code: '', hook_type: 'pre', is_active: true, is_public: false, run_pre_driver: true, run_driver_callable: false, run_pre_navigator: false, run_post_navigator: false, execution_order: 10, timeout_ms: 5000, budget_weight: 1.0 }
+    form = { name: '', description: '', llm_instructions: '', code: '', hook_type: 'pre', is_active: true, is_public: false, run_pre_driver: true, run_driver_callable: false, run_pre_navigator: false, run_post_navigator: false, execution_order: 10, timeout_ms: 5000, budget_weight: 1.0, lorebook_reads_text: '' }
     editingId = null
   }
 
@@ -86,6 +87,7 @@
       run_pre_navigator: s.run_pre_navigator ?? false, run_post_navigator: s.run_post_navigator ?? false,
       execution_order: s.execution_order, timeout_ms: s.timeout_ms,
       budget_weight: s.budget_weight ?? 1.0,
+      lorebook_reads_text: (s.lorebook_reads || []).join(', '),
     }
     showForm = true
   }
@@ -126,10 +128,17 @@
   async function handleSubmit() {
     error = ''
     try {
+      // lorebook_reads travels as an array; the form edits it as text.
+      const { lorebook_reads_text, ...rest } = form
+      const payload = {
+        ...rest,
+        lorebook_reads: (lorebook_reads_text || '').split(',').map((s: string) => s.trim()).filter(Boolean),
+        override_scan: false,
+      }
       await withScanOverride((overrideScan: boolean) =>
         editingId
-          ? api.updateCantrip(editingId, { ...form, override_scan: overrideScan })
-          : api.createCantrip({ ...form, override_scan: overrideScan }),
+          ? api.updateCantrip(editingId, { ...payload, override_scan: overrideScan })
+          : api.createCantrip({ ...payload, override_scan: overrideScan }),
       )
       showForm = false; resetForm(); await withScroll(load)
     } catch (e: any) { error = e.message }
@@ -462,6 +471,15 @@
           <div class="form-group">
             <label for="cantrip-budget">Budget Weight</label>
             <input id="cantrip-budget" type="number" step="0.1" min="0" bind:value={form.budget_weight} />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex: 1;">
+            <label for="cantrip-reads">Lorebook Reads (comma-separated lorebook names)</label>
+            <input id="cantrip-reads" type="text" bind:value={form.lorebook_reads_text}
+              placeholder="e.g. World Codex, Faction Notes" />
+            <small>Entries from these lorebooks are seeded read-only into the script's
+              <code>context.lorebook</code> (max 20 books, capped by the admin lorebook size limit).</small>
           </div>
         </div>
         <div class="form-row">

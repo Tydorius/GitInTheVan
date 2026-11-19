@@ -160,6 +160,57 @@ context.chat_data.set('weather_cycles', cyclesSinceChange);
 const weather = weatherOptions[weatherIndex];
 context.character.scenario += '\\n\\n[WEATHER]\\n' + weather.desc + '\\n[/WEATHER]';""",
     },
+    {
+        "name": "Dynamic Lorebook Creator",
+        "description": "Files <memstore key=\"name\">content</memstore> tags from the response into this chat's dynamic lorebook (context.lorebook), as keyword-triggered entries that surface when mentioned, and strips the tags from the visible reply. Entries take effect from this turn on. If you also use the built-in memory system, both will record the same tags -- usually you want one or the other.",
+        "hook_type": "post",
+        "run_pre_driver": False,
+        "run_pre_navigator": True,
+        "execution_order": 10,
+        "timeout_ms": 5000,
+        "code": """// Dynamic Lorebook Creator: memstore tags -> dynamic lorebook entries.
+// Runs post-Driver (pre-Navigator): reads the response, files entries via
+// context.lorebook, and strips the tags before the reader sees the reply.
+// add() upserts by name, so a re-mentioned fact replaces its entry instead
+// of duplicating it.
+const content = (context.response && context.response.content) || "";
+if (content) {
+    const lb = context.lorebook.create({
+        name: "Chat Notes",
+        description: "Auto-filed from memstore tags by the Dynamic Lorebook Creator template."
+    });
+    if (lb) {
+        const tagRe = /<memstore\\s+key=["']([^"']+)["']\\s*>([\\s\\S]*?)<\\/memstore>|<memstore\\s+key=["']([^"']+)["']\\s+value=["']([^"']*)["']\\s*\\/>/gi;
+        let m, filed = 0;
+        while ((m = tagRe.exec(content)) !== null) {
+            const key = (m[1] || m[3] || "").trim();
+            const value = (m[2] !== undefined ? m[2] : (m[4] || "")).trim();
+            if (!key || !value) continue;
+            lb.add({
+                name: key.slice(0, 128),
+                keys: [key.toLowerCase()],
+                content: value,
+                position: "before_last_message",
+                is_constant: false
+            });
+            filed++;
+        }
+        if (filed) console.log("Dynamic Lorebook Creator: filed " + filed + " entry/entries into Chat Notes");
+    } else {
+        console.log("Dynamic Lorebook Creator: context.lorebook unavailable");
+    }
+
+    const stripped = content
+        .replace(/<memstore\\s+key=["'][^"']+["']\\s*>[\\s\\S]*?<\\/memstore>/gi, "")
+        .replace(/<memstore\\s+key=["'][^"']+["']\\s+value=["'][^"']*["']\\s*\\/>/gi, "")
+        .replace(/\\n{3,}/g, "\\n\\n")
+        .trim();
+    if (stripped !== content) {
+        context.response.content = stripped;
+        context.response.modified = true;
+    }
+}""",
+    },
 ]
 
 

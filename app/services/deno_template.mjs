@@ -62,6 +62,167 @@ context.maps = {
     }
 };
 
+// Dynamic lorebooks (Phase 20): reads are served from a host-seeded copy
+// (this conversation's script-created books always; static books named in the
+// cantrip's lorebook_reads config); writes are collected as an op log the
+// host applies with guards after the run. No host callbacks -- the sandbox
+// stays deny-all. Books seeded with writable=false refuse writes; create is
+// get-or-create so a script that runs every turn reuses its book instead of
+// duplicating it.
+const __lorebookSeed = context.__lorebook || {};
+delete context.__lorebook;
+const __lorebookOps = [];
+const __lorebookBooks = {};
+for (const __bname of Object.keys(__lorebookSeed)) {
+    const __b = __lorebookSeed[__bname] || {};
+    __lorebookBooks[__bname] = {
+        writable: __b.writable === true,
+        entries: (__b.entries || []).map(e => Object.assign({}, e))
+    };
+}
+
+function __lorebookEntryKeys(arr) {
+    if (!Array.isArray(arr)) return null;
+    return arr.map(k => String(k).trim()).filter(k => k).slice(0, 32);
+}
+
+function __normLorebookEntry(entry) {
+    if (typeof entry !== 'object' || entry === null) return null;
+    const content = typeof entry.content === 'string' ? entry.content : '';
+    if (!content.trim()) return null;
+    const keys = __lorebookEntryKeys(entry.keys) || [];
+    const secondary = __lorebookEntryKeys(entry.secondary_keys) || [];
+    return {
+        name: (typeof entry.name === 'string' ? entry.name : '').slice(0, 128),
+        keys,
+        secondary_keys: secondary,
+        content,
+        position: typeof entry.position === 'string' ? entry.position : 'before_last_message',
+        insertion_order: Number.isFinite(entry.insertion_order) ? Math.trunc(entry.insertion_order) : 10,
+        is_constant: entry.is_constant === true,
+        is_selective: entry.is_selective === true,
+        character_limit: Number.isFinite(entry.character_limit)
+            ? Math.max(0, Math.trunc(entry.character_limit)) : 0
+    };
+}
+
+function __lorebookOpAllowed() {
+    // Local half of the op cap; the host's per-request counter is
+    // authoritative (it spans every cantrip position and map stage).
+    if (__lorebookOps.length >= 50) {
+        __debugLogs.push('lorebook: op refused, per-run op cap (50) reached');
+        return false;
+    }
+    return true;
+}
+
+function __findLorebookEntry(book, entryName) {
+    const lower = String(entryName).toLowerCase();
+    let hit = book.entries.find(e => (e.name || '').toLowerCase() === lower);
+    if (hit) return hit;
+    // Exact-key fallback: an entry known by a keyword rather than its name.
+    return book.entries.find(e => (e.keys || []).some(k => String(k).toLowerCase() === lower));
+}
+
+function __wrapLorebook(name) {
+    const book = __lorebookBooks[name];
+    const requireWritable = (op) => {
+        if (!book.writable) {
+            __debugLogs.push('lorebook: ' + op + ' refused, book is read-only: ' + name);
+            return false;
+        }
+        return __lorebookOpAllowed();
+    };
+    return {
+        add: (entry) => {
+            const norm = __normLorebookEntry(entry);
+            if (!norm) {
+                __debugLogs.push('lorebook: add refused, entry needs content');
+                return;
+            }
+            if (!requireWritable('add')) return;
+            __lorebookOps.push({ op: 'add', book: name, entry: norm });
+            // The host upserts by name (scripts run every turn; append-only
+            // would duplicate), so the working copy mirrors that.
+            const existing = __findLorebookEntry(book, norm.name || norm.keys[0] || '');
+            if (existing) Object.assign(existing, norm);
+            else book.entries.push(norm);
+        },
+        update: (entryName, fields) => {
+            if (typeof entryName !== 'string' || !entryName.trim()) {
+                __debugLogs.push('lorebook: update refused, entry name required');
+                return;
+            }
+            if (typeof fields !== 'object' || fields === null) {
+                __debugLogs.push('lorebook: update refused, fields object required');
+                return;
+            }
+            if (!requireWritable('update')) return;
+            const target = __findLorebookEntry(book, entryName);
+            if (!target) {
+                __debugLogs.push('lorebook: update refused, no entry "' + entryName + '" in ' + name);
+                return;
+            }
+            __lorebookOps.push({ op: 'update', book: name, entry: entryName, fields: fields });
+            if (typeof fields.content === 'string') target.content = fields.content;
+            if (typeof fields.name === 'string') target.name = fields.name.slice(0, 128);
+            const fk = __lorebookEntryKeys(fields.keys);
+            if (fk) target.keys = fk;
+            const fsk = __lorebookEntryKeys(fields.secondary_keys);
+            if (fsk) target.secondary_keys = fsk;
+            if (typeof fields.position === 'string') target.position = fields.position;
+            if (Number.isFinite(fields.insertion_order)) target.insertion_order = Math.trunc(fields.insertion_order);
+            if (typeof fields.is_constant === 'boolean') target.is_constant = fields.is_constant;
+            if (typeof fields.is_selective === 'boolean') target.is_selective = fields.is_selective;
+            if (Number.isFinite(fields.character_limit)) target.character_limit = Math.max(0, Math.trunc(fields.character_limit));
+        },
+        delete: (entryName) => {
+            if (typeof entryName !== 'string' || !entryName.trim()) return;
+            if (!requireWritable('delete')) return;
+            const target = __findLorebookEntry(book, entryName);
+            if (!target) {
+                __debugLogs.push('lorebook: delete refused, no entry "' + entryName + '" in ' + name);
+                return;
+            }
+            __lorebookOps.push({ op: 'delete', book: name, entry: entryName });
+            book.entries.splice(book.entries.indexOf(target), 1);
+        },
+        entries: () => book.entries.map(e => Object.assign({}, e)),
+        search: (query) => {
+            const words = String(query || '').toLowerCase().split(/\s+/).filter(w => w);
+            if (!words.length) return [];
+            return book.entries.filter(e => {
+                const hay = ((e.name || '') + ' ' + (e.keys || []).join(' ')
+                    + ' ' + (e.content || '')).toLowerCase();
+                return words.some(w => hay.includes(w));
+            }).map(e => Object.assign({}, e));
+        }
+    };
+}
+
+context.lorebook = {
+    create: (cfg) => {
+        const name = typeof cfg === 'object' && cfg !== null && typeof cfg.name === 'string'
+            ? cfg.name.trim().slice(0, 128) : '';
+        if (!name) {
+            __debugLogs.push('lorebook: create refused, name required');
+            return null;
+        }
+        if (__lorebookBooks[name]) return __wrapLorebook(name);
+        if (!__lorebookOpAllowed()) return null;
+        __lorebookBooks[name] = { writable: true, entries: [] };
+        __lorebookOps.push({
+            op: 'create', book: name,
+            description: typeof cfg.description === 'string' ? cfg.description.slice(0, 2000) : '',
+            tag: typeof cfg.tag === 'string' ? cfg.tag.trim().slice(0, 128) : ''
+        });
+        return __wrapLorebook(name);
+    },
+    get: (name) => {
+        return typeof name === 'string' && __lorebookBooks[name] ? __wrapLorebook(name) : null;
+    }
+};
+
 // Passenger (Phase 17): the sanctioned LLM egress. The host injects either
 // null (feature off or no handler: enabled=false, call() resolves null with
 // zero protocol traffic) or {"enabled":true,"maxCalls":N}. Requests go out
@@ -222,6 +383,7 @@ const __result = {
     cantrip_data: Object.assign({}, __cantripData),
     memories: Object.assign({}, __memories),
     maps_nominated: __mapNominations,
+    lorebook_ops: __lorebookOps,
     debug_logs: __debugLogs,
     error: __error
 };

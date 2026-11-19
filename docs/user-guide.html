@@ -608,6 +608,64 @@ function); purely synchronous scripts are unaffected.</p>
 <p>The Cantrip Tester runs Passenger too, against your own endpoints and
 budgets; those test calls are recorded as sandbox traffic so they never
 pollute your live Metrics aggregates.</p>
+<h3 id="dynamic-lorebooks-0370">Dynamic Lorebooks (0.37.0)</h3>
+<p><code>context.lorebook</code> lets a script create and edit <strong>real lorebooks</strong> at
+runtime — same tables, same keyword engine, same guards as the editor. What
+a script writes this turn is injected this turn, and every turn after, in
+that conversation.</p>
+<pre><code class="language-javascript">// Conversation-scoped by default: the book lives in this chat only.
+const lb = context.lorebook.create({ name: 'Chat Notes' });
+lb.add({
+    name: 'dragon',            // entries upsert by name — a re-run replaces, never duplicates
+    keys: ['dragon'],
+    content: 'The dragon fears silver.',
+    position: 'before_last_message',
+    is_constant: false,        // keyword-triggered, like any lorebook entry
+});
+
+lb.update('dragon', { content: 'The dragon was slain in chapter 3.' });
+const all = lb.entries();
+const hits = lb.search('dragon weakness');
+// lb.delete('dragon');
+</code></pre>
+<p>How it behaves:</p>
+<ul>
+<li><strong><code>create</code> is get-or-create.</strong> Scripts run every turn; a re-run gets its
+  existing book back instead of making a second one.</li>
+<li><strong>Writes are guarded</strong>: every add/update runs the same size limit,
+  sanitizer and safety scan as the lorebook editor. A refused op is dropped
+  with an audit line and a Debug capture — the request never fails because a
+  script wrote something it should not have.</li>
+<li><strong>50 ops per request</strong>, shared across every cantrip and map stage; beyond
+  that, ops are refused.</li>
+<li><strong>Cross-conversation books</strong>: pass a tag —
+  <code>context.lorebook.create({ name: 'World Codex', tag: 'codex' })</code> — and the
+  book is unbound: it activates in any chat whose prompt carries
+  <code>&lt;#lore-codex#&gt;</code>, exactly like a tagged static lorebook.</li>
+<li><strong>Reading static books</strong>: list lorebook names in the cantrip's <em>Lorebook
+  Reads</em> field (comma-separated, in the cantrip editor). Those books are
+  seeded read-only into the script's sandbox — <code>context.lorebook.get(name)</code>
+  then serves <code>entries()</code> and <code>search()</code> against them. Writes to them are
+  refused. This chat's dynamic books and its lexicon book are always seeded.</li>
+<li><strong>Same guards as everything else</strong>: updates and deletes are undoable from
+  the lorebook's History panel; dynamic books appear on the Lorebooks page
+  like any other.</li>
+<li><strong>Debug timeline</strong>: <code>lorebook_seeding</code> (what the script could read),
+  <code>dynamic_lorebook_ops</code> (applied/refused with reasons) and
+  <code>dynamic_lorebook_injection</code> (what reached the prompt this turn).</li>
+</ul>
+<p>The <strong>Dynamic Lorebook Creator</strong> template (Cantrips → Templates) is a ready
+example: it files <code>&lt;memstore key="name"&gt;content&lt;/memstore&gt;</code> tags from each
+response into the chat's dynamic book and strips the tags from the visible
+reply.</p>
+<h3 id="jslorebook-scripts-0370">jslorebook Scripts (0.37.0)</h3>
+<p><code>&lt;jslorebook&gt;...&lt;/jslorebook&gt;</code> blocks embedded in messages are executed
+now (they were previously stripped for prompt hygiene only). They run
+sandboxed — no network, no filesystem — with <code>context.lorebook</code> available,
+at the position their code declares via a comment (<code>&lt;pre-user&gt;</code> or
+<code>&lt;post-llm&gt;</code>; default pre-driver). The block itself is stripped from the
+forwarded prompt either way. Ops pass through the same guards and caps as
+cantrip-written lorebooks.</p>
 <hr>
 <p><a id="lorebooks"></a></p>
 <h2 id="6-lorebooks">6. Lorebooks</h2>

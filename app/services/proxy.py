@@ -246,9 +246,11 @@ async def _forward_request_impl(
             strip_gitv_notices_from_messages,
         )
 
-        # jslorebook blocks are extracted and stripped for prompt hygiene only;
-        # nothing executes them. Wiring them up is Phase 20 (dynamic lorebooks),
-        # deferred — see Planning/project-plan.md phase 27 item 8.
+        # jslorebook blocks are extracted and stripped from the prompt; since
+        # Phase 20 the extracted scripts execute sandboxed at their detected
+        # position (embedded_jslb_scripts -> the cantrip pass machinery), with
+        # context.lorebook available — the JanitorAI-compat route to dynamic
+        # lorebooks.
         from app.services.jslorebook import extract_from_messages as extract_jslorebook
         from app.services.tagging import extract_all_tags_from_messages, strip_tags
 
@@ -572,11 +574,17 @@ async def _forward_request_impl(
         # The global cantrip pass runs before map selection is finalized so a
         # cantrip can nominate a map (context.maps.activate). It excludes the
         # candidate map's stage-bound cantrips exactly as before; those run on
-        # their own stage inside run_map_pipeline.
+        # their own stage inside run_map_pipeline. <jslorebook> scripts
+        # detected as pre_driver run here too (Phase 20) — always, since they
+        # arrived in the chat; map stages inherit their effects through the
+        # prompt rather than re-running them.
+        from app.services.cantrip import embedded_jslb_scripts
+
         body_json = await process_cantrips(
             body_json, user_id, request_headers, tags,
             internal_chat_id=internal_chat_id,
             exclude_ids=stage_bound_cantrip_ids(map_candidate) if map_candidate else None,
+            embedded_scripts=embedded_jslb_scripts(body_json, "pre_driver"),
         )
 
         map_active = map_candidate
@@ -651,6 +659,48 @@ async def _forward_request_impl(
                             "position": e.position,
                         }
                         for e in (deferred_entries or [])
+                    ]
+                },
+            )
+
+        # Phase 20 (0.37.0): entries written by this turn's cantrips inject
+        # this turn. Ops applied during the cantrip pass left their delta on
+        # the body; this is the non-map injection point (map stages pop the
+        # delta per stage inside run_map_pipeline, before their own forward).
+        dynamic_delta = body_json.pop("_gitv_dynamic_lorebook_delta", None)
+        if dynamic_delta:
+            from app.services.metrics import record_prompt_object
+
+            await _flag_injection_content(
+                user_id, "\n".join(e.content for e in dynamic_delta), "lorebook_injection"
+            )
+            body_json["messages"] = inject_entries(body_json["messages"], dynamic_delta)
+            logger.info(
+                "Dynamic lorebook injection (same-turn): %d entries for user %s",
+                len(dynamic_delta), user_id,
+            )
+            for e in dynamic_delta:
+                record_prompt_object(
+                    body_json, "lorebook_entry", e.entry_id,
+                    0, max(1, len(e.content) // 4), parent_id=e.lorebook_id,
+                )
+        if debug_on and dynamic_delta:
+            debug_capture(
+                body_json, "dynamic_lorebook_injection", "Dynamic Lorebook Injection (Same-Turn)",
+                detail=(
+                    f"{len(dynamic_delta)} entr"
+                    f"{'y' if len(dynamic_delta) == 1 else 'ies'} written by cantrips injected this turn"
+                ),
+                metadata={
+                    "entries": [
+                        {
+                            "lorebook_id": e.lorebook_id,
+                            "lorebook_name": e.lorebook_name,
+                            "entry_id": e.entry_id,
+                            "entry_name": e.name,
+                            "position": e.position,
+                        }
+                        for e in dynamic_delta
                     ]
                 },
             )
@@ -1142,19 +1192,32 @@ async def _apply_lorebook_injection(
             # candidates regardless of its tag or Active flag, so a lexicon
             # lorebook (created inactive, untagged) injects in its own chat
             # and in no other. No prompt tag can switch it off.
+            from app.models.conversation_dynamic_lorebook import ConversationDynamicLorebook
             from app.models.conversation_lorebook_binding import ConversationLorebookBinding
             from app.services.lexicon import resolve_action_identity
 
             conversation_id, _ = resolve_action_identity(request_headers or {}, internal_chat_id)
             bound_lorebook_ids: set[str] = set()
             if conversation_id:
-                bound_rows = await db.execute(
+                lex_rows = await db.execute(
                     select(ConversationLorebookBinding.lorebook_id).where(
                         ConversationLorebookBinding.user_id == user_id,
                         ConversationLorebookBinding.conversation_id == conversation_id,
                     )
                 )
-                bound_lorebook_ids = set(bound_rows.scalars().all())
+                bound_lorebook_ids = set(lex_rows.scalars().all())
+                # Phase 20: script-created books bind through the companion
+                # table (multi-book per conversation). Same union, same
+                # semantics — the "" sentinel rows never match a real
+                # conversation id, so unbound tagged books stay tag-activated
+                # only (rule 19 source 3).
+                dyn_rows = await db.execute(
+                    select(ConversationDynamicLorebook.lorebook_id).where(
+                        ConversationDynamicLorebook.user_id == user_id,
+                        ConversationDynamicLorebook.conversation_id == conversation_id,
+                    )
+                )
+                bound_lorebook_ids |= set(dyn_rows.scalars().all())
 
             active_lorebooks = []
             for lb in lorebooks:
@@ -1757,13 +1820,19 @@ async def _apply_post_driver_processing(
     from app.services.cantrip import process_cantrips_post_driver
 
     tags = body_json.get("_gitv_tags", [])
-    body_json_for_cantrip = {k: v for k, v in body_json.items() if not k.startswith("_gitv")}
     debug_on = body_json.get("_gitv_debug") is not None
 
     try:
+        # Full body, not a _gitv_-stripped copy: the pass needs _gitv_chat_id
+        # (header-less clients' store writes), the sandbox/replay isolation
+        # flags, the shared Passenger handler and the metrics accumulator.
+        # The stripped copy silently dropped all four.
+        from app.services.cantrip import embedded_jslb_scripts
+
         new_content = await process_cantrips_post_driver(
-            content, body_json_for_cantrip, user_id, request_headers,
+            content, body_json, user_id, request_headers,
             tags=tags, position="pre_navigator",
+            embedded_scripts=embedded_jslb_scripts(body_json, "pre_navigator"),
         )
         if new_content != content:
             response_data["choices"][0]["message"]["content"] = new_content
@@ -1826,13 +1895,16 @@ async def _apply_post_navigator_processing(
     from app.services.cantrip import process_cantrips_post_driver
 
     tags = body_json.get("_gitv_tags", [])
-    body_json_for_cantrip = {k: v for k, v in body_json.items() if not k.startswith("_gitv")}
     debug_on = body_json.get("_gitv_debug") is not None
 
     try:
+        # Full body — same four keys as the pre-navigator site above.
+        from app.services.cantrip import embedded_jslb_scripts
+
         new_content = await process_cantrips_post_driver(
-            content, body_json_for_cantrip, user_id, request_headers,
+            content, body_json, user_id, request_headers,
             tags=tags, position="post_navigator",
+            embedded_scripts=embedded_jslb_scripts(body_json, "post_navigator"),
         )
         if new_content != content:
             response_data["choices"][0]["message"]["content"] = new_content

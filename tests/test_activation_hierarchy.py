@@ -518,3 +518,83 @@ class TestCantripMapNomination:
         selected = await resolve_map(uid, [_nominated("alpha"), _nominated("beta")])
         assert selected is not None
         assert selected.name in ("A", "B")
+
+
+@pytest.mark.asyncio
+class TestFifthSourceDynamicBooks:
+    """Phase 20: script-created lorebooks (context.lorebook) bind through the
+    companion table and union into the same fifth source as lexicon books.
+    Cross-conversation books (created with a tag) activate per rule 19
+    source 3 instead -- their own tag, regardless of Active flag."""
+
+    async def _user(self, client) -> str:
+        return (await client.get("/api/auth/me")).json()["id"]
+
+    async def _dynamic_book(self, uid: str, *, conversation_id: str, tag: str = "") -> str:
+        """An inactive script-created book: one constant marker entry, bound
+        through the companion table ("" marks the unbound tagged shape)."""
+        from app.models.conversation_dynamic_lorebook import ConversationDynamicLorebook
+        from app.models.lorebook import Lorebook
+        from app.models.lorebook_entry import LorebookEntry
+
+        async with TestSessionLocal() as db:
+            lb = Lorebook(user_id=uid, name="Dynamic Book", tag=tag, is_active=False)
+            lb.entries.append(LorebookEntry(name="dyn", content="DYN-MARKER",
+                                            is_constant=True))
+            db.add(lb)
+            await db.flush()
+            db.add(ConversationDynamicLorebook(
+                user_id=uid, conversation_id=conversation_id,
+                name="scriptbook", lorebook_id=lb.id))
+            await db.commit()
+            return lb.id
+
+    async def test_a_script_created_book_injects_in_its_own_chat(self, admin_client):
+        client, _, _ = admin_client
+        uid = await self._user(client)
+        await self._dynamic_book(uid, conversation_id="chat-1")
+
+        assert await _injected(
+            uid, "DYN-MARKER", headers={"x-conversation-id": "chat-1"}
+        )
+
+    async def test_a_script_created_book_does_not_leak_to_other_chats(
+        self, admin_client
+    ):
+        client, _, _ = admin_client
+        uid = await self._user(client)
+        await self._dynamic_book(uid, conversation_id="chat-1")
+
+        assert not await _injected(
+            uid, "DYN-MARKER", headers={"x-conversation-id": "chat-2"}
+        )
+        assert not await _injected(uid, "DYN-MARKER")
+
+    async def test_no_tag_switches_off_a_script_created_book(self, admin_client):
+        client, _, _ = admin_client
+        uid = await self._user(client)
+        await self._dynamic_book(uid, conversation_id="chat-1")
+
+        assert await _injected(
+            uid, "DYN-MARKER",
+            tags=tags_for("<#lore-unrelated#> <#map-other#>"),
+            headers={"x-conversation-id": "chat-1"},
+        )
+
+    async def test_a_tagged_unbound_book_activates_by_tag_anywhere(
+        self, admin_client
+    ):
+        """The cross-conversation half: created with a tag, bound to the ""
+        sentinel row (never matched by the injection lookup), activated by
+        its own tag per source 3 with is_active=False."""
+        client, _, _ = admin_client
+        uid = await self._user(client)
+        await self._dynamic_book(uid, conversation_id="", tag="dyn")
+
+        assert await _injected(uid, "DYN-MARKER", tags=tags_for("<#lore-dyn#>"))
+        # Without the tag: nothing (no Active blanket -- the book is inactive).
+        assert not await _injected(uid, "DYN-MARKER")
+        # And in a chat that has no binding to it.
+        assert not await _injected(
+            uid, "DYN-MARKER", headers={"x-conversation-id": "chat-9"}
+        )

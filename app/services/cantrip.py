@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy import or_, select
@@ -15,8 +16,57 @@ from app.models.chat_data import ChatData
 from app.models.user_data import UserData
 from app.services.cantrip_context import apply_cantrip_result_to_messages, build_context, extract_context_params
 from app.services.deno_runner import CantripResult, run_cantrip
+from app.services.dynamic_lorebook import DELTA_KEY, apply_ops, build_seed, parse_reads
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class EmbeddedScriptCantrip:
+    """A <jslorebook> script extracted from the message text (Phase 20).
+
+    Runs through the cantrip pass machinery without a DB row. is_active=True
+    and tag="" mean the Activation Hierarchy runs it unconditionally (it
+    arrived in the chat, so no tag/Active question applies). It owns no
+    cantrip_data (its id is per-request, not stable identity) and takes no
+    context-budget slice.
+    """
+
+    id: str
+    name: str
+    code: str
+    timeout_ms: int = 5000
+    tag: str = ""
+    is_active: bool = True
+    is_public: bool = False
+    user_id: str = ""
+    execution_order: int = 0
+    lorebook_reads: str = "[]"
+    budget_weight: float = 0.0
+    ephemeral: bool = True
+    created_at: Any = field(default=None)
+
+
+def embedded_jslb_scripts(
+    body_json: dict[str, Any], position: str
+) -> list[EmbeddedScriptCantrip]:
+    """The request's extracted <jslorebook> scripts for one position.
+
+    They run in the global pre-driver pass and the response-side passes at
+    their detected position (jslorebook._detect_position); map stages do not
+    re-run them — a stage inherits their effects through the prompt the
+    global pass produced.
+    """
+    from app.services.jslorebook import EmbeddedScript
+
+    scripts = body_json.get("_gitv_jslb_scripts") or []
+    if not isinstance(scripts, list):
+        return []
+    return [
+        EmbeddedScriptCantrip(id=f"jslb-{i}", name=f"jslorebook #{i + 1}", code=s.code)
+        for i, s in enumerate(scripts)
+        if isinstance(s, EmbeddedScript) and s.position == position
+    ]
 
 
 async def _load_chat_data(db: AsyncSession, user_id: str, conversation_id: str) -> dict[str, Any]:
@@ -224,6 +274,51 @@ def _store_writes_isolated(body_json: dict[str, Any]) -> bool:
     return bool(body_json.get("_gitv_sandbox") or body_json.get("_gitv_replay"))
 
 
+async def _prepare_lorebook_seeding(
+    db: AsyncSession,
+    body_json: dict[str, Any],
+    user_id: str,
+    request_headers: dict[str, str],
+    internal_chat_id: str,
+    cantrips: list[Cantrip],
+    capture: bool = True,
+) -> tuple[dict[str, dict[str, Any]], set[str], str]:
+    """Phase 20 seeding state for one cantrip pass.
+
+    Returns (full seed blob, always-included book names, binding conversation
+    id). The binding id is the Phase 29 identity (client header, else the
+    internal rolling-hash id) — the same resolver the lexicon compiler and the
+    injection-side fifth-source lookup use, so a book written here is the book
+    that activates there.
+    """
+    # Lazy: lexicon imports this module (test_cantrip), so a top-level import
+    # would be a cycle.
+    from app.services.lexicon import resolve_action_identity
+
+    binding_conv_id, _ = resolve_action_identity(request_headers, internal_chat_id)
+    all_reads: list[str] = []
+    for c in cantrips:
+        for name in parse_reads(getattr(c, "lorebook_reads", None)):
+            if name not in all_reads:
+                all_reads.append(name)
+    full_seed, always = await build_seed(
+        db, body_json, user_id, binding_conv_id, extra_names=all_reads, capture=capture
+    )
+    return full_seed, always, binding_conv_id
+
+
+def _seed_for_cantrip(
+    full_seed: dict[str, dict[str, Any]], always: set[str], reads: list[str]
+) -> dict[str, dict[str, Any]]:
+    """The seed one cantrip sees: always-bound books for everyone at this
+    position, plus that cantrip's own lorebook_reads names."""
+    names = list(always)
+    for name in reads:
+        if name not in names:
+            names.append(name)
+    return {n: full_seed[n] for n in names if n in full_seed}
+
+
 async def process_cantrips(
     body_json: dict[str, Any],
     user_id: str,
@@ -234,6 +329,7 @@ async def process_cantrips(
     only_ids: set[str] | None = None,
     exclude_ids: set[str] | None = None,
     stage_index: int | None = None,
+    embedded_scripts: list[EmbeddedScriptCantrip] | None = None,
 ) -> dict[str, Any]:
     """Run cantrips at a pipeline position.
 
@@ -246,7 +342,8 @@ async def process_cantrips(
 
     ``stage_index`` names the map stage this pass belongs to, so Passenger
     LLM-call rows can attribute their cost to the stage (None everywhere
-    else).
+    else). ``embedded_scripts`` adds <jslorebook> scripts from the message
+    text to this pass (Phase 20); they run after the DB cantrips.
     """
     messages = body_json.get("messages", [])
     if not messages:
@@ -255,7 +352,22 @@ async def process_cantrips(
     params = extract_context_params(body_json, request_headers)
 
     async with async_session() as db:
-        all_cantrips = await _load_active_cantrips(db, user_id, position)
+        all_cantrips: list[Any] = await _load_active_cantrips(db, user_id, position)
+        if embedded_scripts:
+            all_cantrips = [*all_cantrips, *embedded_scripts]
+            from app.services.debug import debug_capture
+
+            debug_capture(
+                body_json, "jslorebook_execution", "jslorebook Scripts",
+                detail=(
+                    f"{len(embedded_scripts)} embedded script(s) executing at "
+                    f"'{position}' (sandboxed, guarded)"
+                ),
+                metadata={
+                    "position": position,
+                    "scripts": [{"id": s.id, "name": s.name} for s in embedded_scripts],
+                },
+            )
         if not all_cantrips:
             return body_json
 
@@ -298,6 +410,10 @@ async def process_cantrips(
         chat_data = await _load_chat_data(db, user_id, conversation_id)
         user_data = await _load_user_data(db, user_id)
 
+        lorebook_seed, lorebook_always, binding_conv_id = await _prepare_lorebook_seeding(
+            db, body_json, user_id, request_headers, internal_chat_id, cantrips
+        )
+
         context = build_context(messages, **params)
 
         if internal_chat_id:
@@ -333,12 +449,24 @@ async def process_cantrips(
         passenger_handler.stage_index = stage_index
 
         for cantrip in cantrips:
-            if budget_allocations:
+            ephemeral = getattr(cantrip, "ephemeral", False)
+            if budget_allocations and not ephemeral:
                 context["budget"] = build_cantrip_budget_context(
                     budget_allocations, cantrip.id, cantrip.budget_weight
                 )
 
-            cantrip_data = await _load_cantrip_data(db, user_id, cantrip.id)
+            # Per-cantrip lorebook seed: bound books for everyone, this
+            # cantrip's configured reads for it alone.
+            context["__lorebook"] = _seed_for_cantrip(
+                lorebook_seed, lorebook_always, parse_reads(cantrip.lorebook_reads)
+            )
+
+            # An embedded script owns no cantrip_data: its id is per-request,
+            # not stable identity, so persisting under it would collide
+            # across scripts and requests.
+            cantrip_data = (
+                {} if ephemeral else await _load_cantrip_data(db, user_id, cantrip.id)
+            )
 
             started = time.monotonic()
             try:
@@ -399,6 +527,7 @@ async def process_cantrips(
                     "chat_data": _diff_store(chat_data, result.chat_data),
                     "user_data": _diff_store(user_data, result.user_data),
                     "cantrip_data": _diff_store(cantrip_data, result.cantrip_data),
+                    **({"lorebook_ops": result.lorebook_ops} if result.lorebook_ops else {}),
                 },
             )
 
@@ -431,8 +560,26 @@ async def process_cantrips(
             chat_data = result.chat_data
             user_data = result.user_data
 
-            if result.cantrip_data != cantrip_data and not isolated:
+            if result.cantrip_data != cantrip_data and not isolated and not ephemeral:
                 await _save_cantrip_data(db, user_id, cantrip.id, result.cantrip_data)
+
+            # Phase 20: apply this cantrip's lorebook ops now, not after the
+            # pass, so the next cantrip's seed reflects them (the shared
+            # chat_data merge, mirrored). Refusals degrade inside apply_ops.
+            if result.lorebook_ops:
+                delta_rows = await apply_ops(
+                    db, body_json, user_id, binding_conv_id,
+                    result.lorebook_ops, source=cantrip.name,
+                )
+                # Same-turn injection only exists before the forward: the
+                # pre_driver position and map stage passes (which run
+                # pre_driver). Response-side passes write for next turn.
+                if delta_rows and position == "pre_driver":
+                    body_json.setdefault(DELTA_KEY, []).extend(delta_rows)
+                lorebook_seed, lorebook_always, _ = await _prepare_lorebook_seeding(
+                    db, body_json, user_id, request_headers, internal_chat_id,
+                    cantrips, capture=False,
+                )
 
         # A sandbox writes chat_data into its forked id (isolated); a replay
         # would write the live conversation's store, so it does not.
@@ -505,6 +652,7 @@ async def process_cantrips_post_driver(
     position: str = "pre_navigator",
     only_ids: set[str] | None = None,
     stage_index: int | None = None,
+    embedded_scripts: list[EmbeddedScriptCantrip] | None = None,
 ) -> str:
     """Run post-Driver cantrips that can modify the response content.
 
@@ -513,6 +661,7 @@ async def process_cantrips_post_driver(
     context.response.content. ``only_ids`` restricts the pass to specific
     cantrips (map stage capture mode runs just the stage's own).
     ``stage_index`` attributes Passenger LLM-call rows to a map stage.
+    ``embedded_scripts`` adds <jslorebook> scripts detected for this position.
     """
     messages = body_json.get("messages", [])
     if not messages:
@@ -521,7 +670,22 @@ async def process_cantrips_post_driver(
     params = extract_context_params(body_json, request_headers)
 
     async with async_session() as db:
-        all_cantrips = await _load_active_cantrips(db, user_id, position)
+        all_cantrips: list[Any] = await _load_active_cantrips(db, user_id, position)
+        if embedded_scripts:
+            all_cantrips = [*all_cantrips, *embedded_scripts]
+            from app.services.debug import debug_capture
+
+            debug_capture(
+                body_json, "jslorebook_execution", "jslorebook Scripts",
+                detail=(
+                    f"{len(embedded_scripts)} embedded script(s) executing at "
+                    f"'{position}' (sandboxed, guarded)"
+                ),
+                metadata={
+                    "position": position,
+                    "scripts": [{"id": s.id, "name": s.name} for s in embedded_scripts],
+                },
+            )
         if not all_cantrips:
             return response_content
 
@@ -544,6 +708,14 @@ async def process_cantrips_post_driver(
         chat_data = await _load_chat_data(db, user_id, conversation_id)
         user_data = await _load_user_data(db, user_id)
 
+        # Phase 20: same seeding/ops as the pre-forward pass, minus the
+        # same-turn injection (the prompt has already been sent; entries
+        # written here inject next turn via the conversation binding).
+        lorebook_seed, lorebook_always, binding_conv_id = await _prepare_lorebook_seeding(
+            db, body_json, user_id, request_headers,
+            body_json.get("_gitv_chat_id", ""), cantrips,
+        )
+
         context = build_context(messages, **params)
         context["response"] = {
             "content": response_content,
@@ -561,7 +733,14 @@ async def process_cantrips_post_driver(
         passenger_handler.stage_index = stage_index
 
         for cantrip in cantrips:
-            cantrip_data = await _load_cantrip_data(db, user_id, cantrip.id)
+            ephemeral = getattr(cantrip, "ephemeral", False)
+            context["__lorebook"] = _seed_for_cantrip(
+                lorebook_seed, lorebook_always, parse_reads(cantrip.lorebook_reads)
+            )
+
+            cantrip_data = (
+                {} if ephemeral else await _load_cantrip_data(db, user_id, cantrip.id)
+            )
 
             try:
                 context["response"]["content"] = current_content
@@ -601,8 +780,18 @@ async def process_cantrips_post_driver(
             chat_data = result.chat_data
             user_data = result.user_data
 
-            if result.cantrip_data != cantrip_data and not isolated:
+            if result.cantrip_data != cantrip_data and not isolated and not ephemeral:
                 await _save_cantrip_data(db, user_id, cantrip.id, result.cantrip_data)
+
+            if result.lorebook_ops:
+                await apply_ops(
+                    db, body_json, user_id, binding_conv_id,
+                    result.lorebook_ops, source=cantrip.name,
+                )
+                lorebook_seed, lorebook_always, _ = await _prepare_lorebook_seeding(
+                    db, body_json, user_id, request_headers,
+                    body_json.get("_gitv_chat_id", ""), cantrips, capture=False,
+                )
 
         # Same isolation rules as process_cantrips: the fork owns chat_data for
         # a sandbox, a replay writes nothing, and user/cantrip-scoped stores are
