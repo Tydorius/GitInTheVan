@@ -47,6 +47,10 @@ Lorebooks have one activation source no other resource type has: a **conversatio
 
 The binding is a union source like any other: it only ever adds, no prompt tag can switch it off, and it applies to no resource type but lorebooks. It is not a `should_activate_resource()` input — it is resolved separately from the binding table and OR-ed in before the tag/Active loop.
 
+## Script activation: the sixth source
+
+`context.activate(name)` in a cantrip (Package 3) turns one of the user's existing static lorebooks on for the current request only. It is proximity-shaped — the script's intent is as close to the message as a tag — and a pure union source: the book's entries are keyword-matched and injected this turn regardless of its Active flag or tag, nothing can switch it off, and nothing persists (the next request is back to the book's own state). Applied post-cantrip by `_apply_prompt_requests` in `cantrip.py`, which extends the same-turn injection delta. `context.inject(text, position)` rides the same pass but is prompt text, not activation.
+
 ## Command tags are a different system
 
 `<VERIFY:off>`, `<SUMMARY:on:persist>`, etc. (see `app/services/command_tags.py`) switch **pipeline features** on or off for a request — they do not activate a resource. They are the only place in GitInTheVan where deactivation exists: `<VERIFY:off>` genuinely turns verification off for that message, which nothing in the Activation Hierarchy can do. Do not confuse the two systems: a `<#verify-tone#>` tag activates a specific verification *rule*; `<VERIFY:off>` disables the verification *feature* regardless of which rules would otherwise have fired. Full syntax and precedence in `tags.md` and the `#command-tags` guide section.

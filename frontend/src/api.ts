@@ -495,7 +495,7 @@ export const api = {
     request<{ models: string[] }>(`/api/endpoints/${id}/models`),
 
   // Settings
-  getSettings: () => request<{ default_endpoint_id: string | null; default_model: string; preserve_thinking: boolean; gitv_status: boolean; simulated_streaming_speed: number; streaming_post_processing_enabled: boolean; lexicon_enabled: boolean; lexicon_endpoint_id: string | null; cantrip_auto_install_enabled: boolean; passenger_calling_enabled: boolean; passenger_call_budget: number; passenger_effective_cap: number; parameters: LlmParameter[]; verification_parameters: LlmParameter[]; summarization_parameters: LlmParameter[]; lexicon_parameters: LlmParameter[]; passenger_parameters: LlmParameter[] }>('/api/settings'),
+  getSettings: () => request<{ default_endpoint_id: string | null; default_model: string; preserve_thinking: boolean; gitv_status: boolean; simulated_streaming_speed: number; streaming_post_processing_enabled: boolean; lexicon_enabled: boolean; lexicon_endpoint_id: string | null; cantrip_auto_install_enabled: boolean; passenger_calling_enabled: boolean; passenger_call_budget: number; passenger_effective_cap: number; response_strip_patterns: string[]; parameters: LlmParameter[]; verification_parameters: LlmParameter[]; summarization_parameters: LlmParameter[]; lexicon_parameters: LlmParameter[]; passenger_parameters: LlmParameter[] }>('/api/settings'),
   updateSettings: (data: any) =>
     request<any>('/api/settings', { method: 'PUT', body: JSON.stringify(data) }),
 

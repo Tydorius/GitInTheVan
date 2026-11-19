@@ -275,3 +275,63 @@ async def bump_turn_counter(user_id: str, conversation_id: str) -> int:
 
         await db.commit()
         return row
+
+
+async def note_request_shape(
+    user_id: str, conversation_id: str, messages: list
+) -> bool:
+    """Record this request's shape; True when it repeats the previous one.
+
+    The is_regenerate heuristic (Package 3, item 2 slice): a client
+    regenerating a swipe resends the same message_count with the same
+    trailing user message. Fingerprint = "{count}:{sha256(trailing user
+    text, first 2000 chars)}"; equal fingerprint on consecutive requests
+    means regenerate. Only live requests call this -- the proxy gates it on
+    the same non-replay condition as the turn counter, and sandbox forks
+    pass their own conversation id. False (unknown) is the safe default.
+    """
+    import hashlib
+    from datetime import UTC, datetime
+
+    from sqlalchemy import update
+
+    from app.models.conversation_turn_counter import ConversationTurnCounter
+
+    trailing = ""
+    count = len(messages) if isinstance(messages, list) else 0
+    for msg in reversed(messages or []):
+        if isinstance(msg, dict) and msg.get("role") == "user":
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                trailing = " ".join(
+                    part.get("text", "") for part in content
+                    if isinstance(part, dict) and isinstance(part.get("text"), str)
+                )
+            else:
+                trailing = str(content)
+            break
+    digest = hashlib.sha256(trailing[:2000].encode("utf-8", "replace")).hexdigest()
+    fingerprint = f"{count}:{digest}"
+
+    async with async_session() as db:
+        stored = (await db.execute(
+            select(ConversationTurnCounter.last_request_fingerprint).where(
+                ConversationTurnCounter.user_id == user_id,
+                ConversationTurnCounter.conversation_id == conversation_id,
+            )
+        )).scalar_one_or_none()
+        # NULL (MySQL) and '' both read as "no previous shape".
+        is_regenerate = bool(stored) and stored == fingerprint
+        await db.execute(
+            update(ConversationTurnCounter)
+            .where(
+                ConversationTurnCounter.user_id == user_id,
+                ConversationTurnCounter.conversation_id == conversation_id,
+            )
+            .values(
+                last_request_fingerprint=fingerprint,
+                updated_at=datetime.now(UTC),
+            )
+        )
+        await db.commit()
+    return is_regenerate

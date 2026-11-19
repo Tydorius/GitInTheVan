@@ -1,7 +1,8 @@
+import json
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +12,7 @@ from app.dependencies import get_current_user
 from app.models.user import User
 from app.models.user_settings import UserSettings
 from app.services.llm_params import ParameterDef, params_from_api, params_to_api
+from app.services.response_tags import parse_strip_patterns
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +67,8 @@ class SettingsResponse(BaseModel):
     summarization_parameters: list[ParameterDef] = Field(default_factory=list)
     lexicon_parameters: list[ParameterDef] = Field(default_factory=list)
     passenger_parameters: list[ParameterDef] = Field(default_factory=list)
+    # Package 3 (item 22): regex patterns stripped from every final reply.
+    response_strip_patterns: list[str] = Field(default_factory=list)
 
 
 class SettingsUpdate(BaseModel):
@@ -91,6 +95,7 @@ class SettingsUpdate(BaseModel):
     summarization_parameters: list[ParameterDef] | None = None
     lexicon_parameters: list[ParameterDef] | None = None
     passenger_parameters: list[ParameterDef] | None = None
+    response_strip_patterns: list[str] | None = None
 
 
 @router.get("")
@@ -131,6 +136,9 @@ async def get_settings(
         summarization_parameters=params_to_api(user_settings.summarization_parameters_json),
         lexicon_parameters=params_to_api(user_settings.lexicon_parameters_json),
         passenger_parameters=params_to_api(user_settings.passenger_parameters_json),
+        response_strip_patterns=parse_strip_patterns(
+            getattr(user_settings, "response_strip_patterns", None)
+        ),
     )
 
 
@@ -182,6 +190,17 @@ async def update_settings(
         user_settings.passenger_calling_enabled = req.passenger_calling_enabled
     if req.passenger_call_budget is not None:
         user_settings.passenger_call_budget = max(0, req.passenger_call_budget)
+    if req.response_strip_patterns is not None:
+        from app.services.response_tags import validate_strip_patterns
+
+        try:
+            cleaned = validate_strip_patterns(req.response_strip_patterns)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
+        user_settings.response_strip_patterns = json.dumps(cleaned)
     if req.parameters is not None:
         user_settings.parameters_json = params_from_api(req.parameters, "driver parameters")
     if req.verification_parameters is not None:
@@ -229,4 +248,7 @@ async def update_settings(
         summarization_parameters=params_to_api(user_settings.summarization_parameters_json),
         lexicon_parameters=params_to_api(user_settings.lexicon_parameters_json),
         passenger_parameters=params_to_api(user_settings.passenger_parameters_json),
+        response_strip_patterns=parse_strip_patterns(
+            getattr(user_settings, "response_strip_patterns", None)
+        ),
     )

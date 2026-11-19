@@ -101,6 +101,15 @@ if (context.tool_call) {
 
 Set **LLM Instructions** to something like: `Roll dice. Args: count (default 1), sides (default 6). Example: <call:dice_roller count="2" sides="20">` — this is what the writing LLM sees in its `[TOOL ACCESS]` notification when the Driver-Callable position is enabled.
 
+## Response tags, activate(), inject() (0.39.0)
+
+- `context.response_tags` — object of `{tagName: [payload, ...]}` seeded into post-Navigator scripts the same turn the model wrote them. The cantrip registers tag names (Response Tags field); GitV extracts them from the final reply, strips them before the client, and delivers here. Unregistered tags pass through untouched.
+- `context.activate(name)` — turn one of the user's existing lorebooks on for this request only (union source; see `#activation-hierarchy`).
+- `context.inject(text, position)` — place prompt text at `system_start`, `before_last_message`, or `in_chat_system` (a system message at the very end). Max 20 per request.
+- `context.request.id` — stable id for the current request.
+- `context.request.is_regenerate` — true when this request repeats the previous one's shape (same message count, same trailing user message): a swipe regeneration.
+- `context.chat.last_messages` entries now carry `role` alongside `message`.
+
 ## See also
 
 - `#cantrips`

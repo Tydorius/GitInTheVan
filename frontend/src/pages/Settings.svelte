@@ -86,6 +86,8 @@
   // from the server so the clamp is visible next to the field.
   let passengerEnabled = true
   let passengerBudget = 0
+  let stripPatternsText = ''
+  let stripSaved = false
   let passengerParams: any[] = []
   let passengerEffectiveCap = 0
   let passengerSaved = false
@@ -109,6 +111,7 @@
       cantripAutoInstall = s.cantrip_auto_install_enabled ?? false
       passengerEnabled = s.passenger_calling_enabled ?? true
       passengerBudget = s.passenger_call_budget ?? 0
+      stripPatternsText = (s.response_strip_patterns || []).join('\n')
       passengerParams = structuredClone(s.passenger_parameters || [])
       passengerEffectiveCap = s.passenger_effective_cap ?? 0
       endpoints = e.endpoints
@@ -188,6 +191,19 @@
         cantrip_auto_install_enabled: cantripAutoInstall,
       } as any)
       lexSaved = true
+    } catch (e: any) { error = e.message }
+  }
+
+  async function saveStripPatterns() {
+    error = ''; stripSaved = false
+    try {
+      await api.updateSettings({
+        response_strip_patterns: (stripPatternsText || '')
+          .split('\n')
+          .map((l: string) => l.trim())
+          .filter(Boolean),
+      } as any)
+      stripSaved = true
     } catch (e: any) { error = e.message }
   }
 
@@ -439,6 +455,22 @@
     </p>
   </div>
   <button class="primary" onclick={saveLexicon}>Save Lexicon Settings</button>
+</CollapsibleCard>
+
+<CollapsibleCard title="Response Cleanup (Strip Patterns)" cardKey="strippatterns" {collapse}>
+  <p style="color: var(--text-dim); font-size: 12px; margin-top: 12px; margin-bottom: 16px;">
+    Regular expressions, one per line, stripped from every model reply before it reaches
+    the client — site footers, watermark lines, artifacts. Applied at the same point as
+    <a class="help-link" href="/help/user-guide.html#cantrips" target="_blank" title="Open documentation">response tags</a>;
+    nothing is captured or stored. Max 20 patterns, 256 characters each.
+  </p>
+  {#if stripSaved}<div class="success-msg">Strip patterns saved.</div>{/if}
+  <div class="form-group">
+    <label for="strip-patterns">Patterns (one per line)</label>
+    <textarea id="strip-patterns" rows="4" bind:value={stripPatternsText}
+      placeholder="SITE_FOOTER_.*&#10;^\[watermark\].*$" style="width: 100%; font-family: monospace;"></textarea>
+  </div>
+  <button class="primary" onclick={saveStripPatterns}>Save Strip Patterns</button>
 </CollapsibleCard>
 
 <CollapsibleCard title="Passenger (Scripted LLM Calls)" cardKey="passenger" {collapse}>

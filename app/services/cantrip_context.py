@@ -168,7 +168,10 @@ def build_context(
     last_messages = []
     for msg in messages:
         text = _extract_text(msg.get("content", ""))
-        last_messages.append({"message": text})
+        # Package 3 (item 2): roles ride along now -- swipe-aware scripts
+        # branch on them. Additive; scripts reading only .message (the
+        # documented JanitorAI shape) are unaffected.
+        last_messages.append({"message": text, "role": msg.get("role", "")})
 
     last_message = last_messages[-1]["message"] if last_messages else ""
     message_count = len(messages)
@@ -213,6 +216,9 @@ def build_context(
             "map_stage_index": (request or {}).get("map_stage_index", -1),
             "map_stage_name": (request or {}).get("map_stage_name", ""),
             "map_stage_endpoint": (request or {}).get("map_stage_endpoint", ""),
+            # Package 3 (item 2): per-request id + regenerate heuristic.
+            "id": (request or {}).get("id", ""),
+            "is_regenerate": bool((request or {}).get("is_regenerate", False)),
         },
         "character": {
             "name": character_name,
@@ -258,6 +264,10 @@ def extract_context_params(body: dict[str, Any], request_headers: dict[str, str]
         "map_stage_index": stage_info.get("index", -1),
         "map_stage_name": stage_info.get("name", ""),
         "map_stage_endpoint": stage_info.get("endpoint", ""),
+        # Package 3 (item 2): per-request id (stable across every cantrip
+        # position and the debug run) and the regenerate heuristic.
+        "id": body.get("_gitv_request_id", ""),
+        "is_regenerate": bool(body.get("_gitv_is_regenerate", False)),
     }
 
     # The monotonic turn index, stamped by the proxy before the first cantrip

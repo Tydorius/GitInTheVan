@@ -1447,6 +1447,36 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             """,
         },
     ),
+    (
+        "060_package3_response_capture",
+        # Package 3 (0.39.0): response tags + registered strip patterns +
+        # the is_regenerate fingerprint. cantrips.response_tags is the
+        # per-cantrip registry of tag names extracted from the model's final
+        # reply and delivered to post-Navigator cantrips the same turn;
+        # user_settings.response_strip_patterns is the user's regex strip
+        # list applied at the same point; conversation_turn_counters stores
+        # the previous request's (message_count, trailing-user-text)
+        # fingerprint so the is_regenerate heuristic has state. MySQL TEXT
+        # columns follow the 055/059 precedent: nullable, NULL reads as
+        # empty by every reader.
+        {
+            "sqlite": """
+            ALTER TABLE cantrips ADD COLUMN response_tags TEXT DEFAULT '[]' NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN response_strip_patterns TEXT DEFAULT '[]' NOT NULL;
+            ALTER TABLE conversation_turn_counters ADD COLUMN last_request_fingerprint TEXT DEFAULT '' NOT NULL;
+            """,
+            "postgresql": """
+            ALTER TABLE cantrips ADD COLUMN response_tags TEXT DEFAULT '[]' NOT NULL;
+            ALTER TABLE user_settings ADD COLUMN response_strip_patterns TEXT DEFAULT '[]' NOT NULL;
+            ALTER TABLE conversation_turn_counters ADD COLUMN last_request_fingerprint TEXT DEFAULT '' NOT NULL;
+            """,
+            "mysql": """
+            ALTER TABLE cantrips ADD COLUMN response_tags TEXT;
+            ALTER TABLE user_settings ADD COLUMN response_strip_patterns TEXT;
+            ALTER TABLE conversation_turn_counters ADD COLUMN last_request_fingerprint TEXT;
+            """,
+        },
+    ),
 ]
 
 

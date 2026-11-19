@@ -507,6 +507,51 @@ console.log('Debug output visible in cantrip tester');
     context.tool_result = `${count}d${sides} = [${results.join(&quot;, &quot;)}] = ${results.reduce((a, b) =&gt; a + b, 0)}`;
 }
 </code></pre>
+<p><a id="response-tags"></a></p>
+<h3 id="response-tags-activate-and-inject-0390">Response Tags, activate() and inject() (0.39.0)</h3>
+<p><strong>Response tags</strong> remove the one-turn wait that forced ledger-style scripts
+through hidden links. A cantrip registers tag names (Cantrips editor →
+<em>Response Tags</em>); GitV extracts those tags from the model's <strong>final</strong> reply,
+strips them before the client ever sees them, and hands the contents to
+post-Navigator scripts <strong>the same turn</strong>:</p>
+<pre><code class="language-javascript">// Post-Navigator cantrip. The model wrote &lt;deed&gt;Hero slew the wolf&lt;/deed&gt;
+// in its reply; the client never sees that tag.
+const deeds = (context.response_tags || {})[&quot;deed&quot;] || [];
+if (deeds.length) {
+    context.cantrip_data.set(&quot;last_deed&quot;, deeds[0]);
+}
+</code></pre>
+<p>Tags register per cantrip (<code>&lt;deed&gt;…&lt;/deed&gt;</code> paired, or
+<code>&lt;deed value="…"/&gt;</code> self-closing), are unique per user, and ownership rules
+both sides: a tag nobody registered passes through to the client untouched.
+Extraction happens after verification (rejected drafts are never seen), and
+each capture appears in the Debug timeline and Metrics as <code>response_tag</code>
+rows.</p>
+<p><strong><code>context.activate(name)</code></strong> turns one of your existing lorebooks on for
+the current request only — regardless of its Active flag or tag — by
+name. Its entries are keyword-matched against the current conversation and
+injected this turn. Nothing persists; the next request is back to normal.
+A union source: it only ever adds.</p>
+<p><strong><code>context.inject(text, position)</code></strong> places text in the prompt at one of
+three positions: <code>system_start</code> (appended to the system message),
+<code>before_last_message</code> (a system message before your last message), or
+<code>in_chat_system</code> — a system message at the very end of the prompt, the
+classic end-of-prompt directive slot. Bounded at 20 injections per request
+and 64k characters total; refusals degrade, never fail the request.</p>
+<pre><code class="language-javascript">if (context.request.is_regenerate) {
+    context.inject(&quot;The player regenerated: keep continuity with the prior attempt.&quot;, &quot;in_chat_system&quot;);
+}
+</code></pre>
+<p><strong>New request facts:</strong> <code>context.request.id</code> (a stable id for this request)
+and <code>context.request.is_regenerate</code> — true when this request has the same
+message count and trailing user message as the previous one in the chat,
+which is what a swipe regeneration looks like. <code>context.chat.last_messages</code>
+entries now also carry a <code>role</code> field, so swipe-aware scripts can tell
+assistant from user turns.</p>
+<p><strong>Response strip patterns</strong> (Settings → <em>Response Cleanup</em>) are regexes
+applied to every final reply at the same point as response tags — pure
+cleanup, nothing captured. Site footers, watermark lines, artifacts: one
+pattern per line, max 20.</p>
 <h3 id="cantrip-snippets">Cantrip Snippets</h3>
 <p>Copy-paste examples for common patterns.</p>
 <p><strong>Day counter (persistent state via <code>chat_data</code>):</strong></p>

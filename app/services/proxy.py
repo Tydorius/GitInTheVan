@@ -234,6 +234,12 @@ async def _forward_request_impl(
     request_headers: dict[str, str] = {}
     if user_id and "messages" in body_json:
         request_headers = {k.lower(): v for k, v in request.headers.items()}
+        # Package 3 (item 2): per-request id, minted once at the
+        # authenticated gate so the debug run block and every cantrip
+        # context see the same value.
+        import uuid as _uuid
+
+        body_json["_gitv_request_id"] = str(_uuid.uuid4())
 
         from app.services.metrics import init_metrics
         init_metrics(body_json, user_id)
@@ -419,10 +425,16 @@ async def _forward_request_impl(
         )
         if turn_conversation_id and not body_json.get("_gitv_replay"):
             try:
-                from app.services.conversation import bump_turn_counter
+                from app.services.conversation import (
+                    bump_turn_counter,
+                    note_request_shape,
+                )
 
                 body_json["_gitv_turn_index"] = await bump_turn_counter(
                     user_id, turn_conversation_id
+                )
+                body_json["_gitv_is_regenerate"] = await note_request_shape(
+                    user_id, turn_conversation_id, body_json.get("messages", [])
                 )
             except Exception:
                 logger.exception("Turn counter bump failed; cantrips see turn_index 0")
@@ -724,6 +736,14 @@ async def _forward_request_impl(
             response_data = await run_map_pipeline(body_json, user_id, request_headers, map_active, map_timeout)
 
             if body_json.get("_gitv_chat_id"):
+                # Package 3: map output gets extraction + stripping too. No
+                # post-Navigator pass runs on the final map output (stage
+                # cantrips ran inside the pipeline), so the seeded key only
+                # feeds the debug trace here -- strip still cleans the reply.
+                from app.services.response_tags import process_response_capture
+                response_data = await process_response_capture(
+                    response_data, user_id, body_json
+                )
                 response_data = await _extract_response_memories(response_data, user_id, body_json)
                 response_data = _append_pending_notices(response_data, body_json)
 
@@ -1607,6 +1627,15 @@ async def _forward_non_streaming_verified(
                     except Exception:
                         logger.exception("Verification loop failed, returning original response")
 
+                    # Package 3: extract registered response tags from the
+                    # final reply and strip them (plus user strip patterns)
+                    # before the post-Navigator pass -- the owning cantrip
+                    # sees this turn's tags this turn.
+                    from app.services.response_tags import process_response_capture
+                    response_data = await process_response_capture(
+                        response_data, user_id, body_json
+                    )
+
                     try:
                         response_data = await _apply_post_navigator_processing(
                             response_data, body_json, user_id, request_headers
@@ -1680,6 +1709,13 @@ async def _forward_non_streaming_verified(
                 )
         except Exception:
             logger.exception("Verification loop failed, returning original response")
+
+        # Package 3: same placement as the verified path above -- final
+        # content only, before post-Navigator cantrips.
+        from app.services.response_tags import process_response_capture
+        response_data = await process_response_capture(
+            response_data, user_id, body_json
+        )
 
         try:
             response_data = await _apply_post_navigator_processing(
@@ -2578,6 +2614,13 @@ async def _forward_streaming_with_memory(
         if ux_settings.get("streaming_post_processing", True):
             response_data = await _apply_post_driver_processing(
                 response_data, body_json, user_id, request_headers or {}
+            )
+            # Package 3: extraction between the passes, as on the buffered
+            # paths. When response checks are disabled the buffered stream
+            # still passes through here, so tags never leak to the client.
+            from app.services.response_tags import process_response_capture
+            response_data = await process_response_capture(
+                response_data, user_id, body_json
             )
             response_data = await _apply_post_navigator_processing(
                 response_data, body_json, user_id, request_headers or {}

@@ -93,6 +93,12 @@ class UserSettings(Base):
     passenger_parameters_json: Mapped[str] = mapped_column(
         Text, nullable=False, default="[]", server_default="[]"
     )
+    # Package 3 (item 22, 0.39.0): user-registered regex strip patterns
+    # applied to every final response at the response-tag extraction point.
+    # No capture, no delivery -- pure stripping. MySQL NULL reads as empty.
+    response_strip_patterns: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]"
+    )
     context_budget_percent: Mapped[float] = mapped_column(Float, default=10.0, nullable=False)
     context_window_override: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     debug_mode: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

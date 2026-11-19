@@ -2,6 +2,65 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.39.0] - 2026-11-19
+
+Package 3 — Response Capture & Data Access: response tags, script
+activation, prompt injections, strip patterns, swipe-aware request facts.
+
+### Added
+
+- **Response tags (no more one-turn wait).** A cantrip registers tag names
+  (Cantrips editor → *Response Tags*, or the API's `response_tags` list);
+  GitV extracts those tags from the model's **final** reply, strips them
+  before the client, and delivers the contents to post-Navigator scripts
+  **the same turn** via `context.response_tags` — the hidden-link format
+  the World Ledger needed (and its no-apostrophes rule) retire. Both
+  grammars mirror memstore (`<deed>...</deed>` and `<deed value="..."/>`),
+  matching is case-insensitive, names are lowercase `[a-z0-9_-]{1,32}` and
+  unique per user (409 on collision, 422 on invalid/reserved names).
+  Ownership drives both sides: a tag nobody registered passes through to
+  the client untouched. Extraction runs on all four authenticated paths
+  after verification — rejected drafts are never seen — with a
+  `response_tags` Debug capture and per-name Metrics rows. The registry
+  ignores activation state deliberately: a disabled ledger still wants its
+  tags out of the visible reply.
+- **`context.activate(name)`** — a cantrip turns one of the user's
+  existing lorebooks on for the current request only, regardless of the
+  book's Active flag or tag. A new **union activation source** (the
+  sixth): proximity-shaped like a tag, only ever adds, request-scoped,
+  nothing persists. Entries are keyword-matched (honoring the book's scan
+  depth) with full provenance and injected this turn; a missing name
+  degrades to a Debug note. Documented in the Activation Hierarchy and
+  covered by `tests/test_activation_hierarchy.py`.
+- **`context.inject(text, position)`** — prompt text at
+  `system_start`, `before_last_message`, or the new **`in_chat_system`**
+  (its own system message at the very end of the prompt). Bounded: 20 per
+  request, 32k chars each, 64k total; refusals drop the single injection,
+  never the request. `INJECTION_POSITIONS` gained the third value —
+  lorebook entries and dynamic books can use it too.
+- **Response strip patterns** (Settings → *Response Cleanup*): regexes
+  applied to every final reply at the same point as response tags — pure
+  cleanup for site footers and artifacts. Max 20 patterns, 256 chars each,
+  validated on write (422 on a non-compiling pattern); nothing is captured
+  or stored. Patterns are deliberately exempt from the prose sanitizer —
+  they are code-like, like cantrip code under rule 18.
+- **Swipe-aware request facts:** `context.request.id` (stable per request),
+  `context.request.is_regenerate` (true when this request repeats the
+  previous one's message count and trailing user message — what a swipe
+  regeneration looks like), and `role` on every
+  `context.chat.last_messages` entry. The heuristic's fingerprint lives on
+  the turn-counter table; sandbox and replay read the flag but never write
+  it.
+
+### Migration
+
+One additive migration (`060_package3_response_capture`) adds
+`cantrips.response_tags`, `user_settings.response_strip_patterns` and
+`conversation_turn_counters.last_request_fingerprint`. All three default
+empty; existing installs see zero behavior change until a cantrip opts in.
+Upgrade-path tested with a vacuity check; the MySQL columns are nullable
+per the 055/059 TEXT-default precedent.
+
 ## [0.38.0] - 2026-11-19
 
 Phase 20b — the passenger-driven RAG half of Dynamic Lorebooks.

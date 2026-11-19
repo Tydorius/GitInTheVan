@@ -40,6 +40,11 @@ class Cantrip(Base):
     # nullable on MySQL (no literal TEXT defaults there); readers treat NULL
     # as "none configured" -- see parse reads helper in dynamic_lorebook.py.
     lorebook_reads: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    # Package 3 (0.39.0): JSON list of registered response-tag names. GitV
+    # extracts these tags from the model's final reply, strips them before
+    # the client, and delivers the extractions to post-Navigator cantrip
+    # context the same turn. Same MySQL NULL-reads-as-empty convention.
+    response_tags: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

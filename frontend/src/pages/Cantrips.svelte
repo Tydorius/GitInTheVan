@@ -53,6 +53,7 @@
     run_pre_navigator: false, run_post_navigator: false,
     execution_order: 10, timeout_ms: 5000, budget_weight: 1.0,
     lorebook_reads_text: '',
+    response_tags_text: '',
   }
 
   let tagModal = { show: false, id: '', name: '', tag: '' }
@@ -74,7 +75,7 @@
   }
 
   function resetForm() {
-    form = { name: '', description: '', llm_instructions: '', code: '', hook_type: 'pre', is_active: true, is_public: false, run_pre_driver: true, run_driver_callable: false, run_pre_navigator: false, run_post_navigator: false, execution_order: 10, timeout_ms: 5000, budget_weight: 1.0, lorebook_reads_text: '' }
+    form = { name: '', description: '', llm_instructions: '', code: '', hook_type: 'pre', is_active: true, is_public: false, run_pre_driver: true, run_driver_callable: false, run_pre_navigator: false, run_post_navigator: false, execution_order: 10, timeout_ms: 5000, budget_weight: 1.0, lorebook_reads_text: '', response_tags_text: '' }
     editingId = null
   }
 
@@ -88,6 +89,7 @@
       execution_order: s.execution_order, timeout_ms: s.timeout_ms,
       budget_weight: s.budget_weight ?? 1.0,
       lorebook_reads_text: (s.lorebook_reads || []).join(', '),
+      response_tags_text: (s.response_tags || []).join(', '),
     }
     showForm = true
   }
@@ -129,10 +131,11 @@
     error = ''
     try {
       // lorebook_reads travels as an array; the form edits it as text.
-      const { lorebook_reads_text, ...rest } = form
+      const { lorebook_reads_text, response_tags_text, ...rest } = form
       const payload = {
         ...rest,
         lorebook_reads: (lorebook_reads_text || '').split(',').map((s: string) => s.trim()).filter(Boolean),
+        response_tags: (response_tags_text || '').split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean),
         override_scan: false,
       }
       await withScanOverride((overrideScan: boolean) =>
@@ -480,6 +483,16 @@
               placeholder="e.g. World Codex, Faction Notes" />
             <small>Entries from these lorebooks are seeded read-only into the script's
               <code>context.lorebook</code> (max 20 books, capped by the admin lorebook size limit).</small>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex: 1;">
+            <label for="cantrip-response-tags">Response Tags (comma-separated tag names)</label>
+            <input id="cantrip-response-tags" type="text" bind:value={form.response_tags_text}
+              placeholder="e.g. deed, loot" />
+            <small>GitV extracts these tags from the model's reply, strips them before the
+              client, and hands the contents to post-Navigator scripts the same turn via
+              <code>context.response_tags</code>. Lowercase letters, digits, - and _; unique per user.</small>
           </div>
         </div>
         <div class="form-row">

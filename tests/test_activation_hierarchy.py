@@ -598,3 +598,97 @@ class TestFifthSourceDynamicBooks:
         assert not await _injected(
             uid, "DYN-MARKER", headers={"x-conversation-id": "chat-9"}
         )
+
+
+@pytest.mark.asyncio
+class TestSixthSourceScriptActivation:
+    """context.activate(name) (Package 3, item 8): a script naming one of
+    the user's existing static lorebooks is a union activation source --
+    proximity-shaped, like a tag in the message. The book serves THIS
+    request regardless of its Active flag or tag, and nothing can switch
+    it off (rule 2); the activation dies with the request. Requires Deno:
+    the source is a real cantrip run."""
+
+    async def _user(self, client) -> str:
+        return (await client.get("/api/auth/me")).json()["id"]
+
+    async def _static_book(self, client):
+        from app.models.lorebook import Lorebook
+        from app.models.lorebook_entry import LorebookEntry
+        from tests.conftest import TestSessionLocal
+
+        uid = await self._user(client)
+        async with TestSessionLocal() as db:
+            book = Lorebook(user_id=uid, name="Script Codex",
+                            is_active=False, tag="")
+            db.add(book)
+            await db.flush()
+            db.add(LorebookEntry(
+                lorebook_id=book.id, name="sigil", keys='["sigil"]',
+                content="SCRIPT_ACTIVATE_MARKER: the sigil hums.",
+                position="before_last_message",
+            ))
+            await db.commit()
+            return book.id
+
+    async def test_script_activation_turns_on_an_inactive_untagged_book(
+        self, admin_client, httpx_mock
+    ):
+        from app.services.deno_runner import DENO_PATH
+        if not DENO_PATH:
+            pytest.skip("Deno not available")
+
+        client, _, api_key = admin_client
+        await self._static_book(client)
+        resp = await client.post("/api/endpoints", json={
+            "name": "hier", "base_url": "http://hier-act.test",
+            "api_key": "k", "enabled": True})
+        assert resp.status_code == 201
+        await client.put("/api/settings", json={
+            "default_endpoint_id": resp.json()["id"]})
+        resp = await client.post("/api/cantrips", json={
+            "name": "activator", "code": 'context.activate("Script Codex");',
+            "is_active": True})
+        assert resp.status_code in (200, 201), resp.text
+
+        httpx_mock.add_response(
+            url="http://hier-act.test/v1/chat/completions",
+            json={"choices": [{"index": 0, "message": {"role": "assistant",
+                                                       "content": "ok"}}]})
+        resp = await client.post(
+            "/v1/chat/completions",
+            json={"model": "m", "messages": [
+                {"role": "user", "content": "study the sigil"}]},
+            headers={"Authorization": f"Bearer {api_key}"})
+        assert resp.status_code == 200, resp.text
+        sent = json.dumps(json.loads(httpx_mock.get_requests()[-1].content))
+        assert "SCRIPT_ACTIVATE_MARKER" in sent
+
+    async def test_no_script_no_injection(self, admin_client, httpx_mock):
+        """The same book with no activating script stays off -- Off is the
+        default (rule 1); the source is the script, not the book."""
+        from app.services.deno_runner import DENO_PATH
+        if not DENO_PATH:
+            pytest.skip("Deno not available")
+
+        client, _, api_key = admin_client
+        await self._static_book(client)
+        resp = await client.post("/api/endpoints", json={
+            "name": "hier2", "base_url": "http://hier-off.test",
+            "api_key": "k", "enabled": True})
+        assert resp.status_code == 201
+        await client.put("/api/settings", json={
+            "default_endpoint_id": resp.json()["id"]})
+
+        httpx_mock.add_response(
+            url="http://hier-off.test/v1/chat/completions",
+            json={"choices": [{"index": 0, "message": {"role": "assistant",
+                                                       "content": "ok"}}]})
+        resp = await client.post(
+            "/v1/chat/completions",
+            json={"model": "m", "messages": [
+                {"role": "user", "content": "study the sigil"}]},
+            headers={"Authorization": f"Bearer {api_key}"})
+        assert resp.status_code == 200, resp.text
+        sent = json.dumps(json.loads(httpx_mock.get_requests()[-1].content))
+        assert "SCRIPT_ACTIVATE_MARKER" not in sent

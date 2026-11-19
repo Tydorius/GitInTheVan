@@ -62,6 +62,29 @@ context.maps = {
     }
 };
 
+// Package 3 (items 8 + 4): prompt-side requests collected for the host's
+// post-cantrip application pass. activate(name) turns one of the user's
+// existing static lorebooks on for THIS request (union source: adds, never
+// subtracts); inject(text, position) places text in the prompt. Neither
+// persists -- re-running the script re-requests them.
+const __bookActivations = [];
+const __injections = [];
+context.activate = (name) => {
+    if (typeof name === 'string' && name.trim()) {
+        __bookActivations.push(name.trim().slice(0, 128));
+    }
+};
+context.inject = (text, position) => {
+    if (typeof text !== 'string' || !text.trim()) return;
+    if (__injections.length >= 20) {
+        __debugLogs.push('inject: refused, per-request cap (20) reached');
+        return;
+    }
+    const pos = ['system_start', 'before_last_message', 'in_chat_system'].indexOf(position) !== -1
+        ? position : 'before_last_message';
+    __injections.push({ text: text, position: pos });
+};
+
 // Dynamic lorebooks (Phase 20): reads are served from a host-seeded copy
 // (this conversation's script-created books always; static books named in the
 // cantrip's lorebook_reads config); writes are collected as an op log the
@@ -384,6 +407,8 @@ const __result = {
     memories: Object.assign({}, __memories),
     maps_nominated: __mapNominations,
     lorebook_ops: __lorebookOps,
+    book_activations: __bookActivations,
+    injections: __injections,
     debug_logs: __debugLogs,
     error: __error
 };

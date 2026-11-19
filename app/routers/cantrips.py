@@ -18,6 +18,7 @@ from app.services.cantrip_context import build_context
 from app.services.content_guard import check_size, gate_scan_findings, log_scan_findings
 from app.services.deno_runner import CantripExecutionError, CantripResult, CantripTimeoutError
 from app.services.dynamic_lorebook import parse_reads
+from app.services.response_tags import parse_tag_names
 from app.services.safety_scanner import scan_cantrip
 from app.templates.cantrip_templates import get_templates
 
@@ -84,6 +85,9 @@ class CantripCreate(BaseModel):
     # Phase 20: lorebook names whose entries are seeded read-only into the
     # sandbox (context.lorebook reads).
     lorebook_reads: list[str] = []
+    # Package 3 (item 3): tag names this cantrip registers for extraction
+    # from the model's final reply. Normalized lowercase; per-user unique.
+    response_tags: list[str] = []
     # Set by a client that has already shown the scanner findings to the user
     # and been told to proceed anyway. Not a model column.
     override_scan: bool = False
@@ -106,6 +110,7 @@ class CantripUpdate(BaseModel):
     tag: str | None = None
     budget_weight: float | None = None
     lorebook_reads: list[str] | None = None
+    response_tags: list[str] | None = None
     override_scan: bool = False
 
 
@@ -127,6 +132,7 @@ class CantripResponse(BaseModel):
     tag: str
     budget_weight: float
     lorebook_reads: list[str]
+    response_tags: list[str] = []
 
 
 class CantripListItem(BaseModel):
@@ -147,6 +153,7 @@ class CantripListItem(BaseModel):
     tag: str
     budget_weight: float
     lorebook_reads: list[str]
+    response_tags: list[str] = []
 
 
 class CantripListResponse(BaseModel):
@@ -192,6 +199,45 @@ def _normalize_reads(names: list[str] | None) -> list[str]:
     return out[:20]
 
 
+async def _validate_response_tags(
+    db: AsyncSession, user_id: str, names: list[str], exclude_cantrip_id: str = ""
+) -> str:
+    """Normalize + validate a response_tags list, returning the stored JSON.
+
+    Refuses (422) names that are not legal ([a-z0-9_-]{1,32}, lowercase) or
+    are reserved, and names another of the user's cantrips already
+    registered -- per-user uniqueness keeps tag ownership unambiguous, like
+    the activation-tag column.
+    """
+    from app.services.response_tags import normalize_tag_name
+
+    cleaned: list[str] = []
+    for raw in names[:20]:
+        name = normalize_tag_name(raw)
+        if name is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"'{raw}' is not a valid response tag name "
+                       "(lowercase letters, digits, - or _, max 32 chars, not reserved)",
+            )
+        if name not in cleaned:
+            cleaned.append(name)
+
+    rows = (
+        await db.execute(select(Cantrip.id, Cantrip.response_tags).where(Cantrip.user_id == user_id))
+    ).all()
+    for row_id, raw_tags in rows:
+        if row_id == exclude_cantrip_id:
+            continue
+        for taken in parse_tag_names(raw_tags):
+            if taken in cleaned:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Response tag '{taken}' is already registered by another cantrip",
+                )
+    return json.dumps(cleaned)
+
+
 def _cantrip_to_response(cantrip: Cantrip) -> CantripResponse:
     return CantripResponse(
         id=cantrip.id,
@@ -211,6 +257,7 @@ def _cantrip_to_response(cantrip: Cantrip) -> CantripResponse:
         tag=cantrip.tag,
         budget_weight=cantrip.budget_weight,
         lorebook_reads=parse_reads(getattr(cantrip, "lorebook_reads", None)),
+        response_tags=parse_tag_names(getattr(cantrip, "response_tags", None)),
     )
 
 
@@ -233,6 +280,7 @@ def _cantrip_to_list_item(cantrip: Cantrip) -> CantripListItem:
         tag=cantrip.tag,
         budget_weight=cantrip.budget_weight,
         lorebook_reads=parse_reads(getattr(cantrip, "lorebook_reads", None)),
+        response_tags=parse_tag_names(getattr(cantrip, "response_tags", None)),
     )
 
 
@@ -350,6 +398,7 @@ async def create_cantrip(
         tag=req.tag,
         budget_weight=req.budget_weight,
         lorebook_reads=json.dumps(_normalize_reads(req.lorebook_reads)),
+        response_tags=await _validate_response_tags(db, current_user.id, req.response_tags),
     )
     db.add(cantrip)
     await db.commit()
@@ -386,6 +435,11 @@ async def update_cantrip(
     if "lorebook_reads" in update_data and update_data["lorebook_reads"] is not None:
         # The column is JSON text; the API speaks lists.
         update_data["lorebook_reads"] = json.dumps(_normalize_reads(update_data["lorebook_reads"]))
+    if "response_tags" in update_data and update_data["response_tags"] is not None:
+        update_data["response_tags"] = await _validate_response_tags(
+            db, current_user.id, update_data["response_tags"],
+            exclude_cantrip_id=cantrip_id,
+        )
     if "code" in update_data and update_data["code"] is not None:
         await _check_and_scan_cantrip_code(
             current_user.id, update_data["code"], cantrip_id, override=req.override_scan

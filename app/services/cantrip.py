@@ -8,11 +8,13 @@ from typing import Any
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.database import async_session
 from app.models.cantrip import Cantrip
 from app.models.cantrip_data import CantripData
 from app.models.chat_data import ChatData
+from app.models.lorebook import Lorebook
 from app.models.user_data import UserData
 from app.services.cantrip_context import apply_cantrip_result_to_messages, build_context, extract_context_params
 from app.services.deno_runner import CantripResult, run_cantrip
@@ -581,6 +583,19 @@ async def process_cantrips(
                     cantrips, capture=False,
                 )
 
+            # Package 3 (items 8 + 4): prompt-side requests. Like the op
+            # delta, they only land before the forward; on response-side
+            # passes there is no injection point left, so they are dropped
+            # (the facade is a pre-forward tool by contract).
+            if result.book_activations or result.injections:
+                request_rows = await _apply_prompt_requests(
+                    db, user_id, body_json,
+                    result.book_activations, result.injections,
+                    source=cantrip.name,
+                )
+                if request_rows and position == "pre_driver":
+                    body_json.setdefault(DELTA_KEY, []).extend(request_rows)
+
         # A sandbox writes chat_data into its forked id (isolated); a replay
         # would write the live conversation's store, so it does not.
         if conversation_id and not body_json.get("_gitv_replay"):
@@ -641,6 +656,121 @@ async def test_cantrip(
         code, context, chat_data, user_data, cantrip_data, timeout_ms,
         passenger_handler=passenger_handler,
     )
+
+
+async def _apply_prompt_requests(
+    db: AsyncSession,
+    user_id: str,
+    body_json: dict[str, Any],
+    activations: list[str],
+    injections: list[dict],
+    source: str,
+) -> list:
+    """Apply context.activate()/context.inject() requests (Package 3).
+
+    Activation is a union source under rule 19: each named book (the user's
+    own static lorebook, exact-name match) has its entries keyword-matched
+    against the current message list -- honoring the book's scan_depth --
+    and the matches become delta rows with full provenance. Nothing
+    persists; the request-scoped activation dies with the request.
+
+    Injections convert straight to delta rows (name/provenance empty --
+    the script is the source). Bounded: 20 per request at the facade, and
+    here 32k chars each / 64k total; refusals drop the single item with a
+    capture, never the request. Returns the delta rows for the caller to
+    extend into DELTA_KEY. Never raises.
+    """
+    from app.services.debug import debug_capture
+    from app.services.lorebook import MatchedEntry, match_book_entries
+    from app.services.metrics import record_prompt_object
+
+    rows: list = []
+    notes: list[dict[str, Any]] = []
+
+    try:
+        messages = body_json.get("messages", [])
+
+        for raw_name in activations[:10]:
+            name = str(raw_name or "").strip()[:128]
+            if not name:
+                continue
+            book = (
+                await db.execute(
+                    select(Lorebook)
+                    .where(Lorebook.user_id == user_id, Lorebook.name == name)
+                    .options(selectinload(Lorebook.entries))
+                    .order_by(Lorebook.created_at)
+                )
+            ).scalars().first()
+            if book is None:
+                notes.append({"kind": "activate", "book": name, "outcome": "refused",
+                              "reason": "no lorebook of that name"})
+                continue
+            entry_dicts = [
+                {
+                    "lorebook_id": book.id,
+                    "lorebook_name": book.name,
+                    "entry_id": entry.id,
+                    "name": entry.name,
+                    "keys": entry.keys,
+                    "secondary_keys": entry.secondary_keys,
+                    "content": entry.content,
+                    "position": entry.position,
+                    "insertion_order": entry.insertion_order,
+                    "is_constant": entry.is_constant,
+                    "is_selective": entry.is_selective,
+                    "is_disabled": entry.is_disabled,
+                    "character_limit": entry.character_limit,
+                }
+                for entry in book.entries
+            ]
+            matched = match_book_entries(messages, entry_dicts, scan_depth=book.scan_depth)
+            rows.extend(matched)
+            notes.append({"kind": "activate", "book": name, "outcome": "activated",
+                          "matched": len(matched), "entries": len(entry_dicts)})
+            if matched:
+                record_prompt_object(
+                    body_json, "book_activation", book.id,
+                    0, sum(len(m.content) for m in matched),
+                )
+
+        total_chars = 0
+        for i, req in enumerate(injections[:20]):
+            text = str(req.get("text") or "")
+            position = str(req.get("position") or "before_last_message")
+            if position not in ("system_start", "before_last_message", "in_chat_system"):
+                position = "before_last_message"
+            if not text.strip():
+                notes.append({"kind": "inject", "index": i, "outcome": "refused",
+                              "reason": "empty text"})
+                continue
+            if len(text) > 32_000:
+                notes.append({"kind": "inject", "index": i, "outcome": "refused",
+                              "reason": "over the 32k per-injection cap"})
+                continue
+            if total_chars + len(text) > 64_000:
+                notes.append({"kind": "inject", "index": i, "outcome": "refused",
+                              "reason": "over the 64k per-request injection cap"})
+                continue
+            total_chars += len(text)
+            rows.append(MatchedEntry(
+                content=text, position=position,
+                insertion_order=1000 + i, name="",
+            ))
+            record_prompt_object(body_json, "injection", "", 0, max(1, len(text) // 4))
+            notes.append({"kind": "inject", "index": i, "position": position,
+                          "outcome": "injected", "chars": len(text)})
+
+        debug_capture(
+            body_json, "prompt_requests", "Prompt Requests (activate/inject)",
+            detail=(f"{len(activations)} activation(s), {len(injections)} injection(s) "
+                    f"from '{source}': {len(rows)} delta row(s)"),
+            metadata={"source": source, "requests": notes},
+        )
+        return rows
+    except Exception:
+        logger.exception("Prompt-request application failed (source '%s')", source)
+        return rows
 
 
 async def process_cantrips_post_driver(
@@ -722,6 +852,11 @@ async def process_cantrips_post_driver(
             "original_content": response_content,
             "modified": False,
         }
+        # Package 3 (item 3): this turn's registered-tag extractions, seeded
+        # by process_response_capture just before this pass. The owning
+        # cantrip reads context.response_tags[name] -> array of payloads --
+        # same-turn delivery, no raw tag text ever reaches the script.
+        context["response_tags"] = body_json.get("_gitv_response_tags") or {}
 
         current_content = response_content
 

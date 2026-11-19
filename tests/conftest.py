@@ -26,6 +26,7 @@ import app.services.memory as _memory_module
 import app.services.metrics as _metrics_module
 import app.services.passenger as _passenger_module
 import app.services.proxy as _proxy_module
+import app.services.response_tags as _response_tags_module
 import app.services.scenario_summarizer as _scenario_summarizer_module
 import app.services.summarization as _summarization_module
 import app.services.verification as _verification_module
@@ -67,6 +68,7 @@ _SESSION_MODULES = [
     _metrics_module,
     _passenger_module,
     _proxy_module,
+    _response_tags_module,
     _scenario_summarizer_module,
     _summarization_module,
     _verification_module,

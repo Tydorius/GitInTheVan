@@ -63,6 +63,14 @@ class CantripResult:
     # 20). Raw op dicts; the host validates and applies them with the
     # lorebook_writes guards -- they are requests, not performed writes.
     lorebook_ops: list[dict] = field(default_factory=list)
+    # Package 3 (item 8): static lorebook names the script asked to activate
+    # for THIS request. A union source under rule 19 -- adds, never
+    # subtracts; applied post-cantrip by matching the book's entries and
+    # extending the same-turn injection delta.
+    book_activations: list[str] = field(default_factory=list)
+    # Package 3 (item 4): prompt injections the script requested. dicts of
+    # {text, position}; applied post-cantrip through inject_entries.
+    injections: list[dict] = field(default_factory=list)
     debug_logs: list[str] = field(default_factory=list)
     error: str | None = None
 
@@ -189,6 +197,8 @@ async def run_cantrip(
             memories=result_data.get("memories", {}),
             maps_nominated=result_data.get("maps_nominated", []),
             lorebook_ops=result_data.get("lorebook_ops", []),
+            book_activations=result_data.get("book_activations", []),
+            injections=result_data.get("injections", []),
             debug_logs=result_data.get("debug_logs", []),
             error=result_data.get("error"),
         )

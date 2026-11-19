@@ -539,6 +539,65 @@ if (context.tool_call) {
 }
 ```
 
+<a id="response-tags"></a>
+
+### Response Tags, activate() and inject() (0.39.0)
+
+**Response tags** remove the one-turn wait that forced ledger-style scripts
+through hidden links. A cantrip registers tag names (Cantrips editor →
+*Response Tags*); GitV extracts those tags from the model's **final** reply,
+strips them before the client ever sees them, and hands the contents to
+post-Navigator scripts **the same turn**:
+
+```javascript
+// Post-Navigator cantrip. The model wrote <deed>Hero slew the wolf</deed>
+// in its reply; the client never sees that tag.
+const deeds = (context.response_tags || {})["deed"] || [];
+if (deeds.length) {
+    context.cantrip_data.set("last_deed", deeds[0]);
+}
+```
+
+Tags register per cantrip (`<deed>…</deed>` paired, or
+`<deed value="…"/>` self-closing), are unique per user, and ownership rules
+both sides: a tag nobody registered passes through to the client untouched.
+Extraction happens after verification (rejected drafts are never seen), and
+each capture appears in the Debug timeline and Metrics as `response_tag`
+rows.
+
+**`context.activate(name)`** turns one of your existing lorebooks on for
+the current request only — regardless of its Active flag or tag — by
+name. Its entries are keyword-matched against the current conversation and
+injected this turn. Nothing persists; the next request is back to normal.
+A union source: it only ever adds.
+
+**`context.inject(text, position)`** places text in the prompt at one of
+three positions: `system_start` (appended to the system message),
+`before_last_message` (a system message before your last message), or
+`in_chat_system` — a system message at the very end of the prompt, the
+classic end-of-prompt directive slot. Bounded at 20 injections per request
+and 64k characters total; refusals degrade, never fail the request.
+
+```javascript
+if (context.request.is_regenerate) {
+    context.inject("The player regenerated: keep continuity with the prior attempt.", "in_chat_system");
+}
+```
+
+**New request facts:** `context.request.id` (a stable id for this request)
+and `context.request.is_regenerate` — true when this request has the same
+message count and trailing user message as the previous one in the chat,
+which is what a swipe regeneration looks like. `context.chat.last_messages`
+entries now also carry a `role` field, so swipe-aware scripts can tell
+assistant from user turns.
+
+**Response strip patterns** (Settings → *Response Cleanup*) are regexes
+applied to every final reply at the same point as response tags — pure
+cleanup, nothing captured. Site footers, watermark lines, artifacts: one
+pattern per line, max 20.
+
+
+
 ### Cantrip Snippets
 
 Copy-paste examples for common patterns.

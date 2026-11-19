@@ -4,7 +4,10 @@ import json
 import re
 from dataclasses import dataclass
 
-INJECTION_POSITIONS = ("system_start", "before_last_message")
+# Package 3 (item 4) added in_chat_system: its own system message placed
+# after the last user message (end of the list) -- the in-chat directive
+# position. Unknown positions still fall through inject_entries' catch-all.
+INJECTION_POSITIONS = ("system_start", "before_last_message", "in_chat_system")
 
 
 @dataclass
@@ -104,7 +107,11 @@ def inject_entries(
 
     system_entries = [m for m in matched if m.position == "system_start"]
     message_entries = [m for m in matched if m.position == "before_last_message"]
-    other_entries = [m for m in matched if m.position not in INJECTION_POSITIONS]
+    in_chat_entries = [m for m in matched if m.position == "in_chat_system"]
+    other_entries = [
+        m for m in matched
+        if m.position not in INJECTION_POSITIONS
+    ]
 
     if system_entries:
         combined = "\n\n".join(m.content for m in system_entries)
@@ -134,6 +141,13 @@ def inject_entries(
             result.insert(last_user_idx, {"role": "system", "content": combined})
         else:
             result.insert(len(result) - 1, {"role": "system", "content": combined})
+
+    if in_chat_entries:
+        # Each in_chat_system entry is its own message at the very end --
+        # the classic end-of-prompt directive slot. Not combined: scripts
+        # inject distinct directives and merging them muddies attribution.
+        for m in sorted(in_chat_entries, key=lambda e: e.insertion_order):
+            result.append({"role": "system", "content": m.content})
 
     if other_entries:
         combined = "\n\n".join(m.content for m in other_entries)
