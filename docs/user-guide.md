@@ -565,6 +565,10 @@ Extraction happens after verification (rejected drafts are never seen), and
 each capture appears in the Debug timeline and Metrics as `response_tag`
 rows.
 
+![Cantrip response tags](media/gitv-cantrips-response-tags.png)
+
+*The cantrip editor's Response Tags field, captured 2026-11-19.*
+
 **`context.activate(name)`** turns one of your existing lorebooks on for
 the current request only — regardless of its Active flag or tag — by
 name. Its entries are keyword-matched against the current conversation and
@@ -595,6 +599,10 @@ assistant from user turns.
 applied to every final reply at the same point as response tags — pure
 cleanup, nothing captured. Site footers, watermark lines, artifacts: one
 pattern per line, max 20.
+
+![Response cleanup settings](media/gitv-settings-strip-patterns.png)
+
+*The Response Cleanup card, captured 2026-11-19.*
 
 
 
