@@ -689,6 +689,256 @@ class TestCreatorTemplate:
         assert body["run_pre_driver"] is False
 
 
+class TestRagExecutorTemplate:
+    def test_template_ships_with_position_flags_and_validates(self):
+        from app.services.deno_runner import validate_cantrip_syntax
+        from app.templates.cantrip_templates import get_templates
+
+        t = next(x for x in get_templates() if x["name"] == "Dynamic Lorebook RAG Executor")
+        # Post-driver like the Creator (pre-driver would double-inject via
+        # the same-turn delta), but ordered after it so the condense pass
+        # sees what the Creator just filed.
+        assert t["run_pre_navigator"] is True
+        assert t.get("run_pre_driver", True) is False
+        assert t["execution_order"] == 20
+        assert "context.passenger.enabled" in t["code"]
+        assert "context.lorebook" in t["code"]
+        assert validate_cantrip_syntax(t["code"]) == ""
+
+    async def test_install_honors_position_flags(self, admin_client):
+        client, _, _ = admin_client
+        resp = await client.post("/api/cantrips/templates/install", json={
+            "template_name": "Dynamic Lorebook RAG Executor",
+        })
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["run_pre_navigator"] is True
+        assert body["run_pre_driver"] is False
+        assert body["execution_order"] == 20
+        assert body["timeout_ms"] == 10000
+
+
+# RAG Executor E2E (Phase 20b): the Creator files raw entries post-Driver,
+# the RAG Executor (order 20, same position) condenses them with one
+# Passenger call, the merged book injects on later turns, and the throttle
+# keeps the cost at one call per growth burst.
+
+RAG_DRIVER_URL = "http://phase20-rag-driver.test"
+RAG_PSG_URL = "http://phase20-rag-psg.test"
+
+
+def _rag_reply(httpx_mock, url: str, content: str = "OK"):
+    httpx_mock.add_response(
+        url=f"{url}/v1/chat/completions",
+        json={
+            "id": "t", "object": "chat.completion", "created": 1, "model": "m",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": content},
+                         "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        },
+    )
+
+
+def _raw_entry(marker: str) -> str:
+    # ~320 chars each; four of these clear the template's 800-char growth gate.
+    return marker + " " + "ancient ledger details " * 14
+
+
+def _merge_reply() -> str:
+    # ~300 chars so the merged book stays over the growth threshold, which is
+    # what makes the throttle (not the entry count) gate the next call.
+    merged = "MERGED_DRAGON_LORE " + "consolidated draconic facts " * 11
+    return (
+        '```json\n'
+        '[{"name": "Dragon", "keys": ["dragon"], "content": "' + merged + '", '
+        '"replaces": ["dragon", "dragon weakness"]}]\n'
+        '```'
+    )
+
+
+def _memstore_response() -> str:
+    return (
+        "The scene settles.\n"
+        f'<memstore key="dragon">{_raw_entry("RAW_DRAGON_A")}</memstore>\n'
+        f'<memstore key="dragon weakness">{_raw_entry("RAW_DRAGON_B")}</memstore>\n'
+        f'<memstore key="harbor">{_raw_entry("RAW_HARBOR_C")}</memstore>\n'
+        f'<memstore key="tavern">{_raw_entry("RAW_TAVERN_D")}</memstore>'
+    )
+
+
+async def _rag_setup(client):
+    """Driver + tool_use endpoints and both templates installed."""
+    resp = await client.post("/api/endpoints", json={
+        "name": "RAG Driver", "base_url": RAG_DRIVER_URL,
+        "api_key": "upstream-key", "enabled": True,
+    })
+    assert resp.status_code == 201, resp.text
+    await client.put("/api/settings", json={"default_endpoint_id": resp.json()["id"]})
+    resp = await client.post("/api/endpoints", json={
+        "name": "RAG Tools", "base_url": RAG_PSG_URL,
+        "api_key": "upstream-key", "role_tag": "tool_use", "enabled": True,
+    })
+    assert resp.status_code == 201, resp.text
+    for name in ("Dynamic Lorebook Creator", "Dynamic Lorebook RAG Executor"):
+        resp = await client.post("/api/cantrips/templates/install", json={
+            "template_name": name})
+        assert resp.status_code == 201, resp.text
+
+
+async def _rag_turn(client, api_key, content: str, assistant_history=None):
+    messages = [{"role": "user", "content": content}]
+    if assistant_history:
+        messages = [
+            {"role": "user", "content": "Tell me about the dragon and the harbor tonight."},
+            {"role": "assistant", "content": assistant_history},
+            {"role": "user", "content": content},
+        ]
+    return await client.post(
+        "/v1/chat/completions",
+        json={"model": "m", "messages": messages},
+        headers={"Authorization": f"Bearer {api_key}", "x-conversation-id": "chat-rag"},
+    )
+
+
+def _rag_psg_requests(httpx_mock):
+    return [r for r in httpx_mock.get_requests() if "phase20-rag-psg" in str(r.url)]
+
+
+def _rag_driver_text(httpx_mock) -> str:
+    driver_reqs = [r for r in httpx_mock.get_requests()
+                   if "phase20-rag-driver" in str(r.url)]
+    return json.dumps(json.loads(driver_reqs[-1].content)["messages"])
+
+
+async def _chat_notes_entry_names() -> set[str]:
+    from sqlalchemy import select
+
+    from app.models.lorebook import Lorebook
+    from app.models.lorebook_entry import LorebookEntry
+    async with TestSessionLocal() as db:
+        book = (await db.execute(
+            select(Lorebook).where(Lorebook.name == "Chat Notes")
+        )).scalar_one()
+        rows = (await db.execute(
+            select(LorebookEntry.name).where(LorebookEntry.lorebook_id == book.id)
+        )).scalars().all()
+        return set(rows)
+
+
+@requires_deno
+class TestRagExecutorE2E:
+    async def test_condenses_after_growth_and_injects_next_turn(
+        self, admin_client, httpx_mock
+    ):
+        """The full 20b loop: Creator files raw entries, the Executor's one
+        Passenger call merges them, the merged book reaches later turns and
+        the merged-away raw entry never does. No growth next turn means no
+        second Passenger call (the throttle, not the entry count, gates it:
+        three entries survive the merge)."""
+        client, _, api_key = admin_client
+        await _rag_setup(client)
+
+        _rag_reply(httpx_mock, RAG_DRIVER_URL, _memstore_response())
+        _rag_reply(httpx_mock, RAG_PSG_URL, _merge_reply())
+        resp = await _rag_turn(client, api_key,
+                               "Tell me about the dragon and the harbor tonight.")
+        assert resp.status_code == 200, resp.text
+
+        psg = _rag_psg_requests(httpx_mock)
+        assert len(psg) == 1, "exactly one condense call for the growth burst"
+        sent = json.dumps(json.loads(psg[0].content)["messages"])
+        assert "RAW_DRAGON_A" in sent, "the raw entries reached the model"
+        assert "dragon" in sent.lower()
+
+        assert await _chat_notes_entry_names() == {"Dragon", "harbor", "tavern"}
+
+        # Turn 2: nothing new filed, throttle not advanced past current size
+        # -> no Passenger call; the merged book serves the injection.
+        _rag_reply(httpx_mock, RAG_DRIVER_URL, "The scene continues.")
+        resp = await _rag_turn(client, api_key,
+                               "The dragon circles the harbor.",
+                               assistant_history="The scene settles.")
+        assert resp.status_code == 200, resp.text
+        assert len(_rag_psg_requests(httpx_mock)) == 1, "no growth, no call"
+
+        text = _rag_driver_text(httpx_mock)
+        assert "MERGED_DRAGON_LORE" in text
+        assert "RAW_DRAGON_B" not in text, "merged-away entry must not inject"
+        assert "RAW_HARBOR_C" in text, "untouched entry still injects"
+
+    async def test_failed_reply_degrades_and_retries_next_qualifying_turn(
+        self, admin_client, httpx_mock
+    ):
+        """An unparseable Passenger verdict writes nothing and does not
+        advance the throttle, so the next qualifying turn tries again."""
+        client, _, api_key = admin_client
+        await _rag_setup(client)
+
+        _rag_reply(httpx_mock, RAG_DRIVER_URL, _memstore_response())
+        _rag_reply(httpx_mock, RAG_PSG_URL,
+                   "Sorry, I cannot answer in structured form right now.")
+        resp = await _rag_turn(client, api_key,
+                               "Tell me about the dragon and the harbor tonight.")
+        assert resp.status_code == 200, resp.text
+        assert len(_rag_psg_requests(httpx_mock)) == 1
+
+        # Turn 2 still injects the untouched raw entries (nothing was
+        # written), and the retry fires because the failure never advanced
+        # the throttle.
+        _rag_reply(httpx_mock, RAG_DRIVER_URL, "The scene continues.")
+        _rag_reply(httpx_mock, RAG_PSG_URL, _merge_reply())
+        resp = await _rag_turn(client, api_key,
+                               "The dragon circles the harbor.",
+                               assistant_history="The scene settles.")
+        assert resp.status_code == 200, resp.text
+        assert "RAW_DRAGON_A" in _rag_driver_text(httpx_mock), \
+            "the failed pass left the book untouched"
+        assert len(_rag_psg_requests(httpx_mock)) == 2, "failure did not advance the throttle"
+
+        assert await _chat_notes_entry_names() == {"Dragon", "harbor", "tavern"}
+
+        # Turn 3: merged book injects; successful merge advanced the
+        # throttle, so no third call.
+        _rag_reply(httpx_mock, RAG_DRIVER_URL, "The scene ends.")
+        resp = await _rag_turn(client, api_key,
+                               "The dragon lands near the harbor.",
+                               assistant_history="The scene settles.")
+        assert resp.status_code == 200, resp.text
+        assert len(_rag_psg_requests(httpx_mock)) == 2
+        text = _rag_driver_text(httpx_mock)
+        assert "MERGED_DRAGON_LORE" in text
+        assert "RAW_DRAGON_B" not in text
+
+    async def test_passenger_gate_off_means_no_condense_traffic(
+        self, admin_client, httpx_mock
+    ):
+        """With Passenger disabled the script is a no-op: zero Passenger
+        traffic, the Creator still files, the book still injects."""
+        client, _, api_key = admin_client
+        await _rag_setup(client)
+        try:
+            await client.put("/api/admin/settings", json={
+                "passenger_calling_enabled": False})
+            _rag_reply(httpx_mock, RAG_DRIVER_URL, _memstore_response())
+            resp = await _rag_turn(
+                client, api_key,
+                "Tell me about the dragon and the harbor tonight.")
+            assert resp.status_code == 200, resp.text
+            assert len(_rag_psg_requests(httpx_mock)) == 0
+
+            _rag_reply(httpx_mock, RAG_DRIVER_URL, "The scene continues.")
+            resp = await _rag_turn(client, api_key,
+                                   "The dragon circles the harbor.",
+                                   assistant_history="The scene settles.")
+            assert resp.status_code == 200, resp.text
+            text = _rag_driver_text(httpx_mock)
+            assert "RAW_DRAGON_A" in text, "Creator filed; engine injected"
+            assert "MERGED_DRAGON_LORE" not in text
+        finally:
+            await client.put("/api/admin/settings", json={
+                "passenger_calling_enabled": True})
+
+
 # ============================================================================
 # API surface
 # ============================================================================

@@ -211,6 +211,135 @@ if (content) {
     }
 }""",
     },
+    {
+        "name": "Dynamic Lorebook RAG Executor",
+        "description": "Companion to the Dynamic Lorebook Creator: periodically condenses this chat's dynamic lorebook with one Passenger call -- merges duplicate entries, tightens wording, sharpens keywords -- so injections stay small and relevant. Fires only after the book grows (default: 800 new characters since the last pass), roughly one LLM call every few turns. Requires Passenger enabled and a tool_use endpoint; when Passenger is off or a call fails, nothing happens that turn. The engine keeps injecting as usual -- this script only maintains the book.",
+        "hook_type": "post",
+        "run_pre_driver": False,
+        "run_pre_navigator": True,
+        "execution_order": 20,
+        "timeout_ms": 10000,
+        "code": """// Dynamic Lorebook RAG Executor (Phase 20b): keeps the chat's dynamic
+// lorebook tight. Runs post-Driver after the Creator (order 20 vs its 10):
+// searches the book for entries relevant to the newest message, makes ONE
+// Passenger call that merges duplicates and tightens wording, and writes the
+// result back through context.lorebook. The engine injects the maintained
+// entries on later turns; this script never injects anything itself (the
+// engine's injection would then double it). A valid model verdict (even an
+// empty "nothing to improve") advances the throttle; a failed or unparseable
+// call does not, so the next qualifying turn retries.
+// Tunables -- edit freely after install, this code is yours.
+const BOOK_NAME = "Chat Notes";   // book to maintain (the Creator's default)
+const MIN_ENTRIES = 3;            // never spend a call on a tiny book
+const MIN_GROWTH = 800;           // new characters required since the last pass
+const MAX_ENTRIES = 12;           // entries sent to the model per pass
+const MAX_CHARS = 1500;           // per-entry character cap, both directions
+
+if (context.passenger.enabled) {
+    const lb = context.lorebook.get(BOOK_NAME);
+    const entries = lb ? lb.entries() : [];
+    const size = entries.reduce((n, e) => n + (e.content || "").length, 0);
+    const doneAt = context.chat_data.get("rag_last_size") || 0;
+    if (entries.length >= MIN_ENTRIES && size - doneAt >= MIN_GROWTH) {
+        // Retrieval: significant words from the newest message pick which
+        // entries this pass touches. The model does the real ranking; the
+        // keywords only bound the payload.
+        const msgs = context.chat.last_messages || [];
+        const text = msgs.length
+            ? String(msgs[msgs.length - 1].message || "")
+            : String(context.chat.last_message || "");
+        const STOP = new Set(["about", "after", "again", "their", "there",
+            "them", "they", "this", "that", "what", "when", "where", "which",
+            "while", "with", "would", "your", "have", "just", "know", "like",
+            "over", "some", "take", "than", "then", "them", "were", "will",
+            "into", "very", "come", "could", "does", "each", "even", "from",
+            "gone", "here", "much", "must", "never", "said", "same", "shall",
+            "should", "still", "such", "sure", "through", "under", "want"]);
+        const words = [];
+        for (const w of (text.toLowerCase().match(/[a-z]{4,}/g) || [])) {
+            if (!STOP.has(w) && words.indexOf(w) === -1) words.push(w);
+            if (words.length >= 12) break;
+        }
+        const hits = words.length ? lb.search(words.join(" ")).slice(0, MAX_ENTRIES) : [];
+        if (hits.length) {
+            const recent = msgs.slice(-2)
+                .map(m => String(m.message || "")).join("\\n")
+                .slice(-1200);
+            const reply = await context.passenger.call({
+                tag: "tool_use",
+                instructions: 'You maintain a roleplay lorebook. The input lists lorebook entries as JSON. Merge entries that overlap, tighten verbose wording, and sharpen keywords, preserving every fact. Reply with ONLY a JSON array; each element is an entry you changed or merged: {"name": string, "keys": string[], "content": string, "replaces": string[]} where "replaces" names the input entries this one supersedes. Return [] if nothing deserves changing. Never invent facts.',
+                context: JSON.stringify({
+                    entries: hits.map(e => ({
+                        name: e.name || "",
+                        keys: e.keys || [],
+                        content: String(e.content || "").slice(0, MAX_CHARS),
+                    })),
+                    recent: recent,
+                }),
+                model: "",
+            });
+            // Reply parsing: strip code fences, take the outermost JSON
+            // array, validate shape. Anything else is a no-op this turn.
+            let changes = null;
+            if (typeof reply === "string" && reply.trim()) {
+                const stripped = reply.replace(/```[a-z]*\\s*/gi, "").replace(/```/g, "");
+                const start = stripped.indexOf("[");
+                const end = stripped.lastIndexOf("]");
+                if (start !== -1 && end > start) {
+                    try { changes = JSON.parse(stripped.slice(start, end + 1)); }
+                    catch (err) { changes = null; }
+                }
+            }
+            if (Array.isArray(changes)) {
+                const byName = {};
+                for (const e of entries) byName[(e.name || "").toLowerCase()] = e;
+                let adds = 0, dels = 0;
+                for (const c of changes.slice(0, MAX_ENTRIES)) {
+                    if (!c || typeof c !== "object") continue;
+                    const name = String(c.name || "").trim().slice(0, 128);
+                    const content = String(c.content || "").trim().slice(0, MAX_CHARS);
+                    if (!name || !content) continue;
+                    const keys = (Array.isArray(c.keys) && c.keys.length ? c.keys : [name])
+                        .map(k => String(k).trim().toLowerCase())
+                        .filter(k => k).slice(0, 8);
+                    const rep = Array.isArray(c.replaces)
+                        ? c.replaces.map(r => String(r).trim()).filter(r => r) : [];
+                    // A rewrite of exactly one entry inherits its position
+                    // and order; a merge takes the Creator's defaults.
+                    let position = "before_last_message";
+                    let order = 10;
+                    if (rep.length === 1) {
+                        const orig = byName[rep[0].toLowerCase()];
+                        if (orig) {
+                            if (orig.position) position = orig.position;
+                            if (Number.isFinite(orig.insertion_order)) order = orig.insertion_order;
+                        }
+                    }
+                    lb.add({
+                        name: name, keys: keys, content: content,
+                        position: position, insertion_order: order,
+                        is_constant: false,
+                    });
+                    adds++;
+                    for (const r of rep) {
+                        if (r.toLowerCase() === name.toLowerCase()) continue;
+                        lb.delete(r);
+                        dels++;
+                    }
+                }
+                const newSize = lb.entries()
+                    .reduce((n, e) => n + (e.content || "").length, 0);
+                context.chat_data.set("rag_last_size", newSize);
+                console.log("RAG Executor: " + adds + " rewritten, " + dels
+                    + " merged away; book now " + newSize + " chars");
+            } else {
+                console.log("RAG Executor: no usable reply this turn; "
+                    + "throttle not advanced");
+            }
+        }
+    }
+}""",
+    },
 ]
 
 

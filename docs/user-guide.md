@@ -667,7 +667,11 @@ How calls behave:
 
 The Cantrip Tester runs Passenger too, against your own endpoints and
 budgets; those test calls are recorded as sandbox traffic so they never
-pollute your live Metrics aggregates.
+pollute your live Metrics aggregates. A worked end-to-end example lives in
+the **Dynamic Lorebook RAG Executor** template (see
+[Dynamic Lorebooks](#dynamic-lorebooks)).
+
+<a id="dynamic-lorebooks"></a>
 
 ### Dynamic Lorebooks (0.37.0)
 
@@ -723,6 +727,18 @@ The **Dynamic Lorebook Creator** template (Cantrips → Templates) is a ready
 example: it files `<memstore key="name">content</memstore>` tags from each
 response into the chat's dynamic book and strips the tags from the visible
 reply.
+
+The **Dynamic Lorebook RAG Executor** template is its companion (0.38.0). Raw
+notes pile up as a chat runs long; the Executor periodically condenses them
+with **one Passenger call** — merging duplicate entries, tightening wording,
+sharpening keywords — and writes the consolidated entries back through
+`context.lorebook`. The engine keeps injecting as usual; the script only
+maintains the book. It fires when the book has grown by 800+ characters
+since the last successful pass (roughly one extra LLM call every few turns,
+not one per response), needs Passenger enabled and a `tool_use`-tagged
+endpoint, and does nothing at all when Passenger is off or the call fails.
+The thresholds are constants at the top of the template's code — edit them
+after install to taste.
 
 ### jslorebook Scripts (0.37.0)
 

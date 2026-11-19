@@ -607,7 +607,10 @@ function); purely synchronous scripts are unaffected.</p>
 </ul>
 <p>The Cantrip Tester runs Passenger too, against your own endpoints and
 budgets; those test calls are recorded as sandbox traffic so they never
-pollute your live Metrics aggregates.</p>
+pollute your live Metrics aggregates. A worked end-to-end example lives in
+the <strong>Dynamic Lorebook RAG Executor</strong> template (see
+<a href="#dynamic-lorebooks">Dynamic Lorebooks</a>).</p>
+<p><a id="dynamic-lorebooks"></a></p>
 <h3 id="dynamic-lorebooks-0370">Dynamic Lorebooks (0.37.0)</h3>
 <p><code>context.lorebook</code> lets a script create and edit <strong>real lorebooks</strong> at
 runtime — same tables, same keyword engine, same guards as the editor. What
@@ -658,6 +661,17 @@ const hits = lb.search('dragon weakness');
 example: it files <code>&lt;memstore key="name"&gt;content&lt;/memstore&gt;</code> tags from each
 response into the chat's dynamic book and strips the tags from the visible
 reply.</p>
+<p>The <strong>Dynamic Lorebook RAG Executor</strong> template is its companion (0.38.0). Raw
+notes pile up as a chat runs long; the Executor periodically condenses them
+with <strong>one Passenger call</strong> — merging duplicate entries, tightening wording,
+sharpening keywords — and writes the consolidated entries back through
+<code>context.lorebook</code>. The engine keeps injecting as usual; the script only
+maintains the book. It fires when the book has grown by 800+ characters
+since the last successful pass (roughly one extra LLM call every few turns,
+not one per response), needs Passenger enabled and a <code>tool_use</code>-tagged
+endpoint, and does nothing at all when Passenger is off or the call fails.
+The thresholds are constants at the top of the template's code — edit them
+after install to taste.</p>
 <h3 id="jslorebook-scripts-0370">jslorebook Scripts (0.37.0)</h3>
 <p><code>&lt;jslorebook&gt;...&lt;/jslorebook&gt;</code> blocks embedded in messages are executed
 now (they were previously stripped for prompt hygiene only). They run

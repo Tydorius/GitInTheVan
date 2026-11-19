@@ -2,6 +2,42 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.38.0] - 2026-11-19
+
+Phase 20b — the passenger-driven RAG half of Dynamic Lorebooks.
+
+### Added
+
+- **Dynamic Lorebook RAG Executor template** (Cantrips → Templates), the
+  companion to the Dynamic Lorebook Creator: as a chat runs long and raw
+  notes pile up, the Executor condenses the chat's dynamic lorebook with
+  one Passenger call — merging duplicate entries, tightening wording,
+  sharpening keywords — and writes the consolidated entries back through
+  `context.lorebook`. The lorebook engine keeps injecting as usual; the
+  template only maintains the book (it deliberately injects nothing
+  itself). This completes Phase 20 as refreshed: 20a shipped in 0.37.0,
+  and the compliance half of 20b (every Passenger call through the
+  unified transport, parameter layers and `record_llm_call`) already
+  shipped inside Phase 17 (0.36.0).
+- **Bounded by design:** the condense pass fires only when the book has
+  grown by 800+ characters since the last successful pass (roughly one
+  extra LLM call every few turns, never one per response), sends at most
+  12 entries, and needs Passenger enabled plus a `tool_use`-tagged
+  endpoint. When Passenger is off, or a call fails or returns unparseable
+  text, nothing happens that turn — and a *failed* pass does not advance
+  the growth throttle, so the next qualifying turn retries. All
+  thresholds are constants at the top of the template's code, editable
+  after install.
+- Writes ride the existing guards (size limits, sanitizer, safety
+  scanner), the 50-ops-per-request cap, sandbox/replay isolation, and the
+  rule-22 Passenger call budget. Deletes happen only for entries the
+  model explicitly names in a `replaces` list — nothing is ever dropped
+  silently, and the consolidated book stays inspectable and undoable from
+  the Lorebooks page like any other.
+
+No database changes; existing installs need no migration step for this
+release.
+
 ## [0.37.1] - 2026-11-19
 
 ### Fixed
