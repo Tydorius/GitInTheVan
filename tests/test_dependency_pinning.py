@@ -307,3 +307,33 @@ class TestDeployScriptPortProbe:
                 "hard-coded 8000 in the port probe: custom-port installs "
                 f"are checked against the wrong port. Probe: {line}"
             )
+
+
+class TestUpdaterBackupPruneSortsByName:
+    """update-windows.bat's keep-newest-10 backup prune sorted `dir /o-d`
+    (mtime order). Windows `copy` preserves the source DB's LastWriteTime,
+    and WAL mode leaves the main .db mtime stale, so every backup shares
+    one mtime -- the sort tie-breaks alphabetically, keeps the OLDEST ten
+    and deletes the just-created backup (observed live 2026-11-20: the
+    run's own logged backup vanished while ten older ones survived).
+    Filenames embed the timestamp, so name order IS time order."""
+
+    def test_backup_prune_uses_name_order(self):
+        src = (ROOT / "scripts" / "update-windows.bat").read_text(
+            encoding="utf-8", errors="replace"
+        )
+        prunes = [
+            line.strip() for line in src.splitlines()
+            if "dir /b" in line and "gitinthevan_backup_" in line
+        ]
+        assert prunes, "backup prune line not found in update-windows.bat"
+        for line in prunes:
+            assert "/o-n" in line, (
+                "the backup prune must sort by NAME (filenames embed the "
+                "timestamp); mtime order deletes the just-created backup "
+                "when `copy` preserves a stale shared LastWriteTime "
+                f"(2026-11-20). Prune: {line}"
+            )
+            assert "/o-d" not in line, (
+                f"mtime-ordered backup prune is the 2026-11-20 bug. Prune: {line}"
+            )

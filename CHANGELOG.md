@@ -2,6 +2,12 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.43.1] - 2026-11-20
+
+### Fixed
+
+- **Windows updater could delete its own database backup.** The keep-newest-10 backup prune in `update-windows.bat` sorted by file modification time, but Windows `copy` preserves the source database's timestamp and WAL mode leaves the main database file's timestamp stale — every backup could share one modification time, so the prune kept the oldest ten and deleted the backup the same run had just created. The prune now sorts by filename (which embeds the timestamp), so the newest ten backups — including the one just written — always survive.
+
 ## [0.43.0] - 2026-11-20
 
 Internal architecture simplification, deduplication, and dead-code cleanup across backend and frontend, plus a performance improvement for cantrip `user_data` seeding. No schema migrations or breaking API changes.

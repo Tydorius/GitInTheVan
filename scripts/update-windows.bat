@@ -160,9 +160,13 @@ if exist "%GITV_ROOT%\data\gitinthevan.db" (
     copy /Y "%GITV_ROOT%\data\gitinthevan.db" "%GITV_ROOT%\!BACKUP_NAME!" >nul
     echo Database backed up to !BACKUP_NAME! >> "%LOG_FILE%"
     echo Database backed up to !BACKUP_NAME!
-    REM Prune to the newest 10. Top level of data\ only: data\backups\ uses the
-    REM same filename prefix for scheduled backups, managed elsewhere.
-    for /f "skip=10 delims=" %%f in ('dir /b /o-d "%GITV_ROOT%\data\gitinthevan_backup_*.db" 2^>nul') do (
+    REM Prune to the newest 10, by NAME order (filenames embed the timestamp).
+    REM Not mtime order: copy preserves the source DB's LastWriteTime and WAL
+    REM mode leaves the main DB's mtime stale, so every backup can share one
+    REM mtime and an mtime sort deletes the just-created backup (2026-11-20).
+    REM Top level of data\ only: data\backups\ uses the same filename prefix
+    REM for scheduled backups, managed elsewhere.
+    for /f "skip=10 delims=" %%f in ('dir /b /o-n "%GITV_ROOT%\data\gitinthevan_backup_*.db" 2^>nul') do (
         del "%GITV_ROOT%\data\%%f" >nul 2>&1
     )
 ) else (
