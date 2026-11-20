@@ -39,6 +39,12 @@ class Lorebook(Base):
     # 0.35.0: 0 = scan the whole conversation (previous behavior); N > 0 =
     # match this book's keys against only the newest N messages.
     scan_depth: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    # 0.42.0: opt-in per book (default off = substring matching, the
+    # original behavior). When on, keywords match on word boundaries only
+    # ("Rook" no longer fires on "rookie").
+    word_boundary_keys: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
     budget_weight: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False

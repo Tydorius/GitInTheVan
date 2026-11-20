@@ -576,3 +576,83 @@ class TestReplay:
     async def test_replaying_a_missing_run_is_a_404(self, admin_client):
         client, _, _ = admin_client
         assert (await client.post("/api/debug/nope/replay")).status_code == 404
+
+
+# ============================================================================
+# 0.42.0: debug quality (Request 5, N4b, N4c)
+# ============================================================================
+
+class TestProgressiveShedding:
+    @pytest.mark.asyncio
+    async def test_only_the_largest_snapshots_are_shed(self, monkeypatch):
+        """Over the cap, snapshots drop largest-first with a re-check after
+        each -- not all at once. A run at 2x the cap keeps its small
+        stages' snapshots and only loses the big one(s)."""
+        from app.services import admin as admin_mod
+        from app.services.debug import _serialize_pipeline
+
+        async def fake_caps():
+            return {"max_debug_exchange_kb": 1}  # 1 KB cap
+
+        monkeypatch.setattr(admin_mod, "get_caps", fake_caps)
+
+        pipeline = {
+            "run": {"model": "m"},
+            "stages": [
+                {"name": "small", "messages_before": ["s" * 100],
+                 "messages_after": ["s" * 100]},
+                {"name": "big", "messages_before": ["b" * 900],
+                 "messages_after": ["b" * 900]},
+            ],
+        }
+        out = await _serialize_pipeline(pipeline)
+        trimmed = json.loads(out)
+
+        assert trimmed["truncated"] is True
+        big = next(s for s in trimmed["stages"] if s["name"] == "big")
+        small = next(s for s in trimmed["stages"] if s["name"] == "small")
+        assert big.get("messages_dropped") is True
+        assert big["messages_before"] is None
+        # The whole point: the small stage KEEPS its snapshots.
+        assert small.get("messages_dropped") is not True
+        assert small["messages_before"], (
+            "progressive shedding must preserve the smallest stages"
+        )
+        # The old all-at-once behavior set messages_dropped on every stage.
+        assert len(out) <= 1024 + 1024  # cap plus marker headroom
+
+
+class TestNavigatorCantripsInTrace:
+    @pytest.mark.skipif(not __import__(
+        "app.services.deno_runner", fromlist=["DENO_PATH"]).DENO_PATH,
+        reason="Deno not available")
+    @pytest.mark.asyncio
+    async def test_post_driver_run_appears_in_trace_with_logs(self, admin_client):
+        """N4c: navigator-position cantrip runs (and their console output)
+        must appear in the Debug trace's run.cantrips, not only at debug
+        log level."""
+        client, _, _ = admin_client
+        me = (await client.get("/api/auth/me")).json()
+        user_id = me["id"]
+
+        from app.services.cantrip import process_cantrips_post_driver
+        from app.services.debug import init_debug
+
+        await client.post("/api/cantrips", json={
+            "name": "NoisyNavigator", "is_active": True,
+            "run_pre_navigator": True,
+            "code": "console.log('NAV_LOG_MARKER'); if (context.response) { context.response.content = context.response.content + ' cleaned'; }",
+        })
+
+        body = {
+            "model": "m", "stream": False,
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+        init_debug(body, [])
+        await process_cantrips_post_driver("reply text", body, user_id, {})
+
+        run = body["_gitv_debug"]["run"]
+        records = [c for c in run.get("cantrips", [])
+                   if c.get("name") == "NoisyNavigator"]
+        assert records, "navigator-position run must appear in run.cantrips"
+        assert "NAV_LOG_MARKER" in (records[0].get("debug_logs") or [])

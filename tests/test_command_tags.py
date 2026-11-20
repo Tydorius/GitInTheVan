@@ -213,3 +213,61 @@ class TestResolveOverrides:
         assert resolved.verify is None
         assert resolved.forbidden is None
         assert resolved.driver_callable is None
+
+
+# ============================================================================
+# 0.42.0 (B6.1): <MEMORY:off> keeps the conversation anchor
+# ============================================================================
+
+class TestMemoryOffKeepsConversation:
+    @pytest.mark.asyncio
+    async def test_memory_off_still_records_the_anchor(self, admin_client, httpx_mock):
+        """`<MEMORY:off>` skips memory extraction but must still record the
+        conversation hash. The recording used to hide inside
+        _extract_response_memories, so a memory-off request left no anchor
+        and the next request started a brand-new chat."""
+        client, _, gitv_key = admin_client
+
+        await client.post("/api/endpoints", json={
+            "name": "MemOff", "base_url": "http://mock-memoff:9999",
+            "api_key": "sk-test",
+        })
+        httpx_mock.add_response(
+            url="http://mock-memoff:9999/v1/chat/completions",
+            json={
+                "id": "1", "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "reply text"},
+                    "finish_reason": "stop",
+                }],
+            },
+            status_code=200,
+        )
+
+        resp = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "m", "stream": False,
+                "messages": [
+                    {"role": "system", "content": "sys"},
+                    {"role": "user", "content": "hello <MEMORY:off>"},
+                ],
+            },
+            headers={
+                "Authorization": f"Bearer {gitv_key}",
+                "x-conversation-id": "memoff-1",
+            },
+        )
+        assert resp.status_code == 200
+
+        from sqlalchemy import select
+
+        from app.models.conversation_hash import ConversationHash
+        from tests.conftest import TestSessionLocal
+
+        async with TestSessionLocal() as db:
+            rows = (await db.execute(
+                select(ConversationHash).where(ConversationHash.user_id.isnot(None))
+            )).scalars().all()
+        assert rows, "<MEMORY:off> must not orphan the conversation (B6.1)"

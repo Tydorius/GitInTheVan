@@ -21,25 +21,33 @@ const __userData = JSON.parse(__b64("__GITV_USERDATA__"));
 const __cantripData = JSON.parse(__b64("__GITV_CANTRIPDATA__"));
 const __userCode = __b64("__GITV_USERCODE__");
 
+// 0.42.0: delete() must persist. The facades record deleted keys so the
+// host save step can remove the rows -- the final dict alone cannot
+// express "this key is gone" (absence once meant "untouched", which is
+// why deletes used to resurface on the next request).
+const __chatDataDeletes = new Set();
+const __userDataDeletes = new Set();
+const __cantripDataDeletes = new Set();
+
 context.chat_data = {
     get: (key) => key in __chatData ? __chatData[key] : null,
-    set: (key, value) => { __chatData[key] = value; },
+    set: (key, value) => { __chatData[key] = value; __chatDataDeletes.delete(key); },
     keys: () => Object.keys(__chatData),
-    delete: (key) => { delete __chatData[key]; }
+    delete: (key) => { delete __chatData[key]; __chatDataDeletes.add(key); }
 };
 
 context.user_data = {
     get: (key) => key in __userData ? __userData[key] : null,
-    set: (key, value) => { __userData[key] = value; },
+    set: (key, value) => { __userData[key] = value; __userDataDeletes.delete(key); },
     keys: () => Object.keys(__userData),
-    delete: (key) => { delete __userData[key]; }
+    delete: (key) => { delete __userData[key]; __userDataDeletes.add(key); }
 };
 
 context.cantrip_data = {
     get: (key) => key in __cantripData ? __cantripData[key] : null,
-    set: (key, value) => { __cantripData[key] = value; },
+    set: (key, value) => { __cantripData[key] = value; __cantripDataDeletes.delete(key); },
     keys: () => Object.keys(__cantripData),
-    delete: (key) => { delete __cantripData[key]; }
+    delete: (key) => { delete __cantripData[key]; __cantripDataDeletes.add(key); }
 };
 
 const __memories = context.__memories || {};
@@ -158,10 +166,14 @@ function __lorebookOpAllowed() {
 }
 
 function __findLorebookEntry(book, entryName) {
-    const lower = String(entryName).toLowerCase();
-    let hit = book.entries.find(e => (e.name || '').toLowerCase() === lower);
+    // 0.42.0 (B8b): name matching is case-sensitive, mirroring the host's
+    // _find_entry -- add({name: "tavern"}) must not silently overwrite an
+    // entry named "Tavern". The keys fallback still folds case.
+    const name = String(entryName);
+    let hit = book.entries.find(e => (e.name || '') === name);
     if (hit) return hit;
     // Exact-key fallback: an entry known by a keyword rather than its name.
+    const lower = name.toLowerCase();
     return book.entries.find(e => (e.keys || []).some(k => String(k).toLowerCase() === lower));
 }
 
@@ -422,6 +434,9 @@ const __result = {
     chat_data: Object.assign({}, __chatData),
     user_data: Object.assign({}, __userData),
     cantrip_data: Object.assign({}, __cantripData),
+    chat_data_deletes: Array.from(__chatDataDeletes),
+    user_data_deletes: Array.from(__userDataDeletes),
+    cantrip_data_deletes: Array.from(__cantripDataDeletes),
     memories: Object.assign({}, __memories),
     maps_nominated: __mapNominations,
     lorebook_ops: __lorebookOps,

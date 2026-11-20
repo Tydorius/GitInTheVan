@@ -1495,6 +1495,41 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             """,
         },
     ),
+    (
+        "062_tag_group_activate_members",
+        # 0.42.0: per-group opt-in (default off) making membership a direct
+        # activation source, so blank-tag members run when the group fires.
+        # Boolean literals follow the 054/055 precedent: TRUE/FALSE on
+        # PostgreSQL, 0/1 elsewhere.
+        {
+            "sqlite": """
+            ALTER TABLE tag_groups ADD COLUMN activate_members BOOLEAN NOT NULL DEFAULT 0;
+            """,
+            "postgresql": """
+            ALTER TABLE tag_groups ADD COLUMN activate_members BOOLEAN NOT NULL DEFAULT FALSE;
+            """,
+            "mysql": """
+            ALTER TABLE tag_groups ADD COLUMN activate_members BOOLEAN NOT NULL DEFAULT 0;
+            """,
+        },
+    ),
+    (
+        "063_lorebook_word_boundary_keys",
+        # 0.42.0: per-book opt-in (default off = substring matching, the
+        # original behavior). When on, keywords match on word boundaries
+        # only ("Rook" no longer fires on "rookie").
+        {
+            "sqlite": """
+            ALTER TABLE lorebooks ADD COLUMN word_boundary_keys BOOLEAN NOT NULL DEFAULT 0;
+            """,
+            "postgresql": """
+            ALTER TABLE lorebooks ADD COLUMN word_boundary_keys BOOLEAN NOT NULL DEFAULT FALSE;
+            """,
+            "mysql": """
+            ALTER TABLE lorebooks ADD COLUMN word_boundary_keys BOOLEAN NOT NULL DEFAULT 0;
+            """,
+        },
+    ),
 ]
 
 

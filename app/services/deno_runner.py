@@ -53,6 +53,12 @@ class CantripResult:
     chat_data: dict = field(default_factory=dict)
     user_data: dict = field(default_factory=dict)
     cantrip_data: dict = field(default_factory=dict)
+    # 0.42.0: keys the script deleted via the store facades. Absent from
+    # the dicts above AND listed here = delete the row host-side; present
+    # in the dicts = deleted then re-set in the same run (the set wins).
+    chat_data_deletes: list[str] = field(default_factory=list)
+    user_data_deletes: list[str] = field(default_factory=list)
+    cantrip_data_deletes: list[str] = field(default_factory=list)
     memories: dict = field(default_factory=dict)
     # Map tags the cantrip asked to activate via context.maps.activate(tag).
     # A nomination, not a command: maps are a selection resource under repo
@@ -201,6 +207,9 @@ async def run_cantrip(
             chat_data=result_data.get("chat_data", {}),
             user_data=result_data.get("user_data", {}),
             cantrip_data=result_data.get("cantrip_data", {}),
+            chat_data_deletes=result_data.get("chat_data_deletes", []),
+            user_data_deletes=result_data.get("user_data_deletes", []),
+            cantrip_data_deletes=result_data.get("cantrip_data_deletes", []),
             memories=result_data.get("memories", {}),
             maps_nominated=result_data.get("maps_nominated", []),
             lorebook_ops=result_data.get("lorebook_ops", []),

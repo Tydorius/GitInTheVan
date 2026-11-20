@@ -198,34 +198,75 @@ async def _serialize_pipeline(pipeline_data: dict[str, Any]) -> str:
         return blob
 
     trimmed = json.loads(blob)
-    shed = 0
-    for stage in trimmed.get("stages", []):
-        for key in ("messages_before", "messages_after"):
-            if stage.get(key):
-                shed += len(stage[key])
-                stage[key] = None
-        stage["messages_dropped"] = True
+    stages = trimmed.get("stages", [])
 
-    trimmed["truncated"] = True
-    trimmed["truncated_reason"] = (
-        f"Trace was {len(blob) // 1024} KB, over the {cap_kb} KB admin limit. "
-        f"Per-stage message snapshots were dropped ({shed // 1024} KB). "
-        "Reasoning, cantrip output and metrics are intact."
+    def _stage_weight(stage: dict[str, Any], keys: tuple[str, ...]) -> int:
+        return sum(
+            len(json.dumps(stage.get(k), default=str))
+            for k in keys
+            if stage.get(k)
+        )
+
+    # 0.42.0 (Request 5): shed PROGRESSIVELY, largest stage first,
+    # re-checking the estimate after each drop. Previously every stage's
+    # snapshots went the moment the cap was crossed, destroying the whole
+    # timeline's diff to save a few KB.
+    def _shed_progressively(keys: tuple[str, ...], marker_key: str) -> int:
+        """Drop per-stage payload in `keys` largest-first until the
+        estimated size fits. Returns how many stages were shed."""
+        approx = len(blob) + 300  # headroom for the truncated marker text
+        candidates = sorted(
+            ((i, _stage_weight(s, keys)) for i, s in enumerate(stages)
+             if any(s.get(k) for k in keys)),
+            key=lambda pair: pair[1],
+            reverse=True,
+        )
+        shed_count = 0
+        for idx, weight in candidates:
+            if approx <= cap_bytes:
+                break
+            stage = stages[idx]
+            for k in keys:
+                stage[k] = None if "messages" in k else ""
+            stage[marker_key] = True
+            approx -= weight
+            shed_count += 1
+        return shed_count
+
+    total_stages = len(stages)
+    shed_stages = _shed_progressively(
+        ("messages_before", "messages_after"), "messages_dropped"
     )
 
     blob = json.dumps(trimmed, default=str)
     if len(blob) > cap_bytes:
-        # Still over after shedding snapshots: the cantrip payloads or reasoning
-        # are themselves oversized. Keep the run block and stage headers, which
-        # is what the comparison view needs, and say so.
-        for stage in trimmed.get("stages", []):
+        # Still over: the cantrip payloads or reasoning are themselves
+        # oversized. Tier two drops stage metadata/content, progressively
+        # too, keeping the run block and stage headers -- what the
+        # comparison view needs -- and says so.
+        shed_meta = _shed_progressively(
+            ("metadata", "content_before", "content_after"), "metadata_dropped"
+        )
+        blob = json.dumps(trimmed, default=str)
+
+    trimmed["truncated"] = True
+    reason = (
+        f"Trace was over the {cap_kb} KB admin limit. "
+        f"Message snapshots of {shed_stages} of {total_stages} stage(s) were "
+        "dropped, largest first"
+    )
+    if len(blob) > cap_bytes:
+        reason += f", then metadata/content of {shed_meta} stage(s)"
+        for stage in stages:
             stage["metadata"] = {"dropped": "oversized"}
             stage["content_before"] = ""
             stage["content_after"] = ""
-        trimmed["truncated_reason"] += " Stage metadata was dropped as well."
         blob = json.dumps(trimmed, default=str)
+    reason += ". Reasoning, cantrip output and metrics are intact."
+    trimmed["truncated_reason"] = reason
+    blob = json.dumps(trimmed, default=str)
 
-    logger.info("Debug trace exceeded %d KB cap; snapshots shed", cap_kb)
+    logger.info("Debug trace exceeded %d KB cap; %d stage(s) shed", cap_kb, shed_stages)
     return blob
 
 

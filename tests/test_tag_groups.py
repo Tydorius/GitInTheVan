@@ -159,7 +159,7 @@ class TestGroupResolver:
         user_id = me["id"]
 
         async with TestSessionLocal() as db:
-            expanded, activated = await resolve_group_tags(db, user_id, [
+            expanded, activated, _ = await resolve_group_tags(db, user_id, [
                 {"type": "lore", "name": "foo", "owner": None, "raw": "lore-foo"}
             ])
         assert len(expanded) == 1
@@ -192,7 +192,7 @@ class TestGroupResolver:
         })
 
         async with TestSessionLocal() as db:
-            expanded, activated = await resolve_group_tags(db, user_id, [])
+            expanded, activated, _ = await resolve_group_tags(db, user_id, [])
 
         tag_names = {(t["type"], t["name"]) for t in expanded}
         assert ("lore", "lbtag1") in tag_names
@@ -219,7 +219,7 @@ class TestGroupResolver:
 
         tags = [{"type": "taggroup", "name": "mygroup", "owner": None, "raw": "mygroup"}]
         async with TestSessionLocal() as db:
-            expanded, activated = await resolve_group_tags(db, user_id, tags)
+            expanded, activated, _ = await resolve_group_tags(db, user_id, tags)
 
         assert ("lore", "mylb") in {(t["type"], t["name"]) for t in expanded}
         assert activated == ["TagActivated"]
@@ -241,7 +241,7 @@ class TestGroupResolver:
         })
 
         async with TestSessionLocal() as db:
-            expanded, activated = await resolve_group_tags(db, user_id, [])
+            expanded, activated, _ = await resolve_group_tags(db, user_id, [])
 
         assert expanded == []
         assert activated == []
@@ -264,7 +264,7 @@ class TestGroupResolver:
         })
 
         async with TestSessionLocal() as db:
-            expanded, activated = await resolve_group_tags(db, user_id, [])
+            expanded, activated, _ = await resolve_group_tags(db, user_id, [])
 
         assert expanded == []
         assert activated == ["MissingMember"]
@@ -289,7 +289,7 @@ class TestGroupResolver:
 
         tags = [{"type": "lore", "name": "dupe", "owner": None, "raw": "lore-dupe"}]
         async with TestSessionLocal() as db:
-            expanded, _ = await resolve_group_tags(db, user_id, tags)
+            expanded, _, _ = await resolve_group_tags(db, user_id, tags)
 
         lore_dupe_tags = [t for t in expanded if t["type"] == "lore" and t["name"] == "dupe"]
         assert len(lore_dupe_tags) == 1
@@ -413,3 +413,252 @@ class TestPipelineIntegration:
         body = json.loads(forwarded.content)
         full_text = json.dumps(body["messages"])
         assert "SCENE_BY_TAG" in full_text
+
+
+# ============================================================================
+# Upgrade path: migration 062 on the old schema
+# ============================================================================
+
+class TestMigration062UpgradePath:
+    @pytest.mark.asyncio
+    async def test_column_added_on_upgrade(self):
+        """tag_groups is migration-created (035), so TestMigrationCoverage
+        checks the model/migration pair statically -- this proves the ALTER
+        actually runs on a pre-062 database (the skills.budget_weight bug
+        class, rule 10): create_all from current models, drop the column,
+        vacuity-check, migrate, round-trip through the ORM."""
+        from sqlalchemy import text
+        from sqlalchemy.ext.asyncio import create_async_engine
+
+        from app.models.base import Base
+        from app.services.migrations import run_migrations
+
+        engine = create_async_engine("sqlite+aiosqlite://", echo=False)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+                await conn.execute(
+                    text("ALTER TABLE tag_groups DROP COLUMN activate_members")
+                )
+
+            # Vacuity check: this really reproduces the old schema.
+            async with engine.connect() as conn:
+                cols = await conn.execute(text("PRAGMA table_info(tag_groups)"))
+                col_names = {r[1] for r in cols.all()}
+            assert "activate_members" not in col_names
+
+            await run_migrations(engine)
+
+            from sqlalchemy import insert, select
+
+            from app.models.tag_group import TagGroup
+            async with engine.begin() as conn:
+                await conn.execute(insert(TagGroup).values(
+                    user_id="u-upg062", name="G", tag="g", activate_members=True))
+                raw = (await conn.execute(
+                    select(TagGroup.activate_members).where(TagGroup.name == "G")
+                )).scalar_one()
+            assert raw is True
+        finally:
+            await engine.dispose()
+
+
+
+
+# ============================================================================
+# 0.42.0: raw-string tag matching + activate_members (seventh source)
+# ============================================================================
+
+class TestRawTagMatching:
+    """A group tag that collides with a TAG_TYPES prefix (taggroup-kok,
+    lore-kok, kok-lore-set) could never activate: parse_tag strips the
+    prefix and the resolver matched only the parsed *name*. The copy button
+    emits the raw string -- match it too."""
+
+    @pytest.mark.asyncio
+    async def test_taggroup_prefixed_group_tag_activates(self, admin_client):
+        from tests.conftest import TestSessionLocal
+        client, _, _ = admin_client
+        me = (await client.get("/api/auth/me")).json()
+        user_id = me["id"]
+
+        lb_resp = await client.post("/api/lorebooks", json={"name": "KLB", "tag": "koklore"})
+        lb_id = lb_resp.json()["id"]
+        await client.post("/api/tag-groups", json={
+            "name": "KoK", "tag": "taggroup-kok",
+            "members": [{"member_type": "lorebook", "member_id": lb_id}],
+        })
+
+        async with TestSessionLocal() as db:
+            expanded, activated, direct = await resolve_group_tags(db, user_id, [
+                {"type": "taggroup", "name": "kok", "owner": None, "raw": "taggroup-kok"}
+            ])
+        assert activated == ["KoK"]
+        assert ("lore", "koklore") in {(t["type"], t["name"]) for t in expanded}
+
+    @pytest.mark.asyncio
+    async def test_mid_tag_type_word_activates(self, admin_client):
+        """'kok-lore-set' parses as type=lore owner=kok name=set -- never a
+        group lookup under name matching. The raw form still identifies the
+        group."""
+        from tests.conftest import TestSessionLocal
+        client, _, _ = admin_client
+        me = (await client.get("/api/auth/me")).json()
+        user_id = me["id"]
+
+        lb_resp = await client.post("/api/lorebooks", json={"name": "MidLB", "tag": "midlore"})
+        lb_id = lb_resp.json()["id"]
+        await client.post("/api/tag-groups", json={
+            "name": "Mid", "tag": "kok-lore-set",
+            "members": [{"member_type": "lorebook", "member_id": lb_id}],
+        })
+
+        async with TestSessionLocal() as db:
+            expanded, activated, direct = await resolve_group_tags(db, user_id, [
+                {"type": "lore", "name": "set", "owner": "kok", "raw": "kok-lore-set"}
+            ])
+        assert activated == ["Mid"]
+        assert ("lore", "midlore") in {(t["type"], t["name"]) for t in expanded}
+
+
+class TestActivateMembersFlag:
+    """The opt-in seventh activation source (rule 19): a flagged group that
+    activates returns its members' ids directly, so a blank-tag inactive
+    member is reachable. Off (the default) keeps the macro semantics."""
+
+    @pytest.mark.asyncio
+    async def test_flagged_group_returns_direct_member_ids(self, admin_client):
+        from tests.conftest import TestSessionLocal
+        client, _, _ = admin_client
+        me = (await client.get("/api/auth/me")).json()
+        user_id = me["id"]
+
+        # Blank tag, inactive: unreachable by any tag or Active flag.
+        ct_resp = await client.post("/api/cantrips", json={
+            "name": "Ledger", "code": "1", "is_active": False,
+        })
+        ct_id = ct_resp.json()["id"]
+
+        await client.post("/api/tag-groups", json={
+            "name": "Flagged", "tag": "kok", "activate_members": True,
+            "members": [{"member_type": "cantrip", "member_id": ct_id}],
+        })
+
+        async with TestSessionLocal() as db:
+            expanded, activated, direct = await resolve_group_tags(db, user_id, [
+                {"type": "unknown", "name": "kok", "owner": None, "raw": "kok"}
+            ])
+        assert activated == ["Flagged"]
+        assert direct.get("cantrip") == {ct_id}
+
+    @pytest.mark.asyncio
+    async def test_unflagged_group_returns_no_direct_ids(self, admin_client):
+        from tests.conftest import TestSessionLocal
+        client, _, _ = admin_client
+        me = (await client.get("/api/auth/me")).json()
+        user_id = me["id"]
+
+        ct_resp = await client.post("/api/cantrips", json={
+            "name": "Ledger2", "code": "1", "is_active": False,
+        })
+        ct_id = ct_resp.json()["id"]
+
+        await client.post("/api/tag-groups", json={
+            "name": "Unflagged", "tag": "kok2",
+            "members": [{"member_type": "cantrip", "member_id": ct_id}],
+        })
+
+        async with TestSessionLocal() as db:
+            expanded, activated, direct = await resolve_group_tags(db, user_id, [
+                {"type": "unknown", "name": "kok2", "owner": None, "raw": "kok2"}
+            ])
+        assert activated == ["Unflagged"]
+        assert direct == {}
+
+    @pytest.mark.asyncio
+    async def test_flagged_but_not_activated_returns_no_direct_ids(self, admin_client):
+        from tests.conftest import TestSessionLocal
+        client, _, _ = admin_client
+        me = (await client.get("/api/auth/me")).json()
+        user_id = me["id"]
+
+        ct_resp = await client.post("/api/cantrips", json={
+            "name": "Ledger3", "code": "1", "is_active": False,
+        })
+        ct_id = ct_resp.json()["id"]
+
+        await client.post("/api/tag-groups", json={
+            "name": "Dormant", "tag": "dormant", "activate_members": True,
+            "members": [{"member_type": "cantrip", "member_id": ct_id}],
+        })
+
+        async with TestSessionLocal() as db:
+            expanded, activated, direct = await resolve_group_tags(db, user_id, [])
+        assert activated == []
+        assert direct == {}
+
+    @pytest.mark.asyncio
+    async def test_activate_members_round_trips_through_api(self, admin_client):
+        client, _, _ = admin_client
+        create = await client.post("/api/tag-groups", json={
+            "name": "RoundTrip", "tag": "rt", "activate_members": True,
+        })
+        assert create.status_code == 201
+        gid = create.json()["id"]
+        assert create.json()["activate_members"] is True
+
+        update = await client.put(f"/api/tag-groups/{gid}", json={"activate_members": False})
+        assert update.status_code == 200
+        assert update.json()["activate_members"] is False
+
+
+class TestDirectActivationPipeline:
+    @pytest.mark.asyncio
+    async def test_flagged_group_runs_blank_tag_lorebook_in_proxy(self, admin_client, httpx_mock):
+        """End to end: <#taggroup-kok#> (the raw copied form) + a flagged
+        group injects a lorebook that has no tag and is inactive."""
+        client, _, gitv_key = admin_client
+
+        await client.post("/api/endpoints", json={
+            "name": "DirectTest", "base_url": MOCK_ENDPOINT_URL, "api_key": "sk-test",
+        })
+
+        lb_resp = await client.post("/api/lorebooks", json={
+            "name": "Untagged Book", "tag": "", "is_active": False,
+        })
+        lb_id = lb_resp.json()["id"]
+        await client.post(f"/api/lorebooks/{lb_id}/entries", json={
+            "name": "Always",
+            "keys": [],
+            "content": "DIRECT_MEMBER_INJECTED",
+            "position": "before_last_message",
+            "insertion_order": 10,
+            "is_constant": True,
+            "is_selective": False,
+        })
+
+        await client.post("/api/tag-groups", json={
+            "name": "KoK Direct", "tag": "taggroup-kok", "activate_members": True,
+            "members": [{"member_type": "lorebook", "member_id": lb_id}],
+        })
+
+        httpx_mock.add_response(
+            url=f"{MOCK_ENDPOINT_URL}/v1/chat/completions",
+            json=_mock_response("response"),
+            status_code=200,
+        )
+
+        resp = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "hello <#taggroup-kok#>"}],
+                "stream": False,
+            },
+            headers={"Authorization": f"Bearer {gitv_key}"},
+        )
+        assert resp.status_code == 200
+
+        forwarded = httpx_mock.get_requests()[-1]
+        full_text = json.dumps(json.loads(forwarded.content)["messages"])
+        assert "DIRECT_MEMBER_INJECTED" in full_text

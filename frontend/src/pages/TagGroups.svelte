@@ -28,8 +28,16 @@
     name: '',
     tag: '',
     is_active: false,
+    activate_members: false,
     members: [] as { member_type: string; member_id: string; checked: boolean }[],
   }
+
+  // Members whose own tag is blank: reachable through this group ONLY via
+  // direct activation (0.42.0) -- the macro path has nothing to expand.
+  $: blankTagMembers = [
+    ...lorebooks.filter((lb: any, i: number) => form.members[i]?.checked && !lb.tag).map((lb: any) => lb.name),
+    ...cantrips.filter((c: any, j: number) => form.members[lorebooks.length + j]?.checked && !c.tag).map((c: any) => c.name),
+  ]
 
   // Tag edit modal
   let tagModalResource: any = null
@@ -59,6 +67,7 @@
       name: '',
       tag: '',
       is_active: false,
+      activate_members: false,
       members: [
         ...lorebooks.map((lb: any) => ({ member_type: 'lorebook', member_id: lb.id, checked: false })),
         ...cantrips.map((c: any) => ({ member_type: 'cantrip', member_id: c.id, checked: false })),
@@ -75,6 +84,7 @@
       name: detail.name,
       tag: detail.tag,
       is_active: detail.is_active,
+      activate_members: detail.activate_members ?? false,
       members: [
         ...lorebooks.map((lb: any) => ({
           member_type: 'lorebook', member_id: lb.id,
@@ -98,13 +108,17 @@
         .map(m => ({ member_type: m.member_type, member_id: m.member_id }))
 
       if (editingId) {
-        await api.updateTagGroup(editingId, { name: form.name, tag: form.tag, is_active: form.is_active })
+        await api.updateTagGroup(editingId, {
+          name: form.name, tag: form.tag, is_active: form.is_active,
+          activate_members: form.activate_members,
+        })
         await api.updateTagGroupMembers(editingId, selectedMembers)
       } else {
         await api.createTagGroup({
           name: form.name,
           tag: form.tag,
           is_active: form.is_active,
+          activate_members: form.activate_members,
           members: selectedMembers,
         })
       }
@@ -325,6 +339,15 @@
             <input type="checkbox" bind:checked={form.is_active} style="width: auto;">
             Active (blanket-applied on every message)
           </label>
+          <label style="display: flex; align-items: center; gap: 6px; margin-top: 6px;">
+            <input type="checkbox" bind:checked={form.activate_members} style="width: auto;">
+            Activate members directly (including members with no tag of their own)
+          </label>
+          <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+            Off (default): the group works as a shortcut that injects each member's own tag.
+            On: when the group activates, every member runs regardless of its own tag or
+            Active flag.
+          </p>
         </div>
         <div class="form-group">
           <label>Members</label>
@@ -353,6 +376,13 @@
               <div style="color: var(--text-dim); font-size: 12px;">No lorebooks or cantrips available.</div>
             {/if}
           </div>
+          {#if blankTagMembers.length > 0}
+            <p style="color: var(--text-dim); font-size: 11px; margin-top: 6px;">
+              No tag of their own: <strong>{blankTagMembers.join(', ')}</strong>.
+              Those members run through this group only with "Activate members
+              directly" on — otherwise give them their own tags.
+            </p>
+          {/if}
         </div>
         <div class="modal-actions">
           <button type="button" onclick={() => showForm = false}>Cancel</button>

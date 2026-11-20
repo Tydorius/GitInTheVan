@@ -225,11 +225,20 @@ async def execute_tool_call(
         # A sandbox or replay run reads the live stores but must not write the
         # user-scoped ones — same rule as process_cantrips.
         if params["conversation_id"]:
-            await _save_chat_data(db, user_id, params["conversation_id"], result.chat_data)
+            await _save_chat_data(
+                db, user_id, params["conversation_id"], result.chat_data,
+                deletes=set(result.chat_data_deletes),
+            )
         if persist_shared:
-            await _save_user_data(db, user_id, result.user_data)
+            await _save_user_data(
+                db, user_id, result.user_data,
+                deletes=set(result.user_data_deletes),
+            )
             if result.cantrip_data != cantrip_data:
-                await _save_cantrip_data(db, user_id, tool.id, result.cantrip_data)
+                await _save_cantrip_data(
+                    db, user_id, tool.id, result.cantrip_data,
+                    deletes=set(result.cantrip_data_deletes),
+                )
 
     tool_result = ""
     if hasattr(result, "tool_result") and result.tool_result:

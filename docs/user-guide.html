@@ -784,13 +784,19 @@ cantrips run at the other positions.</p>
   chats stop paying a full-history scan per key. Constant entries always apply regardless of
   the window. The window counts messages of the request as the book sees it, including
   earlier injections on map stages.</li>
+<li><strong>Whole-word keywords only</strong>: off by default — keywords match anywhere inside a word
+  ("Rook" fires on "rookie", "Crow" on "crowd"). When on, keywords match on word
+  boundaries only, which retires punctuation-suffix workaround keys like <code>Crow,</code> and
+  <code>Crow.</code>.</li>
 </ul>
 <p><a id="dynamic-lorebooks"></a></p>
 <h3 id="dynamic-lorebooks">Dynamic Lorebooks</h3>
 <p><code>context.lorebook</code> lets a cantrip create and edit <strong>real lorebooks</strong> at
 runtime — same tables, same keyword engine, same guards as the editor. What
 a script writes this turn is injected this turn, and every turn after, in
-that conversation.</p>
+that conversation. One exception: an entry the main lorebook pass already
+injected this turn is not injected a second time by a same-turn update —
+the rewritten content serves from the next turn's main pass.</p>
 <pre><code class="language-javascript">// Conversation-scoped by default: the book lives in this chat only.
 const lb = context.lorebook.create({ name: 'Chat Notes' });
 lb.add({
@@ -906,6 +912,7 @@ cantrip-written lorebooks.</p>
 <li>Enter a <strong>Name</strong> and <strong>Group Tag</strong></li>
 <li>Check the lorebooks and cantrips to include</li>
 <li>Optionally enable <strong>Active</strong> (blanket-applied on every message without needing the tag)</li>
+<li>Optionally enable <strong>Activate members directly</strong> — when the group fires, every member runs regardless of its own tag or Active flag</li>
 </ol>
 <p><strong>Group behavior:</strong></p>
 <ul>
@@ -915,6 +922,7 @@ cantrip-written lorebooks.</p>
 <li>If a member lorebook or cantrip is deleted, the group logs a warning and continues</li>
 <li>If a resource is called multiple times in the same pipeline stage (e.g., via both its own tag and a group), only one instance activates</li>
 </ul>
+<p><strong>Two activation modes.</strong> By default a group is a <em>shortcut</em>: when it fires, it injects each member's own tag, so a member with no tag of its own is never reached — the editor lists such members so you can give them tags. With <strong>Activate members directly</strong> on, membership itself turns members on when the group activates (by its tag or its Active flag) — the mode for untagged members. Both modes only ever add; nothing can switch a member off.</p>
 <h3 id="tags-tab">Tags Tab</h3>
 <p>The Tags tab shows all your lorebooks and cantrips in one table with their tags and visibility settings.</p>
 <ul>
@@ -940,6 +948,9 @@ it the same way.</p>
 </ol>
 <p>So a resource switched off in the UI still runs if a tag names it, and that is
 correct — you asked for it by name, in the message.</p>
+<p>One more union source: a tag group with <strong>Activate members directly</strong> on
+turns its members on when the group fires, regardless of their own tags —
+see <a href="#tags-and-groups">Tags and Groups</a>.</p>
 <h3 id="maps-and-memory-rules-are-chosen-not-stacked">Maps and memory rules are chosen, not stacked</h3>
 <p>Exactly one map and one memory rule can win, so rule 4 works differently for
 them: Active cannot also mean "apply to everything", because blanket-running a
@@ -1634,7 +1645,7 @@ editable at runtime from the Storage page.</p>
 <li><strong>Injection Budget (%)</strong>: Percentage of the context window reserved for injections (default 10). Set to 0 to disable budgeting entirely.</li>
 <li><strong>Context Window Override</strong>: Manually set the model's context window size in tokens. Set to 0 to auto-detect from the model name (e.g., GPT-4o = 128K, Claude 3.5 = 200K, Gemini 2 = 1M).</li>
 </ul>
-<p>When enabled, each active cantrip and lorebook receives a proportional share of the budget based on their <strong>Budget Weight</strong> field (found on each cantrip/lorebook edit form). Cantrips can read <code>context.budget.detail_level</code> to choose between full, summary, or bullet-point output.</p>
+<p>When enabled, each active cantrip and lorebook receives a proportional share of the budget based on their <strong>Budget Weight</strong> field (found on each cantrip/lorebook edit form). Cantrips can read <code>context.budget.detail_level</code> to choose between full, summary, or bullet-point output. The budget is computed <strong>before</strong> anything is injected, and each lorebook's matched entries stop at its share (later entries stop matching once the share is spent). Only skills and samples attached to the endpoint in use count toward the share split.</p>
 <h3 id="security-settings">Security Settings</h3>
 <p>Server-level security — CORS origins, rate limits, request size cap, JWT
 lifetime, password strength — is set at install time via <code>.env</code>

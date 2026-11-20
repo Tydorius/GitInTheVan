@@ -75,6 +75,7 @@ class LorebookCreate(BaseModel):
     run_post_navigator: bool = False
     inject_after_cantrips: bool = False
     scan_depth: int = 0
+    word_boundary_keys: bool = False
     budget_weight: float = 1.0
 
 
@@ -91,6 +92,7 @@ class LorebookUpdate(BaseModel):
     run_post_navigator: bool | None = None
     inject_after_cantrips: bool | None = None
     scan_depth: int | None = None
+    word_boundary_keys: bool | None = None
     budget_weight: float | None = None
 
 
@@ -108,6 +110,7 @@ class LorebookResponse(BaseModel):
     run_post_navigator: bool
     inject_after_cantrips: bool
     scan_depth: int
+    word_boundary_keys: bool
     budget_weight: float
     entries: list[EntryResponse]
 
@@ -126,6 +129,7 @@ class LorebookListItem(BaseModel):
     run_post_navigator: bool
     inject_after_cantrips: bool
     scan_depth: int
+    word_boundary_keys: bool
     budget_weight: float
     entry_count: int
 
@@ -211,6 +215,7 @@ async def list_lorebooks(
                 budget_weight=lb.budget_weight,
                 inject_after_cantrips=lb.inject_after_cantrips,
                 scan_depth=lb.scan_depth,
+                word_boundary_keys=lb.word_boundary_keys,
                 entry_count=len(lb.entries),
             )
             for lb in lorebooks
@@ -246,6 +251,7 @@ async def list_public_lorebooks(
                 budget_weight=lb.budget_weight,
                 inject_after_cantrips=lb.inject_after_cantrips,
                 scan_depth=lb.scan_depth,
+                word_boundary_keys=lb.word_boundary_keys,
                 entry_count=len(lb.entries),
             )
             for lb in lorebooks
@@ -285,6 +291,7 @@ async def get_lorebook(
         budget_weight=lorebook.budget_weight,
         inject_after_cantrips=lorebook.inject_after_cantrips,
         scan_depth=lorebook.scan_depth,
+        word_boundary_keys=lorebook.word_boundary_keys,
         entries=[_entry_to_response(e) for e in lorebook.entries],
     )
 
@@ -310,6 +317,7 @@ async def create_lorebook(
         budget_weight=req.budget_weight,
         inject_after_cantrips=req.inject_after_cantrips,
         scan_depth=max(0, req.scan_depth),
+        word_boundary_keys=req.word_boundary_keys,
     )
     db.add(lorebook)
     await db.commit()
@@ -329,6 +337,7 @@ async def create_lorebook(
         budget_weight=lorebook.budget_weight,
         inject_after_cantrips=lorebook.inject_after_cantrips,
         scan_depth=lorebook.scan_depth,
+        word_boundary_keys=lorebook.word_boundary_keys,
         entries=[],
     )
 
@@ -380,6 +389,8 @@ async def update_lorebook(
         lorebook.inject_after_cantrips = req.inject_after_cantrips
     if req.scan_depth is not None:
         lorebook.scan_depth = max(0, req.scan_depth)
+    if req.word_boundary_keys is not None:
+        lorebook.word_boundary_keys = req.word_boundary_keys
     if req.budget_weight is not None:
         lorebook.budget_weight = req.budget_weight
 
@@ -400,6 +411,7 @@ async def update_lorebook(
         budget_weight=lorebook.budget_weight,
         inject_after_cantrips=lorebook.inject_after_cantrips,
         scan_depth=lorebook.scan_depth,
+        word_boundary_keys=lorebook.word_boundary_keys,
         entries=[],
     )
 
@@ -659,6 +671,7 @@ async def import_lorebook(
         budget_weight=lorebook.budget_weight,
         inject_after_cantrips=lorebook.inject_after_cantrips,
         scan_depth=lorebook.scan_depth,
+        word_boundary_keys=lorebook.word_boundary_keys,
         entries=[_entry_to_response(e) for e in lorebook.entries],
     )
 

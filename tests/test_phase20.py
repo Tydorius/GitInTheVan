@@ -1078,3 +1078,153 @@ class TestUpgradePath:
                 assert row.name == "notes"
         finally:
             await pre.dispose()
+
+
+# ============================================================================
+# 0.42.0: dynamic lorebook correctness (B7.4, B8a, B8b, B8c)
+# ============================================================================
+
+class TestDynamicLorebookFixes:
+    async def _uid(self, client) -> str:
+        return (await client.get("/api/auth/me")).json()["id"]
+
+    async def test_add_over_existing_takes_a_snapshot(self, admin_client):
+        """B8a: an `add` that overwrites a stored entry is an update in
+        disguise and owes a pre_edit snapshot -- it used to skip the gate,
+        so the pre-edit state was unrecoverable."""
+        from sqlalchemy import select
+
+        from app.models.resource_snapshot import ResourceSnapshot
+
+        client, _, _ = admin_client
+        uid = await self._uid(client)
+
+        from app.services.dynamic_lorebook import apply_ops
+
+        async with TestSessionLocal() as db:
+            await apply_ops(db, {}, uid, "conv-b8a", list(_CREATE_OPS), source="t")
+        async with TestSessionLocal() as db:
+            await apply_ops(db, {}, uid, "conv-b8a", [
+                {"op": "add", "book": "notes", "entry": {
+                    "name": "dragon", "keys": ["dragon"],
+                    "content": "Dragons fear nothing now.",
+                }},
+            ], source="t")
+        async with TestSessionLocal() as db:
+            snaps = (await db.execute(
+                select(ResourceSnapshot).where(
+                    ResourceSnapshot.user_id == uid,
+                    ResourceSnapshot.resource_type == "lorebook",
+                )
+            )).scalars().all()
+            assert snaps, "an add-as-upsert over a stored row must snapshot first"
+            assert any(
+                "Dragons fear silver." in (s.content_json or "")
+                for s in snaps
+            ), "the snapshot must carry the PRE-edit content"
+
+    async def test_add_does_not_clobber_across_case(self, admin_client):
+        """B8b: name matching is case-sensitive. add({name: "tavern"}) must
+        create a new entry beside an existing "Tavern", not overwrite it."""
+        from sqlalchemy import select
+
+        from app.models.lorebook_entry import LorebookEntry
+
+        client, _, _ = admin_client
+        uid = await self._uid(client)
+
+        from app.services.dynamic_lorebook import apply_ops
+
+        ops = [
+            {"op": "create", "book": "notes", "tag": ""},
+            {"op": "add", "book": "notes", "entry": {
+                "name": "Tavern", "keys": ["tavern-hall"], "content": "the old one",
+            }},
+            {"op": "add", "book": "notes", "entry": {
+                "name": "tavern", "keys": ["inn"], "content": "the new one",
+            }},
+        ]
+        async with TestSessionLocal() as db:
+            await apply_ops(db, {}, uid, "conv-b8b", ops, source="t")
+        async with TestSessionLocal() as db:
+            rows = (await db.execute(select(LorebookEntry))).scalars().all()
+            contents = sorted(r.content for r in rows if r.lorebook_id)
+            assert "the old one" in contents and "the new one" in contents, (
+                "both entries must exist -- no silent clobber across case"
+            )
+
+    async def test_delete_sees_a_same_batch_add(self, admin_client):
+        """B8c: the sandbox's working copy reflects same-run adds, so a
+        delete after an add in one batch must remove the staged add instead
+        of being refused while the add lands anyway."""
+        from sqlalchemy import select
+
+        from app.models.lorebook_entry import LorebookEntry
+
+        client, _, _ = admin_client
+        uid = await self._uid(client)
+
+        from app.services.dynamic_lorebook import apply_ops
+
+        ops = [
+            {"op": "create", "book": "notes", "tag": ""},
+            {"op": "add", "book": "notes", "entry": {
+                "name": "ephemeral", "keys": ["eph"], "content": "temporary",
+            }},
+            {"op": "delete", "book": "notes", "entry": "ephemeral"},
+        ]
+        async with TestSessionLocal() as db:
+            delta = await apply_ops(db, {}, uid, "conv-b8c", ops, source="t")
+            assert delta == [], "a deleted staged add must produce no delta row"
+        async with TestSessionLocal() as db:
+            rows = (await db.execute(select(LorebookEntry))).scalars().all()
+            assert all(r.name != "ephemeral" for r in rows), (
+                "the staged add must not land after its same-batch delete"
+            )
+
+
+@requires_deno
+class TestDoubleInjectionFixE2E:
+    async def test_matched_and_updated_entry_injects_once(self, admin_client, httpx_mock):
+        """B7.4: an entry the main pass already injected this turn (old
+        content) must not inject a second time through the same-turn delta
+        (new content). The rewrite serves from the next turn's main pass."""
+        client, _, api_key = admin_client
+        await _make_e2e_endpoint(client)
+        await client.post("/api/cantrips", json={
+            "name": "Dyn Writer", "code": _WRITER_CANTRIP,
+            "is_active": False, "tag": "writer",
+        })
+        await client.post("/api/cantrips", json={
+            "name": "Dyn Updater",
+            "code": (
+                'const lb = context.lorebook.get("Chat Notes");'
+                'if (lb) lb.update("dragon", {content: "UPDATED_DRAGON_LORE"});'
+            ),
+            "is_active": False, "tag": "updater",
+        })
+
+        # Turn 1: create the book with a constant entry.
+        _upstream(httpx_mock)
+        resp = await _send(client, api_key,
+                           content="hello <#cantrip-writer#>")
+        assert resp.status_code == 200, resp.text
+        assert "DYNAMIC_DRAGON_LORE" in _forwarded_text(httpx_mock)
+
+        # Turn 2: the entry matches (constant, bound book) AND is updated.
+        # Exactly ONE of the two contents may reach the model.
+        _upstream(httpx_mock)
+        resp = await _send(client, api_key,
+                           content="again <#cantrip-updater#>")
+        assert resp.status_code == 200, resp.text
+        text = _forwarded_text(httpx_mock)
+        assert "DYNAMIC_DRAGON_LORE" in text, "the main pass still serves it"
+        assert "UPDATED_DRAGON_LORE" not in text, (
+            "the delta must not double-inject an already-served entry (B7.4)"
+        )
+
+        # Turn 3: the rewrite serves from the main pass.
+        _upstream(httpx_mock)
+        resp = await _send(client, api_key, content="third")
+        assert resp.status_code == 200, resp.text
+        assert "UPDATED_DRAGON_LORE" in _forwarded_text(httpx_mock)

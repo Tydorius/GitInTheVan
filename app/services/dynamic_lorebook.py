@@ -31,7 +31,7 @@ import logging
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -316,15 +316,22 @@ async def _find_dynamic_row(
 
 
 async def _find_entry(db: AsyncSession, lorebook_id: str, ref: str) -> LorebookEntry | None:
-    """Entry by name (case-insensitive), exact-key fallback — the same rule
-    the sandbox facade uses, so what a script updated is what gets updated."""
+    """Entry by exact name (case-sensitive), exact-key fallback — the same
+    rule the sandbox facade uses, so what a script updated is what gets
+    updated.
+
+    0.42.0 (B8b): name matching is case-sensitive. It used to fold case,
+    so ``add({name: "tavern"})`` silently overwrote an entry named
+    ``Tavern``; now the two are distinct entries and the upsert cannot
+    clobber across case. The keys fallback still folds case (keys are
+    keyword lists, matched case-insensitively everywhere else)."""
     if not ref:
         return None
     row = (
         await db.execute(
             select(LorebookEntry).where(
                 LorebookEntry.lorebook_id == lorebook_id,
-                func.lower(LorebookEntry.name) == ref.lower(),
+                LorebookEntry.name == ref,
             )
         )
     ).scalar_one_or_none()
@@ -479,7 +486,7 @@ async def apply_ops(
             if not ref:
                 keys = parse_json_list(fields.get("keys", "[]"))
                 ref = keys[0] if keys else ""
-            staged_hit = staged_by_key.get((book_key, ref.lower()))
+            staged_hit = staged_by_key.get((book_key, ref))
             existing = staged_hit["existing"] if staged_hit else (
                 await _find_entry(db, lorebook_id, ref) if lorebook_id else None
             )
@@ -500,7 +507,7 @@ async def apply_ops(
             step = {"kind": "upsert", "book": name, "lorebook_id": lorebook_id,
                     "existing": existing, "fields": fields}
             staged.append(step)
-            staged_by_key[(book_key, ref.lower())] = step
+            staged_by_key[(book_key, ref)] = step
             outcomes.append({
                 "op": "add", "book": name, "outcome": "updated" if existing else "added",
             })
@@ -512,7 +519,7 @@ async def apply_ops(
             if not ref or fields is None:
                 outcomes.append({"op": "update", "book": name, "outcome": "refused", "reason": "malformed update"})
                 continue
-            staged_hit = staged_by_key.get((book_key, ref.lower()))
+            staged_hit = staged_by_key.get((book_key, ref))
             existing = staged_hit["existing"] if staged_hit else (
                 await _find_entry(db, lorebook_id, ref) if lorebook_id else None
             )
@@ -545,6 +552,18 @@ async def apply_ops(
 
         # delete
         ref = str(op.get("entry") or "")
+        # 0.42.0 (B8c): a delete must see an add staged earlier in the same
+        # batch. The sandbox's working copy reflects same-run adds, so the
+        # script saw its delete succeed -- the host used to refuse it and
+        # land the add anyway. A staged add over nothing is simply dropped;
+        # a staged add over a stored row falls through to the normal DB
+        # delete (net delete, both snapshots owed).
+        staged_hit = staged_by_key.get((book_key, ref))
+        if staged_hit is not None and staged_hit["kind"] == "upsert" and staged_hit.get("existing") is None:
+            staged_hit["kind"] = "noop"
+            outcomes.append({"op": "delete", "book": name,
+                             "outcome": "deleted (staged add removed)"})
+            continue
         existing = await _find_entry(db, lorebook_id, ref) if lorebook_id else None
         if existing is None:
             outcomes.append({"op": "delete", "book": name, "outcome": "refused",
@@ -590,6 +609,9 @@ async def apply_ops(
     staged_finals: list[dict[str, Any]] = []
     for step in staged:
         kind = step["kind"]
+        if kind == "noop":
+            # 0.42.0 (B8c): a same-batch add cancelled by a later delete.
+            continue
         if kind == "set_tag":
             book = (
                 await db.execute(select(Lorebook).where(Lorebook.id == step["lorebook_id"]))
@@ -600,7 +622,12 @@ async def apply_ops(
         lorebook_id = step["lorebook_id"] or resolved.get(step["book"], "")
         book_name = book_name_by_id.get(lorebook_id) or step["book"]
         existing: LorebookEntry | None = step.get("existing")
-        if existing is not None and kind in ("update", "delete"):
+        # 0.42.0 (B8a): an `add` that overwrote a stored entry (staged as
+        # kind "upsert" with a resolved existing row) owes a pre_edit
+        # snapshot just like an update -- it used to skip the gate and
+        # destroy the pre-edit state. Same-batch add-merges over nothing
+        # still skip (nothing existed to snapshot).
+        if existing is not None and kind in ("update", "delete", "upsert"):
             await snapshots.capture(db, user_id, "lorebook", lorebook_id)
         if kind == "delete":
             await db.delete(existing)

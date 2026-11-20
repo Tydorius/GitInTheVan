@@ -893,6 +893,10 @@ Two options on the Pipeline Positions editor (the **Edit Positions** button on a
   chats stop paying a full-history scan per key. Constant entries always apply regardless of
   the window. The window counts messages of the request as the book sees it, including
   earlier injections on map stages.
+- **Whole-word keywords only**: off by default — keywords match anywhere inside a word
+  ("Rook" fires on "rookie", "Crow" on "crowd"). When on, keywords match on word
+  boundaries only, which retires punctuation-suffix workaround keys like `Crow,` and
+  `Crow.`.
 
 <a id="dynamic-lorebooks"></a>
 
@@ -901,7 +905,9 @@ Two options on the Pipeline Positions editor (the **Edit Positions** button on a
 `context.lorebook` lets a cantrip create and edit **real lorebooks** at
 runtime — same tables, same keyword engine, same guards as the editor. What
 a script writes this turn is injected this turn, and every turn after, in
-that conversation.
+that conversation. One exception: an entry the main lorebook pass already
+injected this turn is not injected a second time by a same-turn update —
+the rewritten content serves from the next turn's main pass.
 
 ```javascript
 // Conversation-scoped by default: the book lives in this chat only.
@@ -1043,6 +1049,7 @@ Groups let you activate multiple lorebooks and cantrips with a single tag. Inste
 2. Enter a **Name** and **Group Tag**
 3. Check the lorebooks and cantrips to include
 4. Optionally enable **Active** (blanket-applied on every message without needing the tag)
+5. Optionally enable **Activate members directly** — when the group fires, every member runs regardless of its own tag or Active flag
 
 **Group behavior:**
 
@@ -1051,6 +1058,8 @@ Groups let you activate multiple lorebooks and cantrips with a single tag. Inste
 - Groups cannot nest into each other
 - If a member lorebook or cantrip is deleted, the group logs a warning and continues
 - If a resource is called multiple times in the same pipeline stage (e.g., via both its own tag and a group), only one instance activates
+
+**Two activation modes.** By default a group is a *shortcut*: when it fires, it injects each member's own tag, so a member with no tag of its own is never reached — the editor lists such members so you can give them tags. With **Activate members directly** on, membership itself turns members on when the group activates (by its tag or its Active flag) — the mode for untagged members. Both modes only ever add; nothing can switch a member off.
 
 ### Tags Tab
 
@@ -1081,6 +1090,10 @@ it the same way.
 
 So a resource switched off in the UI still runs if a tag names it, and that is
 correct — you asked for it by name, in the message.
+
+One more union source: a tag group with **Activate members directly** on
+turns its members on when the group fires, regardless of their own tags —
+see [Tags and Groups](#tags-and-groups).
 
 ### Maps and memory rules are chosen, not stacked
 
@@ -1895,7 +1908,7 @@ Allocates a percentage of the model's context window for injected content (cantr
 - **Injection Budget (%)**: Percentage of the context window reserved for injections (default 10). Set to 0 to disable budgeting entirely.
 - **Context Window Override**: Manually set the model's context window size in tokens. Set to 0 to auto-detect from the model name (e.g., GPT-4o = 128K, Claude 3.5 = 200K, Gemini 2 = 1M).
 
-When enabled, each active cantrip and lorebook receives a proportional share of the budget based on their **Budget Weight** field (found on each cantrip/lorebook edit form). Cantrips can read `context.budget.detail_level` to choose between full, summary, or bullet-point output.
+When enabled, each active cantrip and lorebook receives a proportional share of the budget based on their **Budget Weight** field (found on each cantrip/lorebook edit form). Cantrips can read `context.budget.detail_level` to choose between full, summary, or bullet-point output. The budget is computed **before** anything is injected, and each lorebook's matched entries stop at its share (later entries stop matching once the share is spent). Only skills and samples attached to the endpoint in use count toward the share split.
 
 ### Security Settings
 

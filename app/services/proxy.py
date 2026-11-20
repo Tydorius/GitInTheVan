@@ -337,15 +337,26 @@ async def _forward_request_impl(
 
         from app.services.group_resolver import resolve_group_tags
         async with async_session() as group_db:
-            tags, activated_group_names = await resolve_group_tags(group_db, user_id, tags)
+            tags, activated_group_names, group_member_ids = await resolve_group_tags(
+                group_db, user_id, tags
+            )
         if activated_group_names:
             body_json["_gitv_tags"] = tags
             body_json["_gitv_activated_groups"] = activated_group_names
+            if group_member_ids:
+                # Seventh activation source (rule 19): ids of members of
+                # activated groups that opted into direct activation. The
+                # cantrip/lorebook decision sites OR these in.
+                body_json["_gitv_group_member_ids"] = group_member_ids
             logger.info("Tag groups activated: %s", activated_group_names)
             if debug_on:
                 debug_capture(body_json, "tag_group_resolution", "Tag Group Resolution",
                     detail=f"Activated groups: {', '.join(activated_group_names)}",
-                    metadata={"groups": activated_group_names, "expanded_tag_count": len(tags)})
+                    metadata={
+                        "groups": activated_group_names,
+                        "expanded_tag_count": len(tags),
+                        "direct_member_count": sum(len(v) for v in group_member_ids.values()),
+                    })
 
         from app.services.conversation import (
             load_memories_for_chat,
@@ -532,6 +543,20 @@ async def _forward_request_impl(
             if _order_plan["enabled"]:
                 manual_order_plan = _order_plan
 
+        # 0.42.0 (B9b): the budget is computed BEFORE anything is injected.
+        # It used to run after lorebook and skills injection, so injected
+        # text was counted as conversation and the budget never constrained
+        # it. Now current_tokens measures the raw client prompt, and each
+        # book's share caps its own entry matching below.
+        from app.services.budget import prepare_budget
+        await prepare_budget(
+            body_json, user_id, tags, endpoint_id=body_json.get("_gitv_endpoint_id", "")
+        )
+        if debug_on:
+            debug_capture(body_json, "budget_preparation", "Budget Preparation",
+                detail="Context budget allocated",
+                metadata={"budget": body_json.get("_gitv_budget", {})})
+
         if manual_order_plan is not None:
             if debug_on:
                 debug_capture(body_json, "lorebook_injection", "Lorebook Injection",
@@ -596,13 +621,6 @@ async def _forward_request_impl(
         elif debug_on:
             debug_capture(body_json, "skills_injection", "Skills Injection",
                 detail="No endpoint configured", setting="endpoint_skills", setting_value=False)
-
-        from app.services.budget import prepare_budget
-        await prepare_budget(body_json, user_id, tags)
-        if debug_on:
-            debug_capture(body_json, "budget_preparation", "Budget Preparation",
-                detail="Context budget allocated",
-                metadata={"budget": body_json.get("_gitv_budget", {})})
 
         # Map candidacy was resolved above the lorebook-injection site (the
         # manual pipeline order needs it early; the hoist is
@@ -722,6 +740,24 @@ async def _forward_request_impl(
         # the body; this is the non-map injection point (map stages pop the
         # delta per stage inside run_map_pipeline, before their own forward).
         dynamic_delta = body_json.pop("_gitv_dynamic_lorebook_delta", None)
+        served_entry_ids = body_json.pop("_gitv_main_matched_entry_ids", None)
+        dynamic_delta_skipped = 0
+        if dynamic_delta and served_entry_ids:
+            # 0.42.0 (B7.4): drop delta rows for entries the main pass
+            # already injected this turn (double-injection fix).
+            kept = [
+                e for e in dynamic_delta
+                if not (e.entry_id and e.entry_id in served_entry_ids)
+            ]
+            dynamic_delta_skipped = len(dynamic_delta) - len(kept)
+            if dynamic_delta_skipped:
+                logger.info(
+                    "Dynamic lorebook same-turn delta: skipped %d entr%s "
+                    "already injected by the main pass (B7.4)",
+                    dynamic_delta_skipped,
+                    "y" if dynamic_delta_skipped == 1 else "ies",
+                )
+            dynamic_delta = kept
         if dynamic_delta:
             from app.services.metrics import record_prompt_object
 
@@ -738,12 +774,19 @@ async def _forward_request_impl(
                     body_json, "lorebook_entry", e.entry_id,
                     0, max(1, len(e.content) // 4), parent_id=e.lorebook_id,
                 )
-        if debug_on and dynamic_delta:
+        # Rule 16: the stage appears even when every row was skipped, so a
+        # user can SEE that the delta was considered and why nothing landed.
+        if debug_on and (dynamic_delta or dynamic_delta_skipped):
             debug_capture(
                 body_json, "dynamic_lorebook_injection", "Dynamic Lorebook Injection (Same-Turn)",
                 detail=(
                     f"{len(dynamic_delta)} entr"
                     f"{'y' if len(dynamic_delta) == 1 else 'ies'} written by cantrips injected this turn"
+                    + (
+                        f"; {dynamic_delta_skipped} skipped as already injected"
+                        " by the main pass (B7.4)"
+                        if dynamic_delta_skipped else ""
+                    )
                 ),
                 metadata={
                     "entries": [
@@ -755,7 +798,9 @@ async def _forward_request_impl(
                             "position": e.position,
                         }
                         for e in dynamic_delta
-                    ]
+                    ],
+                    **({"skipped_already_served": dynamic_delta_skipped}
+                       if dynamic_delta_skipped else {}),
                 },
             )
 
@@ -1242,10 +1287,16 @@ async def _apply_lorebook_injection(
         async with async_session() as db:
             # Shared loader (also feeds the manual-order orchestrator), so
             # both orderings activate lorebooks through one code path.
+            from app.services.group_resolver import group_direct_members
             from app.services.lorebook import load_active_lorebooks
 
             active_lorebooks = await load_active_lorebooks(
-                db, user_id, tags, request_headers, internal_chat_id
+                db,
+                user_id,
+                tags,
+                request_headers,
+                internal_chat_id,
+                direct_member_ids=group_direct_members(body_json),
             )
 
             if not any(lb.entries for lb in active_lorebooks):
@@ -1285,7 +1336,20 @@ async def _apply_lorebook_injection(
                     }
                     for entry in lb.entries
                 ]
-                book_matched = match_book_entries(messages, book_entries, lb.scan_depth)
+                book_matched = match_book_entries(
+                    messages, book_entries, lb.scan_depth,
+                    word_boundary=lb.word_boundary_keys,
+                    # 0.42.0 (B9b): the book's budget share finally caps its
+                    # injection (the cap existed but no caller passed it).
+                    # Tokens -> chars via the canonical len//4 estimator.
+                    total_budget=(
+                        (body_json.get("_gitv_budget_allocations") or {})
+                        .get("allocations", {})
+                        .get(lb.id, {})
+                        .get("share", 0)
+                        * 4
+                    ),
+                )
                 if lb.inject_after_cantrips:
                     deferred_pending = True
                     deferred_matched.extend(book_matched)
@@ -1333,6 +1397,14 @@ async def _apply_lorebook_injection(
                 + [_detail(e, True) for e in deferred_matched]
             )
             body_json["_gitv_matched_entries"] = matched_detail
+            # 0.42.0 (B7.4): entry ids served by the main pass this turn.
+            # The same-turn delta filters these out -- an entry that already
+            # injected (old content) must not inject a second time via its
+            # update's delta (new content). The rewrite serves from the next
+            # turn's main pass, exactly like post-driver ops always have.
+            body_json["_gitv_main_matched_entry_ids"] = {
+                e["entry_id"] for e in matched_detail if e.get("entry_id")
+            }
 
             # Per-entry prompt metrics (settled decision: granularity is the
             # entry, with the book id on parent_id so aggregates roll up).
@@ -1349,6 +1421,32 @@ async def _apply_lorebook_injection(
     except Exception:
         logger.exception("Lorebook injection failed, forwarding original request")
         return body_json
+
+
+async def _record_conversation_anchor(
+    response_data: dict[str, Any], user_id: str, body_json: dict[str, Any]
+) -> None:
+    """0.42.0 (B6.1): conversation identity must survive `<MEMORY:off>`.
+
+    Recording the post-hash used to hide inside _extract_response_memories,
+    so turning memory off for a request also stopped the conversation from
+    matching on the next one -- the chat silently started over. Memory
+    extraction stays skipped; only the anchor is recorded, against the
+    unmodified content (memory is off, so memstore tags are neither
+    stripped nor saved)."""
+    choices = response_data.get("choices", [])
+    if not choices:
+        return
+    content = choices[0].get("message", {}).get("content", "")
+    if not content:
+        return
+    chat_id = body_json.get("_gitv_chat_id", "")
+    if not chat_id:
+        return
+    messages_for_hash = body_json.get("_gitv_messages_for_hash", body_json.get("messages", []))
+    from app.services.conversation import record_post_hash
+
+    await record_post_hash(messages_for_hash, content, chat_id, user_id)
 
 
 async def _extract_response_memories(
@@ -1725,6 +1823,11 @@ async def _forward_non_streaming_verified(
         if body_json.get("_gitv_command_overrides", {}).get("memory") is not False:
             response_data = await _extract_response_memories(response_data, user_id, body_json)
             response_data = _append_pending_notices(response_data, body_json)
+        else:
+            # 0.42.0 (B6.1): memory is off, but the conversation anchor is
+            # not part of memory -- record it or the next request starts a
+            # new chat.
+            await _record_conversation_anchor(response_data, user_id, body_json)
 
     if isinstance(response_data, dict):
         response_data.pop("_gitv_forbidden_summary", None)
@@ -1868,14 +1971,18 @@ async def _apply_post_driver_processing(
             embedded_scripts=embedded_jslb_scripts(body_json, "pre_navigator"),
         )
         if new_content != content:
+            # 0.42.0 (N4a): capture the BEFORE text before it is overwritten.
+            # Both snapshots used to read the post-cantrip content, so the
+            # stage's diff always showed "no change".
+            original_content = content
             response_data["choices"][0]["message"]["content"] = new_content
             content = new_content
             logger.info("Pre-navigator cantrips modified response")
             if debug_on:
                 from app.services.debug import debug_capture_response
                 debug_capture_response(body_json, "pre_navigator_cantrips", "Pre-Navigator Cantrips",
-                    content_before=response_data["choices"][0]["message"]["content"][:500],
-                    content_after=content[:500],
+                    content_before=original_content,
+                    content_after=new_content,
                     detail="Response modified by pre-navigator cantrips")
         elif debug_on:
             from app.services.debug import debug_capture_response
@@ -1945,7 +2052,7 @@ async def _apply_post_navigator_processing(
             if debug_on:
                 from app.services.debug import debug_capture_response
                 debug_capture_response(body_json, "post_navigator_cantrips", "Post-Navigator Cantrips",
-                    content_before=content[:500], content_after=new_content[:500],
+                    content_before=content, content_after=new_content,
                     detail="Response modified by post-navigator cantrips")
         elif debug_on:
             from app.services.debug import debug_capture_response

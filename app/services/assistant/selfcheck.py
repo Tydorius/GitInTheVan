@@ -160,7 +160,7 @@ async def _dry_run_activation(ctx: Any, args: dict[str, Any]) -> list[CheckResul
     results: list[CheckResult] = []
 
     async with async_session() as db:
-        expanded_tags, activated_groups = await group_resolver.resolve_group_tags(
+        expanded_tags, activated_groups, _direct = await group_resolver.resolve_group_tags(
             db, ctx.user_id, extracted
         )
 

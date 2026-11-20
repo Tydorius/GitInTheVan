@@ -1218,3 +1218,175 @@ class TestProxyIntegrationJanitorSeeded:
         assert "[Personality]" not in system
         assert "[Scenario]" not in system
         assert len(messages) == 2
+
+
+# ============================================================================
+# 0.42.0: store delete() persists (N5)
+# ============================================================================
+
+class TestStoreDeletesPersist:
+    """The sandbox facades record deleted keys and the host saves delete
+    the rows. Previously saves were upsert-only, so a deleted key
+    resurfaced on the next request -- every KoK cantrip's delete was
+    silently undone. Delete-then-set in one run keeps the new value."""
+
+    @pytest.mark.asyncio
+    async def test_chat_data_delete_persists(self, admin_client):
+        client, _, _ = admin_client
+        me = (await client.get("/api/auth/me")).json()
+        user_id = me["id"]
+
+        from app.models.chat_data import ChatData
+        from app.services.cantrip import _load_chat_data, process_cantrips
+        from tests.conftest import TestSessionLocal
+
+        conv = "conv-delete-persist-1"
+        async with TestSessionLocal() as db:
+            db.add(ChatData(user_id=user_id, conversation_id=conv,
+                            key="day", value_json="3"))
+            await db.commit()
+
+        await client.post("/api/cantrips", json={
+            "name": "ChatDeleter", "is_active": True,
+            "code": "context.chat_data.delete('day'); context.chat_data.set('kept', 'yes');",
+        })
+
+        body = {
+            "model": "m", "stream": False,
+            "messages": [{"role": "user", "content": "hi"}],
+            "_gitv_chat_id": conv,
+        }
+        await process_cantrips(body, user_id, {}, position="pre_driver")
+
+        async with TestSessionLocal() as db:
+            loaded = await _load_chat_data(db, user_id, conv)
+        assert "day" not in loaded, "deleted key must not resurface (N5)"
+        assert loaded.get("kept") == "yes"
+
+    @pytest.mark.asyncio
+    async def test_user_data_delete_persists(self, admin_client):
+        client, _, _ = admin_client
+        me = (await client.get("/api/auth/me")).json()
+        user_id = me["id"]
+
+        from app.models.user_data import UserData
+        from app.services.cantrip import _load_user_data, process_cantrips
+        from tests.conftest import TestSessionLocal
+
+        async with TestSessionLocal() as db:
+            db.add(UserData(user_id=user_id, key="stale", value_json='"x"'))
+            await db.commit()
+
+        await client.post("/api/cantrips", json={
+            "name": "UserDeleter", "is_active": True,
+            "code": "context.user_data.delete('stale');",
+        })
+
+        body = {
+            "model": "m", "stream": False,
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+        await process_cantrips(body, user_id, {}, position="pre_driver")
+
+        async with TestSessionLocal() as db:
+            loaded = await _load_user_data(db, user_id)
+        assert "stale" not in loaded
+
+    @pytest.mark.asyncio
+    async def test_cantrip_data_delete_persists(self, admin_client):
+        client, _, _ = admin_client
+        me = (await client.get("/api/auth/me")).json()
+        user_id = me["id"]
+
+        from app.models.cantrip_data import CantripData
+        from app.services.cantrip import _load_cantrip_data, process_cantrips
+        from tests.conftest import TestSessionLocal
+
+        ct = await client.post("/api/cantrips", json={
+            "name": "SelfDeleter", "is_active": True,
+            "code": "context.cantrip_data.delete('old'); context.cantrip_data.set('new', 1);",
+        })
+        ct_id = ct.json()["id"]
+
+        async with TestSessionLocal() as db:
+            db.add(CantripData(user_id=user_id, cantrip_id=ct_id,
+                               key="old", value_json="9"))
+            await db.commit()
+
+        body = {
+            "model": "m", "stream": False,
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+        await process_cantrips(body, user_id, {}, position="pre_driver")
+
+        async with TestSessionLocal() as db:
+            loaded = await _load_cantrip_data(db, user_id, ct_id)
+        assert "old" not in loaded
+        assert loaded.get("new") == 1
+
+    @pytest.mark.asyncio
+    async def test_delete_then_set_keeps_the_new_value(self, admin_client):
+        """A key deleted and re-set in the same run keeps its new value --
+        the final dict is the truth, the delete must not clobber it."""
+        client, _, _ = admin_client
+        me = (await client.get("/api/auth/me")).json()
+        user_id = me["id"]
+
+        from app.models.chat_data import ChatData
+        from app.services.cantrip import _load_chat_data, process_cantrips
+        from tests.conftest import TestSessionLocal
+
+        conv = "conv-delete-persist-2"
+        async with TestSessionLocal() as db:
+            db.add(ChatData(user_id=user_id, conversation_id=conv,
+                            key="a", value_json='"old"'))
+            await db.commit()
+
+        await client.post("/api/cantrips", json={
+            "name": "DeleteThenSet", "is_active": True,
+            "code": "context.chat_data.delete('a'); context.chat_data.set('a', 'new');",
+        })
+
+        body = {
+            "model": "m", "stream": False,
+            "messages": [{"role": "user", "content": "hi"}],
+            "_gitv_chat_id": conv,
+        }
+        await process_cantrips(body, user_id, {}, position="pre_driver")
+
+        async with TestSessionLocal() as db:
+            loaded = await _load_chat_data(db, user_id, conv)
+        assert loaded.get("a") == "new"
+
+    @pytest.mark.asyncio
+    async def test_post_driver_delete_persists(self, admin_client):
+        """The response-side pass aggregates deletes the same way."""
+        client, _, _ = admin_client
+        me = (await client.get("/api/auth/me")).json()
+        user_id = me["id"]
+
+        from app.models.chat_data import ChatData
+        from app.services.cantrip import _load_chat_data, process_cantrips_post_driver
+        from tests.conftest import TestSessionLocal
+
+        conv = "conv-delete-persist-3"
+        async with TestSessionLocal() as db:
+            db.add(ChatData(user_id=user_id, conversation_id=conv,
+                            key="draft", value_json="1"))
+            await db.commit()
+
+        await client.post("/api/cantrips", json={
+            "name": "PostDeleter", "is_active": True, "run_pre_navigator": True,
+            "code": "context.chat_data.delete('draft');",
+        })
+
+        body = {
+            "model": "m", "stream": False,
+            "messages": [{"role": "user", "content": "hi"}],
+            "_gitv_chat_id": conv,
+        }
+        await process_cantrips_post_driver("reply", body, user_id, {})
+
+        async with TestSessionLocal() as db:
+            loaded = await _load_chat_data(db, user_id, conv)
+        assert "draft" not in loaded

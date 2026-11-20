@@ -121,14 +121,18 @@ def compute_budget(
 
 
 async def load_weighted_resources(
-    user_id: str, tags: list | None = None
+    user_id: str, tags: list | None = None, endpoint_id: str = ""
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Load active cantrips, lorebooks, and skills with their budget weights.
 
     Returns (cantrips, lorebooks, skills) where each entry is a dict with
     id, name, weight, and position info.
+
+    0.42.0 (B9a): with an endpoint id, only the skills/samples ATTACHED to
+    that endpoint count. Every owned skill used to dilute the shares --
+    including ones no request would ever inject.
     """
-    from app.models.skill import Skill
+    from app.models.skill import EndpointSkill, Skill
     from app.services.tagging import should_activate_resource
 
     async with async_session() as db:
@@ -164,9 +168,19 @@ async def load_weighted_resources(
             ):
                 active_cantrips.append(c)
 
-        skill_result = await db.execute(
-            select(Skill).where(Skill.user_id == user_id)
-        )
+        if endpoint_id:
+            skill_result = await db.execute(
+                select(Skill)
+                .join(EndpointSkill, EndpointSkill.skill_id == Skill.id)
+                .where(
+                    Skill.user_id == user_id,
+                    EndpointSkill.endpoint_id == endpoint_id,
+                )
+            )
+        else:
+            skill_result = await db.execute(
+                select(Skill).where(Skill.user_id == user_id)
+            )
         all_skills = skill_result.scalars().all()
 
         lorebook_info = [
@@ -265,7 +279,10 @@ def build_cantrip_budget_context(
 
 
 async def prepare_budget(
-    body_json: dict[str, Any], user_id: str, tags: list | None = None
+    body_json: dict[str, Any],
+    user_id: str,
+    tags: list | None = None,
+    endpoint_id: str = "",
 ) -> dict[str, Any] | None:
     """Full budget preparation: load settings, compute, allocate.
 
@@ -284,7 +301,9 @@ async def prepare_budget(
     if injection_budget <= 0:
         return None
 
-    cantrip_info, lorebook_info, skill_info = await load_weighted_resources(user_id, tags)
+    cantrip_info, lorebook_info, skill_info = await load_weighted_resources(
+        user_id, tags, endpoint_id=endpoint_id
+    )
     allocations = allocate_budget(injection_budget, cantrip_info, lorebook_info, skill_info)
 
     body_json["_gitv_budget_allocations"] = allocations

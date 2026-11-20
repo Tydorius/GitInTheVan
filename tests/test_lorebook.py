@@ -554,3 +554,146 @@ class TestPublicLorebooks:
         )
         assert resp.status_code == 200
         assert resp.json()["name"] == "Shared"
+
+
+# ============================================================================
+# Upgrade path: migration 063 on the old schema
+# ============================================================================
+
+class TestMigration063UpgradePath:
+    @pytest.mark.asyncio
+    async def test_column_added_on_upgrade(self):
+        """lorebooks is migration-created, so TestMigrationCoverage checks
+        the model/migration pair statically -- this proves the ALTER runs on
+        a pre-063 database (rule 10): create_all, drop the column,
+        vacuity-check, migrate, round-trip through the ORM."""
+        from sqlalchemy import text
+        from sqlalchemy.ext.asyncio import create_async_engine
+
+        from app.models.base import Base
+        from app.services.migrations import run_migrations
+
+        engine = create_async_engine("sqlite+aiosqlite://", echo=False)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+                await conn.execute(
+                    text("ALTER TABLE lorebooks DROP COLUMN word_boundary_keys")
+                )
+
+            async with engine.connect() as conn:
+                cols = await conn.execute(text("PRAGMA table_info(lorebooks)"))
+                col_names = {r[1] for r in cols.all()}
+            assert "word_boundary_keys" not in col_names
+
+            await run_migrations(engine)
+
+            from sqlalchemy import insert, select
+
+            from app.models.lorebook import Lorebook
+            async with engine.begin() as conn:
+                await conn.execute(insert(Lorebook).values(
+                    user_id="u-upg063", name="LB", word_boundary_keys=True))
+                raw = (await conn.execute(
+                    select(Lorebook.word_boundary_keys).where(Lorebook.name == "LB")
+                )).scalar_one()
+            assert raw is True
+        finally:
+            await engine.dispose()
+
+
+# ============================================================================
+# 0.42.0 (B7.1): opt-in word-boundary keyword matching
+# ============================================================================
+
+class TestWordBoundaryMatching:
+    """Substring matching is the original behavior and stays the default.
+    A book that opts in via word_boundary_keys matches whole words only:
+    "Rook" stops firing on "rookie", "Crow" on "crowd" -- which retires the
+    punctuation-suffix workaround keys ("Crow,", "Crow.") real users have
+    been maintaining by hand."""
+
+    @pytest.mark.asyncio
+    async def test_substring_stays_the_default(self, admin_client):
+        from app.services.lorebook import match_entries
+
+        msgs = [{"role": "user", "content": "the rookie moves"}]
+        entries = [{"keys": '["Rook"]', "content": "X", "insertion_order": 1}]
+        assert match_entries(msgs, entries), "default must keep matching inside words"
+
+    @pytest.mark.asyncio
+    async def test_word_boundary_does_not_match_inside_words(self, admin_client):
+        from app.services.lorebook import match_entries
+
+        msgs = [{"role": "user", "content": "the rookie moves"}]
+        entries = [{"keys": '["Rook"]', "content": "X", "insertion_order": 1}]
+        assert not match_entries(msgs, entries, word_boundary=True)
+        # ...but still matches the actual word, with punctuation around it
+        msgs2 = [{"role": "user", "content": "the Rook, it said"}]
+        assert match_entries(msgs2, entries, word_boundary=True)
+
+    @pytest.mark.asyncio
+    async def test_flag_flows_through_the_pipeline(self, admin_client, httpx_mock):
+        """The book's flag reaches matching through the real injection
+        path: with the flag on, an inside-word mention does not inject."""
+        from app.models.lorebook import Lorebook
+        from tests.conftest import TestSessionLocal
+
+        client, _, gitv_key = admin_client
+
+        await client.post("/api/endpoints", json={
+            "name": "WB", "base_url": "http://mock-wb:9999", "api_key": "sk-test",
+        })
+        lb_resp = await client.post("/api/lorebooks", json={
+            "name": "WB Book", "tag": "", "is_active": True,
+            "word_boundary_keys": True,
+        })
+        lb_id = lb_resp.json()["id"]
+        await client.post(f"/api/lorebooks/{lb_id}/entries", json={
+            "name": "Crow", "keys": ["Crow"], "content": "CROW_ENTRY",
+            "position": "before_last_message", "insertion_order": 5,
+            "is_constant": False, "is_selective": False,
+        })
+
+        httpx_mock.add_response(
+            url="http://mock-wb:9999/v1/chat/completions",
+            json={"id": "1", "object": "chat.completion", "choices": [{
+                "index": 0, "message": {"role": "assistant", "content": "ok"},
+                "finish_reason": "stop"}]},
+            status_code=200,
+        )
+        resp = await client.post(
+            "/v1/chat/completions",
+            json={"model": "m", "stream": False,
+                  "messages": [{"role": "user", "content": "a crowded room"}]},
+            headers={"Authorization": f"Bearer {gitv_key}"},
+        )
+        assert resp.status_code == 200
+        forwarded = httpx_mock.get_requests()[-1]
+        assert "CROW_ENTRY" not in json.dumps(json.loads(forwarded.content)["messages"])
+
+        # Sanity: the same book with the flag off WOULD have injected.
+        async with TestSessionLocal() as db:
+            from sqlalchemy import select
+
+            book = (await db.execute(
+                select(Lorebook).where(Lorebook.id == lb_id)
+            )).scalar_one()
+            book.word_boundary_keys = False
+            await db.commit()
+        httpx_mock.add_response(
+            url="http://mock-wb:9999/v1/chat/completions",
+            json={"id": "2", "object": "chat.completion", "choices": [{
+                "index": 0, "message": {"role": "assistant", "content": "ok"},
+                "finish_reason": "stop"}]},
+            status_code=200,
+        )
+        resp2 = await client.post(
+            "/v1/chat/completions",
+            json={"model": "m", "stream": False,
+                  "messages": [{"role": "user", "content": "a crowded room"}]},
+            headers={"Authorization": f"Bearer {gitv_key}"},
+        )
+        assert resp2.status_code == 200
+        forwarded2 = httpx_mock.get_requests()[-1]
+        assert "CROW_ENTRY" in json.dumps(json.loads(forwarded2.content)["messages"])

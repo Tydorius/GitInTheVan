@@ -98,6 +98,7 @@
         scan_depth: positionLb.scanEnabled
           ? Math.max(1, Math.floor(Number(positionLb.scanDepthValue) || 10))
           : 0,
+        word_boundary_keys: positionLb.word_boundary_keys ?? false,
       })
       positionLb = null
       await withScroll(load)
@@ -629,8 +630,16 @@
           <input type="number" min="1" step="1" bind:value={positionLb.scanDepthValue} disabled={!positionLb.scanEnabled} style="width: 70px;">
           messages
         </label>
-        <p style="color: var(--text-dim); font-size: 11px; margin: 2px 0 0;">
+        <p style="color: var(--text-dim); font-size: 11px; margin: 2px 0 8px;">
           Off (default) scans the whole conversation. On, only the newest N messages are scanned for this book's keywords — constant entries always apply.
+        </p>
+        <label style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
+          <input type="checkbox" bind:checked={positionLb.word_boundary_keys} style="width: auto;"> Whole-word keywords only
+        </label>
+        <p style="color: var(--text-dim); font-size: 11px; margin: 2px 0 0;">
+          Off (default) matches keywords anywhere inside a word ("Rook" fires on
+          "rookie"). On, keywords match on word boundaries only — punctuation-suffix
+          workaround keys like "Crow," become unnecessary.
         </p>
       </div>
       <div class="modal-actions">

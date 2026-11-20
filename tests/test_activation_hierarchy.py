@@ -692,3 +692,110 @@ class TestSixthSourceScriptActivation:
         assert resp.status_code == 200, resp.text
         sent = json.dumps(json.loads(httpx_mock.get_requests()[-1].content))
         assert "SCRIPT_ACTIVATE_MARKER" not in sent
+
+
+# ============================================================================
+# Seventh source: opt-in tag-group membership activation (0.42.0)
+# ============================================================================
+
+from app.services.deno_runner import DENO_PATH as _DENO_PATH  # noqa: E402 (appended test block)
+
+_SKIP_DENO_SEVENTH = not _DENO_PATH
+
+
+class TestSeventhSourceGroupMembership:
+    """A group with ``activate_members`` on turns its members on when the
+    group activates (by its tag or its Active flag), regardless of the
+    member's own tag or Active flag -- the seventh activation source.
+
+    Union-only (it can never switch anything off), request-scoped (the
+    flag is read per request, nothing persists), and opt-in per group:
+    without the flag a group stays a tag macro, and a blank-tag member of
+    an unflagged group remains reachable only through its own Active flag
+    (rules 1-4 unchanged)."""
+
+    @pytest.mark.skipif(_SKIP_DENO_SEVENTH, reason="Deno not available")
+    @pytest.mark.asyncio
+    async def test_blank_tag_inactive_member_runs_when_group_activated(self, admin_client):
+        """The exact KoK-Ledger symptom: member has no tag and is off; the
+        flagged group's tag in the prompt runs it anyway (proximity by
+        proxy -- the user named the group, the group names its members)."""
+        client, _, _ = admin_client
+        me = (await client.get("/api/auth/me")).json()
+        user_id = me["id"]
+
+        from app.services.cantrip import process_cantrips
+
+        ct = await client.post("/api/cantrips", json={
+            "name": "Seventh Ledger", "code": "context.character.scenario = 'SEVENTH_RAN';",
+            "is_active": False, "tag": "",
+        })
+        ct_id = ct.json()["id"]
+        assert ct.status_code == 201
+
+        body = {
+            "model": "m", "stream": False,
+            "messages": [{"role": "user", "content": "hi <#taggroup-kok#>"}],
+            "_gitv_tags": [
+                {"type": "taggroup", "name": "kok", "owner": None, "raw": "taggroup-kok"}
+            ],
+            "_gitv_group_member_ids": {"cantrip": [ct_id]},
+        }
+        out = await process_cantrips(body, user_id, {}, position="pre_driver")
+        assert "SEVENTH_RAN" in json.dumps(out.get("messages", []))
+
+    @pytest.mark.skipif(_SKIP_DENO_SEVENTH, reason="Deno not available")
+    @pytest.mark.asyncio
+    async def test_without_the_flag_the_member_stays_off(self, admin_client):
+        """Default-off pins the original semantics: the same body without
+        the resolver's member-ids key runs nothing (the member is
+        inactive, untagged, and the group is a macro with nothing to
+        expand)."""
+        client, _, _ = admin_client
+        me = (await client.get("/api/auth/me")).json()
+        user_id = me["id"]
+
+        from app.services.cantrip import process_cantrips
+
+        ct = await client.post("/api/cantrips", json={
+            "name": "Macro Ledger", "code": "context.character.scenario = 'MACRO_RAN';",
+            "is_active": False, "tag": "",
+        })
+        assert ct.status_code == 201
+
+        body = {
+            "model": "m", "stream": False,
+            "messages": [{"role": "user", "content": "hi <#taggroup-kok#>"}],
+            "_gitv_tags": [
+                {"type": "taggroup", "name": "kok", "owner": None, "raw": "taggroup-kok"}
+            ],
+        }
+        out = await process_cantrips(body, user_id, {}, position="pre_driver")
+        assert "MACRO_RAN" not in json.dumps(out.get("messages", []))
+
+    @pytest.mark.asyncio
+    async def test_source_is_union_a_direct_member_still_runs_with_its_own_tag(
+        self, admin_client,
+    ):
+        """Rule 2: the seventh source only adds. A member that would run
+        anyway still runs exactly once."""
+        client, _, _ = admin_client
+        me = (await client.get("/api/auth/me")).json()
+        user_id = me["id"]
+
+        from app.services.lorebook import load_active_lorebooks
+        from tests.conftest import TestSessionLocal
+
+        lb = await client.post("/api/lorebooks", json={
+            "name": "Union Book", "tag": "uniontag", "is_active": False,
+        })
+        lb_id = lb.json()["id"]
+
+        async with TestSessionLocal() as db:
+            active = await load_active_lorebooks(
+                db, user_id,
+                [{"type": "lore", "name": "uniontag", "owner": None, "raw": "lore-uniontag"}],
+                direct_member_ids={lb_id},
+            )
+        # tag-activated AND direct -- present once, not twice
+        assert [b.id for b in active].count(lb_id) == 1

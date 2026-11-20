@@ -936,10 +936,10 @@ export const api = {
 
   // Tag Groups
   listTagGroups: () => request<{ groups: any[] }>('/api/tag-groups'),
-  createTagGroup: (data: { name: string; tag?: string; is_active?: boolean; members?: any[] }) =>
+  createTagGroup: (data: { name: string; tag?: string; is_active?: boolean; activate_members?: boolean; members?: any[] }) =>
     request<any>('/api/tag-groups', { method: 'POST', body: JSON.stringify(data) }),
   getTagGroup: (id: string) => request<any>(`/api/tag-groups/${id}`),
-  updateTagGroup: (id: string, data: { name?: string; tag?: string; is_active?: boolean }) =>
+  updateTagGroup: (id: string, data: { name?: string; tag?: string; is_active?: boolean; activate_members?: boolean }) =>
     request<any>(`/api/tag-groups/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteTagGroup: (id: string) => request<void>(`/api/tag-groups/${id}`, { method: 'DELETE' }),
   updateTagGroupMembers: (id: string, members: any[]) =>

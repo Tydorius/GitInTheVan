@@ -91,7 +91,11 @@ async def _load_chat_data(db: AsyncSession, user_id: str, conversation_id: str) 
 
 
 async def _save_chat_data(
-    db: AsyncSession, user_id: str, conversation_id: str, chat_data: dict[str, Any]
+    db: AsyncSession,
+    user_id: str,
+    conversation_id: str,
+    chat_data: dict[str, Any],
+    deletes: set[str] | None = None,
 ) -> None:
     if not conversation_id:
         return
@@ -119,6 +123,15 @@ async def _save_chat_data(
                 )
             )
 
+    # 0.42.0: delete() persists. A key deleted then re-set in the same run
+    # keeps its new value (the final dict is the truth).
+    for key in deletes or ():
+        if key in chat_data:
+            continue
+        row = existing.get(key)
+        if row is not None:
+            await db.delete(row)
+
     await db.commit()
 
 
@@ -137,7 +150,10 @@ async def _load_user_data(db: AsyncSession, user_id: str) -> dict[str, Any]:
 
 
 async def _save_user_data(
-    db: AsyncSession, user_id: str, user_data: dict[str, Any]
+    db: AsyncSession,
+    user_id: str,
+    user_data: dict[str, Any],
+    deletes: set[str] | None = None,
 ) -> None:
     existing_result = await db.execute(
         select(UserData).where(UserData.user_id == user_id)
@@ -157,6 +173,13 @@ async def _save_user_data(
                     value_json=value_json,
                 )
             )
+
+    for key in deletes or ():
+        if key in user_data:
+            continue
+        row = existing.get(key)
+        if row is not None:
+            await db.delete(row)
 
     await db.commit()
 
@@ -181,7 +204,11 @@ async def _load_cantrip_data(
 
 
 async def _save_cantrip_data(
-    db: AsyncSession, user_id: str, cantrip_id: str, cantrip_data: dict[str, Any]
+    db: AsyncSession,
+    user_id: str,
+    cantrip_id: str,
+    cantrip_data: dict[str, Any],
+    deletes: set[str] | None = None,
 ) -> None:
     existing_result = await db.execute(
         select(CantripData).where(
@@ -205,6 +232,13 @@ async def _save_cantrip_data(
                     value_json=value_json,
                 )
             )
+
+    for key in deletes or ():
+        if key in cantrip_data:
+            continue
+        row = existing.get(key)
+        if row is not None:
+            await db.delete(row)
 
     await db.commit()
 
@@ -238,7 +272,10 @@ def _diff_store(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]
 
 
 async def _load_active_cantrips(
-    db: AsyncSession, user_id: str, position: str = "pre_driver"
+    db: AsyncSession,
+    user_id: str,
+    position: str = "pre_driver",
+    direct_member_ids: set[str] | None = None,
 ) -> list[Cantrip]:
     flag_map = {
         "pre_driver": Cantrip.run_pre_driver,
@@ -251,11 +288,17 @@ async def _load_active_cantrips(
     # reach should_activate_resource, or its tag can never switch it on -- which
     # is rule 3 of the Activation Hierarchy (see the README). Filtering
     # is_active here is what made cantrip tags unable to activate anything.
+    # direct_member_ids (the seventh source, rule 19) must widen the same
+    # candidate set: a blank-tag inactive cantrip is exactly what group
+    # membership activates.
+    conditions = [or_(Cantrip.is_active.is_(True), Cantrip.tag != "")]
+    if direct_member_ids:
+        conditions.append(Cantrip.id.in_(direct_member_ids))
     query = (
         select(Cantrip)
         .where(
             Cantrip.user_id == user_id,
-            or_(Cantrip.is_active.is_(True), Cantrip.tag != ""),
+            or_(*conditions),
             flag.is_(True),
         )
         .order_by(Cantrip.execution_order, Cantrip.created_at)
@@ -362,7 +405,11 @@ async def process_cantrips(
     params = extract_context_params(body_json, request_headers)
 
     async with async_session() as db:
-        all_cantrips: list[Any] = await _load_active_cantrips(db, user_id, position)
+        from app.services.group_resolver import group_direct_members
+
+        all_cantrips: list[Any] = await _load_active_cantrips(
+            db, user_id, position, direct_member_ids=group_direct_members(body_json)
+        )
         if embedded_scripts:
             all_cantrips = [*all_cantrips, *embedded_scripts]
             from app.services.debug import debug_capture
@@ -389,14 +436,18 @@ async def process_cantrips(
             return body_json
 
         from app.services.debug_metrics import record_cantrip
+        from app.services.group_resolver import group_direct_members
         from app.services.tagging import should_activate_resource
+        direct_ids = group_direct_members(body_json)
         cantrips = []
         for c in all_cantrips:
             # Asked for every candidate. There used to be an `if c.tag and tags`
             # pre-check with an unconditional `else: append`, which skipped the
             # hierarchy entirely whenever the request carried no tags -- so an
             # inactive cantrip ran anyway.
-            if should_activate_resource(
+            # Seventh source (rule 19): direct membership in an activated
+            # opted-in group, OR-ed in like every union source.
+            if c.id in direct_ids or should_activate_resource(
                 c.tag, "cantrip", c.is_active, c.is_public, c.user_id, user_id, tags or []
             ):
                 cantrips.append(c)
@@ -523,10 +574,16 @@ async def process_cantrips(
             # A sandbox writes chat_data into its forked id (isolated); a replay
             # would write the live conversation's store, so it does not.
             if conversation_id and not body_json.get("_gitv_replay"):
-                await _save_chat_data(db, user_id, conversation_id, chat_data)
+                await _save_chat_data(
+                    db, user_id, conversation_id, chat_data,
+                    deletes=state.get("chat_data_deletes"),
+                )
 
             if not isolated:
-                await _save_user_data(db, user_id, user_data)
+                await _save_user_data(
+                    db, user_id, user_data,
+                    deletes=state.get("user_data_deletes"),
+                )
 
     if internal_chat_id and state["accumulated_memories"]:
         from app.services.conversation import save_memories_for_chat
@@ -716,12 +773,20 @@ async def _execute_cantrip_step(
 
     state["chat_data"] = result.chat_data
     state["user_data"] = result.user_data
+    # 0.42.0: aggregate the pass's store deletes. Sequential cantrips share
+    # the state dict, so a later set of a deleted key simply wins (the
+    # final dict is the truth; the save skips keys still present).
+    state.setdefault("chat_data_deletes", set()).update(result.chat_data_deletes)
+    state.setdefault("user_data_deletes", set()).update(result.user_data_deletes)
 
     if store_seeds is not None:
         if not ephemeral:
             store_seeds["cantrip_data"][cantrip.id] = result.cantrip_data
     elif result.cantrip_data != cantrip_data and not isolated and not ephemeral:
-        await _save_cantrip_data(db, user_id, cantrip.id, result.cantrip_data)
+        await _save_cantrip_data(
+            db, user_id, cantrip.id, result.cantrip_data,
+            deletes=set(result.cantrip_data_deletes),
+        )
 
     # Phase 20: apply this cantrip's lorebook ops now, not after the
     # pass, so the next cantrip's seed reflects them (the shared
@@ -925,7 +990,7 @@ async def _apply_prompt_requests(
                 }
                 for entry in book.entries
             ]
-            matched = match_book_entries(messages, entry_dicts, scan_depth=book.scan_depth)
+            matched = match_book_entries(messages, entry_dicts, scan_depth=book.scan_depth, word_boundary=book.word_boundary_keys)
             rows.extend(matched)
             notes.append({"kind": "activate", "book": name, "outcome": "activated",
                           "matched": len(matched), "entries": len(entry_dicts)})
@@ -1007,7 +1072,11 @@ async def process_cantrips_post_driver(
     params = extract_context_params(body_json, request_headers)
 
     async with async_session() as db:
-        all_cantrips: list[Any] = await _load_active_cantrips(db, user_id, position)
+        from app.services.group_resolver import group_direct_members
+
+        all_cantrips: list[Any] = await _load_active_cantrips(
+            db, user_id, position, direct_member_ids=group_direct_members(body_json)
+        )
         if embedded_scripts:
             all_cantrips = [*all_cantrips, *embedded_scripts]
             from app.services.debug import debug_capture
@@ -1026,10 +1095,12 @@ async def process_cantrips_post_driver(
         if not all_cantrips:
             return response_content
 
+        from app.services.group_resolver import group_direct_members
         from app.services.tagging import should_activate_resource
+        direct_ids = group_direct_members(body_json)
         cantrips = []
         for c in all_cantrips:
-            if should_activate_resource(
+            if c.id in direct_ids or should_activate_resource(
                 c.tag, "cantrip", c.is_active, c.is_public, c.user_id, user_id, tags or []
             ):
                 cantrips.append(c)
@@ -1051,6 +1122,10 @@ async def process_cantrips_post_driver(
         else:
             chat_data = await _load_chat_data(db, user_id, conversation_id)
             user_data = await _load_user_data(db, user_id)
+        # 0.42.0: keys deleted by this pass's scripts (persisted at the
+        # pass-level save below).
+        chat_data_deletes: set = set()
+        user_data_deletes: set = set()
 
         # Phase 20: same seeding/ops as the pre-forward pass, minus the
         # same-turn injection (the prompt has already been sent; entries
@@ -1096,6 +1171,7 @@ async def process_cantrips_post_driver(
 
             try:
                 context["response"]["content"] = current_content
+                started = time.monotonic()
                 result = await run_cantrip(
                     code=cantrip.code,
                     context=context,
@@ -1129,14 +1205,45 @@ async def process_cantrips_post_driver(
                 prev_content_tokens, _est_tokens(current_content),
             )
 
+            # 0.42.0 (N4c): navigator-position runs belong in the Debug
+            # trace like every other position. Console output used to be
+            # reachable only at debug log level, and run comparison could
+            # not see response-side cantrips at all.
+            from app.services.debug_metrics import record_cantrip
+
+            record_cantrip(
+                body_json, cantrip_id=cantrip.id, name=cantrip.name, position=position,
+                triggered=True, tag=cantrip.tag or "", code=cantrip.code,
+                execution_order=cantrip.execution_order, timeout_ms=cantrip.timeout_ms,
+                duration_ms=(time.monotonic() - started) * 1000.0,
+                debug_logs=result.debug_logs, error=result.error or "",
+                output={
+                    "response_content": result.response_content,
+                    "tool_result": result.tool_result,
+                },
+                data_changes={
+                    "chat_data": _diff_store(chat_data, result.chat_data),
+                    "user_data": _diff_store(user_data, result.user_data),
+                    "cantrip_data": _diff_store(cantrip_data, result.cantrip_data),
+                    **({"lorebook_ops": result.lorebook_ops} if result.lorebook_ops else {}),
+                },
+            )
+
             chat_data = result.chat_data
             user_data = result.user_data
+            # 0.42.0: aggregate the pass's store deletes (same semantics as
+            # the pre-forward pass: a later set of a deleted key wins).
+            chat_data_deletes.update(result.chat_data_deletes)
+            user_data_deletes.update(result.user_data_deletes)
 
             if store_seeds is not None:
                 if not ephemeral:
                     store_seeds["cantrip_data"][cantrip.id] = result.cantrip_data
             elif result.cantrip_data != cantrip_data and not isolated and not ephemeral:
-                await _save_cantrip_data(db, user_id, cantrip.id, result.cantrip_data)
+                await _save_cantrip_data(
+                    db, user_id, cantrip.id, result.cantrip_data,
+                    deletes=set(result.cantrip_data_deletes),
+                )
 
             if result.lorebook_ops:
                 await apply_ops(
@@ -1158,10 +1265,13 @@ async def process_cantrips_post_driver(
             # for a sandbox, a replay writes nothing, and user/cantrip-scoped
             # stores are never written from an isolated run.
             if conversation_id and not body_json.get("_gitv_replay"):
-                await _save_chat_data(db, user_id, conversation_id, chat_data)
+                await _save_chat_data(
+                    db, user_id, conversation_id, chat_data,
+                    deletes=chat_data_deletes or None,
+                )
 
             if not isolated:
-                await _save_user_data(db, user_id, user_data)
+                await _save_user_data(db, user_id, user_data, deletes=user_data_deletes or None)
 
     if current_content != response_content:
         logger.info(

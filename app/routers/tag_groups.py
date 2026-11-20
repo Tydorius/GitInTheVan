@@ -27,6 +27,10 @@ class GroupCreate(BaseModel):
     name: str
     tag: str = ""
     is_active: bool = False
+    # Opt-in (0.42.0): when on, an activated group turns its members on
+    # directly regardless of their own tag or Active flag (rule 19's
+    # seventh source). Default off keeps the macro semantics.
+    activate_members: bool = False
     members: list[MemberSpec] = []
 
 
@@ -34,6 +38,7 @@ class GroupUpdate(BaseModel):
     name: str | None = None
     tag: str | None = None
     is_active: bool | None = None
+    activate_members: bool | None = None
 
 
 class MembersUpdate(BaseModel):
@@ -51,6 +56,7 @@ class GroupResponse(BaseModel):
     name: str
     tag: str
     is_active: bool
+    activate_members: bool
     members: list[MemberResponse]
     created_at: str
 
@@ -65,6 +71,7 @@ def _group_to_response(group: TagGroup) -> GroupResponse:
         name=group.name,
         tag=group.tag,
         is_active=group.is_active,
+        activate_members=group.activate_members,
         members=[
             MemberResponse(id=m.id, member_type=m.member_type, member_id=m.member_id)
             for m in group.members
@@ -119,6 +126,7 @@ async def create_tag_group(
         name=body.name,
         tag=body.tag,
         is_active=body.is_active,
+        activate_members=body.activate_members,
     )
     db.add(group)
     await db.flush()
@@ -178,6 +186,8 @@ async def update_tag_group(
         group.tag = body.tag
     if body.is_active is not None:
         group.is_active = body.is_active
+    if body.activate_members is not None:
+        group.activate_members = body.activate_members
 
     await db.commit()
     await db.refresh(group, attribute_names=["members"])

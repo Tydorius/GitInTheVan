@@ -2,6 +2,86 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.42.0] - 2026-11-20
+
+The KoK bug-fix batch: every verified issue from the 0.41.1 known-issues
+list, plus two opt-in features. **This release changes some behavior on
+purpose** — each change is listed under "Behavior changes" below, even
+where it corrects a previous bug.
+
+### Fixed
+
+- **Tag groups activate from their copied tag.** A group whose tag
+  collides with a resource-type prefix (`taggroup-kok`, `lore-kok`,
+  `kok-lore-set`) could never activate: the tag parser strips the prefix
+  and the resolver matched only the stripped name. The raw embedded
+  string now identifies the group as well.
+- **Store deletes persist.** `context.chat_data` / `user_data` /
+  `cantrip_data` `.delete(key)` used to remove the key for the current
+  run only; the save step was upsert-only, so the key resurfaced on the
+  next request. Deleted keys are now transported and their rows removed.
+  A key deleted then re-set in the same run keeps its new value.
+- **`<MEMORY:off>` no longer orphans the conversation.** On
+  non-streaming requests it also skipped recording the conversation for
+  matching, so the next request started a new chat. Identity recording
+  is decoupled from memory extraction.
+- **The Pre-Navigator debug capture showed identical before/after text**
+  even when cantrips changed the reply — both snapshots were read after
+  the overwrite. Capture order fixed; both Navigator captures also store
+  the full text now instead of cutting at 500 characters.
+- **Navigator-position cantrip runs appear in the Debug trace** (and run
+  comparison) with their console output, instead of only at debug log
+  level.
+- **Over the per-run debug size cap, snapshots shed progressively**
+  (largest stage first, re-checking after each) instead of dropping
+  every stage's snapshots at once.
+- **Dynamic lorebooks:** an entry that is keyword-matched and updated in
+  the same turn no longer injects twice (the rewrite serves from the
+  next turn's main pass); an `add` that overwrites an existing entry now
+  leaves a pre-edit snapshot in History; and a `delete` sees an entry
+  added earlier in the same run instead of refusing while the add lands.
+- **Context budgeting is honest:** only skills and samples attached to
+  the endpoint in use count toward the share split (previously every
+  owned skill diluted the shares), and the budget is computed before
+  anything is injected, with each lorebook's matched entries stopping at
+  its share (the cap existed but was never applied).
+
+### Added
+
+- **Tag groups: "Activate members directly"** (opt-in per group, default
+  off). When the group fires, every member runs regardless of its own
+  tag or Active flag — the way to reach members with no tag of their
+  own. The group editor lists untagged members so the default
+  (shortcut) mode's limit is visible.
+- **Lorebooks: "Whole-word keywords only"** (opt-in per book, default
+  off). Keywords match on word boundaries instead of anywhere inside a
+  word — "Rook" stops firing on "rookie". Punctuation-suffix workaround
+  keys (`Crow,`, `Crow.`) can be retired on books that enable it.
+
+### Behavior changes
+
+Corrective or opt-in, listed so every behavior change is visible:
+
+- Colliding-tag groups (`taggroup-*`, `lore-*`, `map-*`… prefixes, at
+  the start or middle of the tag) that silently never fired **now fire**
+  when tagged.
+- `add({name: "tavern"})` on a dynamic lorebook **no longer overwrites**
+  an entry named `Tavern` — name matching is case-sensitive, so a new
+  entry is created instead. (The keys fallback still folds case.)
+- With budgeting enabled, lorebook entries beyond a book's share **stop
+  matching** (previously every matching entry injected unbounded), and
+  shares grow for users owning unattached skills/samples.
+- Debug rows can be larger: Navigator captures are no longer cut to 500
+  characters, and navigator runs now write trace records. The admin
+  per-run size cap still bounds traces.
+- A same-turn dynamic-lorebook update of an entry the main pass already
+  injected no longer double-injects; the new content arrives next turn.
+
+### Schema
+
+- Migration 062: `tag_groups.activate_members` (additive, default off).
+- Migration 063: `lorebooks.word_boundary_keys` (additive, default off).
+
 ## [0.41.1] - 2026-11-19
 
 User guide restructured; long-standing frontend type errors fixed.

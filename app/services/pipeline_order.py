@@ -157,7 +157,7 @@ async def _inject_book_now(
     ]
     if not entry_dicts:
         return 0
-    matched = match_book_entries(messages, entry_dicts, lb.scan_depth)
+    matched = match_book_entries(messages, entry_dicts, lb.scan_depth, word_boundary=lb.word_boundary_keys)
     matched.sort(key=lambda m: m.insertion_order)
     if not matched:
         debug_capture(
@@ -238,12 +238,17 @@ async def run_pre_forward_ordered(
         # Activation (rule 19): the plan orders, it never activates. The
         # skipped candidates are recorded exactly as the default pass
         # records them, so comparisons stay meaningful.
-        all_cantrips: list[Any] = await _load_active_cantrips(db, user_id, "pre_driver")
+        from app.services.group_resolver import group_direct_members
+
+        direct_ids = group_direct_members(body_json)
+        all_cantrips: list[Any] = await _load_active_cantrips(
+            db, user_id, "pre_driver", direct_member_ids=direct_ids
+        )
         if embedded_scripts:
             all_cantrips = [*all_cantrips, *embedded_scripts]
         cantrips = []
         for c in all_cantrips:
-            if should_activate_resource(
+            if c.id in direct_ids or should_activate_resource(
                 c.tag, "cantrip", c.is_active, c.is_public, c.user_id, user_id, tags or []
             ):
                 cantrips.append(c)
@@ -257,7 +262,8 @@ async def run_pre_forward_ordered(
                     ),
                 )
         activating_lorebooks = await load_active_lorebooks(
-            db, user_id, tags, request_headers, internal_chat_id
+            db, user_id, tags, request_headers, internal_chat_id,
+            direct_member_ids=direct_ids,
         )
 
         steps = ordered_steps(plan, cantrips, activating_lorebooks)
@@ -359,11 +365,18 @@ async def run_pre_forward_ordered(
 
         # Pass tail (mirrors process_cantrips': stores, memories, card
         # fields). The per-cantrip step itself is shared; only this small
-        # ending is written here.
+        # ending is written here. Store deletes aggregate in the step and
+        # persist here (0.42.0).
         if conversation_id and not body_json.get("_gitv_replay"):
-            await _save_chat_data(db, user_id, conversation_id, state["chat_data"])
+            await _save_chat_data(
+                db, user_id, conversation_id, state["chat_data"],
+                deletes=state.get("chat_data_deletes"),
+            )
         if not isolated:
-            await _save_user_data(db, user_id, state["user_data"])
+            await _save_user_data(
+                db, user_id, state["user_data"],
+                deletes=state.get("user_data_deletes"),
+            )
 
     if internal_chat_id and state["accumulated_memories"]:
         from app.services.conversation import save_memories_for_chat

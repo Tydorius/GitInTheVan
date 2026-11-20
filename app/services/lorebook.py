@@ -38,6 +38,7 @@ def match_entries(
     messages: list[dict],
     entries: list[dict],
     total_budget: int = 0,
+    word_boundary: bool = False,
 ) -> list[MatchedEntry]:
     conversation_text = _extract_conversation_text(messages)
     matched: list[MatchedEntry] = []
@@ -57,7 +58,8 @@ def match_entries(
             continue
 
         primary_matched = any(
-            _keyword_matches(key, conversation_text) for key in primary_keys
+            _keyword_matches(key, conversation_text, word_boundary)
+            for key in primary_keys
         )
 
         if not primary_matched:
@@ -67,7 +69,8 @@ def match_entries(
             secondary_keys = parse_json_list(entry.get("secondary_keys", "[]"))
             if secondary_keys:
                 secondary_matched = any(
-                    _keyword_matches(key, conversation_text) for key in secondary_keys
+                    _keyword_matches(key, conversation_text, word_boundary)
+                    for key in secondary_keys
                 )
                 if not secondary_matched:
                     continue
@@ -83,17 +86,30 @@ def match_entries(
 
 
 def match_book_entries(
-    messages: list[dict], entries: list[dict], scan_depth: int = 0
+    messages: list[dict],
+    entries: list[dict],
+    scan_depth: int = 0,
+    word_boundary: bool = False,
+    total_budget: int = 0,
 ) -> list[MatchedEntry]:
-    """Match one book's entries, honoring that book's scan depth.
+    """Match one book's entries, honoring that book's scan depth, its
+    word-boundary flag and its budget share.
 
     scan_depth <= 0 scans the whole message list (previous behavior); N > 0
     matches keys against only the newest N messages, so a keyword mentioned
     in ancient history no longer triggers the entry and long chats stop
     paying a full-history regex scan per key.
+
+    word_boundary (0.42.0, B7.1) is the book's opt-in to whole-word keyword
+    matching ("Rook" stops firing on "rookie"). Substring matching -- the
+    original behavior -- stays the default.
+
+    total_budget (0.42.0, B9b) caps this book's matched content, in
+    characters -- the caller converts the token share with the canonical
+    len//4 estimator. Zero (the previous behavior) means uncapped.
     """
     window = messages[-scan_depth:] if scan_depth > 0 else messages
-    return match_entries(window, entries)
+    return match_entries(window, entries, total_budget=total_budget, word_boundary=word_boundary)
 
 
 def inject_entries(
@@ -156,13 +172,17 @@ def inject_entries(
     return result
 
 
-def _keyword_matches(keyword: str, text: str) -> bool:
+def _keyword_matches(keyword: str, text: str, word_boundary: bool = False) -> bool:
     keyword_lower = keyword.lower()
     text_lower = text.lower()
-    if keyword_lower in text_lower:
-        return True
-    pattern = r"\b" + re.escape(keyword_lower) + r"\b"
-    return bool(re.search(pattern, text_lower))
+    if word_boundary:
+        # 0.42.0 (B7.1): opt-in whole-word matching. Substring was the only
+        # behavior before and stays the default; the word-boundary branch
+        # used to be dead code (a boundary match implies the substring
+        # above had already matched).
+        pattern = r"\b" + re.escape(keyword_lower) + r"\b"
+        return bool(re.search(pattern, text_lower))
+    return keyword_lower in text_lower
 
 
 def _extract_conversation_text(messages: list[dict]) -> str:
@@ -198,12 +218,15 @@ async def load_active_lorebooks(
     tags: list | None = None,
     request_headers: dict[str, str] | None = None,
     internal_chat_id: str = "",
+    direct_member_ids: set[str] | None = None,
 ) -> list:
     """The activated lorebook rows for one request: every candidate through
     the Activation Hierarchy (rule 19) plus the conversation bindings (the
-    fifth source, union-only). Shared by the default injection pass
-    (proxy._apply_lorebook_injection) and the manual-order orchestrator
-    (pipeline_order.py) so both orderings activate through ONE code path.
+    fifth source, union-only) plus direct tag-group membership (the seventh
+    source: ids of members of activated opted-in groups, OR-ed in). Shared
+    by the default injection pass (proxy._apply_lorebook_injection) and the
+    manual-order orchestrator (pipeline_order.py) so both orderings
+    activate through ONE code path.
 
     ``db`` is the caller's session; entries are eager-loaded.
     """
@@ -258,11 +281,16 @@ async def load_active_lorebooks(
     active_lorebooks = []
     for lb in lorebooks:
         # Bound lorebooks join unconditionally (fifth source, union-only).
+        # Direct group membership likewise (seventh source, union-only).
         # Every other candidate goes through should_activate_resource with no
         # caller-side pre-check: an `if lb.tag and tags:` shape here would
         # duplicate the hierarchy and only happen to agree with it.
-        if lb.id in bound_lorebook_ids or should_activate_resource(
-            lb.tag, "lore", lb.is_active, lb.is_public, lb.user_id, user_id, tags
+        if (
+            lb.id in bound_lorebook_ids
+            or lb.id in (direct_member_ids or ())
+            or should_activate_resource(
+                lb.tag, "lore", lb.is_active, lb.is_public, lb.user_id, user_id, tags
+            )
         ):
             active_lorebooks.append(lb)
     return active_lorebooks

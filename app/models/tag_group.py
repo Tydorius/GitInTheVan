@@ -25,6 +25,14 @@ class TagGroup(Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="0", nullable=False
     )
+    # 0.42.0: opt-in per group (default off). When on and the group
+    # activates (by its tag or Active), every member runs regardless of its
+    # own tag or Active flag -- the seventh activation source (rule 19).
+    # Off keeps the original semantics: the group is a macro that injects
+    # member tags, so a member with no tag of its own is unreachable.
+    activate_members: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
