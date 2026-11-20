@@ -290,7 +290,12 @@ class TestMapPipelineBugfixes:
             default_model="gpt-4",
             enabled=True,
         )
-        body_json = {"model": "gpt-4", "messages": [{"role": "user", "content": "hi"}]}
+        body_json = {
+            "model": "gpt-4",
+            "messages": [{"role": "user", "content": "hi"}],
+            # Debug on so the regeneration capture is recorded.
+            "_gitv_debug": {"stages": []},
+        }
 
         mock_session = MagicMock()
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
@@ -324,6 +329,72 @@ class TestMapPipelineBugfixes:
 
         assert mock_stage_llm.await_count == 2
         assert result["choices"][0]["message"]["content"] == "good draft"
+
+        # Rule 16: the regeneration is its own response-side step and must
+        # appear in the Debug timeline, or the trace shows only the rejected
+        # output while the pipeline proceeds with the corrected one.
+        regen_captures = [
+            s for s in body_json["_gitv_debug"]["stages"]
+            if s["name"] == "map_stage_regenerated"
+        ]
+        assert regen_captures, body_json["_gitv_debug"]["stages"]
+        assert regen_captures[0]["content_after"] == "good draft"
+        assert regen_captures[0]["metadata"]["violation_reason"] == "bad"
+
+    async def test_stage_empty_choices_response_does_not_crash(self):
+        """A 200 stage response with an empty ``choices`` list must not
+        IndexError the pipeline (the same class as the verification and
+        summarizer empty-choices fixes; this extraction site was missed)."""
+        stage = SimpleNamespace(
+            id="s-1",
+            map_id="m-1",
+            stage_order=0,
+            name="Draft",
+            condition_json="",
+            base_prompt_mode="default",
+            system_prompt="",
+            user_prompt_prefix="",
+            user_prompt_suffix="",
+            driver_callable_turns=0,
+            verification_enabled=False,
+            output_mode="persist",
+            resources=[],
+        )
+        map_obj = SimpleNamespace(
+            id="m-1", user_id="user-1", name="TestMap", stages=[stage], global_llm_instructions=""
+        )
+        ep = Endpoint(
+            id="ep-1",
+            user_id="user-1",
+            name="EP",
+            base_url="https://ep.test",
+            api_key="k",
+            default_model="gpt-4",
+            enabled=True,
+        )
+        body_json = {"model": "gpt-4", "messages": [{"role": "user", "content": "hi"}]}
+
+        mock_session = MagicMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("app.services.map_pipeline.async_session", return_value=mock_session),
+            patch("app.services.map_pipeline._resolve_stage_endpoint", AsyncMock(return_value=([ep], "gpt-4"))),
+            patch("app.services.map_pipeline.stage_parameters", AsyncMock(return_value=({}, {}))),
+            patch("app.services.admin.get_caps", AsyncMock(return_value={"max_map_stages": 10, "max_driver_callable_turns": 5, "max_verification_retries": 3})),
+            patch("app.services.map_pipeline._inject_stage_instructions", AsyncMock(side_effect=lambda b, *_: b)),
+            patch("app.services.map_pipeline._inject_stage_lorebooks", AsyncMock(side_effect=lambda b, *_: b)),
+            patch("app.services.map_pipeline._inject_stage_skills", AsyncMock(side_effect=lambda b, *_: b)),
+            patch("app.services.map_pipeline._forward_stage_llm", AsyncMock(return_value=({"choices": []}, 200))) as mock_stage_llm,
+        ):
+            result = await run_map_pipeline(
+                body_json, "user-1", {}, map_obj, httpx.Timeout(10.0)
+            )
+
+        assert mock_stage_llm.await_count == 1
+        # The raw upstream response passes through untouched; nothing raised.
+        assert result["choices"] == []
 
 
 class TestVerificationAndSummarizationFixes:

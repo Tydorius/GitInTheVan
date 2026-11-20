@@ -772,11 +772,12 @@
     <div class="empty-state">No audit logs recorded.</div>
   {:else}
     <table>
-      <thead><tr><th>Action</th><th>Target</th><th>Details</th><th>Time</th></tr></thead>
+      <thead><tr><th>Action</th><th>User</th><th>Target</th><th>Details</th><th>Time</th></tr></thead>
       <tbody>
         {#each auditLogs as log}
           <tr>
             <td><strong>{log.action}</strong></td>
+            <td style="font-size: 11px;">{log.username || (log.user_id || '').slice(0, 8)}</td>
             <td style="font-size: 11px;">{log.target_type}{#if log.target_id} ({log.target_id.slice(0, 8)}){/if}</td>
             <td style="font-size: 12px; max-width: 300px; overflow: hidden; text-overflow: ellipsis;">{log.details}</td>
             <td style="color: var(--text-dim); font-size: 11px;">{new Date(log.created_at).toLocaleString()}</td>

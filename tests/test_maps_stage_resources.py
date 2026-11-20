@@ -615,6 +615,61 @@ context.chat_data.set("tool_ran", "yes");
 
 
 class TestDriverCallableInStages:
+    @pytest.mark.asyncio
+    async def test_inactive_stage_tool_is_not_offered(self, admin_client, httpx_mock):
+        """Rule 19: stage binding is routing, not activation. A driver-callable
+        cantrip bound to the stage but inactive, untagged and not group-activated
+        must not be offered -- its id in the stage's resource list only narrows
+        which *activated* tools the stage offers."""
+        client, _, api_key = admin_client
+
+        await _endpoint(client, "Tool", "tool.test", "tooler")
+        created = await client.post("/api/maps/import", json={"data": {
+            "name": "TooledOff",
+            "stages": [
+                _stage(1, "Worker", "tooler", "persist",
+                       [_cantrip_resource("Weather", WEATHER_TOOL, run_driver_callable=True)]),
+            ],
+        }})
+        assert created.status_code == 201, created.text
+        stage = created.json()["stages"][0]
+        cantrip_id = stage["resources"][0]["resource_id"]
+        # Stage attachment stays; the cantrip itself is turned off.
+        off = await client.put(f"/api/cantrips/{cantrip_id}", json={"is_active": False})
+        assert off.status_code == 200, off.text
+        updated = await client.put(f"/api/maps/{created.json()['id']}", json={
+            "stages": [{
+                "name": stage["name"], "endpoint_tag": "tooler",
+                "output_mode": "persist",
+                "driver_callable_turns": 1,
+                "resources": [{
+                    "resource_type": "cantrip",
+                    "resource_id": cantrip_id,
+                    "position": "pre_driver", "sticky": False,
+                }],
+            }],
+        })
+        assert updated.status_code in (200, 201), updated.text
+
+        await client.put("/api/settings", json={"default_map_id": created.json()["id"]})
+
+        httpx_mock.add_response(
+            url="http://tool.test/v1/chat/completions",
+            json={"choices": [{"message": {"content": 'Let me check <call:weather city="Paris">'}}]},
+        )
+
+        resp = await client.post("/v1/chat/completions", json={
+            "model": "test", "messages": [{"role": "user", "content": "Go"}],
+        }, headers={"Authorization": f"Bearer {api_key}"})
+        assert resp.status_code == 200, resp.text
+
+        bodies = _bodies_for(httpx_mock, "tool.test")
+        # One forward only: no tool was offered, so no tool round happened.
+        assert len(bodies) == 1, [r.url.host for r in httpx_mock.get_requests()]
+        assert "weather" not in json.dumps(bodies[0]["messages"]).lower()
+        # Nothing executed the call tag (that would need a second round).
+        assert "<call:weather" in resp.json()["choices"][0]["message"]["content"]
+
     @needs_deno
     @pytest.mark.asyncio
     async def test_a_stage_tool_loop_runs_through_the_stage_endpoint(

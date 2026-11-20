@@ -139,6 +139,8 @@ def _settings_response(s: AdminSettings, effective: str) -> AdminSettingsRespons
 
 class AuditLogItem(BaseModel):
     id: str
+    user_id: str
+    username: str = ""
     action: str
     target_type: str
     target_id: str

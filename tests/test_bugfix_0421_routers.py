@@ -334,6 +334,16 @@ class TestAdminAuditAndOwnershipFixes:
         assert len(data["logs"]) == 1
         assert data["total"] == 3
 
+        # Attribution: with every user's rows in one list, each row must say
+        # whose it is (user id + resolved username).
+        resp = await client.get("/api/admin/audit?limit=10", headers=admin_headers)
+        assert resp.status_code == 200
+        rows = resp.json()["logs"]
+        assert {(row["user_id"], row["username"]) for row in rows} == {
+            (admin.id, "audit_admin"),
+            (other.id, "audit_other"),
+        }
+
     @pytest.mark.asyncio
     async def test_storage_import_ownership_and_export_all(self, client: AsyncClient, db_session: AsyncSession):
         owner, owner_headers = await _create_user(db_session, "store_owner")

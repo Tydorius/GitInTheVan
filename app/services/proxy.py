@@ -1440,8 +1440,9 @@ async def _record_conversation_anchor(
     so turning memory off for a request also stopped the conversation from
     matching on the next one -- the chat silently started over. Memory
     extraction stays skipped; only the anchor is recorded, against the
-    unmodified content (memory is off, so memstore tags are neither
-    stripped nor saved)."""
+    client-bound content (memstore tags are stripped before hashing, so
+    the post-hash matches what the client sends back on its next
+    request)."""
     choices = response_data.get("choices", [])
     if not choices:
         return
@@ -1555,12 +1556,12 @@ async def _run_driver_callable_loop(
     forward=None,
     tool_only_ids: set[str] | None = None,
     stage_index: int | None = None,
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, Any], int] | None:
     """Run the Driver-Callable tool loop.
 
-    Returns the final response_data dict if the loop ran, or None if
-    driver-callable is not active for this request (caller should
-    forward normally).
+    Returns the final (response_data, status_code) tuple if the loop ran,
+    or None if driver-callable is not active for this request (caller
+    should forward normally).
 
     ``forward`` overrides how each round reaches the LLM (map stages inject
     their failover-chain forwarder here); it receives the loop's body dict
@@ -1593,20 +1594,19 @@ async def _run_driver_callable_loop(
         all_cantrips = await _load_active_cantrips(
             db, user_id, "pre_driver", direct_member_ids=load_extra_ids
         )
+        # Stage binding is routing, not activation (rule 19): tool_only_ids
+        # restricts which activated tools a stage offers, and the Activation
+        # Hierarchy decides "activated" on the stage path exactly as on the
+        # non-stage path.
         tool_cantrips = {
             c.name.lower(): c
             for c in all_cantrips
             if c.run_driver_callable
+            and (tool_only_ids is None or c.id in tool_only_ids)
             and (
-                (tool_only_ids is not None and c.id in tool_only_ids)
-                or (
-                    tool_only_ids is None
-                    and (
-                        c.id in direct_ids
-                        or should_activate_resource(
-                            c.tag, "cantrip", c.is_active, c.is_public, c.user_id, user_id, tags
-                        )
-                    )
+                c.id in direct_ids
+                or should_activate_resource(
+                    c.tag, "cantrip", c.is_active, c.is_public, c.user_id, user_id, tags
                 )
             )
         }

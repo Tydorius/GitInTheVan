@@ -875,7 +875,7 @@ cantrips run at the other positions.
 
 ![Lorebook Positions Editor](media/gitv-lorebooks-word-boundary.png)
 
-*The Positions editor with its options (Inject After Cantrips, Scan only the newest N, Whole-word keywords only), captured 2026-11-20.*
+*The Positions editor with its options (Inject After Cantrips, Scan only the newest N, Whole-word keywords only, Budget Weight), captured 2026-11-20.*
 
 Two options on the Pipeline Positions editor (the **Edit Positions** button on a lorebook)
 *are* wired:
@@ -897,6 +897,10 @@ Two options on the Pipeline Positions editor (the **Edit Positions** button on a
   ("Rook" fires on "rookie", "Crow" on "crowd"). When on, keywords match on word
   boundaries only, which retires punctuation-suffix workaround keys like `Crow,` and
   `Crow.`.
+- **Budget Weight** (default 1.0): how large a share of the context budget this
+  book's entries may claim when budgeting is on. Books with a weight of 0 or less
+  are exempt from per-book budget caps entirely — their matched entries inject
+  uncapped (the whole-instance context limit still applies).
 
 <a id="dynamic-lorebooks"></a>
 
@@ -1270,6 +1274,8 @@ Use the **Refresh** button to update the list, or toggle **Auto** for automatic 
 
 ![Forbidden Words](media/gitv-verification-forbidden-words.png)
 
+*The Forbidden Phrases card with the Regex toggle (one regex entry showing its Yes badge), captured 2026-11-20.*
+
 The Forbidden Words tab provides a fast, string-matching check that runs before the Navigator. This is more efficient than using an LLM for simple word/phrase filters.
 
 **How it works:**
@@ -1284,7 +1290,7 @@ The Forbidden Words tab provides a fast, string-matching check that runs before 
 - **Enable Forbidden Words Check**: Master toggle
 - **Case Sensitive**: Whether to match case-sensitively (default: off, matching is case-insensitive)
 
-Add forbidden words or phrases via the input field. Each phrase is checked literally against the response text. Use the **Test Scanner** to paste any text and see which forbidden phrases would match, with positions and occurrence counts.
+Add forbidden words or phrases via the input field. Each phrase is checked literally against the response text; tick the **Regex** checkbox to enter a phrase as a regular expression instead (its row shows a Yes badge in the Regex column). Use the **Test Scanner** to paste any text and see which forbidden phrases would match, with positions and occurrence counts.
 
 ### Test Tab
 

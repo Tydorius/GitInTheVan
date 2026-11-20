@@ -49,17 +49,22 @@ async def list_logs(
     db: AsyncSession, user_id: str | None = None, limit: int = 100, offset: int = 0
 ) -> list[dict[str, Any]]:
     """List audit logs for a user, or all users when user_id is None."""
-    stmt = select(AuditLog)
+    from app.models.user import User
+
+    stmt = select(AuditLog, User.username).outerjoin(
+        User, AuditLog.user_id == User.id
+    )
     if user_id is not None:
         stmt = stmt.where(AuditLog.user_id == user_id)
     result = await db.execute(
         stmt.order_by(AuditLog.created_at.desc()).limit(limit).offset(offset)
     )
-    logs = result.scalars().all()
+    rows = result.all()
     return [
         {
             "id": log.id,
             "user_id": log.user_id,
+            "username": username or "",
             "action": log.action,
             "target_type": log.target_type,
             "target_id": log.target_id,
@@ -67,7 +72,7 @@ async def list_logs(
             "ip_address": log.ip_address,
             "created_at": log.created_at.isoformat() if log.created_at else "",
         }
-        for log in logs
+        for log, username in rows
     ]
 
 

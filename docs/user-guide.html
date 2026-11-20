@@ -767,7 +767,7 @@ The four position toggles shown on some older installs (Pre-Driver, Driver-Calla
 Pre-Navigator, Post-Navigator) were never wired up for lorebooks and have no effect; only
 cantrips run at the other positions.</p>
 <p><img alt="Lorebook Positions Editor" src="media/gitv-lorebooks-word-boundary.png"></p>
-<p><em>The Positions editor with its options (Inject After Cantrips, Scan only the newest N, Whole-word keywords only), captured 2026-11-20.</em></p>
+<p><em>The Positions editor with its options (Inject After Cantrips, Scan only the newest N, Whole-word keywords only, Budget Weight), captured 2026-11-20.</em></p>
 <p>Two options on the Pipeline Positions editor (the <strong>Edit Positions</strong> button on a lorebook)
 <em>are</em> wired:</p>
 <ul>
@@ -788,6 +788,10 @@ cantrips run at the other positions.</p>
   ("Rook" fires on "rookie", "Crow" on "crowd"). When on, keywords match on word
   boundaries only, which retires punctuation-suffix workaround keys like <code>Crow,</code> and
   <code>Crow.</code>.</li>
+<li><strong>Budget Weight</strong> (default 1.0): how large a share of the context budget this
+  book's entries may claim when budgeting is on. Books with a weight of 0 or less
+  are exempt from per-book budget caps entirely — their matched entries inject
+  uncapped (the whole-instance context limit still applies).</li>
 </ul>
 <p><a id="dynamic-lorebooks"></a></p>
 <h3 id="dynamic-lorebooks">Dynamic Lorebooks</h3>
@@ -1122,6 +1126,7 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <p>Use the <strong>Refresh</strong> button to update the list, or toggle <strong>Auto</strong> for automatic refresh every 15 seconds.</p>
 <h3 id="forbidden-words-tab">Forbidden Words Tab</h3>
 <p><img alt="Forbidden Words" src="media/gitv-verification-forbidden-words.png"></p>
+<p><em>The Forbidden Phrases card with the Regex toggle (one regex entry showing its Yes badge), captured 2026-11-20.</em></p>
 <p>The Forbidden Words tab provides a fast, string-matching check that runs before the Navigator. This is more efficient than using an LLM for simple word/phrase filters.</p>
 <p><strong>How it works:</strong></p>
 <ol>
@@ -1134,7 +1139,7 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <p><strong>Settings:</strong>
 - <strong>Enable Forbidden Words Check</strong>: Master toggle
 - <strong>Case Sensitive</strong>: Whether to match case-sensitively (default: off, matching is case-insensitive)</p>
-<p>Add forbidden words or phrases via the input field. Each phrase is checked literally against the response text. Use the <strong>Test Scanner</strong> to paste any text and see which forbidden phrases would match, with positions and occurrence counts.</p>
+<p>Add forbidden words or phrases via the input field. Each phrase is checked literally against the response text; tick the <strong>Regex</strong> checkbox to enter a phrase as a regular expression instead (its row shows a Yes badge in the Regex column). Use the <strong>Test Scanner</strong> to paste any text and see which forbidden phrases would match, with positions and occurrence counts.</p>
 <h3 id="test-tab">Test Tab</h3>
 <p><img alt="Verification Test" src="media/gitv-verification-test.png"></p>
 <p>The test panel lets you check sample responses against a verification rule without sending traffic through the proxy:</p>

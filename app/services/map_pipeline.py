@@ -1174,21 +1174,19 @@ async def run_map_pipeline(
             direct_ids = group_direct_members(body_json)
             load_extra_ids = direct_ids | stage_cantrip_ids if stage_cantrip_ids else direct_ids
             async with async_session() as db:
+                # Same rule as _run_driver_callable_loop: stage binding is
+                # routing, not activation (rule 19). stage_cantrip_ids only
+                # narrows which activated tools this stage offers.
                 stage_tools = [
                     c for c in await _load_active_cantrips(
                         db, user_id, "pre_driver", direct_member_ids=load_extra_ids
                     )
                     if c.run_driver_callable
+                    and (not stage_cantrip_ids or c.id in stage_cantrip_ids)
                     and (
-                        (stage_cantrip_ids and c.id in stage_cantrip_ids)
-                        or (
-                            not stage_cantrip_ids
-                            and (
-                                c.id in direct_ids
-                                or should_activate_resource(
-                                    c.tag, "cantrip", c.is_active, c.is_public, c.user_id, user_id, tags or []
-                                )
-                            )
+                        c.id in direct_ids
+                        or should_activate_resource(
+                            c.tag, "cantrip", c.is_active, c.is_public, c.user_id, user_id, tags or []
                         )
                     )
                 ]
@@ -1237,10 +1235,12 @@ async def run_map_pipeline(
             body_json["_gitv_map_status_code"] = status_code
             return response_data
 
-        content = response_data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        content = (
+            (response_data.get("choices") or [{}])[0].get("message") or {}
+        ).get("content", "")
 
         if debug_on:
-            message = response_data.get("choices", [{}])[0].get("message", {})
+            message = (response_data.get("choices") or [{}])[0].get("message") or {}
             thinking = message.get("reasoning_content") or message.get("thinking") or ""
             debug_capture_response(
                 body_json, "map_stage_output", f"Stage {stage_idx + 1} Output: {stage.name}",
@@ -1284,6 +1284,18 @@ async def run_map_pipeline(
                 )
                 response_data = retry_data
                 content = new_content
+                if debug_on:
+                    debug_capture_response(
+                        body_json, "map_stage_regenerated",
+                        f"Stage {stage_idx + 1} Regenerated: {stage.name}",
+                        content_after=new_content,
+                        detail=f"{len(new_content)} chars after correction",
+                        metadata={
+                            "stage_index": stage_idx,
+                            "stage_id": stage.id,
+                            "violation_reason": violation_reason,
+                        },
+                    )
                 return new_content
 
             approved, reason, errored = await _verify_stage(
