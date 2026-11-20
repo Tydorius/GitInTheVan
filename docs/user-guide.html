@@ -766,8 +766,8 @@ and cantrip API second, so they are documented with the rest of it in the
 The four position toggles shown on some older installs (Pre-Driver, Driver-Callable,
 Pre-Navigator, Post-Navigator) were never wired up for lorebooks and have no effect; only
 cantrips run at the other positions.</p>
-<p><img alt="Lorebook Positions Editor" src="media/gitv-lorebook-positions.png"></p>
-<p><em>The Positions editor with its two options (Inject After Cantrips, Scan only the newest N), captured 2026-11-18.</em></p>
+<p><img alt="Lorebook Positions Editor" src="media/gitv-lorebooks-word-boundary.png"></p>
+<p><em>The Positions editor with its options (Inject After Cantrips, Scan only the newest N, Whole-word keywords only), captured 2026-11-20.</em></p>
 <p>Two options on the Pipeline Positions editor (the <strong>Edit Positions</strong> button on a lorebook)
 <em>are</em> wired:</p>
 <ul>
@@ -923,6 +923,8 @@ cantrip-written lorebooks.</p>
 <li>If a resource is called multiple times in the same pipeline stage (e.g., via both its own tag and a group), only one instance activates</li>
 </ul>
 <p><strong>Two activation modes.</strong> By default a group is a <em>shortcut</em>: when it fires, it injects each member's own tag, so a member with no tag of its own is never reached — the editor lists such members so you can give them tags. With <strong>Activate members directly</strong> on, membership itself turns members on when the group activates (by its tag or its Active flag) — the mode for untagged members. Both modes only ever add; nothing can switch a member off.</p>
+<p><img alt="Tag group direct activation" src="media/gitv-taggroups-direct-activation.png"></p>
+<p><em>The group editor with direct activation on; the hint names the member that has no tag of its own. Captured 2026-11-20.</em></p>
 <h3 id="tags-tab">Tags Tab</h3>
 <p>The Tags tab shows all your lorebooks and cantrips in one table with their tags and visibility settings.</p>
 <ul>

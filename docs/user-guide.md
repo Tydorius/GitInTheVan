@@ -873,9 +873,9 @@ The four position toggles shown on some older installs (Pre-Driver, Driver-Calla
 Pre-Navigator, Post-Navigator) were never wired up for lorebooks and have no effect; only
 cantrips run at the other positions.
 
-![Lorebook Positions Editor](media/gitv-lorebook-positions.png)
+![Lorebook Positions Editor](media/gitv-lorebooks-word-boundary.png)
 
-*The Positions editor with its two options (Inject After Cantrips, Scan only the newest N), captured 2026-11-18.*
+*The Positions editor with its options (Inject After Cantrips, Scan only the newest N, Whole-word keywords only), captured 2026-11-20.*
 
 Two options on the Pipeline Positions editor (the **Edit Positions** button on a lorebook)
 *are* wired:
@@ -1060,6 +1060,10 @@ Groups let you activate multiple lorebooks and cantrips with a single tag. Inste
 - If a resource is called multiple times in the same pipeline stage (e.g., via both its own tag and a group), only one instance activates
 
 **Two activation modes.** By default a group is a *shortcut*: when it fires, it injects each member's own tag, so a member with no tag of its own is never reached — the editor lists such members so you can give them tags. With **Activate members directly** on, membership itself turns members on when the group activates (by its tag or its Active flag) — the mode for untagged members. Both modes only ever add; nothing can switch a member off.
+
+![Tag group direct activation](media/gitv-taggroups-direct-activation.png)
+
+*The group editor with direct activation on; the hint names the member that has no tag of its own. Captured 2026-11-20.*
 
 ### Tags Tab
 
