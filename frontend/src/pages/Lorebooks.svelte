@@ -235,8 +235,9 @@
         is_disabled: entryForm.is_disabled,
       }
       if (editingEntryId) {
+        const entryId = editingEntryId
         await withScanOverride((overrideScan: boolean) =>
-          api.updateLorebookEntry(selectedLorebook.id, editingEntryId, {
+          api.updateLorebookEntry(selectedLorebook.id, entryId, {
             ...data,
             override_scan: overrideScan,
           }),

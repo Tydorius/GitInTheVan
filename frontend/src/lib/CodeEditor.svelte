@@ -13,6 +13,7 @@
   export let placeholder: string = ''
   export let minHeight: string = '200px'
   export let errorLine: number | null = null
+  export let id: string = ''
 
   let minHeightPx: string = '200px'
 
@@ -154,6 +155,7 @@
       spellcheck="false"
       autocomplete="off"
       class="code-editor-textarea"
+      id={id}
       placeholder={placeholder}
     ></textarea>
   </div>

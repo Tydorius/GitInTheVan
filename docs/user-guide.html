@@ -52,28 +52,28 @@ surrounding UI may have moved on.</p>
 <hr>
 <h2 id="table-of-contents">Table of Contents</h2>
 <ol>
-<li><a href="#1-login-and-admin-setup">Login and Admin Setup</a></li>
-<li><a href="#2-https-and-lan-access">HTTPS and LAN Access</a></li>
-<li><a href="#3-dashboard">Dashboard</a></li>
-<li><a href="#4-endpoints">Endpoints</a></li>
-<li><a href="#5-cantrips">Cantrips</a></li>
-<li><a href="#6-lorebooks">Lorebooks</a></li>
+<li><a href="#login">Login and Admin Setup</a></li>
+<li><a href="#https">HTTPS and LAN Access</a></li>
+<li><a href="#dashboard">Dashboard</a></li>
+<li><a href="#endpoints">Endpoints</a></li>
+<li><a href="#cantrips">Cantrips</a></li>
+<li><a href="#lorebooks">Lorebooks</a></li>
 <li><a href="#skills">Skills &amp; Samples</a></li>
-<li><a href="#8-verification">Verification</a></li>
-<li><a href="#9-memories">Memories</a></li>
-<li><a href="#10-command-tags">Command Tags</a></li>
-<li><a href="#11-maps">Maps</a></li>
-<li><a href="#12-content-packs">Content Packs</a></li>
-<li><a href="#13-tags-and-groups">Tags and Groups</a></li>
-<li><a href="#14-settings">Settings</a></li>
-<li><a href="#assistant">Assistant</a></li>
-<li><a href="#16-admin">Admin</a></li>
-<li><a href="#17-model-parameters">Model Parameters</a></li>
-<li><a href="#18-debug-and-comparing-runs">Debug and Comparing Runs</a></li>
-<li><a href="#19-the-activation-hierarchy">The Activation Hierarchy</a></li>
-<li><a href="#snapshots">Snapshots and Restore</a></li>
-<li><a href="#metrics">Metrics</a></li>
+<li><a href="#tags-and-groups">Tags and Groups</a></li>
+<li><a href="#activation">The Activation Hierarchy</a></li>
+<li><a href="#command-tags">Command Tags</a></li>
+<li><a href="#verification">Verification</a></li>
+<li><a href="#memories">Memories</a></li>
 <li><a href="#storage">Storage</a></li>
+<li><a href="#maps">Maps</a></li>
+<li><a href="#content-packs">Content Packs</a></li>
+<li><a href="#debug">Debug and Comparing Runs</a></li>
+<li><a href="#metrics">Metrics</a></li>
+<li><a href="#settings">Settings</a></li>
+<li><a href="#model-parameters">Model Parameters</a></li>
+<li><a href="#assistant">Assistant</a></li>
+<li><a href="#snapshots">Snapshots and Restore</a></li>
+<li><a href="#admin">Admin</a></li>
 </ol>
 <hr>
 <p><a id="login"></a></p>
@@ -104,7 +104,6 @@ surrounding UI may have moved on.</p>
 </blockquote>
 <h4 id="platform-specific-notes">Platform-Specific Notes</h4>
 <p><strong>Firefox (all platforms):</strong>
-<strong>Firefox (all platforms):</strong>
 Firefox uses its <strong>own certificate store</strong>, separate from the OS. Installing the CA in Windows Certificate Manager or macOS Keychain does NOT help Firefox. You must either:</p>
 <p><strong>Option A</strong> — Import the CA into Firefox directly:
 1. Go to <code>about:preferences#privacy</code> → scroll to <strong>Certificates</strong> → <strong>View Certificates</strong> → <strong>Authorities</strong> tab
@@ -300,7 +299,7 @@ the next one.</p>
   they back each other up. <strong>Custom Tag Name</strong> appears when you pick <code>custom</code>.</li>
 <li><strong>Priority</strong>: position in the chain. Ties break on creation order.</li>
 </ul>
-<p>The chain applies to the Driver call, to map stages, and — since 0.24.0 — to the
+<p>The chain applies to the Driver call, to map stages, and to the
 verification judge and the verification retry.</p>
 <h3 id="content-bypass-per-endpoint">Content Bypass (Per-Endpoint)</h3>
 <p><img alt="Endpoint Content Bypass" src="media/gitv-endpoints-edit-endpoint-1-top.png"></p>
@@ -423,7 +422,7 @@ verification judge and the verification retry.</p>
 - <strong>Personality Output</strong>: The final value of <code>context.character.personality</code>
 - <strong>Debug Logs</strong>: Output from <code>console.log()</code> calls in the cantrip
 - <strong>Chat Data Result</strong>: The final state of <code>context.chat_data</code> after execution</p>
-<h3 id="sequence-tester-0400">Sequence Tester (0.40.0)</h3>
+<h3 id="sequence-tester">Sequence Tester</h3>
 <p><img alt="Sequence Tester" src="media/gitv-cantrips-sequence-tester.png"></p>
 <p><em>The Sequence Tester card with a three-turn script run: per-turn cantrip records, extracted response tags and the final store state. Captured 2026-11-19.</em></p>
 <p>The one-shot tester runs a single cantrip against a single context. The
@@ -553,7 +552,7 @@ console.log('Debug output visible in cantrip tester');
 }
 </code></pre>
 <p><a id="response-tags"></a></p>
-<h3 id="response-tags-activate-and-inject-0390">Response Tags, activate() and inject() (0.39.0)</h3>
+<h3 id="response-tags-activate-inject-and-strip">Response Tags, activate(), inject() and strip()</h3>
 <p><strong>Response tags</strong> remove the one-turn wait that forced ledger-style scripts
 through hidden links. A cantrip registers tag names (Cantrips editor →
 <em>Response Tags</em>); GitV extracts those tags from the model's <strong>final</strong> reply,
@@ -589,7 +588,7 @@ and 64k characters total; refusals degrade, never fail the request.</p>
     context.inject(&quot;The player regenerated: keep continuity with the prior attempt.&quot;, &quot;in_chat_system&quot;);
 }
 </code></pre>
-<p><strong><code>context.strip(pattern, scope)</code></strong> (0.41.0) removes regex matches from the
+<p><strong><code>context.strip(pattern, scope)</code></strong> removes regex matches from the
 prompt's message text — the inverse of <code>inject()</code>, and previously
 impossible: cantrips could add prompt text but never remove it. Scope is
 <code>all</code> (default), <code>system</code> (system-role messages only) or <code>messages</code>
@@ -615,34 +614,6 @@ cleanup, nothing captured. Site footers, watermark lines, artifacts: one
 pattern per line, max 20.</p>
 <p><img alt="Response cleanup settings" src="media/gitv-settings-strip-patterns.png"></p>
 <p><em>The Response Cleanup card, captured 2026-11-19.</em></p>
-<h3 id="pre-forward-order-0410">Pre-Forward Order (0.41.0)</h3>
-<p><img alt="Pre-Forward Order" src="media/gitv-settings-pipeline-order.png"></p>
-<p><em>The Pre-Forward Order card with an interleaved order: the Prompt Janitor cantrip first, then a lorebook, then another cantrip. Captured 2026-11-19.</em></p>
-<p>By default the pipeline runs all lorebook injections, then all pre-Driver
-cantrips — two batches. This card replaces that window with <strong>one exact
-interleaved order you define</strong>: Cantrip 1, Lorebook 1, Lorebook 2,
-Cantrip 2, anything you like. Drag rows (or use the arrows); each step's
-outputs — strips, injections, activations — land before the next step
-runs, so a lorebook keyword-matches against text an earlier cantrip
-stripped or wrote.</p>
-<ul>
-<li><strong>Off (or an empty list) keeps today's behavior exactly.</strong> Enabling
-  offers to populate the list from your current active resources, in
-  today's order; reorder from there.</li>
-<li><strong>The list orders, it never activates.</strong> A resource still needs its tag
-  or Active flag to fire; listing something inactive does nothing.</li>
-<li><strong>Unlisted resources are not dropped.</strong> Anything that activates but is
-  not listed (including resources you create later) runs after the list
-  in its default order.</li>
-<li>A lorebook's <em>Inject After Cantrips</em> setting is ignored in manual mode
-  — its position in the list is the truth.</li>
-<li>Applies to non-map requests; maps keep their own stage ordering.</li>
-</ul>
-<p>Pair it with the <strong>Prompt Janitor</strong> template (Cantrips → Templates): a
-disabled-by-default cantrip that strips configurable regex patterns from
-the prompt — platform-injected system notes, watermark lines — before
-anything else sees them. Its patterns live in the cantrip's data and are
-editable at runtime from the Storage page.</p>
 <h3 id="cantrip-snippets">Cantrip Snippets</h3>
 <p>Copy-paste examples for common patterns.</p>
 <p><strong>Day counter (persistent state via <code>chat_data</code>):</strong></p>
@@ -695,7 +666,7 @@ if (!budget) {
 }
 </code></pre>
 <p><a id="passenger"></a></p>
-<h3 id="passenger-scripted-llm-calls-0360">Passenger: Scripted LLM Calls (0.36.0)</h3>
+<h3 id="passenger-scripted-llm-calls">Passenger: Scripted LLM Calls</h3>
 <p>Cantrips run in a sandbox with no network access — that is what makes them
 safe to install. <strong>Passenger</strong> is the one sanctioned exception: a script can
 ask GitV itself to make a side LLM call on its behalf. The host holds the
@@ -746,9 +717,77 @@ budgets; those test calls are recorded as sandbox traffic so they never
 pollute your live Metrics aggregates. A worked end-to-end example lives in
 the <strong>Dynamic Lorebook RAG Executor</strong> template (see
 <a href="#dynamic-lorebooks">Dynamic Lorebooks</a>).</p>
+<p>Scripts can also create and edit <strong>real lorebooks at runtime</strong> via
+<code>context.lorebook</code>, and <code>&lt;jslorebook&gt;</code> blocks embedded in messages run
+sandboxed at their declared position. Both are lorebook machinery first
+and cantrip API second, so they are documented with the rest of it in the
+<a href="#lorebooks">Lorebooks</a> section.</p>
+<hr>
+<p><a id="lorebooks"></a></p>
+<h2 id="6-lorebooks">6. Lorebooks</h2>
+<p><img alt="Lorebooks List" src="media/gitv-lorebooks.png"></p>
+<p>Lorebooks are JSON worldbook entries that inject context into requests based on keyword matching.</p>
+<h3 id="lorebook-list">Lorebook List</h3>
+<p>The table shows each lorebook with:
+- <strong>Name</strong>: Click to manage entries
+- <strong>Entries</strong>: Count of keyword entries
+- <strong>Active</strong>: ON/OFF toggle to enable/disable injection without deleting
+- <strong>Visibility</strong>: Public or Private
+- <strong>Actions</strong>: Manage, Export (download JSON), Delete</p>
+<h3 id="importing-lorebooks">Importing Lorebooks</h3>
+<p><img alt="Import Lorebook" src="media/gitv-lorebooks-import-lorebook-example.png"></p>
+<p>Click <strong>"Import JSON"</strong> to import a lorebook from an external source:</p>
+<ul>
+<li><strong>Load from File</strong>: Click to open a file browser and select a <code>.json</code> file</li>
+<li><strong>Or paste JSON</strong>: Manually paste lorebook JSON into the text area</li>
+<li><strong>Lorebook Name</strong>: Optional, defaults to the name in the JSON</li>
+</ul>
+<p>Supported formats include:
+- GitInTheVan native format
+- SillyTavern world info format
+- Chub lorebook format
+- JanitorAI lorebook exports</p>
+<p>The import handles both array and dictionary-keyed entry formats, and maps common alternative field names automatically.</p>
+<h3 id="managing-entries">Managing Entries</h3>
+<p><img alt="Manage Lorebook" src="media/gitv-lorebooks-manage-lorebook-example.png"></p>
+<p>Click <strong>Manage</strong> on a lorebook to view and edit its entries:</p>
+<p>Each entry has:
+- <strong>Entry Name</strong>: A label for the entry
+- <strong>Keywords</strong>: Comma-separated trigger words (e.g., <code>castle, throne, keep</code>)
+- <strong>Secondary Keywords</strong>: Additional keywords for selective matching
+- <strong>Content</strong>: The text to inject when keywords match
+- <strong>Position</strong>: Where in the message array to inject (<code>before_last_message</code> or <code>system_start</code>)
+- <strong>Insertion Order</strong>: Sort order when multiple entries match (lower = first)
+- <strong>Always Include (Constant)</strong>: Entry always fires regardless of keywords
+- <strong>Selective</strong>: Requires both a primary AND secondary keyword to match
+- <strong>Disabled</strong>: Temporarily disable this entry without deleting it</p>
+<h3 id="lorebook-pipeline-positions">Lorebook Pipeline Positions</h3>
+<p>Lorebooks inject at one point in the pipeline: <strong>Pre-Driver</strong>, before the request is forwarded.
+The four position toggles shown on some older installs (Pre-Driver, Driver-Callable,
+Pre-Navigator, Post-Navigator) were never wired up for lorebooks and have no effect; only
+cantrips run at the other positions.</p>
+<p><img alt="Lorebook Positions Editor" src="media/gitv-lorebook-positions.png"></p>
+<p><em>The Positions editor with its two options (Inject After Cantrips, Scan only the newest N), captured 2026-11-18.</em></p>
+<p>Two options on the Pipeline Positions editor (the <strong>Edit Positions</strong> button on a lorebook)
+<em>are</em> wired:</p>
+<ul>
+<li><strong>Inject After Cantrips</strong>: cantrips read the message list (via <code>context.chat.last_messages</code>)
+  before it reaches the model. With this on, the book's entries are injected <em>after</em> cantrips
+  run — the entries still reach the model in the same request, but cantrips cannot read them.
+  Use it for entries with spoilers or mechanics that scripts should not see. The injection
+  happens before conversation summarization and before map stage snapshots, so nothing else
+  changes. The option is per-install: map exports and packs do not carry it (imported copies
+  start with it off), matching every other book-level setting.</li>
+<li><strong>Scan only the newest N messages</strong>: off by default (the whole conversation is scanned).
+  When on (the field pre-fills 10), this book's keywords match against only the newest N
+  messages — a keyword mentioned in ancient history no longer triggers the entry, and long
+  chats stop paying a full-history scan per key. Constant entries always apply regardless of
+  the window. The window counts messages of the request as the book sees it, including
+  earlier injections on map stages.</li>
+</ul>
 <p><a id="dynamic-lorebooks"></a></p>
-<h3 id="dynamic-lorebooks-0370">Dynamic Lorebooks (0.37.0)</h3>
-<p><code>context.lorebook</code> lets a script create and edit <strong>real lorebooks</strong> at
+<h3 id="dynamic-lorebooks">Dynamic Lorebooks</h3>
+<p><code>context.lorebook</code> lets a cantrip create and edit <strong>real lorebooks</strong> at
 runtime — same tables, same keyword engine, same guards as the editor. What
 a script writes this turn is injected this turn, and every turn after, in
 that conversation.</p>
@@ -797,7 +836,7 @@ const hits = lb.search('dragon weakness');
 example: it files <code>&lt;memstore key="name"&gt;content&lt;/memstore&gt;</code> tags from each
 response into the chat's dynamic book and strips the tags from the visible
 reply.</p>
-<p>The <strong>Dynamic Lorebook RAG Executor</strong> template is its companion (0.38.0). Raw
+<p>The <strong>Dynamic Lorebook RAG Executor</strong> template is its companion. Raw
 notes pile up as a chat runs long; the Executor periodically condenses them
 with <strong>one Passenger call</strong> — merging duplicate entries, tightening wording,
 sharpening keywords — and writes the consolidated entries back through
@@ -811,77 +850,13 @@ after install to taste.</p>
 <p><img alt="Cantrip templates" src="media/gitv-cantrips-templates-rag.png"></p>
 <p><em>The Cantrips → Templates list with both Dynamic Lorebook entries,
 captured 2026-11-19.</em></p>
-<h3 id="jslorebook-scripts-0370">jslorebook Scripts (0.37.0)</h3>
-<p><code>&lt;jslorebook&gt;...&lt;/jslorebook&gt;</code> blocks embedded in messages are executed
-now (they were previously stripped for prompt hygiene only). They run
-sandboxed — no network, no filesystem — with <code>context.lorebook</code> available,
-at the position their code declares via a comment (<code>&lt;pre-user&gt;</code> or
-<code>&lt;post-llm&gt;</code>; default pre-driver). The block itself is stripped from the
-forwarded prompt either way. Ops pass through the same guards and caps as
+<h3 id="jslorebook-scripts">jslorebook Scripts</h3>
+<p><code>&lt;jslorebook&gt;...&lt;/jslorebook&gt;</code> blocks embedded in messages run sandboxed —
+no network, no filesystem — with <code>context.lorebook</code> available, at the
+position their code declares via a comment (<code>&lt;pre-user&gt;</code> or <code>&lt;post-llm&gt;</code>;
+default pre-driver). The block itself is stripped from the forwarded
+prompt either way. Ops pass through the same guards and caps as
 cantrip-written lorebooks.</p>
-<hr>
-<p><a id="lorebooks"></a></p>
-<h2 id="6-lorebooks">6. Lorebooks</h2>
-<p><img alt="Lorebooks List" src="media/gitv-lorebooks.png"></p>
-<p>Lorebooks are JSON worldbook entries that inject context into requests based on keyword matching.</p>
-<h3 id="lorebook-list">Lorebook List</h3>
-<p>The table shows each lorebook with:
-- <strong>Name</strong>: Click to manage entries
-- <strong>Entries</strong>: Count of keyword entries
-- <strong>Active</strong>: ON/OFF toggle to enable/disable injection without deleting
-- <strong>Visibility</strong>: Public or Private
-- <strong>Actions</strong>: Manage, Export (download JSON), Delete</p>
-<h3 id="importing-lorebooks">Importing Lorebooks</h3>
-<p><img alt="Import Lorebook" src="media/gitv-lorebooks-import-lorebook-example.png"></p>
-<p>Click <strong>"Import JSON"</strong> to import a lorebook from an external source:</p>
-<ul>
-<li><strong>Load from File</strong>: Click to open a file browser and select a <code>.json</code> file</li>
-<li><strong>Or paste JSON</strong>: Manually paste lorebook JSON into the text area</li>
-<li><strong>Lorebook Name</strong>: Optional, defaults to the name in the JSON</li>
-</ul>
-<p>Supported formats include:
-- GitInTheVan native format
-- SillyTavern world info format
-- Chub lorebook format
-- JanitorAI lorebook exports</p>
-<p>The import handles both array and dictionary-keyed entry formats, and maps common alternative field names automatically.</p>
-<h3 id="managing-entries">Managing Entries</h3>
-<p><img alt="Manage Lorebook" src="media/gitv-lorebooks-manage-lorebook-example.png"></p>
-<p>Click <strong>Manage</strong> on a lorebook to view and edit its entries:</p>
-<p>Each entry has:
-- <strong>Entry Name</strong>: A label for the entry
-- <strong>Keywords</strong>: Comma-separated trigger words (e.g., <code>castle, throne, keep</code>)
-- <strong>Secondary Keywords</strong>: Additional keywords for selective matching
-- <strong>Content</strong>: The text to inject when keywords match
-- <strong>Position</strong>: Where in the message array to inject (<code>before_last_message</code> or <code>system_start</code>)
-- <strong>Insertion Order</strong>: Sort order when multiple entries match (lower = first)
-- <strong>Always Include (Constant)</strong>: Entry always fires regardless of keywords
-- <strong>Selective</strong>: Requires both a primary AND secondary keyword to match
-- <strong>Disabled</strong>: Temporarily disable this entry without deleting it</p>
-<h3 id="lorebook-pipeline-positions">Lorebook Pipeline Positions</h3>
-<p>Lorebooks inject at one point in the pipeline: <strong>Pre-Driver</strong>, before the request is forwarded.
-The four position toggles shown on some older installs (Pre-Driver, Driver-Callable,
-Pre-Navigator, Post-Navigator) were never wired up for lorebooks and have no effect; only
-cantrips run at the other positions.</p>
-<p><img alt="Lorebook Positions Editor" src="media/gitv-lorebook-positions.png"></p>
-<p><em>The Positions editor with the 0.35.0 options (Inject After Cantrips, Scan only the newest N), captured 2026-11-18.</em></p>
-<p>Two options on the Pipeline Positions editor (the <strong>Edit Positions</strong> button on a lorebook)
-<em>are</em> wired:</p>
-<ul>
-<li><strong>Inject After Cantrips</strong>: cantrips read the message list (via <code>context.chat.last_messages</code>)
-  before it reaches the model. With this on, the book's entries are injected <em>after</em> cantrips
-  run — the entries still reach the model in the same request, but cantrips cannot read them.
-  Use it for entries with spoilers or mechanics that scripts should not see. The injection
-  happens before conversation summarization and before map stage snapshots, so nothing else
-  changes. The option is per-install: map exports and packs do not carry it (imported copies
-  start with it off), matching every other book-level setting.</li>
-<li><strong>Scan only the newest N messages</strong>: off by default (the whole conversation is scanned).
-  When on (the field pre-fills 10), this book's keywords match against only the newest N
-  messages — a keyword mentioned in ancient history no longer triggers the entry, and long
-  chats stop paying a full-history scan per key. Constant entries always apply regardless of
-  the window. The window counts messages of the request as the book sees it, including
-  earlier injections on map stages.</li>
-</ul>
 <hr>
 <p><a id="skills"></a></p>
 <h2 id="7-skills-samples">7. Skills &amp; Samples</h2>
@@ -905,11 +880,11 @@ cantrips run at the other positions.</p>
 <ol>
 <li>Navigate to <strong>Skills &amp; Samples</strong> in the sidebar</li>
 <li>Use the <strong>Skills</strong> / <strong>Writing Samples</strong> tabs to switch between types</li>
+<li>Click <strong>New Skill</strong> or <strong>New Writing Sample</strong></li>
+<li>Fill in name, description, and content (markdown supported)</li>
+<li>Select the type if needed (Skill or Writing Sample)</li>
 </ol>
-<p>Each row also carries <strong>History</strong> (version history) and <strong>Export</strong> (download as JSON) buttons.
-3. Click <strong>New Skill</strong> or <strong>New Writing Sample</strong>
-4. Fill in name, description, and content (markdown supported)
-5. Select the type if needed (Skill or Writing Sample)</p>
+<p>Each row also carries <strong>History</strong> (version history) and <strong>Export</strong> (download as JSON) buttons.</p>
 <h3 id="attaching-to-endpoints">Attaching to Endpoints</h3>
 <ol>
 <li>Create or edit a skill/sample</li>
@@ -919,141 +894,83 @@ cantrips run at the other positions.</p>
 </ol>
 <p>When a request comes through an endpoint, all attached skills are injected into the system message, then all attached samples are injected before the last user message.</p>
 <hr>
-<p><a id="verification"></a></p>
-<h2 id="8-verification">8. Verification</h2>
-<p>Verification uses a separate LLM (the <strong>Navigator</strong>) to check the writing LLM's (the <strong>Driver's</strong>) responses against configurable rules. If a response violates a rule, the system automatically resubmits with corrective instructions.</p>
-<p>The Verification page has five tabs: <strong>Rules</strong>, <strong>Settings</strong>, <strong>Logs</strong>, <strong>Forbidden Words</strong>, and <strong>Test</strong>.</p>
-<h3 id="rules-tab">Rules Tab</h3>
-<p><img alt="Verification Rules" src="media/gitv-verification-rules.png"></p>
-<p>Each rule contains:
-- <strong>Name</strong>: A label for the rule
-- <strong>Description</strong>: Optional notes
-- <strong>Verification Prompt</strong>: Instructions for the Navigator (e.g., "The response must contain the string MARKER:")
-- <strong>Max Retries</strong>: How many times to resubmit before giving up (default 2)
-- <strong>Execution Order</strong>: Sort order when multiple rules are active
-- <strong>Resubmission Strategy</strong>: How to handle violations:
-  - <strong>Add Instructions</strong>: Appends a corrective system message to the request
-  - <strong>Rewrite</strong>: Sends the bad response back with rewrite instructions
-- <strong>Verification Endpoint Override</strong>: Use a specific endpoint for this rule (leave as "Use global setting" for the default)
-- <strong>Verification Model Override</strong>: Use a specific model for this rule (leave blank for the global setting)</p>
-<p>Each rule card has an <strong>ON/OFF toggle</strong> to enable/disable without editing. Rules are taggable and activate via <code>&lt;#verify-tag#&gt;</code> in persona or message text.</p>
-<p><img alt="Edit Verification Rule" src="media/gitv-verification-rules-edit-rule-example.png"></p>
-<h3 id="settings-tab">Settings Tab</h3>
-<p><img alt="Verification Settings" src="media/gitv-verification-settings.png"></p>
-<p>Configure the Navigator:
-- <strong>Verification Enabled</strong>: Master toggle for response verification
-- <strong>Verification Endpoint</strong>: Which endpoint to use for Navigator checks (can be the same or different from your Driver endpoint)
-- <strong>Verification Model</strong>: Which model to use for checking (a fast, instruction-following model is recommended)</p>
-<p><strong>Note:</strong> When verification is enabled, streaming requests are automatically converted to non-streaming to allow the full response to be checked before returning to the client.</p>
-<h3 id="logs-tab">Logs Tab</h3>
-<p><img alt="Verification Logs" src="media/gitv-verification-logs.png"></p>
-<p>The logs tab shows the history of verification checks:
-- <strong>Rule</strong>: Which rule was evaluated
-- <strong>Result</strong>: Approved or Rejected
-- <strong>Severity</strong>: How serious the violation was (none, low, medium, high)
-- <strong>Retries</strong>: How many resubmission attempts were made
-- <strong>Reason</strong>: Why the response was rejected (if applicable)
-- <strong>Time</strong>: When the check occurred</p>
-<p>Use the <strong>Refresh</strong> button to update the list, or toggle <strong>Auto</strong> for automatic refresh every 15 seconds.</p>
-<h3 id="forbidden-words-tab">Forbidden Words Tab</h3>
-<p><img alt="Forbidden Words" src="media/gitv-verification-forbidden-words.png"></p>
-<p>The Forbidden Words tab provides a fast, string-matching check that runs before the Navigator. This is more efficient than using an LLM for simple word/phrase filters.</p>
-<p><strong>How it works:</strong></p>
+<p><a id="tags-and-groups"></a></p>
+<h2 id="8-tags-and-groups">8. Tags and Groups</h2>
+<p><img alt="Tags and Groups" src="media/gitv-tags-and-groups.png"></p>
+<p>The Tags and Groups page provides centralized management of all your lorebook and cantrip tags, plus the ability to create group collections activated by a single tag.</p>
+<h3 id="groups-tab">Groups Tab</h3>
+<p>Groups let you activate multiple lorebooks and cantrips with a single tag. Instead of embedding five separate tags in your persona or scenario, create a group with tag <code>castlescene</code> and embed <code>&lt;#castlescene#&gt;</code>.</p>
+<p><strong>Creating a Group:</strong></p>
 <ol>
-<li>After the Driver responds, the response is scanned against your list of forbidden phrases — on every request type, including buffered streaming responses (see <a href="#streaming-and-status">Streaming and Status</a> to disable that)</li>
-<li>Any matches are collected into a violation summary</li>
-<li>If matches are found and the Navigator is enabled, the summary is prepended to the verification prompt as a <code>[FORBIDDEN CONTENT DETECTED]</code> block</li>
-<li>When the Navigator rejects a response and regenerates it, the retry is re-scanned before it is judged — a retry that swaps one forbidden phrase for another does not pass on the previous response's stale findings</li>
-<li>If the Navigator has no rules configured, matches are logged but the response is still returned; the retry loop requires at least one verification rule</li>
+<li>Click <strong>+ Create Group</strong></li>
+<li>Enter a <strong>Name</strong> and <strong>Group Tag</strong></li>
+<li>Check the lorebooks and cantrips to include</li>
+<li>Optionally enable <strong>Active</strong> (blanket-applied on every message without needing the tag)</li>
 </ol>
-<p><strong>Settings:</strong>
-- <strong>Enable Forbidden Words Check</strong>: Master toggle
-- <strong>Case Sensitive</strong>: Whether to match case-sensitively (default: off, matching is case-insensitive)</p>
-<p>Add forbidden words or phrases via the input field. Each phrase is checked literally against the response text. Use the <strong>Test Scanner</strong> to paste any text and see which forbidden phrases would match, with positions and occurrence counts.</p>
-<h3 id="test-tab">Test Tab</h3>
-<p><img alt="Verification Test" src="media/gitv-verification-test.png"></p>
-<p>The test panel lets you check sample responses against a verification rule without sending traffic through the proxy:</p>
-<ol>
-<li>Enter or paste <strong>response content</strong> to evaluate</li>
-<li>Select a saved <strong>rule</strong> from the dropdown to auto-load its prompt, or enter a <strong>custom verification prompt</strong></li>
-<li>Select an <strong>endpoint</strong> and <strong>model</strong> for the check</li>
-<li>Click <strong>Run Verification Check</strong></li>
-</ol>
-<p>The result shows whether the response was approved or rejected, along with the reason and severity. If the verification model returns thinking/reasoning output, it is displayed in a highlighted <strong>Model Thinking</strong> section. The raw LLM response is available in a collapsible <strong>Raw LLM Response</strong> section.</p>
-<hr>
-<h3 id="when-a-rule-does-not-run">When a Rule Does Not Run</h3>
-<p>If the verification endpoint cannot be reached, the check is <strong>skipped and the
-response is returned unchecked</strong>. That is deliberate — an endpoint outage must
-not block your reply — but it is reported rather than silently passing:</p>
-<blockquote>
-<p>Verification resulted in a 404 error, so rule 'No Purple Prose' did not
-process. The response was returned unchecked.</p>
-</blockquote>
-<p>The same sentence appears in three places: the run's Verification stage in
-Debug, the reason column on the <strong>Logs</strong> tab, and an amber banner on the
-<strong>Test</strong> tab. A rule that did not run never shows as approved.</p>
-<p>If you see this, check that the endpoint on <strong>Verification -&gt; Settings</strong> (or the
-rule's own override) is reachable, and that its <strong>Provider</strong> setting matches the
-API it actually speaks.</p>
-<hr>
-<p><a id="memories"></a></p>
-<h2 id="9-memories">9. Memories</h2>
-<p><img alt="Memories Page" src="media/gitv-memories.png"></p>
-<p>The Memories page shows persistent data and summarization overrides.</p>
-<h3 id="persistent-memory-flags">Persistent Memory (Flags)</h3>
-<p>Persistent memories are discrete key/value facts the LLM chooses to remember across turns:</p>
-<ol>
-<li>The LLM includes <code>&lt;memstore&gt;</code> tags in its response:
-   <code>&lt;memstore key="location"&gt;Dragon's Breath Tavern&lt;/memstore&gt;</code></li>
-<li>GitInTheVan extracts these tags, stores them per-conversation, and strips them from the response</li>
-<li>On the next request, stored memories are injected as a <code>[PERSISTENT MEMORY]</code> system block</li>
-</ol>
-<p>The memories table shows each memory's key, value, conversation, and last-updated time. Memories can be edited or deleted manually.</p>
-<h3 id="conversation-summaries">Conversation Summaries</h3>
-<p>When summarization is enabled (see <a href="#settings">Settings</a>), long conversations are automatically compressed. The summaries section shows:</p>
+<p><strong>Group behavior:</strong></p>
 <ul>
-<li><strong>Chat</strong>: Internal conversation identifier</li>
-<li><strong>Messages</strong>: How many messages were compressed into the summary</li>
-<li><strong>Tokens</strong>: Estimated token count at time of summarization</li>
-<li><strong>Updated</strong>: When the summary was last generated</li>
+<li>Groups are always private (only the owner can use them)</li>
+<li>Groups activate in the normal pre-LLM phase</li>
+<li>Groups cannot nest into each other</li>
+<li>If a member lorebook or cantrip is deleted, the group logs a warning and continues</li>
+<li>If a resource is called multiple times in the same pipeline stage (e.g., via both its own tag and a group), only one instance activates</li>
 </ul>
-<p>Click <strong>View</strong> to expand and read the full summary text. Click <strong>Delete</strong> to remove a summary (the conversation will be re-summarized next time it exceeds the threshold).</p>
-<h3 id="memory-rules">Memory Rules</h3>
-<p><img alt="Add Memory Rule" src="media/gitv-memories-add-rule.png"></p>
-<p>Memory Rules override summarization behavior for specific conversations. Rules are taggable — they activate via <code>&lt;#memory-rule-tag#&gt;</code> in persona or message text. A rule with no tag acts as the default fallback. Each rule can also be exported as JSON (<strong>Export</strong>) and keeps version history (<strong>History</strong>).</p>
-<p>Each rule can override:
-- <strong>Summarization Enabled</strong>: Turn summarization on or off for matching conversations
-- <strong>Token Threshold</strong>: Override the global threshold (0 = use global)
-- <strong>Keep Recent</strong>: Override the global keep-recent count (0 = use global)
-- <strong>Custom Prompt</strong>: Override the summarization prompt (empty = use global)</p>
-<p>Rules are evaluated in execution order. The first matching tagged rule wins. If no tagged rules match, the default (untagged) rule applies. If no rules exist, global settings are used.</p>
-<p>To create a memory rule:
-1. Click <strong>+ Add Rule</strong> in the Memory Rules section
-2. Enter a <strong>Name</strong> and optional <strong>Tag</strong>
-3. Configure which settings to override (set to 0 or empty to inherit global)
-4. Click <strong>Create</strong></p>
-<p>Use <strong>Edit</strong> to modify a rule and the <strong>ON/OFF</strong> toggle to enable/disable without deleting. <strong>Export</strong> downloads the rule as JSON (the <strong>History</strong> button keeps its version history).</p>
-<h3 id="scenario-summarization-rules">Scenario Summarization Rules</h3>
-<p>Scenario summarization automatically compresses the system message (character definition + scenario + lorebooks) when it exceeds a token threshold. This is critical for large lorebooks or complex character cards that can consume thousands of tokens.</p>
-<p><strong>Two firing positions:</strong></p>
+<h3 id="tags-tab">Tags Tab</h3>
+<p>The Tags tab shows all your lorebooks and cantrips in one table with their tags and visibility settings.</p>
 <ul>
-<li><strong>Pre</strong> — Fires after memory injection, before lorebooks and cantrips. Controls the size of the author-provided scenario (character card, OOC instructions, stored memories).</li>
-<li><strong>Post</strong> — Fires after cantrips, skills, and lorebooks have been applied. Controls the final system message size before it reaches the model.</li>
+<li><strong>Tag</strong>: Click the edit icon to change the tag. Shows the full activation tag (e.g., <code>&lt;#lore-mytag#&gt;</code>)</li>
+<li><strong>Visibility</strong>: Toggle between Public and Private. Private tags only work for the owner. Public tags work for all users.</li>
 </ul>
-<p>Both positions can fire on the same request. Each position independently picks the highest-triggered rule (sorted by threshold descending). For example:
-- A Pre rule at 3,000 tokens summarizes a bloated 6,000-token character card down to 2,500
-- GITV adds lorebooks and skills bringing it to 5,000 tokens
-- A Post rule at 6,000 tokens does not trigger (5,000 &lt; 6,000) — good, it's within budget</p>
-<p><strong>Rule fields:</strong>
-- <strong>Token Threshold</strong>: Summarize when system message exceeds this
-- <strong>Fire Position</strong>: Pre or Post
-- <strong>Endpoint</strong>: Which LLM endpoint to use (default = main endpoint)
-- <strong>Model</strong>: Specific model for summarization (default = endpoint's default model)
-- <strong>Prompt</strong>: Custom summarization prompt (empty = use built-in default)</p>
-<blockquote>
-<p>Use a fast, cheap model for low-threshold rules and a more capable model for high-threshold rules. Scenario summarization only sends the system message (never chat messages) to the summarization LLM.</p>
-</blockquote>
-<p>Scenario rules can be shared via content packs in the <code>scenario_rules/</code> folder.</p>
+<hr>
+<p><a id="activation"></a></p>
+<h2 id="9-the-activation-hierarchy">9. The Activation Hierarchy</h2>
+<p>Five kinds of resource — lorebooks, cantrips, verification rules, maps and memory
+rules — all answer the same question: <em>is this on for this request?</em> They answer
+it the same way.</p>
+<ol>
+<li><strong>Off is the default.</strong> A resource participates only if something turns it on.</li>
+<li><strong>Activation is a union. Sources add, never subtract.</strong> There is deliberately
+   no way to express "off", so no source can countermand another.</li>
+<li><strong>Proximity wins.</strong> A tag in the system prompt, the persona or the message
+   text activates the resource <strong>regardless of its Active flag</strong>. The closer a
+   source is to the message, the more authority it has.</li>
+<li><strong>Active is the blanket source</strong>, used when no tag has spoken. Active means
+   "apply to everything", so an Active resource runs even when the request
+   carries unrelated tags.</li>
+</ol>
+<p>So a resource switched off in the UI still runs if a tag names it, and that is
+correct — you asked for it by name, in the message.</p>
+<h3 id="maps-and-memory-rules-are-chosen-not-stacked">Maps and memory rules are chosen, not stacked</h3>
+<p>Exactly one map and one memory rule can win, so rule 4 works differently for
+them: Active cannot also mean "apply to everything", because blanket-running a
+multi-stage map would silently multiply what every request costs.</p>
+<p>They match on <strong>their own tag</strong> only, plus one explicit default — the <strong>Default
+Map</strong> in Settings, or the untagged default memory rule. Rules 1-3 apply to them
+unchanged.</p>
+<h3 id="tag-format">Tag format</h3>
+<p>Tags are written inline and stripped before the request is forwarded:</p>
+<pre><code>&lt;#lore-worldbuilding#&gt;  &lt;#cantrip-dice#&gt;  &lt;#verify-tone#&gt;
+&lt;#map-poker#&gt;           &lt;#memory-rule-longform#&gt;
+&lt;#taggroup-mygame#&gt;
+</code></pre>
+<p>A <strong>tag group</strong> activates several resources at once — see
+<a href="#tags-and-groups">Tags and Groups</a>.</p>
+<h3 id="conversation-binding-lexicon-lorebooks">Conversation binding (lexicon lorebooks)</h3>
+<p>Lorebooks have one more activation source: a <strong>conversation binding</strong>. The
+<code>&lt;LEXICON:name&gt;</code> command creates one lorebook per chat and binds it to that
+conversation (see <a href="#command-tags">Action Commands</a>). A bound lorebook injects
+in its own conversation regardless of its tag or Active flag — it is created
+inactive and untagged precisely so it never blanket-runs anywhere else. The
+binding only ever adds: no prompt tag can switch it off, and it touches no
+other resource type.</p>
+<p>One known limit: exporting and re-importing the chat on the client side
+produces a new conversation id and orphans the binding. The lorebook still
+exists and can be re-bound by running another <code>&lt;LEXICON:...&gt;</code> command in the
+new chat.</p>
+<h3 id="command-tags-are-separate">Command tags are separate</h3>
+<p><code>&lt;COMMAND:setting&gt;</code> tags (e.g. <code>&lt;VERIFY:off&gt;</code>) control the pipeline for one
+request rather than activating a resource. They are covered in
+<a href="#command-tags">Command Tags</a>.</p>
 <hr>
 <p><a id="command-tags"></a></p>
 <h2 id="10-command-tags">10. Command Tags</h2>
@@ -1154,8 +1071,183 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <p><strong>Cantrip auto-install</strong> is doubly gated, and both switches default to off: an admin allows it under Admin → Global Caps, and you enable your half in Settings. With both on, <code>&lt;CANTRIP:...&gt;</code> drafts, validates, smoke-tests and installs the cantrip inside the request instead of queueing it — a draft that fails validation or the safety scan is refused, and one that fails only its sandbox smoke test is installed <strong>disabled</strong> with the findings recorded. Either way you get a one-line <code>[OOC: GitV: ...]</code> note in the reply. These notes are stripped from the history on the next request, and they are the only <code>[OOC: ...]</code> blocks GitV removes — your own OOC notes always reach the model.</p>
 <p><img alt="Cantrip auto-install: the admin half of the gate" src="media/gitv-admin-cantrip-auto-install.png"></p>
 <hr>
+<p><a id="verification"></a></p>
+<h2 id="11-verification">11. Verification</h2>
+<p>Verification uses a separate LLM (the <strong>Navigator</strong>) to check the writing LLM's (the <strong>Driver's</strong>) responses against configurable rules. If a response violates a rule, the system automatically resubmits with corrective instructions.</p>
+<p>The Verification page has five tabs: <strong>Rules</strong>, <strong>Settings</strong>, <strong>Logs</strong>, <strong>Forbidden Words</strong>, and <strong>Test</strong>.</p>
+<h3 id="rules-tab">Rules Tab</h3>
+<p><img alt="Verification Rules" src="media/gitv-verification-rules.png"></p>
+<p>Each rule contains:
+- <strong>Name</strong>: A label for the rule
+- <strong>Description</strong>: Optional notes
+- <strong>Verification Prompt</strong>: Instructions for the Navigator (e.g., "The response must contain the string MARKER:")
+- <strong>Max Retries</strong>: How many times to resubmit before giving up (default 2)
+- <strong>Execution Order</strong>: Sort order when multiple rules are active
+- <strong>Resubmission Strategy</strong>: How to handle violations:
+  - <strong>Add Instructions</strong>: Appends a corrective system message to the request
+  - <strong>Rewrite</strong>: Sends the bad response back with rewrite instructions
+- <strong>Verification Endpoint Override</strong>: Use a specific endpoint for this rule (leave as "Use global setting" for the default)
+- <strong>Verification Model Override</strong>: Use a specific model for this rule (leave blank for the global setting)</p>
+<p>Each rule card has an <strong>ON/OFF toggle</strong> to enable/disable without editing. Rules are taggable and activate via <code>&lt;#verify-tag#&gt;</code> in persona or message text.</p>
+<p><img alt="Edit Verification Rule" src="media/gitv-verification-rules-edit-rule-example.png"></p>
+<h3 id="settings-tab">Settings Tab</h3>
+<p><img alt="Verification Settings" src="media/gitv-verification-settings.png"></p>
+<p>Configure the Navigator:
+- <strong>Verification Enabled</strong>: Master toggle for response verification
+- <strong>Verification Endpoint</strong>: Which endpoint to use for Navigator checks (can be the same or different from your Driver endpoint)
+- <strong>Verification Model</strong>: Which model to use for checking (a fast, instruction-following model is recommended)</p>
+<p><strong>Note:</strong> When verification is enabled, streaming requests are automatically converted to non-streaming to allow the full response to be checked before returning to the client.</p>
+<h3 id="logs-tab">Logs Tab</h3>
+<p><img alt="Verification Logs" src="media/gitv-verification-logs.png"></p>
+<p>The logs tab shows the history of verification checks:
+- <strong>Rule</strong>: Which rule was evaluated
+- <strong>Result</strong>: Approved or Rejected
+- <strong>Severity</strong>: How serious the violation was (none, low, medium, high)
+- <strong>Retries</strong>: How many resubmission attempts were made
+- <strong>Reason</strong>: Why the response was rejected (if applicable)
+- <strong>Time</strong>: When the check occurred</p>
+<p>Use the <strong>Refresh</strong> button to update the list, or toggle <strong>Auto</strong> for automatic refresh every 15 seconds.</p>
+<h3 id="forbidden-words-tab">Forbidden Words Tab</h3>
+<p><img alt="Forbidden Words" src="media/gitv-verification-forbidden-words.png"></p>
+<p>The Forbidden Words tab provides a fast, string-matching check that runs before the Navigator. This is more efficient than using an LLM for simple word/phrase filters.</p>
+<p><strong>How it works:</strong></p>
+<ol>
+<li>After the Driver responds, the response is scanned against your list of forbidden phrases — on every request type, including buffered streaming responses (see <a href="#streaming-and-status">Streaming and Status</a> to disable that)</li>
+<li>Any matches are collected into a violation summary</li>
+<li>If matches are found and the Navigator is enabled, the summary is prepended to the verification prompt as a <code>[FORBIDDEN CONTENT DETECTED]</code> block</li>
+<li>When the Navigator rejects a response and regenerates it, the retry is re-scanned before it is judged — a retry that swaps one forbidden phrase for another does not pass on the previous response's stale findings</li>
+<li>If the Navigator has no rules configured, matches are logged but the response is still returned; the retry loop requires at least one verification rule</li>
+</ol>
+<p><strong>Settings:</strong>
+- <strong>Enable Forbidden Words Check</strong>: Master toggle
+- <strong>Case Sensitive</strong>: Whether to match case-sensitively (default: off, matching is case-insensitive)</p>
+<p>Add forbidden words or phrases via the input field. Each phrase is checked literally against the response text. Use the <strong>Test Scanner</strong> to paste any text and see which forbidden phrases would match, with positions and occurrence counts.</p>
+<h3 id="test-tab">Test Tab</h3>
+<p><img alt="Verification Test" src="media/gitv-verification-test.png"></p>
+<p>The test panel lets you check sample responses against a verification rule without sending traffic through the proxy:</p>
+<ol>
+<li>Enter or paste <strong>response content</strong> to evaluate</li>
+<li>Select a saved <strong>rule</strong> from the dropdown to auto-load its prompt, or enter a <strong>custom verification prompt</strong></li>
+<li>Select an <strong>endpoint</strong> and <strong>model</strong> for the check</li>
+<li>Click <strong>Run Verification Check</strong></li>
+</ol>
+<p>The result shows whether the response was approved or rejected, along with the reason and severity. If the verification model returns thinking/reasoning output, it is displayed in a highlighted <strong>Model Thinking</strong> section. The raw LLM response is available in a collapsible <strong>Raw LLM Response</strong> section.</p>
+<h3 id="when-a-rule-does-not-run">When a Rule Does Not Run</h3>
+<p>If the verification endpoint cannot be reached, the check is <strong>skipped and the
+response is returned unchecked</strong>. That is deliberate — an endpoint outage must
+not block your reply — but it is reported rather than silently passing:</p>
+<blockquote>
+<p>Verification resulted in a 404 error, so rule 'No Purple Prose' did not
+process. The response was returned unchecked.</p>
+</blockquote>
+<p>The same sentence appears in three places: the run's Verification stage in
+Debug, the reason column on the <strong>Logs</strong> tab, and an amber banner on the
+<strong>Test</strong> tab. A rule that did not run never shows as approved.</p>
+<p>If you see this, check that the endpoint on <strong>Verification -&gt; Settings</strong> (or the
+rule's own override) is reachable, and that its <strong>Provider</strong> setting matches the
+API it actually speaks.</p>
+<hr>
+<p><a id="memories"></a></p>
+<h2 id="12-memories">12. Memories</h2>
+<p><img alt="Memories Page" src="media/gitv-memories.png"></p>
+<p>The Memories page shows persistent data and summarization overrides.</p>
+<h3 id="persistent-memory-flags">Persistent Memory (Flags)</h3>
+<p>Persistent memories are discrete key/value facts the LLM chooses to remember across turns:</p>
+<ol>
+<li>The LLM includes <code>&lt;memstore&gt;</code> tags in its response:
+   <code>&lt;memstore key="location"&gt;Dragon's Breath Tavern&lt;/memstore&gt;</code></li>
+<li>GitInTheVan extracts these tags, stores them per-conversation, and strips them from the response</li>
+<li>On the next request, stored memories are injected as a <code>[PERSISTENT MEMORY]</code> system block</li>
+</ol>
+<p>The memories table shows each memory's key, value, conversation, and last-updated time. Memories can be edited or deleted manually.</p>
+<h3 id="conversation-summaries">Conversation Summaries</h3>
+<p>When summarization is enabled (see <a href="#settings">Settings</a>), long conversations are automatically compressed. The summaries section shows:</p>
+<ul>
+<li><strong>Chat</strong>: Internal conversation identifier</li>
+<li><strong>Messages</strong>: How many messages were compressed into the summary</li>
+<li><strong>Tokens</strong>: Estimated token count at time of summarization</li>
+<li><strong>Updated</strong>: When the summary was last generated</li>
+</ul>
+<p>Click <strong>View</strong> to expand and read the full summary text. Click <strong>Delete</strong> to remove a summary (the conversation will be re-summarized next time it exceeds the threshold).</p>
+<h3 id="memory-rules">Memory Rules</h3>
+<p><img alt="Add Memory Rule" src="media/gitv-memories-add-rule.png"></p>
+<p>Memory Rules override summarization behavior for specific conversations. Rules are taggable — they activate via <code>&lt;#memory-rule-tag#&gt;</code> in persona or message text. A rule with no tag acts as the default fallback. Each rule can also be exported as JSON (<strong>Export</strong>) and keeps version history (<strong>History</strong>).</p>
+<p>Each rule can override:
+- <strong>Summarization Enabled</strong>: Turn summarization on or off for matching conversations
+- <strong>Token Threshold</strong>: Override the global threshold (0 = use global)
+- <strong>Keep Recent</strong>: Override the global keep-recent count (0 = use global)
+- <strong>Custom Prompt</strong>: Override the summarization prompt (empty = use global)</p>
+<p>Rules are evaluated in execution order. The first matching tagged rule wins. If no tagged rules match, the default (untagged) rule applies. If no rules exist, global settings are used.</p>
+<p>To create a memory rule:
+1. Click <strong>+ Add Rule</strong> in the Memory Rules section
+2. Enter a <strong>Name</strong> and optional <strong>Tag</strong>
+3. Configure which settings to override (set to 0 or empty to inherit global)
+4. Click <strong>Create</strong></p>
+<p>Use <strong>Edit</strong> to modify a rule and the <strong>ON/OFF</strong> toggle to enable/disable without deleting. <strong>Export</strong> downloads the rule as JSON (the <strong>History</strong> button keeps its version history).</p>
+<h3 id="scenario-summarization-rules">Scenario Summarization Rules</h3>
+<p>Scenario summarization automatically compresses the system message (character definition + scenario + lorebooks) when it exceeds a token threshold. This is critical for large lorebooks or complex character cards that can consume thousands of tokens.</p>
+<p><strong>Two firing positions:</strong></p>
+<ul>
+<li><strong>Pre</strong> — Fires after memory injection, before lorebooks and cantrips. Controls the size of the author-provided scenario (character card, OOC instructions, stored memories).</li>
+<li><strong>Post</strong> — Fires after cantrips, skills, and lorebooks have been applied. Controls the final system message size before it reaches the model.</li>
+</ul>
+<p>Both positions can fire on the same request. Each position independently picks the highest-triggered rule (sorted by threshold descending). For example:
+- A Pre rule at 3,000 tokens summarizes a bloated 6,000-token character card down to 2,500
+- GITV adds lorebooks and skills bringing it to 5,000 tokens
+- A Post rule at 6,000 tokens does not trigger (5,000 &lt; 6,000) — good, it's within budget</p>
+<p><strong>Rule fields:</strong>
+- <strong>Token Threshold</strong>: Summarize when system message exceeds this
+- <strong>Fire Position</strong>: Pre or Post
+- <strong>Endpoint</strong>: Which LLM endpoint to use (default = main endpoint)
+- <strong>Model</strong>: Specific model for summarization (default = endpoint's default model)
+- <strong>Prompt</strong>: Custom summarization prompt (empty = use built-in default)</p>
+<blockquote>
+<p>Use a fast, cheap model for low-threshold rules and a more capable model for high-threshold rules. Scenario summarization only sends the system message (never chat messages) to the summarization LLM.</p>
+</blockquote>
+<p>Scenario rules can be shared via content packs in the <code>scenario_rules/</code> folder.</p>
+<hr>
+<p><a id="storage"></a></p>
+<h2 id="13-storage">13. Storage</h2>
+<p>The <strong>Storage</strong> page is a direct window onto the cantrip persistent
+stores — <code>context.chat_data</code> (per conversation), <code>context.cantrip_data</code>
+(per cantrip) and <code>context.user_data</code> (global to you). Scripts read and
+write them; this page lets you see what has accumulated, fix a value,
+export or import bundles, and move a conversation's state elsewhere.</p>
+<p><img alt="The Storage page" src="media/gitv-storage-page.png"></p>
+<p><em>The Storage page: the chat-data card with a conversation selected (left) and the global user-data card. Captured 2026-11-19.</em></p>
+<h3 id="chat-data">Chat Data</h3>
+<p>Grouped by conversation. Pick a conversation to see its keys and values;
+each row shows its size and last-update time. Click a row to expand its full
+value, <strong>Edit</strong> to change the key or value (values are JSON — an edit that
+does not parse is refused), <strong>Copy</strong> to duplicate the row into another
+conversation, <strong>Delete</strong> to remove it.</p>
+<p>Conversation-level actions: <strong>Export</strong> downloads the conversation's rows as
+a JSON bundle, <strong>Copy To…</strong> duplicates every row into a target conversation
+(keys that already exist there are skipped and reported), and <strong>Clear</strong>
+deletes every row for that conversation.</p>
+<h3 id="cantrip-data">Cantrip Data</h3>
+<p>Pick a cantrip to browse its per-cantrip store — the one that persists
+across all chats. Same row actions; <strong>Export</strong> downloads that cantrip's
+rows.</p>
+<h3 id="user-data">User Data</h3>
+<p>Your global store, shared across all chats and cantrips. Same row actions,
+plus <strong>Export All</strong>.</p>
+<h3 id="import">Import</h3>
+<p>Each card's <strong>Import…</strong> accepts a previously exported bundle. Imports are
+upserts: a row whose key already exists is updated, never duplicated, and
+anything refused (too large, invalid key) is reported per-row rather than
+silently dropped. Chat bundles that carry no conversation id import into the
+conversation id you name in the field beside the button; cantrip bundles
+import into the cantrip selected on the card.</p>
+<h3 id="limits-and-safety">Limits and safety</h3>
+<p>Values are content: edits are size-checked against the admin memory-rule cap
+and sanitized like every other content write. Every stored value is JSON by
+construction, so the editor validates before saving — a broken value cannot
+corrupt a store a script later reads. All routes are scoped to your account;
+another user's rows are invisible.</p>
+<hr>
 <p><a id="maps"></a></p>
-<h2 id="11-maps">11. Maps</h2>
+<h2 id="14-maps">14. Maps</h2>
 <p><img alt="Maps List" src="media/gitv-maps.png"></p>
 <p>Maps are workflow presets that chain multiple LLM stages into a single request. Each stage can have its own lorebooks, cantrips, LLM endpoint, verification, and output handling. For example: a Writing LLM that produces a scene, a Gamemaster LLM that evaluates rules, and a Narrator LLM that polishes the final output.</p>
 <p>When no map is active, the standard single-stage pipeline runs.</p>
@@ -1194,7 +1286,7 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <li><strong>Attached Cantrips</strong>: Cantrips run before this stage's LLM call (with a <strong>Sticky</strong> option)</li>
 </ul>
 <p><img alt="Map Editor - Stage Options" src="media/gitv-maps-stage-qol.png"></p>
-<p><em>The stage editor with the 0.33.0 options (Base Prompt, Output Mode including Capture, Run Condition), captured 2026-11-18.</em></p>
+<p><em>The stage editor with its extra options (Base Prompt, Output Mode including Capture, Run Condition), captured 2026-11-18.</em></p>
 <p><img alt="Map Editor - Verification" src="media/gitv-maps-edit-3.png"></p>
 <p>Each stage can optionally enable <strong>Verification</strong> with its own Navigator instructions, endpoint, model, and max retries. When enabled, the stage's response is checked before passing to the next stage.</p>
 <p><strong>"+ Add Stage"</strong> adds stages to the chain (up to the maximum). Use <strong>Remove Stage</strong> to delete a stage.</p>
@@ -1268,7 +1360,7 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <p>A complete example map — the Gambling Hall (a 3-stage casino game with driver-callable card dealing, money tracking, and personality assignment) — is included in <code>docs/examples/map/</code>. It contains individual cantrip/lorebook components with build instructions, plus a pre-exported <code>map_gambling_hall.json</code> you can import directly. See the <a href="examples/map/README.md">example map guide</a> for setup instructions.</p>
 <hr>
 <p><a id="content-packs"></a></p>
-<h2 id="12-content-packs">12. Content Packs</h2>
+<h2 id="15-content-packs">15. Content Packs</h2>
 <p><img alt="Content Packs" src="media/gitv-content-packs.png"></p>
 <p>The Content Packs page lets you browse and install resources from git repositories or local folders. GitInTheVan works with any standard git endpoint (GitHub, Gitea, GitLab) plus admin-linked local folders.</p>
 <p>The page has two tabs: <strong>Browse</strong> (link, browse, sync, and install from repos) and <strong>Create Pack</strong> (export your own resources as a git-ready pack).</p>
@@ -1301,7 +1393,7 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <li>Filter by type and check the resources you want to include — <strong>Select All</strong> acts on the filtered list, so filtering to one type and clicking it selects every object of that type (a one-click "export all my cantrips")</li>
 <li>Click <strong>Export Pack</strong></li>
 </ol>
-<p>Cantrips, lorebooks, skills and samples, verification rules, memory rules, scenario rules and maps are all packable (memory rules since 0.30.1).</p>
+<p>Cantrips, lorebooks, skills and samples, verification rules, memory rules, scenario rules and maps are all packable.</p>
 <p>The downloaded zip contains:
 - Serialized JSON files for each resource (in type folders)
 - <code>descriptions.json</code> manifest
@@ -1361,36 +1453,114 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <h3 id="syncing-repos">Syncing Repos</h3>
 <p>Click <strong>Sync</strong> on a repo to re-fetch the latest <code>descriptions.json</code> and file list. This checks for new files and updates.</p>
 <hr>
-<p><a id="tags-and-groups"></a></p>
-<h2 id="13-tags-and-groups">13. Tags and Groups</h2>
-<p><img alt="Tags and Groups" src="media/gitv-tags-and-groups.png"></p>
-<p>The Tags and Groups page provides centralized management of all your lorebook and cantrip tags, plus the ability to create group collections activated by a single tag.</p>
-<h3 id="groups-tab">Groups Tab</h3>
-<p>Groups let you activate multiple lorebooks and cantrips with a single tag. Instead of embedding five separate tags in your persona or scenario, create a group with tag <code>castlescene</code> and embed <code>&lt;#castlescene#&gt;</code>.</p>
-<p><strong>Creating a Group:</strong></p>
-<ol>
-<li>Click <strong>+ Create Group</strong></li>
-<li>Enter a <strong>Name</strong> and <strong>Group Tag</strong></li>
-<li>Check the lorebooks and cantrips to include</li>
-<li>Optionally enable <strong>Active</strong> (blanket-applied on every message without needing the tag)</li>
-</ol>
-<p><strong>Group behavior:</strong></p>
+<p><a id="debug"></a></p>
+<h2 id="16-debug-and-comparing-runs">16. Debug and Comparing Runs</h2>
+<p><em>Available to all users. Enable </em><em>Debug Mode</em><em> in Settings first, then send a
+message through the proxy.</em></p>
+<p>The <strong>Debug</strong> tab sits beside <strong>Overview</strong> at the top of the Dashboard. It is a
+passive tap: it records what the pipeline did, and changes nothing about what it
+does. Streaming and non-streaming requests are both captured.</p>
+<p><img alt="Debug run detail" src="media/gitv-debug-run.png"></p>
+<h3 id="recent-runs">Recent Runs</h3>
+<p>Newest first, each showing the model, timestamp, stage count, token total and
+wall-clock time. Runs are pruned to a limit set by your administrator, so a run
+you want to keep needs <strong>Save</strong> — saved runs are exempt from pruning and are
+what the save-slot counter at the top refers to. <strong>Rename</strong> gives a run a label
+you will recognise later; <strong>Delete</strong> removes one; <strong>Clear All</strong> empties the list.</p>
+<p>A run close to being pruned is marked <em>near eviction — save it to keep it</em>.</p>
+<h3 id="run-detail">Run detail</h3>
+<p><strong>Metrics.</strong> Tokens (split into prompt and completion), how many tokens the
+pipeline injected, total time, pipeline overhead — the share of the wall clock
+not spent waiting on an LLM — tokens per second, and the number of upstream LLM
+calls.</p>
+<p>Token counts come from the provider's own <code>usage</code> object where one is returned,
+and from an estimate where it is not. The two are never mixed silently: a run
+whose calls disagree is badged so a comparison cannot quietly compare a
+measurement against a guess.</p>
+<p><strong>Upstream calls.</strong> One row per call, labelled by purpose — <code>MAIN</code> for the
+Driver, <code>VERIFICATION_JUDGE</code>, <code>SUMMARIZER</code>, <code>MAP_STAGE</code> — with the endpoint,
+model, latency and token split. Failed failover attempts appear here too, since
+a run that tried two endpoints spent both latencies.</p>
+<p><strong>Cantrips.</strong> Every cantrip considered, whether it ran, and if not, why — most
+often that its tag was not present in the request.</p>
+<p><strong>Pipeline timeline.</strong> Each stage in order, with a <strong>changed</strong> badge when it
+modified the messages. Expand one for the before/after message snapshots, the
+metadata behind it (matched keywords, memory keys, budget allocation, cantrip
+console output, tool calls, resolved LLM parameters and which layer supplied
+each), and the setting that controls it.</p>
+<h3 id="comparing-runs">Comparing runs</h3>
+<p><img alt="Comparing runs" src="media/gitv-debug-compare.png"></p>
+<p><strong>Compare runs</strong> puts up to four side by side. One is the <strong>baseline</strong> — set it
+with the radio button — and the others are expressed as differences from it:
+token and timing deltas with direction and percentage, and a word-level diff of
+the response text.</p>
+<p>This is the loop the feature exists for: change a cantrip or a parameter, replay,
+and read what actually moved.</p>
+<p>Differences in model, endpoint or provider are called out explicitly, because a
+run served by a different endpoint is not really comparable to the baseline.</p>
+<h3 id="replay">Replay</h3>
+<p><strong>Replay</strong> re-sends a run's original messages through the <em>current</em>
+configuration and links the result back to the run it came from. It is a
+one-shot "same input, today's config" check that writes nothing.</p>
+<p>Replays go through the real pipeline — the same code path a client hits — because
+a replay that took a shortcut would stop being evidence.</p>
+<h3 id="sandbox-copies">Sandbox copies</h3>
+<p><strong>Create sandbox copy</strong> forks a run into something you can iterate on. The fork
+copies the request <em>and</em> the conversation state it read — memories, chat data,
+summary — into a conversation of its own, so repeated runs accumulate there and
+the original thread is never touched. Cantrip stores scoped to you rather than
+the chat (<code>user_data</code>, <code>cantrip_data</code>) are read so the run sees real state, but
+a sandbox or replay never writes them.</p>
+<p>From a sandbox you can run it, edit the prompt, reset it to the state it was
+forked from, or delete it and its state entirely.</p>
+<p><strong>Nothing is sent back to the service the original request came from.</strong> A
+sandbox run starts inside GitInTheVan and its response is displayed here, so a
+chat platform that is not expecting a reply never receives one.</p>
+<p>Sandboxes complement replay rather than replacing it: replay is one-shot and
+writes nothing, a sandbox is a scenario you keep.</p>
+<h3 id="exporting">Exporting</h3>
+<p><strong>Export .md</strong> and <strong>Export .json</strong> save a run — or a whole comparison — to a
+file. The JSON export is the full trace, which is what to attach to a bug report.</p>
+<hr>
+<p><a id="metrics"></a></p>
+<h2 id="17-metrics">17. Metrics</h2>
+<p><img alt="Metrics page" src="media/gitv-metrics.png"></p>
+<p><em>Screenshots from 2026-11-18, against 0.31.0.</em></p>
+<p>The <strong>Metrics</strong> page shows what your pipeline costs over time: which lorebook entries, cantrips
+and other injected content bloat your prompt budget, and what each LLM role (driver, judge,
+summarizer, map stage) actually costs in tokens and latency. Where the <a href="#debug">Debug page</a>
+shows one run, Metrics shows the trend.</p>
+<p>Recording is always on. Every authenticated request through the proxy writes one row per
+prompt-mutating object that fired and one row per upstream LLM call — debug mode is not required.
+Sandbox and replay runs are recorded too, but flagged; they are excluded from the default view so
+they cannot skew live-traffic statistics, and the <strong>Include sandbox/replay</strong> checkbox brings them
+back.</p>
+<h3 id="reading-the-page">Reading the page</h3>
 <ul>
-<li>Groups are always private (only the owner can use them)</li>
-<li>Groups activate in the normal pre-LLM phase</li>
-<li>Groups cannot nest into each other</li>
-<li>If a member lorebook or cantrip is deleted, the group logs a warning and continues</li>
-<li>If a resource is called multiple times in the same pipeline stage (e.g., via both its own tag and a group), only one instance activates</li>
+<li><strong>Window</strong> (7 / 30 / 90 days), <strong>Chat</strong> filter and the sandbox/replay toggle apply to both
+  tables. <strong>Refresh</strong> reloads.</li>
+<li><strong>Prompt Objects</strong> lists every object that changed a prompt in the window: how many times it
+  fired, the total and average token delta it caused, and which book (for lorebook entries) or
+  map (for stage objects) it belongs to. A positive delta adds to your prompt; a negative one
+  (a cantrip that trims content, a summarizer that compresses it) takes away. Sorted by impact.</li>
+<li><strong>LLM Calls</strong> groups upstream calls by role, endpoint and model: call count, success rate,
+  retry and failover counts, median latency, and token totals. Judge rows carry the verification
+  rule that ran.</li>
+<li><strong>Recent Rows</strong> shows the raw last 20 rows of each table, including flagged ones, for
+  checking exactly what one request recorded.</li>
 </ul>
-<h3 id="tags-tab">Tags Tab</h3>
-<p>The Tags tab shows all your lorebooks and cantrips in one table with their tags and visibility settings.</p>
-<ul>
-<li><strong>Tag</strong>: Click the edit icon to change the tag. Shows the full activation tag (e.g., <code>&lt;#lore-mytag#&gt;</code>)</li>
-<li><strong>Visibility</strong>: Toggle between Public and Private. Private tags only work for the owner. Public tags work for all users.</li>
-</ul>
+<h3 id="about-the-numbers">About the numbers</h3>
+<p>Token counts come from the upstream <code>usage</code> object when your provider returns one, and from a
+chars-per-4 estimate when it does not. The two are never blended silently — the tables say which
+source each row used, and a group whose calls disagree is marked <em>mixed</em>. Estimates are close
+enough to spot a lorebook entry that adds a thousand tokens per message; they are not an invoice.</p>
+<p>Rows are kept for the admin-configured retention period (<strong>Metrics Retention</strong>, default 30 days,
+on the Admin page) and pruned automatically. Metrics are per-user: your tables show your traffic
+only.</p>
+<p><img alt="Metrics retention setting on the Admin page" src="media/gitv-admin-metrics-retention.png"></p>
 <hr>
 <p><a id="settings"></a></p>
-<h2 id="14-settings">14. Settings</h2>
+<h2 id="18-settings">18. Settings</h2>
 <p><img alt="Settings Page" src="media/gitv-settings.png"></p>
 <p>The Settings page configures your default proxy behavior, streaming UX, summarization, and pipeline features.</p>
 <h3 id="proxy-configuration">Proxy Configuration</h3>
@@ -1400,10 +1570,38 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 </ul>
 <p>Model configuration is per-endpoint — there is no model override here. Set the <strong>Default Model</strong> on each endpoint in the Endpoints page; it is used as a fallback when the client doesn't specify one.</p>
 <p><strong>Default Parameters</strong> blocks appear here for each role — all requests, verification calls, and summarization calls. They are the broadest layer of the parameter system; anything set on an endpoint, a model, a rule or a map stage overrides them. See <a href="#model-parameters">Model Parameters</a>.</p>
+<h3 id="pre-forward-order">Pre-Forward Order</h3>
+<p><img alt="Pre-Forward Order" src="media/gitv-settings-pipeline-order.png"></p>
+<p><em>The Pre-Forward Order card with an interleaved order: the Prompt Janitor cantrip first, then a lorebook, then another cantrip. Captured 2026-11-19.</em></p>
+<p>By default the pipeline runs all lorebook injections, then all pre-Driver
+cantrips — two batches. This card replaces that window with <strong>one exact
+interleaved order you define</strong>: Cantrip 1, Lorebook 1, Lorebook 2,
+Cantrip 2, anything you like. Drag rows (or use the arrows); each step's
+outputs — strips, injections, activations — land before the next step
+runs, so a lorebook keyword-matches against text an earlier cantrip
+stripped or wrote.</p>
+<ul>
+<li><strong>Off (or an empty list) keeps the default behavior exactly.</strong> Enabling
+  offers to populate the list from your current active resources, in the
+  default order; reorder from there.</li>
+<li><strong>The list orders, it never activates.</strong> A resource still needs its tag
+  or Active flag to fire; listing something inactive does nothing.</li>
+<li><strong>Unlisted resources are not dropped.</strong> Anything that activates but is
+  not listed (including resources you create later) runs after the list
+  in its default order.</li>
+<li>A lorebook's <em>Inject After Cantrips</em> setting is ignored in manual mode
+  — its position in the list is the truth.</li>
+<li>Applies to non-map requests; maps keep their own stage ordering.</li>
+</ul>
+<p>Pair it with the <strong>Prompt Janitor</strong> template (Cantrips → Templates): a
+disabled-by-default cantrip that strips configurable regex patterns from
+the prompt — platform-injected system notes, watermark lines — before
+anything else sees them. Its patterns live in the cantrip's data and are
+editable at runtime from the Storage page.</p>
 <h3 id="streaming-and-status">Streaming and Status</h3>
 <p>These settings affect how responses are delivered. Streaming responses are buffered by the proxy (memory extraction needs the full response) and then re-delivered to your client as streaming output — these options control what runs before that delivery:</p>
 <ul>
-<li><strong>Run Response Checks on Streams</strong>: Run the forbidden-words scan and pre-/post-Navigator cantrips on buffered streaming responses (on by default). The response is already buffered, so these cost only the checks themselves; turn this off to deliver the response the moment memory extraction finishes. Before 0.29.0 these checks silently never ran on streaming requests unless verification was enabled.</li>
+<li><strong>Run Response Checks on Streams</strong>: Run the forbidden-words scan and pre-/post-Navigator cantrips on buffered streaming responses (on by default). The response is already buffered, so these cost only the checks themselves; turn this off to deliver the response the moment memory extraction finishes.</li>
 <li><strong>GITV Status Block</strong>: Includes a <code>&lt;think&gt;&lt;gitv&gt;</code> status block before the response showing pipeline activity</li>
 <li><strong>Preserve Thinking</strong>: Include the LLM's reasoning/thought process in the final response</li>
 <li><strong>Simulated Streaming Speed</strong>: When the response is buffered (verification or response checks), simulate streaming output at this speed (tokens/min, 0 = instant)</li>
@@ -1438,57 +1636,157 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 </ul>
 <p>When enabled, each active cantrip and lorebook receives a proportional share of the budget based on their <strong>Budget Weight</strong> field (found on each cantrip/lorebook edit form). Cantrips can read <code>context.budget.detail_level</code> to choose between full, summary, or bullet-point output.</p>
 <h3 id="security-settings">Security Settings</h3>
-<p>The following security features are configured via environment variables (<code>.env</code> file):</p>
+<p>Server-level security — CORS origins, rate limits, request size cap, JWT
+lifetime, password strength — is set at install time via <code>.env</code>
+environment variables, and the runtime knobs (rate limits, log level,
+caps) live on the Admin page. The complete table of every variable and
+its default is in <a href="#every-admin-control-and-its-default">Admin → Every admin control and its
+default</a>; admin actions are
+recorded in the audit log viewable there.</p>
+<hr>
+<p><a id="model-parameters"></a></p>
+<h2 id="19-model-parameters">19. Model Parameters</h2>
+<p>Naming a model says <em>which</em> model to call. Parameters say <em>how</em> to call it —
+<code>reasoning_effort</code>, <code>max_tokens</code>, <code>temperature</code>, or anything else your provider
+accepts.</p>
+<p>A parameter can be attached anywhere a model can be named, and the layers merge
+per key, with the layer closest to the message winning:</p>
 <table>
 <thead>
 <tr>
-<th>Setting</th>
-<th>Default</th>
-<th>Description</th>
+<th>Layer</th>
+<th>Where you set it</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>GITV_CORS_ORIGINS</code></td>
-<td><code>*</code></td>
-<td>Allowed CORS origins (comma-separated)</td>
+<td>1 (broadest)</td>
+<td>Whatever your client sent</td>
 </tr>
 <tr>
-<td><code>GITV_RATE_LIMIT_ENABLED</code></td>
-<td><code>true</code></td>
-<td>Enable rate limiting</td>
+<td>2</td>
+<td><strong>Settings</strong> → per role (default / verification / summarization)</td>
 </tr>
 <tr>
-<td><code>GITV_RATE_LIMIT_PROXY_PER_MIN</code></td>
-<td><code>60</code></td>
-<td>Max proxy requests per minute per client</td>
+<td>3</td>
+<td>An endpoint, on the <strong>Endpoints</strong> page</td>
 </tr>
 <tr>
-<td><code>GITV_RATE_LIMIT_API_PER_MIN</code></td>
-<td><code>120</code></td>
-<td>Max management API requests per minute</td>
+<td>4</td>
+<td>A specific model in that endpoint's model list</td>
 </tr>
 <tr>
-<td><code>GITV_MAX_REQUEST_BODY_SIZE</code></td>
-<td><code>10485760</code></td>
-<td>Max request body size (10MB)</td>
-</tr>
-<tr>
-<td><code>GITV_JWT_EXPIRATION_HOURS</code></td>
-<td><code>24</code></td>
-<td>JWT token lifetime</td>
-</tr>
-<tr>
-<td><code>GITV_MIN_PASSWORD_LENGTH</code></td>
-<td><code>8</code></td>
-<td>Minimum password length (requires letter + number)</td>
+<td>5 (closest)</td>
+<td>The verification rule, map stage, or scenario rule making the call</td>
 </tr>
 </tbody>
 </table>
-<p>Admin actions (user creation, deletion, password resets) are recorded in the audit log, viewable via the <strong>Admin</strong> page. Global caps for driver-callable turns and verification retries are also configured in the Admin page.</p>
+<p>So if your endpoint sets <code>reasoning_effort: max</code> and a cheap verification rule
+sets <code>reasoning_effort: low</code>, the writing call gets <code>max</code> and that rule's check
+gets <code>low</code>. A client that asked for <code>high</code> is overridden in both.</p>
+<p><strong>Anything you do not configure is passed through from your client untouched.</strong>
+Configuring a name is what makes GitInTheVan override it.</p>
+<h3 id="parameter-fields">Parameter Fields</h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Name</strong></td>
+<td>The key sent upstream, e.g. <code>reasoning_effort</code></td>
+</tr>
+<tr>
+<td><strong>Type</strong></td>
+<td><code>string</code>, <code>string list</code>, <code>integer</code>, <code>float</code>, <code>number</code>, or <code>boolean</code>. The value is converted before sending, so an integer arrives as <code>128000</code>, not <code>"128000"</code></td>
+</tr>
+<tr>
+<td><strong>Value</strong></td>
+<td>What to send</td>
+</tr>
+<tr>
+<td><strong>Required</strong></td>
+<td>Stops you saving the parameter with an empty value, and marks it in the UI. It does not change what is sent — every parameter you define is sent</td>
+</tr>
+<tr>
+<td><strong>Options</strong></td>
+<td>Optional comma-separated list of allowed values. Setting it turns Value into a dropdown and rejects anything outside the list</td>
+</tr>
+<tr>
+<td><strong>Description</strong></td>
+<td>Optional note to yourself</td>
+</tr>
+</tbody>
+</table>
+<p><code>messages</code>, <code>model</code> and <code>stream</code> cannot be used as parameter names. <code>model</code> has
+its own field at every scope, and <code>stream</code> is controlled by the pipeline —
+verification and driver-callable runs force it off, so overriding it would break
+the request.</p>
+<p>A parameter whose value cannot be converted to its type, or whose value is not in
+its own options list, is dropped with a log line rather than sent upstream. A bad
+parameter never fails the request.</p>
+<h3 id="where-to-set-them">Where to set them</h3>
+<table>
+<thead>
+<tr>
+<th>Scope</th>
+<th>Where</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Every request</td>
+<td>Settings → Proxy Configuration → <em>Default Parameters (all requests)</em></td>
+</tr>
+<tr>
+<td>Every verification check</td>
+<td>Settings → <em>Default Parameters (verification calls)</em></td>
+</tr>
+<tr>
+<td>Every summarization call</td>
+<td>Settings → Conversation Summarization → <em>Default Parameters (summarization calls)</em></td>
+</tr>
+<tr>
+<td>One endpoint</td>
+<td>Endpoints → Edit → <em>Endpoint Parameters</em></td>
+</tr>
+<tr>
+<td>One model on an endpoint</td>
+<td>Endpoints → Edit → <em>Models</em> → the model's own parameters</td>
+</tr>
+<tr>
+<td>One verification rule</td>
+<td>Verification → Rules → Edit → <em>Parameters for this rule</em></td>
+</tr>
+<tr>
+<td>One map stage</td>
+<td>Maps → Edit → the stage's parameters (generation and verification are separate)</td>
+</tr>
+<tr>
+<td>One scenario rule</td>
+<td>Memory → Scenario Summarization Rules</td>
+</tr>
+</tbody>
+</table>
+<h3 id="model-lists">Model lists</h3>
+<p><img alt="Per-model parameters on an endpoint" src="media/gitv-endpoints-models.png"></p>
+<p>Each endpoint can carry a list of the models it offers. On the Endpoints page,
+add them by hand or press <strong>Fetch from provider</strong> to seed the list from the
+endpoint's own model listing, then give each model its own parameters.</p>
+<p>The list populates the model dropdowns on Maps, Verification, Memory and
+Settings. It is entirely optional: every model field keeps an escape hatch for
+typing a name that is not listed, and a model you use without listing simply
+contributes no parameters of its own.</p>
+<h3 id="seeing-what-was-applied">Seeing what was applied</h3>
+<p>Turn on Debug Mode and the pipeline timeline gains an <strong>LLM Parameters</strong> stage
+showing the resolved set and which layer supplied each value. That is the fastest
+way to answer "why did this call get <code>temperature: 0.1</code>?".</p>
 <hr>
 <p><a id="assistant"></a></p>
-<h2 id="15-assistant">15. Assistant</h2>
+<h2 id="20-assistant">20. Assistant</h2>
 <p><em>Screenshots of the pane's conversation view are still pending (2026-09-02); the drafts list
 below was captured 2026-11-18.</em></p>
 <p>The Assistant Pane is a persistent panel on the right edge of the management UI where one of
@@ -1590,16 +1888,78 @@ pane is enabled at all; whether it may read server logs and schema state (off by
 read-only even when on); whether it may link repos and install content packs (also off by
 default); the per-turn tool-call cap; the per-user conversation limit; and the maximum size of a
 single tool result before it is truncated.</p>
-<h3 id="security">Security</h3>
 <p><a id="assistant-security"></a></p>
+<h3 id="security">Security</h3>
 <p>The <strong>Assistant Security</strong> page is where every tool's permission mode lives — one card per group,
 each with its own mode selector, a link to the page it acts on, and a table of its tools with
 their own mode and a computed <strong>Effective</strong> column showing what actually applies once group and
 tool settings are combined. Changes here take effect on the assistant's next tool call; nothing
 needs a restart.</p>
 <hr>
+<p><a id="snapshots"></a></p>
+<h2 id="21-snapshots-and-restore">21. Snapshots and Restore</h2>
+<p><em>Screenshots pending (2026-09-02) — this section shipped with the feature, before a capture pass.</em></p>
+<p>Every time you change or delete a cantrip, lorebook, skill, sample, verification rule, memory
+rule, scenario rule or map, GitInTheVan stores the version you had immediately before. You do
+not have to remember to do anything: the history is there when you need it. For a map, the
+version includes every stage and its attachments.</p>
+<p>Open it with the <strong>History</strong> button on the object's card or row. The panel lists every stored
+version newest first, and selecting one shows exactly what changed between it and what you have
+now.</p>
+<h3 id="what-is-captured">What is captured</h3>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Automatic</strong></td>
+<td>Immediately before every update and every delete, including changes made for you by the <a href="#assistant">Assistant</a>.</td>
+</tr>
+<tr>
+<td><strong>Saved</strong></td>
+<td>When you press <strong>Save a version</strong> and give it a name.</td>
+</tr>
+</tbody>
+</table>
+<p>A version is stored only when something actually changed — pressing Update three times without
+editing anything stores one version, not three. Automatic versions are trimmed to the limit an
+admin sets (<strong>Max snapshots per object</strong>, default 20, on the Admin page). Versions you saved by
+name are never trimmed.</p>
+<p>Maps are covered too — a map version includes every stage and attachment, and a
+restore that finds a referenced endpoint, cantrip or lorebook gone drops the reference and
+says so in its notes. Forbidden words and tag groups are still not covered.</p>
+<h3 id="restoring">Restoring</h3>
+<p>Two ways, and the difference matters.</p>
+<p><strong>Restore as a copy</strong> creates a new object from the stored version and leaves what you have
+alone. This is the safe one, and it is the only option for an object you deleted — the history
+survives the delete, so a cantrip removed by mistake can be brought back. The copy's tag is
+always cleared, because a tag activates exactly one resource and two objects cannot share one;
+the copy arrives inactive as far as tags are concerned, and you can give it the tag yourself
+once you are happy with it.</p>
+<p><strong>Restore over this object</strong> replaces the current content with the stored version. Before it
+does, it stores what it is about to replace — so if you restore the wrong version, the version
+you were on is now the newest entry in the list and you can go straight back.</p>
+<p>If the stored version's tag has since been given to a different object, the restore keeps the
+tag you have now and tells you it did. Everything else is restored.</p>
+<h3 id="what-a-restore-checks">What a restore checks</h3>
+<p>A restore is a content write like any other, so it goes through the same checks as typing the
+content in yourself: the size limits an admin has set, and the safety scanner for cantrip code
+and lorebook entries. A version stored months ago is not trusted just because this install
+wrote it — if the limits have tightened since, the restore is refused and tells you why.</p>
+<p>If the scanner finds critical patterns in the stored version, the restore is refused until you
+confirm you want to proceed. The dialog lists exactly what was found; the same gate applies to
+saving cantrips, lorebook entries and importing maps.</p>
+<h3 id="from-the-assistant">From the Assistant</h3>
+<p>The assistant can list versions, save one, and restore one, under the <strong>Snapshots</strong> group on the
+<a href="#assistant">Assistant Security</a> page. Restoring over an object is treated as a destructive
+action, so under Normal it asks first and shows you the difference.</p>
+<hr>
 <p><a id="admin"></a></p>
-<h2 id="16-admin">16. Admin</h2>
+<h2 id="22-admin">22. Admin</h2>
 <p><em>Admin only. The Admin link in the sidebar is only visible to admin accounts.</em></p>
 <p><img alt="Admin" src="media/gitv-admin-global-caps.png"></p>
 <p>The Admin page provides system-wide management with seven tabs: <strong>Global Caps</strong>, <strong>Users</strong>, <strong>Update</strong>, <strong>Audit Logs</strong>, <strong>Server Logs</strong>, <strong>Network</strong>, and <strong>Backup</strong>. Debug is available as a tab on the Dashboard. A red badge appears on the Admin sidebar button when an update is available.</p>
@@ -1612,7 +1972,7 @@ needs a restart.</p>
 <li><strong>Max Verification Retries</strong>: Global cap for verification resubmission retries (default 3)</li>
 <li><strong>Rate Limit: Proxy</strong>: Max proxy requests per minute (default 60)</li>
 <li><strong>Rate Limit: Management API</strong>: Max management API requests per minute (default 120)</li>
-<li><strong>Passenger Calling Enabled</strong>: Server-wide kill switch for scripted LLM calls from cantrips (0.36.0; default on). With it off, <code>context.passenger.call()</code> returns null for every user — see <a href="#passenger">Passenger</a></li>
+<li><strong>Passenger Calling Enabled</strong>: Server-wide kill switch for scripted LLM calls from cantrips (default on). With it off, <code>context.passenger.call()</code> returns null for every user — see <a href="#passenger">Passenger</a></li>
 <li><strong>Max Passenger Calls Per Request</strong>: Ceiling shared by every cantrip and map stage in one request (default 3). A user's own budget in Settings can lower it, never raise it</li>
 <li><strong>Passenger Call Timeout</strong>: Per-call upstream timeout in seconds (default 60)</li>
 </ul>
@@ -1929,404 +2289,5 @@ restart. The ones that matter day-to-day:</p>
 <p>The two rate-limit values have both an env seed and an Admin setting: the
 Admin value wins once changed, so the running instance always has one source
 of truth.</p>
-<hr>
-<p><a id="model-parameters"></a></p>
-<h2 id="17-model-parameters">17. Model Parameters</h2>
-<p>Naming a model says <em>which</em> model to call. Parameters say <em>how</em> to call it —
-<code>reasoning_effort</code>, <code>max_tokens</code>, <code>temperature</code>, or anything else your provider
-accepts.</p>
-<p>A parameter can be attached anywhere a model can be named, and the layers merge
-per key, with the layer closest to the message winning:</p>
-<table>
-<thead>
-<tr>
-<th>Layer</th>
-<th>Where you set it</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>1 (broadest)</td>
-<td>Whatever your client sent</td>
-</tr>
-<tr>
-<td>2</td>
-<td><strong>Settings</strong> → per role (default / verification / summarization)</td>
-</tr>
-<tr>
-<td>3</td>
-<td>An endpoint, on the <strong>Endpoints</strong> page</td>
-</tr>
-<tr>
-<td>4</td>
-<td>A specific model in that endpoint's model list</td>
-</tr>
-<tr>
-<td>5 (closest)</td>
-<td>The verification rule, map stage, or scenario rule making the call</td>
-</tr>
-</tbody>
-</table>
-<p>So if your endpoint sets <code>reasoning_effort: max</code> and a cheap verification rule
-sets <code>reasoning_effort: low</code>, the writing call gets <code>max</code> and that rule's check
-gets <code>low</code>. A client that asked for <code>high</code> is overridden in both.</p>
-<p><strong>Anything you do not configure is passed through from your client untouched.</strong>
-Configuring a name is what makes GitInTheVan override it.</p>
-<h3 id="parameter-fields">Parameter Fields</h3>
-<table>
-<thead>
-<tr>
-<th>Field</th>
-<th>Meaning</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>Name</strong></td>
-<td>The key sent upstream, e.g. <code>reasoning_effort</code></td>
-</tr>
-<tr>
-<td><strong>Type</strong></td>
-<td><code>string</code>, <code>string list</code>, <code>integer</code>, <code>float</code>, <code>number</code>, or <code>boolean</code>. The value is converted before sending, so an integer arrives as <code>128000</code>, not <code>"128000"</code></td>
-</tr>
-<tr>
-<td><strong>Value</strong></td>
-<td>What to send</td>
-</tr>
-<tr>
-<td><strong>Required</strong></td>
-<td>Stops you saving the parameter with an empty value, and marks it in the UI. It does not change what is sent — every parameter you define is sent</td>
-</tr>
-<tr>
-<td><strong>Options</strong></td>
-<td>Optional comma-separated list of allowed values. Setting it turns Value into a dropdown and rejects anything outside the list</td>
-</tr>
-<tr>
-<td><strong>Description</strong></td>
-<td>Optional note to yourself</td>
-</tr>
-</tbody>
-</table>
-<p><code>messages</code>, <code>model</code> and <code>stream</code> cannot be used as parameter names. <code>model</code> has
-its own field at every scope, and <code>stream</code> is controlled by the pipeline —
-verification and driver-callable runs force it off, so overriding it would break
-the request.</p>
-<p>A parameter whose value cannot be converted to its type, or whose value is not in
-its own options list, is dropped with a log line rather than sent upstream. A bad
-parameter never fails the request.</p>
-<h3 id="where-to-set-them">Where to set them</h3>
-<table>
-<thead>
-<tr>
-<th>Scope</th>
-<th>Where</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Every request</td>
-<td>Settings → Proxy Configuration → <em>Default Parameters (all requests)</em></td>
-</tr>
-<tr>
-<td>Every verification check</td>
-<td>Settings → <em>Default Parameters (verification calls)</em></td>
-</tr>
-<tr>
-<td>Every summarization call</td>
-<td>Settings → Conversation Summarization → <em>Default Parameters (summarization calls)</em></td>
-</tr>
-<tr>
-<td>One endpoint</td>
-<td>Endpoints → Edit → <em>Endpoint Parameters</em></td>
-</tr>
-<tr>
-<td>One model on an endpoint</td>
-<td>Endpoints → Edit → <em>Models</em> → the model's own parameters</td>
-</tr>
-<tr>
-<td>One verification rule</td>
-<td>Verification → Rules → Edit → <em>Parameters for this rule</em></td>
-</tr>
-<tr>
-<td>One map stage</td>
-<td>Maps → Edit → the stage's parameters (generation and verification are separate)</td>
-</tr>
-<tr>
-<td>One scenario rule</td>
-<td>Memory → Scenario Summarization Rules</td>
-</tr>
-</tbody>
-</table>
-<h3 id="model-lists">Model lists</h3>
-<p><img alt="Per-model parameters on an endpoint" src="media/gitv-endpoints-models.png"></p>
-<p>Each endpoint can carry a list of the models it offers. On the Endpoints page,
-add them by hand or press <strong>Fetch from provider</strong> to seed the list from the
-endpoint's own model listing, then give each model its own parameters.</p>
-<p>The list populates the model dropdowns on Maps, Verification, Memory and
-Settings. It is entirely optional: every model field keeps an escape hatch for
-typing a name that is not listed, and a model you use without listing simply
-contributes no parameters of its own.</p>
-<h3 id="seeing-what-was-applied">Seeing what was applied</h3>
-<p>Turn on Debug Mode and the pipeline timeline gains an <strong>LLM Parameters</strong> stage
-showing the resolved set and which layer supplied each value. That is the fastest
-way to answer "why did this call get <code>temperature: 0.1</code>?".</p>
-<hr>
-<p><a id="debug"></a></p>
-<h2 id="18-debug-and-comparing-runs">18. Debug and Comparing Runs</h2>
-<p><em>Available to all users. Enable </em><em>Debug Mode</em><em> in Settings first, then send a
-message through the proxy.</em></p>
-<p>The <strong>Debug</strong> tab sits beside <strong>Overview</strong> at the top of the Dashboard. It is a
-passive tap: it records what the pipeline did, and changes nothing about what it
-does. Streaming and non-streaming requests are both captured.</p>
-<p><img alt="Debug run detail" src="media/gitv-debug-run.png"></p>
-<h3 id="recent-runs">Recent Runs</h3>
-<p>Newest first, each showing the model, timestamp, stage count, token total and
-wall-clock time. Runs are pruned to a limit set by your administrator, so a run
-you want to keep needs <strong>Save</strong> — saved runs are exempt from pruning and are
-what the save-slot counter at the top refers to. <strong>Rename</strong> gives a run a label
-you will recognise later; <strong>Delete</strong> removes one; <strong>Clear All</strong> empties the list.</p>
-<p>A run close to being pruned is marked <em>near eviction — save it to keep it</em>.</p>
-<h3 id="run-detail">Run detail</h3>
-<p><strong>Metrics.</strong> Tokens (split into prompt and completion), how many tokens the
-pipeline injected, total time, pipeline overhead — the share of the wall clock
-not spent waiting on an LLM — tokens per second, and the number of upstream LLM
-calls.</p>
-<p>Token counts come from the provider's own <code>usage</code> object where one is returned,
-and from an estimate where it is not. The two are never mixed silently: a run
-whose calls disagree is badged so a comparison cannot quietly compare a
-measurement against a guess.</p>
-<p><strong>Upstream calls.</strong> One row per call, labelled by purpose — <code>MAIN</code> for the
-Driver, <code>VERIFICATION_JUDGE</code>, <code>SUMMARIZER</code>, <code>MAP_STAGE</code> — with the endpoint,
-model, latency and token split. Failed failover attempts appear here too, since
-a run that tried two endpoints spent both latencies.</p>
-<p><strong>Cantrips.</strong> Every cantrip considered, whether it ran, and if not, why — most
-often that its tag was not present in the request.</p>
-<p><strong>Pipeline timeline.</strong> Each stage in order, with a <strong>changed</strong> badge when it
-modified the messages. Expand one for the before/after message snapshots, the
-metadata behind it (matched keywords, memory keys, budget allocation, cantrip
-console output, tool calls, resolved LLM parameters and which layer supplied
-each), and the setting that controls it.</p>
-<h3 id="comparing-runs">Comparing runs</h3>
-<p><img alt="Comparing runs" src="media/gitv-debug-compare.png"></p>
-<p><strong>Compare runs</strong> puts up to four side by side. One is the <strong>baseline</strong> — set it
-with the radio button — and the others are expressed as differences from it:
-token and timing deltas with direction and percentage, and a word-level diff of
-the response text.</p>
-<p>This is the loop the feature exists for: change a cantrip or a parameter, replay,
-and read what actually moved.</p>
-<p>Differences in model, endpoint or provider are called out explicitly, because a
-run served by a different endpoint is not really comparable to the baseline.</p>
-<h3 id="replay">Replay</h3>
-<p><strong>Replay</strong> re-sends a run's original messages through the <em>current</em>
-configuration and links the result back to the run it came from. It is a
-one-shot "same input, today's config" check that writes nothing.</p>
-<p>Replays go through the real pipeline — the same code path a client hits — because
-a replay that took a shortcut would stop being evidence.</p>
-<h3 id="sandbox-copies">Sandbox copies</h3>
-<p><strong>Create sandbox copy</strong> forks a run into something you can iterate on. The fork
-copies the request <em>and</em> the conversation state it read — memories, chat data,
-summary — into a conversation of its own, so repeated runs accumulate there and
-the original thread is never touched. Cantrip stores scoped to you rather than
-the chat (<code>user_data</code>, <code>cantrip_data</code>) are read so the run sees real state, but
-a sandbox or replay never writes them.</p>
-<p>From a sandbox you can run it, edit the prompt, reset it to the state it was
-forked from, or delete it and its state entirely.</p>
-<p><strong>Nothing is sent back to the service the original request came from.</strong> A
-sandbox run starts inside GitInTheVan and its response is displayed here, so a
-chat platform that is not expecting a reply never receives one.</p>
-<p>Sandboxes complement replay rather than replacing it: replay is one-shot and
-writes nothing, a sandbox is a scenario you keep.</p>
-<h3 id="exporting">Exporting</h3>
-<p><strong>Export .md</strong> and <strong>Export .json</strong> save a run — or a whole comparison — to a
-file. The JSON export is the full trace, which is what to attach to a bug report.</p>
-<hr>
-<p><a id="activation"></a></p>
-<h2 id="19-the-activation-hierarchy">19. The Activation Hierarchy</h2>
-<p>Five kinds of resource — lorebooks, cantrips, verification rules, maps and memory
-rules — all answer the same question: <em>is this on for this request?</em> They answer
-it the same way.</p>
-<ol>
-<li><strong>Off is the default.</strong> A resource participates only if something turns it on.</li>
-<li><strong>Activation is a union. Sources add, never subtract.</strong> There is deliberately
-   no way to express "off", so no source can countermand another.</li>
-<li><strong>Proximity wins.</strong> A tag in the system prompt, the persona or the message
-   text activates the resource <strong>regardless of its Active flag</strong>. The closer a
-   source is to the message, the more authority it has.</li>
-<li><strong>Active is the blanket source</strong>, used when no tag has spoken. Active means
-   "apply to everything", so an Active resource runs even when the request
-   carries unrelated tags.</li>
-</ol>
-<p>So a resource switched off in the UI still runs if a tag names it, and that is
-correct — you asked for it by name, in the message.</p>
-<h3 id="maps-and-memory-rules-are-chosen-not-stacked">Maps and memory rules are chosen, not stacked</h3>
-<p>Exactly one map and one memory rule can win, so rule 4 works differently for
-them: Active cannot also mean "apply to everything", because blanket-running a
-multi-stage map would silently multiply what every request costs.</p>
-<p>They match on <strong>their own tag</strong> only, plus one explicit default — the <strong>Default
-Map</strong> in Settings, or the untagged default memory rule. Rules 1-3 apply to them
-unchanged.</p>
-<h3 id="tag-format">Tag format</h3>
-<p>Tags are written inline and stripped before the request is forwarded:</p>
-<pre><code>&lt;#lore-worldbuilding#&gt;  &lt;#cantrip-dice#&gt;  &lt;#verify-tone#&gt;
-&lt;#map-poker#&gt;           &lt;#memory-rule-longform#&gt;
-&lt;#taggroup-mygame#&gt;
-</code></pre>
-<p>A <strong>tag group</strong> activates several resources at once — see
-<a href="#tags-and-groups">Tags and Groups</a>.</p>
-<h3 id="conversation-binding-lexicon-lorebooks">Conversation binding (lexicon lorebooks)</h3>
-<p>Lorebooks have one more activation source: a <strong>conversation binding</strong>. The
-<code>&lt;LEXICON:name&gt;</code> command creates one lorebook per chat and binds it to that
-conversation (see <a href="#command-tags">Action Commands</a>). A bound lorebook injects
-in its own conversation regardless of its tag or Active flag — it is created
-inactive and untagged precisely so it never blanket-runs anywhere else. The
-binding only ever adds: no prompt tag can switch it off, and it touches no
-other resource type.</p>
-<p>One known limit: exporting and re-importing the chat on the client side
-produces a new conversation id and orphans the binding. The lorebook still
-exists and can be re-bound by running another <code>&lt;LEXICON:...&gt;</code> command in the
-new chat.</p>
-<h3 id="command-tags-are-separate">Command tags are separate</h3>
-<p><code>&lt;COMMAND:setting&gt;</code> tags (e.g. <code>&lt;VERIFY:off&gt;</code>) control the pipeline for one
-request rather than activating a resource. They are covered in
-<a href="#command-tags">Command Tags</a>.</p>
-<hr>
-<p><a id="snapshots"></a></p>
-<h2 id="20-snapshots-and-restore">20. Snapshots and Restore</h2>
-<p><em>Screenshots pending (2026-09-02) — this section shipped with the feature, before a capture pass.</em></p>
-<p>Every time you change or delete a cantrip, lorebook, skill, sample, verification rule, memory
-rule, scenario rule or map, GitInTheVan stores the version you had immediately before. You do
-not have to remember to do anything: the history is there when you need it. For a map, the
-version includes every stage and its attachments.</p>
-<p>Open it with the <strong>History</strong> button on the object's card or row. The panel lists every stored
-version newest first, and selecting one shows exactly what changed between it and what you have
-now.</p>
-<h3 id="what-is-captured">What is captured</h3>
-<table>
-<thead>
-<tr>
-<th>Source</th>
-<th>When</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>Automatic</strong></td>
-<td>Immediately before every update and every delete, including changes made for you by the <a href="#assistant">Assistant</a>.</td>
-</tr>
-<tr>
-<td><strong>Saved</strong></td>
-<td>When you press <strong>Save a version</strong> and give it a name.</td>
-</tr>
-</tbody>
-</table>
-<p>A version is stored only when something actually changed — pressing Update three times without
-editing anything stores one version, not three. Automatic versions are trimmed to the limit an
-admin sets (<strong>Max snapshots per object</strong>, default 20, on the Admin page). Versions you saved by
-name are never trimmed.</p>
-<p>Maps are covered as of 0.30.0 — a map version includes every stage and attachment, and a
-restore that finds a referenced endpoint, cantrip or lorebook gone drops the reference and
-says so in its notes. Forbidden words and tag groups are still not covered.</p>
-<h3 id="restoring">Restoring</h3>
-<p>Two ways, and the difference matters.</p>
-<p><strong>Restore as a copy</strong> creates a new object from the stored version and leaves what you have
-alone. This is the safe one, and it is the only option for an object you deleted — the history
-survives the delete, so a cantrip removed by mistake can be brought back. The copy's tag is
-always cleared, because a tag activates exactly one resource and two objects cannot share one;
-the copy arrives inactive as far as tags are concerned, and you can give it the tag yourself
-once you are happy with it.</p>
-<p><strong>Restore over this object</strong> replaces the current content with the stored version. Before it
-does, it stores what it is about to replace — so if you restore the wrong version, the version
-you were on is now the newest entry in the list and you can go straight back.</p>
-<p>If the stored version's tag has since been given to a different object, the restore keeps the
-tag you have now and tells you it did. Everything else is restored.</p>
-<h3 id="what-a-restore-checks">What a restore checks</h3>
-<p>A restore is a content write like any other, so it goes through the same checks as typing the
-content in yourself: the size limits an admin has set, and the safety scanner for cantrip code
-and lorebook entries. A version stored months ago is not trusted just because this install
-wrote it — if the limits have tightened since, the restore is refused and tells you why.</p>
-<p>If the scanner finds critical patterns in the stored version, the restore is refused until you
-confirm you want to proceed. The dialog lists exactly what was found; the same gate applies to
-saving cantrips, lorebook entries and importing maps.</p>
-<h3 id="from-the-assistant">From the Assistant</h3>
-<p>The assistant can list versions, save one, and restore one, under the <strong>Snapshots</strong> group on the
-<a href="#assistant">Assistant Security</a> page. Restoring over an object is treated as a destructive
-action, so under Normal it asks first and shows you the difference.</p>
-<hr>
-<p><a id="metrics"></a></p>
-<h2 id="21-metrics">21. Metrics</h2>
-<p><img alt="Metrics page" src="media/gitv-metrics.png"></p>
-<p><em>Screenshots from 2026-11-18, against 0.31.0.</em></p>
-<p>The <strong>Metrics</strong> page shows what your pipeline costs over time: which lorebook entries, cantrips
-and other injected content bloat your prompt budget, and what each LLM role (driver, judge,
-summarizer, map stage) actually costs in tokens and latency. Where the <a href="#18-debug-and-comparing-runs">Debug page</a>
-shows one run, Metrics shows the trend.</p>
-<p>Recording is always on. Every authenticated request through the proxy writes one row per
-prompt-mutating object that fired and one row per upstream LLM call — debug mode is not required.
-Sandbox and replay runs are recorded too, but flagged; they are excluded from the default view so
-they cannot skew live-traffic statistics, and the <strong>Include sandbox/replay</strong> checkbox brings them
-back.</p>
-<h3 id="reading-the-page">Reading the page</h3>
-<ul>
-<li><strong>Window</strong> (7 / 30 / 90 days), <strong>Chat</strong> filter and the sandbox/replay toggle apply to both
-  tables. <strong>Refresh</strong> reloads.</li>
-<li><strong>Prompt Objects</strong> lists every object that changed a prompt in the window: how many times it
-  fired, the total and average token delta it caused, and which book (for lorebook entries) or
-  map (for stage objects) it belongs to. A positive delta adds to your prompt; a negative one
-  (a cantrip that trims content, a summarizer that compresses it) takes away. Sorted by impact.</li>
-<li><strong>LLM Calls</strong> groups upstream calls by role, endpoint and model: call count, success rate,
-  retry and failover counts, median latency, and token totals. Judge rows carry the verification
-  rule that ran.</li>
-<li><strong>Recent Rows</strong> shows the raw last 20 rows of each table, including flagged ones, for
-  checking exactly what one request recorded.</li>
-</ul>
-<h3 id="about-the-numbers">About the numbers</h3>
-<p>Token counts come from the upstream <code>usage</code> object when your provider returns one, and from a
-chars-per-4 estimate when it does not. The two are never blended silently — the tables say which
-source each row used, and a group whose calls disagree is marked <em>mixed</em>. Estimates are close
-enough to spot a lorebook entry that adds a thousand tokens per message; they are not an invoice.</p>
-<p>Rows are kept for the admin-configured retention period (<strong>Metrics Retention</strong>, default 30 days,
-on the Admin page) and pruned automatically. Metrics are per-user: your tables show your traffic
-only.</p>
-<p><img alt="Metrics retention setting on the Admin page" src="media/gitv-admin-metrics-retention.png"></p>
-<hr>
-<p><a id="storage"></a></p>
-<h2 id="22-storage-0400">22. Storage (0.40.0)</h2>
-<p>The cantrip persistent stores — <code>context.chat_data</code> (per conversation),
-<code>context.cantrip_data</code> (per cantrip) and <code>context.user_data</code> (global to you)
-— used to be write-only from the UI: scripts could read and write them, but
-there was no way to see what had accumulated, fix a value, or move a
-conversation's state elsewhere. The <strong>Storage</strong> page is that window.</p>
-<p><img alt="The Storage page" src="media/gitv-storage-page.png"></p>
-<p><em>The Storage page: the chat-data card with a conversation selected (left) and the global user-data card. Captured 2026-11-19.</em></p>
-<h3 id="chat-data">Chat Data</h3>
-<p>Grouped by conversation. Pick a conversation to see its keys and values;
-each row shows its size and last-update time. Click a row to expand its full
-value, <strong>Edit</strong> to change the key or value (values are JSON — an edit that
-does not parse is refused), <strong>Copy</strong> to duplicate the row into another
-conversation, <strong>Delete</strong> to remove it.</p>
-<p>Conversation-level actions: <strong>Export</strong> downloads the conversation's rows as
-a JSON bundle, <strong>Copy To…</strong> duplicates every row into a target conversation
-(keys that already exist there are skipped and reported), and <strong>Clear</strong>
-deletes every row for that conversation.</p>
-<h3 id="cantrip-data">Cantrip Data</h3>
-<p>Pick a cantrip to browse its per-cantrip store — the one that persists
-across all chats. Same row actions; <strong>Export</strong> downloads that cantrip's
-rows.</p>
-<h3 id="user-data">User Data</h3>
-<p>Your global store, shared across all chats and cantrips. Same row actions,
-plus <strong>Export All</strong>.</p>
-<h3 id="import">Import</h3>
-<p>Each card's <strong>Import…</strong> accepts a previously exported bundle. Imports are
-upserts: a row whose key already exists is updated, never duplicated, and
-anything refused (too large, invalid key) is reported per-row rather than
-silently dropped. Chat bundles that carry no conversation id import into the
-conversation id you name in the field beside the button; cantrip bundles
-import into the cantrip selected on the card.</p>
-<h3 id="limits-and-safety">Limits and safety</h3>
-<p>Values are content: edits are size-checked against the admin memory-rule cap
-and sanitized like every other content write. Every stored value is JSON by
-construction, so the editor validates before saving — a broken value cannot
-corrupt a store a script later reads. All routes are scoped to your account;
-another user's rows are invisible.</p>
 </body>
 </html>

@@ -2,6 +2,27 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.41.1] - 2026-11-19
+
+User guide restructured; long-standing frontend type errors fixed.
+
+### Changed
+
+- **User guide reorganized** to follow the app's sidebar order instead of
+  the release order sections accreted in. The Pre-Forward Order
+  documentation moved to the Settings section (where the card lives);
+  Dynamic Lorebooks and jslorebook scripts moved to the Lorebooks
+  section; the hand-numbered table of contents now links alias anchors,
+  so future sections can be inserted without renumbering anything; the
+  duplicated environment-variable table was consolidated into the Admin
+  reference; release-version tags were removed from headings; and a
+  duplicated line in the HTTPS certificate instructions was fixed.
+- **Frontend type errors fixed** (svelte-check reports 0 errors, down
+  from 2): `CodeEditor` accepts an `id` prop so the Maps stage editor's
+  label actually associates with the editor, and a closure-narrowing
+  `string | null` error in the lorebook entry form was fixed by capturing
+  the entry id before the callback.
+
 ## [0.41.0] - 2026-11-19
 
 Pipeline ordering: drag cantrips and lorebooks into one exact interleaved
