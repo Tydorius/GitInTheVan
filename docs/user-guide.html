@@ -1087,6 +1087,7 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <p><img alt="Chat Lexicon settings card" src="media/gitv-settings-lexicon.png"></p>
 <p><strong>Cantrip auto-install</strong> is doubly gated, and both switches default to off: an admin allows it under Admin → Global Caps, and you enable your half in Settings. With both on, <code>&lt;CANTRIP:...&gt;</code> drafts, validates, smoke-tests and installs the cantrip inside the request instead of queueing it — a draft that fails validation or the safety scan is refused, and one that fails only its sandbox smoke test is installed <strong>disabled</strong> with the findings recorded. Either way you get a one-line <code>[OOC: GitV: ...]</code> note in the reply. These notes are stripped from the history on the next request, and they are the only <code>[OOC: ...]</code> blocks GitV removes — your own OOC notes always reach the model.</p>
 <p><img alt="Cantrip auto-install: the admin half of the gate" src="media/gitv-admin-cantrip-auto-install.png"></p>
+<p><em>The Assistant card on the Admin page's Global Caps tab, with the auto-install switch, captured 2026-11-20.</em></p>
 <hr>
 <p><a id="verification"></a></p>
 <h2 id="11-verification">11. Verification</h2>
@@ -1576,6 +1577,7 @@ enough to spot a lorebook entry that adds a thousand tokens per message; they ar
 on the Admin page) and pruned automatically. Metrics are per-user: your tables show your traffic
 only.</p>
 <p><img alt="Metrics retention setting on the Admin page" src="media/gitv-admin-metrics-retention.png"></p>
+<p><em>The Debug Runs card on the Admin page's Global Caps tab, captured 2026-11-20.</em></p>
 <hr>
 <p><a id="settings"></a></p>
 <h2 id="18-settings">18. Settings</h2>

@@ -242,6 +242,77 @@ class TestUserDataSeedingOptimization:
                 )
                 assert seen_user_data[1] == {"big_blob": "x" * 100}
 
+    async def test_unnamed_user_data_writes_still_propagate(self, caplog):
+        """The seeding gate is a substring scan of the source; a script that
+        reaches the store without the literal name (introspection, a
+        runtime-built key) must not have its writes silently dropped."""
+        import logging
+
+        async def fake_run_cantrip(**kwargs):
+            assert kwargs["user_data"] == {}
+            return CantripResult(
+                personality="P",
+                scenario="S",
+                example_dialogs="E",
+                chat_data=dict(kwargs["chat_data"]),
+                user_data={"dyn": 1},
+                user_data_deletes={"old"},
+                cantrip_data=dict(kwargs["cantrip_data"]),
+            )
+
+        # No contiguous "user_data" substring anywhere in the source.
+        cantrip_dynamic = SimpleNamespace(
+            id="c3",
+            name="dynamic-ud",
+            code="const k = 'user' + '_data';",
+            timeout_ms=5000,
+            tag="",
+            execution_order=0,
+            lorebook_reads="[]",
+            budget_weight=0.0,
+            ephemeral=True,
+        )
+
+        state = {
+            "chat_data": {},
+            "user_data": {"big_blob": "x" * 100},
+            "accumulated_memories": {},
+            "memory_deletes": set(),
+            "lorebook_seed": {},
+            "lorebook_always": set(),
+        }
+        context = {
+            "character": {"personality": "", "scenario": "", "example_dialogs": ""},
+        }
+        body_json: dict = {"messages": [{"role": "user", "content": "hi"}]}
+
+        with caplog.at_level(logging.WARNING, logger="app.services.cantrip"):
+            async with TestSessionLocal() as db:
+                with patch("app.services.cantrip.run_cantrip", side_effect=fake_run_cantrip):
+                    await _execute_cantrip_step(
+                        cantrip_dynamic,
+                        db=db,
+                        body_json=body_json,
+                        user_id="u1",
+                        request_headers={},
+                        position="pre_driver",
+                        context=context,
+                        state=state,
+                        binding_conv_id="",
+                        internal_chat_id="",
+                        isolated=True,
+                        store_seeds=None,
+                        passenger_handler=None,
+                        budget_allocations=None,
+                        cantrips_for_seeding=[],
+                    )
+
+        # Seeded empty (the optimization), but the writes propagated and a
+        # warning named the cantrip.
+        assert state["user_data"] == {"dyn": 1}
+        assert "old" in state.get("user_data_deletes", set())
+        assert any("without naming it" in r.getMessage() for r in caplog.records)
+
     async def test_post_driver_skips_user_data_when_unused(self):
         seen_user_data: list[dict] = []
 

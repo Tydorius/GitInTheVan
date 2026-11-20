@@ -4,8 +4,6 @@ import logging
 import re
 from typing import Any
 
-from app.database import async_session as async_session
-
 logger = logging.getLogger(__name__)
 
 TOS_WARNING = (

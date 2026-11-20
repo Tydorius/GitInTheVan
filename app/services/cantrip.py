@@ -761,7 +761,17 @@ async def _execute_cantrip_step(
 
     state["chat_data"] = result.chat_data
     state.setdefault("chat_data_deletes", set()).update(result.chat_data_deletes)
-    if uses_user_data:
+    if uses_user_data or result.user_data or result.user_data_deletes:
+        if not uses_user_data:
+            # The seeding gate is a substring scan of the source; a script
+            # that reaches the store without the literal name (introspection,
+            # a runtime-built key) still gets its writes propagated rather
+            # than silently dropped.
+            logger.warning(
+                "Cantrip '%s' wrote user_data without naming it; propagating "
+                "writes (the store was seeded empty for this pass)",
+                cantrip.name,
+            )
         state["user_data"] = result.user_data
         state.setdefault("user_data_deletes", set()).update(result.user_data_deletes)
 
@@ -1232,7 +1242,15 @@ async def process_cantrips_post_driver(
 
             chat_data = result.chat_data
             chat_data_deletes.update(result.chat_data_deletes)
-            if uses_user_data:
+            if uses_user_data or result.user_data or result.user_data_deletes:
+                if not uses_user_data:
+                    # Mirror of the pre-driver gate: writes from a script that
+                    # reached the store without naming it still propagate.
+                    logger.warning(
+                        "Cantrip '%s' wrote user_data without naming it; propagating "
+                        "writes (the store was seeded empty for this pass)",
+                        cantrip.name,
+                    )
                 user_data = result.user_data
                 user_data_deletes.update(result.user_data_deletes)
             accumulated_memories.update(result.memories)

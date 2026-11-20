@@ -1215,6 +1215,8 @@ Action commands look like command tags but carry free text instead of on/off. Th
 
 ![Cantrip auto-install: the admin half of the gate](media/gitv-admin-cantrip-auto-install.png)
 
+*The Assistant card on the Admin page's Global Caps tab, with the auto-install switch, captured 2026-11-20.*
+
 ---
 
 <a id="verification"></a>
@@ -1819,6 +1821,8 @@ on the Admin page) and pruned automatically. Metrics are per-user: your tables s
 only.
 
 ![Metrics retention setting on the Admin page](media/gitv-admin-metrics-retention.png)
+
+*The Debug Runs card on the Admin page's Global Caps tab, captured 2026-11-20.*
 
 ---
 

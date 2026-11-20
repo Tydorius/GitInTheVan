@@ -10,7 +10,6 @@ import app.services.assistant.selfcheck as _assistant_selfcheck_module
 import app.services.assistant.store as _assistant_store_module
 import app.services.backup as _backup_module
 import app.services.budget as _budget_module
-import app.services.bypass as _bypass_module
 import app.services.cantrip as _cantrip_module
 import app.services.command_tags as _command_tags_module
 import app.services.content_guard as _content_guard_module
@@ -53,7 +52,6 @@ _SESSION_MODULES = [
     _assistant_store_module,
     _backup_module,
     _budget_module,
-    _bypass_module,
     _cantrip_module,
     _command_tags_module,
     _content_guard_module,

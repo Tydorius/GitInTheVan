@@ -200,17 +200,6 @@ def _collect_tag_names(rows: Any) -> list[str]:
     return names
 
 
-async def registered_tag_names(user_id: str) -> list[str]:
-    """Union of every tag name the user's cantrips register."""
-    async with async_session() as db:
-        rows = (
-            await db.execute(
-                select(Cantrip.response_tags).where(Cantrip.user_id == user_id)
-            )
-        ).scalars().all()
-    return _collect_tag_names(rows)
-
-
 async def process_response_capture(
     response_data: dict, user_id: str, body_json: dict
 ) -> dict:
