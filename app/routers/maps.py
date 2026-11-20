@@ -3,7 +3,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -11,6 +11,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.map import Map, MapStage, MapStageResource
 from app.models.user import User
+from app.routers._helpers import check_tag_unique, get_owned_or_404
 from app.services.admin import get_admin_settings
 from app.services.content_guard import (
     check_size,
@@ -32,8 +33,6 @@ class ResourceInput(BaseModel):
     resource_id: str
     position: str = "pre_driver"
     sticky: bool = False
-
-    from pydantic import field_validator
 
     @field_validator("resource_type")
     @classmethod
@@ -234,19 +233,6 @@ def _map_to_response(m: Map) -> MapResponse:
     )
 
 
-async def _check_tag_unique(db: AsyncSession, tag: str, user_id: str, exclude_id: str | None = None) -> None:
-    if not tag:
-        return
-    query = text("SELECT id FROM maps WHERE tag = :tag AND user_id = :uid")
-    params: dict[str, Any] = {"tag": tag, "uid": user_id}
-    if exclude_id:
-        query = text("SELECT id FROM maps WHERE tag = :tag AND user_id = :uid AND id != :mid")
-        params["mid"] = exclude_id
-    result = await db.execute(query, params)
-    if result.scalar_one_or_none() is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tag already in use")
-
-
 async def _guard_map_texts(
     db: AsyncSession,
     user_id: str,
@@ -387,7 +373,7 @@ async def create_map(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    await _check_tag_unique(db, req.tag, current_user.id)
+    await check_tag_unique(db, Map, current_user.id, req.tag)
     await _guard_map_texts(db, current_user.id, req, req.stages)
     m = Map(
         user_id=current_user.id,
@@ -424,14 +410,14 @@ async def update_map(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    result = await db.execute(
-        select(Map)
-        .where(Map.id == map_id, Map.user_id == current_user.id)
-        .options(selectinload(Map.stages).selectinload(MapStage.resources))
+    m = await get_owned_or_404(
+        db,
+        Map,
+        map_id,
+        current_user.id,
+        "Map",
+        options=(selectinload(Map.stages).selectinload(MapStage.resources),),
     )
-    m = result.scalar_one_or_none()
-    if m is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Map not found")
 
     # Pre-edit snapshot before the write, so an update that rebuilds every
     # stage is undoable. Best-effort: a history failure must not block an edit.
@@ -440,7 +426,7 @@ async def update_map(
     await _guard_map_texts(db, current_user.id, req, req.stages, map_id)
 
     if req.tag is not None and req.tag != m.tag:
-        await _check_tag_unique(db, req.tag, current_user.id, map_id)
+        await check_tag_unique(db, Map, current_user.id, req.tag, exclude_id=map_id)
         m.tag = req.tag
     if req.name is not None:
         m.name = req.name
@@ -488,12 +474,7 @@ async def delete_map(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    result = await db.execute(
-        select(Map).where(Map.id == map_id, Map.user_id == current_user.id)
-    )
-    m = result.scalar_one_or_none()
-    if m is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Map not found")
+    m = await get_owned_or_404(db, Map, map_id, current_user.id, "Map")
 
     # Snapshots outlive the object they describe, so a deleted map stays
     # recoverable as a restore-as-new copy. Best-effort, same as update.

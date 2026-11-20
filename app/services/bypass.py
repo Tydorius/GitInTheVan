@@ -4,10 +4,7 @@ import logging
 import re
 from typing import Any
 
-from sqlalchemy import select
-
-from app.database import async_session
-from app.models.user_settings import UserSettings
+from app.database import async_session as async_session
 
 logger = logging.getLogger(__name__)
 
@@ -113,18 +110,6 @@ def decode_incoming(text: str, method: str) -> str:
     if method == "dot_separation":
         return re.sub(r"(?<=[a-zA-Z])\.(?=[a-zA-Z])", "", text)
     return text
-
-
-async def get_bypass_method(user_id: str) -> str:
-    """Get the user's configured bypass method. Returns 'none' if disabled."""
-    async with async_session() as db:
-        result = await db.execute(
-            select(UserSettings).where(UserSettings.user_id == user_id)
-        )
-        settings = result.scalar_one_or_none()
-        if settings is None:
-            return "none"
-        return getattr(settings, "bypass_method", "none") or "none"
 
 
 def apply_bypass_encode(

@@ -80,13 +80,6 @@ class ScanResult:
         return ", ".join(parts)
 
 
-def _find_line(text: str, pattern: str, start: int = 0) -> int:
-    match = re.search(pattern, text[start:], re.IGNORECASE)
-    if match:
-        return text[:start + match.start()].count("\n") + 1
-    return 0
-
-
 def scan_cantrip(code: str, max_content_size: int | None = None) -> ScanResult:
     result = ScanResult(safe=True)
     limit = MAX_CONTENT_SIZE if max_content_size is None else max_content_size

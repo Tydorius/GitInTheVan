@@ -12,39 +12,87 @@ from app.config import settings
 from app.database import async_session
 from app.services.cantrip import process_cantrips
 from app.services.llm_params import (
-    RESERVED_NAMES,
     ParamDef,
     apply_to_body,
     parse_params,
     resolve,
 )
 from app.services.lorebook import inject_entries
+from app.services.response_pipeline import (
+    _append_pending_notices as _append_pending_notices,
+)
+from app.services.response_pipeline import (
+    _apply_post_driver_processing as _apply_post_driver_processing,
+)
+from app.services.response_pipeline import (
+    _apply_post_navigator_processing as _apply_post_navigator_processing,
+)
+from app.services.response_pipeline import (
+    _extract_response_memories as _extract_response_memories,
+)
+from app.services.response_pipeline import (
+    _handle_response_memories as _handle_response_memories,
+)
+from app.services.response_pipeline import (
+    _record_conversation_anchor as _record_conversation_anchor,
+)
+from app.services.response_pipeline import (
+    _save_debug_exchange as _save_debug_exchange,
+)
+from app.services.response_pipeline import (
+    _serialize_violations as _serialize_violations,
+)
+from app.services.response_pipeline import (
+    finalize_response as finalize_response,
+)
 from app.services.routing import FailoverEndpoint, resolve_routing
-from app.services.verification import run_verification_loop
+from app.services.upstream import (
+    LITELLM_NATIVE_PARAMS as LITELLM_NATIVE_PARAMS,
+)
+from app.services.upstream import (
+    _build_upstream_url as _build_upstream_url,
+)
+from app.services.upstream import (
+    _convert_to_sse as _convert_to_sse,
+)
+from app.services.upstream import (
+    _do_forward as _do_forward,
+)
+from app.services.upstream import (
+    _do_forward_litellm as _do_forward_litellm,
+)
+from app.services.upstream import (
+    _forward_with_failover as _forward_with_failover,
+)
+from app.services.upstream import (
+    _log_request as _log_request,
+)
+from app.services.upstream import (
+    _log_response as _log_response,
+)
+from app.services.upstream import (
+    _record_call as _record_call,
+)
+from app.services.upstream import (
+    _StreamAccumulator as _StreamAccumulator,
+)
+from app.services.upstream import (
+    _strip_think_tags as _strip_think_tags,
+)
+from app.services.upstream import (
+    auth_headers as auth_headers,
+)
+from app.services.upstream import (
+    extract_response_text as extract_response_text,
+)
+from app.services.upstream import (
+    forward_llm_chain as forward_llm_chain,
+)
 
 logger = logging.getLogger(__name__)
 
 FORWARD_HEADERS = {"content-type", "accept"}
 SKIP_HEADERS = {"host", "authorization", "content-length", "transfer-encoding"}
-
-# Parameters LiteLLM accepts as named kwargs. Anything outside this set that the
-# user has deliberately configured is passed through `extra_body` instead;
-# anything outside it that only the *client* sent is still dropped, because the
-# raw body is not forwarded on this path and guessing which unknown client keys
-# a provider will tolerate is how the Gemini `top_k` failures started.
-#
-# `reasoning_effort` and `max_completion_tokens` were absent until Phase 23,
-# which is why a client that sent either lost it on every provider endpoint.
-# `tools`, `tool_choice` and `parallel_tool_calls` were absent until Phase 26a,
-# the same class of bug: a client-sent tool definition was silently dropped on
-# every provider endpoint, so native function calling never reached the model.
-LITELLM_NATIVE_PARAMS: frozenset[str] = frozenset({
-    "temperature", "max_tokens", "top_p", "top_k", "stream",
-    "stop", "frequency_penalty", "presence_penalty", "seed",
-    "n", "logprobs", "user",
-    "reasoning_effort", "max_completion_tokens", "response_format", "thinking",
-    "tools", "tool_choice", "parallel_tool_calls",
-})
 
 
 async def _flag_injection_content(user_id: str, text: str, source: str) -> None:
@@ -84,47 +132,6 @@ def _build_forward_headers(request: Request, api_key: str) -> dict[str, str]:
     return headers
 
 
-def auth_headers(api_key: str) -> dict[str, str]:
-    """Headers for internal LLM calls (judges, summarizers, map stages,
-    lexicon compiles). A keyless endpoint (local LLMs, LAN gateways) must
-    not get an Authorization header at all: httpcore rejects `Bearer ` with
-    an empty credential as an illegal header value, so the unconditional
-    form failed every internal call on keyless endpoints."""
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    return headers
-
-
-def _build_upstream_url(base_url: str, path: str, api_base_path: str = "") -> str:
-    if api_base_path:
-        if api_base_path.endswith("/chat/completions"):
-            if path == "/v1/chat/completions":
-                path = api_base_path
-            elif path.startswith("/v1/"):
-                suffix = path[3:]
-                base = api_base_path[: -len("/chat/completions")]
-                path = base + suffix
-            elif path == "/v1":
-                path = api_base_path[: -len("/chat/completions")]
-        elif path.startswith("/v1/"):
-            path = api_base_path + path[3:]
-        elif path == "/v1":
-            path = api_base_path
-    return f"{base_url}{path}"
-
-
-def _log_request(method: str, url: str, model: str | None, stream: bool) -> None:
-    logger.info("proxy %s %s model=%s stream=%s", method, url, model, stream)
-    logger.debug("proxy headers: api_key_present=%s", "<redacted>" if "sk-" in str(url) else "check")
-
-
-def _log_response(status_code: int, elapsed: float, response_body: str = "") -> None:
-    logger.info("proxy response status=%d elapsed=%.2fs", status_code, elapsed)
-    if status_code >= 400 and response_body:
-        logger.debug("proxy error response body: %.500s", response_body[:500])
-
-
 async def _resolve_target(
     request: Request,
 ) -> tuple[str, str, str | None, str, str, str, str, str, list] | None:
@@ -141,7 +148,6 @@ async def _resolve_target(
                         result.model, result.endpoint_id, result.failover_chain,
                     )
                 return None
-            return None
 
     base_url = settings.default_endpoint_url
     api_key = settings.default_endpoint_api_key
@@ -823,30 +829,24 @@ async def _forward_request_impl(
             response_data = await run_map_pipeline(body_json, user_id, request_headers, map_active, map_timeout)
             map_status = body_json.pop("_gitv_map_status_code", 200)
 
-            if map_status == 200 and body_json.get("_gitv_chat_id"):
-                # Package 3: map output gets extraction + stripping too. No
-                # post-Navigator pass runs on the final map output (stage
-                # cantrips ran inside the pipeline), so the seeded key only
-                # feeds the debug trace here -- strip still cleans the reply.
-                from app.services.response_tags import process_response_capture
-                response_data = await process_response_capture(
-                    response_data, user_id, body_json
-                )
-                response_data = await _handle_response_memories(response_data, user_id, body_json)
-            if map_status == 200:
-                response_data = _append_pending_notices(response_data, body_json)
-
-            if body_json.get("_gitv_debug") and user_id:
-                # The map pipeline returns its own verification result; passing
-                # it through is what stops every map run storing empty
-                # verification_data (and reporting has_verification=False).
-                await _save_debug_exchange(
-                    response_data, body_json, user_id,
-                    vresult=body_json.pop("_gitv_map_vresult", None),
-                )
-
-            from app.services.metrics import flush_metrics
-            await flush_metrics(body_json)
+            has_chat = bool(body_json.get("_gitv_chat_id"))
+            response_data = await finalize_response(
+                response_data,
+                map_status,
+                body_json,
+                user_id,
+                request_headers,
+                vresult=body_json.pop("_gitv_map_vresult", None),
+                run_post_driver=False,
+                run_verification=False,
+                run_response_capture=has_chat,
+                run_post_navigator=False,
+                run_memories=has_chat,
+                append_notices=True,
+                run_bypass_decode=False,
+                save_debug=True,
+                flush_metrics=True,
+            )
 
             if map_status == 200 and stream:
                 ux_settings = await _load_ux_settings(user_id)
@@ -951,9 +951,6 @@ async def _forward_request_impl(
                 await _flag_injection_content(user_id, notification, "driver_callable")
                 body_json["_gitv_driver_callable"] = True
                 body_json["_gitv_driver_callable_turns"] = dc_config.turns
-                body_json["_gitv_driver_callable_tools"] = [
-                    {"id": t.id, "name": t.name.lower()} for t in dc_config.tools
-                ]
                 body_json["messages"] = inject_tool_notification_safe(
                     body_json.get("messages", []), notification
                 )
@@ -1156,123 +1153,6 @@ def _apply_llm_parameters(
     return out
 
 
-def _strip_think_tags(content: str) -> str:
-    """Remove <think>...</think> blocks from content."""
-    import re
-    return re.sub(r"<think>.*?</think>\s*", "", content, flags=re.DOTALL)
-
-
-def _append_pending_notices(response_data: Any, body_json: dict[str, Any]) -> Any:
-    """Append pipeline OOC notices to the reply so the player sees them.
-
-    Notices ([OOC: GitV: ...], built in lexicon.build_notice) ride the final
-    content out once and are stripped from messages on every subsequent
-    request, so they never persist in the history the client resends.
-    """
-    notices = body_json.get("_gitv_pending_notices") or []
-    if not notices or not isinstance(response_data, dict):
-        return response_data
-    content_before = ""
-    appended = False
-    try:
-        choices = response_data.get("choices") or []
-        if choices and isinstance(choices[0].get("message"), dict):
-            message = choices[0]["message"]
-            content_before = str(message.get("content") or "")
-            joined = "\n".join(notices)
-            message["content"] = f"{content_before}\n\n{joined}".strip() if content_before else joined
-            appended = True
-    except Exception:
-        logger.exception("Failed to append pending notices")
-
-    # Captured here rather than at the call sites so every path -- including a
-    # future one -- reports the stage, and so a failed append (the player never
-    # sees the notice) is visible in the Debug timeline instead of only the log.
-    from app.services.debug import debug_capture_response
-    if appended:
-        debug_capture_response(
-            body_json, "pending_notices", "Pending Notices",
-            content_before=content_before,
-            content_after=str(
-                (response_data.get("choices") or [{}])[0].get("message", {}).get("content") or ""
-            ),
-            detail=f"Appended {len(notices)} OOC notice(s) to the reply",
-            metadata={"notices": [n[:200] for n in notices]},
-        )
-    else:
-        debug_capture_response(
-            body_json, "pending_notices", "Pending Notices",
-            detail=(
-                f"{len(notices)} notice(s) pending but NOT appended "
-                "(no parseable message content; the player will not see them)"
-            ),
-            metadata={"notices": [n[:200] for n in notices]},
-        )
-    return response_data
-
-
-def _convert_to_sse(
-    response: JSONResponse,
-    model: str,
-    gitv_status: bool = False,
-    simulated_speed: int = 0,
-    preserve_thinking: bool = True,
-) -> StreamingResponse:
-    import time
-
-    data = json.loads(response.body)
-    message = data.get("choices", [{}])[0].get("message", {})
-    content = message.get("content", "")
-    reasoning = message.get("reasoning_content", "") or message.get("thinking", "")
-    chunk_id = data.get("id", "chatcmpl-converted")
-    created = data.get("created", 0)
-
-    if not preserve_thinking and content:
-        content = _strip_think_tags(content)
-
-    def make_chunk(delta_content: str, finish: str | None = None) -> str:
-        chunk = {
-            "id": chunk_id,
-            "object": "chat.completion.chunk",
-            "created": created,
-            "model": model,
-            "choices": [{"index": 0, "delta": {"content": delta_content}, "finish_reason": finish}],
-        }
-        return f"data: {json.dumps(chunk)}\n\n"
-
-    def generate():
-        if gitv_status:
-            status_text = "<think>\n<gitv>\nVerification complete. Streaming response to client.\n</gitv>\n</think>\n"
-            yield make_chunk(status_text)
-
-        if reasoning and preserve_thinking:
-            yield make_chunk(reasoning)
-
-        if simulated_speed > 0 and content:
-            words = content.split(" ")
-            for i in range(len(words)):
-                if i == 0:
-                    yield make_chunk(words[i])
-                else:
-                    yield make_chunk(" " + words[i])
-                time.sleep(60.0 / simulated_speed / 10)
-        elif content:
-            yield make_chunk(content)
-
-        yield make_chunk("", finish="stop")
-        yield b"data: [DONE]\n\n"
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
 async def _apply_lorebook_injection(
     body_json: dict[str, Any],
     user_id: str,
@@ -1431,113 +1311,6 @@ async def _apply_lorebook_injection(
         return body_json
 
 
-async def _record_conversation_anchor(
-    response_data: dict[str, Any], user_id: str, body_json: dict[str, Any]
-) -> None:
-    """0.42.0 (B6.1): conversation identity must survive `<MEMORY:off>`.
-
-    Recording the post-hash used to hide inside _extract_response_memories,
-    so turning memory off for a request also stopped the conversation from
-    matching on the next one -- the chat silently started over. Memory
-    extraction stays skipped; only the anchor is recorded, against the
-    client-bound content (memstore tags are stripped before hashing, so
-    the post-hash matches what the client sends back on its next
-    request)."""
-    choices = response_data.get("choices", [])
-    if not choices:
-        return
-    content = choices[0].get("message", {}).get("content", "")
-    if not content:
-        return
-    chat_id = body_json.get("_gitv_chat_id", "")
-    if not chat_id:
-        return
-    messages_for_hash = body_json.get("_gitv_messages_for_hash", body_json.get("messages", []))
-    from app.services.conversation import record_post_hash
-
-    await record_post_hash(messages_for_hash, content, chat_id, user_id)
-
-
-async def _extract_response_memories(
-    response_data: dict[str, Any], user_id: str, body_json: dict[str, Any]
-) -> dict[str, Any]:
-    choices = response_data.get("choices", [])
-    if not choices:
-        return response_data
-
-    content = choices[0].get("message", {}).get("content", "")
-    if not content:
-        return response_data
-
-    from app.services.conversation import record_post_hash, save_memories_for_chat
-    from app.services.memory import parse_memstore_tags
-
-    cleaned, memories = parse_memstore_tags(content)
-
-    chat_id = body_json.get("_gitv_chat_id", "")
-    messages_for_hash = body_json.get("_gitv_messages_for_hash", body_json.get("messages", []))
-
-    if cleaned != content:
-        response_data["choices"][0]["message"]["content"] = cleaned
-
-    if chat_id and memories and body_json.get("_gitv_replay"):
-        # Guarded here rather than at the five call sites, so a new one cannot
-        # miss it. Replay must not persist memories: a second replay would read
-        # them back and inject them, so run B would differ from run A for a
-        # reason that has nothing to do with what the user changed.
-        logger.info("Replay: skipping %d memory write(s)", len(memories))
-        memories = {}
-
-    if chat_id and memories:
-        # LLM-output-derived write path, not a router — same control-char stripping
-        # as sanitize_input() applied at router write paths, since this content gets
-        # re-injected into future requests via load_memories_for_chat. See
-        # Planning/security-control-document.md.
-        from app.services.sanitization import detect_zero_width, strip_control_chars
-        memories = {k: strip_control_chars(v) for k, v in memories.items()}
-        for k, v in memories.items():
-            if detect_zero_width(v):
-                logger.warning("Zero-width characters detected in extracted memory '%s' for chat %s", k, chat_id[:12])
-        await save_memories_for_chat(chat_id, user_id, memories)
-        logger.info("Memory extraction: %d keys saved for chat %s", len(memories), chat_id[:12])
-
-    if chat_id and body_json.get("_gitv_debug") is not None:
-        from app.services.debug import debug_capture_response
-        debug_capture_response(body_json, "memory_extraction", "Memory Extraction",
-            content_before=content[:500],
-            content_after=cleaned[:500],
-            detail=f"Extracted {len(memories)} memories" if memories else "No memories found",
-            metadata={"memory_keys": list(memories.keys()) if memories else []})
-
-    if chat_id:
-        await record_post_hash(messages_for_hash, cleaned, chat_id, user_id)
-
-    return response_data
-
-
-async def _handle_response_memories(
-    response_data: dict[str, Any], user_id: str, body_json: dict[str, Any]
-) -> dict[str, Any]:
-    """Extract/save memories unless <MEMORY:off> is active; when off, strip
-    <memstore> tags so raw tags never leak and record the conversation anchor."""
-    if body_json.get("_gitv_command_overrides", {}).get("memory") is not False:
-        return await _extract_response_memories(response_data, user_id, body_json)
-
-    choices = response_data.get("choices", []) if isinstance(response_data, dict) else []
-    if choices:
-        content = choices[0].get("message", {}).get("content", "")
-        if content:
-            from app.services.memory import parse_memstore_tags
-
-            cleaned, _ = parse_memstore_tags(content)
-            if cleaned != content:
-                response_data["choices"][0]["message"]["content"] = cleaned
-
-    if body_json.get("_gitv_chat_id"):
-        await _record_conversation_anchor(response_data, user_id, body_json)
-    return response_data
-
-
 def inject_tool_notification_safe(
     messages: list[dict[str, Any]], notification: str
 ) -> list[dict[str, Any]]:
@@ -1668,11 +1441,9 @@ async def _run_driver_callable_loop(
             logger.warning("Driver-callable loop: forward returned %d", status_code)
             return response_data, status_code
 
-        choices = response_data.get("choices", [])
-        if not choices:
+        content = extract_response_text(response_data)
+        if not content:
             return response_data, status_code
-
-        content = choices[0].get("message", {}).get("content", "")
         calls = parse_call_tags(content)
 
         if not calls or turns_remaining <= 0:
@@ -1722,9 +1493,8 @@ async def _run_driver_callable_loop(
     response_data, status_code = await forward(loop_body)
 
     if status_code == 200:
-        choices = response_data.get("choices", [])
-        if choices:
-            content = choices[0].get("message", {}).get("content", "")
+        content = extract_response_text(response_data)
+        if content:
             cleaned = strip_call_tags(content)
             if cleaned != content:
                 response_data["choices"][0]["message"]["content"] = cleaned
@@ -1749,63 +1519,19 @@ async def _forward_non_streaming_verified(
                 body_json, method, url, headers, timeout, user_id, request_headers,
             )
             if loop_result is not None:
-                body_json["_gitv_driver_callable_completed"] = True
                 response_data, status_code = loop_result
-
-                if status_code == 200 and user_id:
-                    response_data = await _apply_post_driver_processing(
-                        response_data, body_json, user_id, request_headers
-                    )
-                    conversation_id = request_headers.get("x-conversation-id", "")
-                    try:
-                        response_data, vresult = await run_verification_loop(
-                            response_data, body_json, method, url, headers, timeout,
-                            user_id, conversation_id, body_json.get("_gitv_tags"), path,
-                        )
-                        if vresult:
-                            logger.info(
-                                "Verification: approved=%s retries=%d violations_total=%d",
-                                vresult.approved,
-                                vresult.retries_used,
-                                sum(len(c.violations) for c in vresult.check_history),
-                            )
-                    except Exception:
-                        logger.exception("Verification loop failed, returning original response")
-
-                    # Package 3: extract registered response tags from the
-                    # final reply and strip them (plus user strip patterns)
-                    # before the post-Navigator pass -- the owning cantrip
-                    # sees this turn's tags this turn.
-                    from app.services.response_tags import process_response_capture
-                    response_data = await process_response_capture(
-                        response_data, user_id, body_json
-                    )
-
-                    try:
-                        response_data = await _apply_post_navigator_processing(
-                            response_data, body_json, user_id, request_headers
-                        )
-                    except Exception:
-                        logger.exception("Post-navigator processing failed")
-
-                if status_code == 200 and body_json.get("_gitv_chat_id"):
-                    response_data = await _handle_response_memories(response_data, user_id, body_json)
-                if status_code == 200:
-                    response_data = _append_pending_notices(response_data, body_json)
-
-                if isinstance(response_data, dict):
-                    response_data.pop("_gitv_forbidden_summary", None)
-
-                if status_code == 200 and body_json.get("_gitv_bypass_method"):
-                    from app.services.bypass import apply_bypass_decode
-                    response_data = apply_bypass_decode(response_data, body_json["_gitv_bypass_method"])
-
-                if body_json.get("_gitv_debug") and user_id:
-                    await _save_debug_exchange(response_data, body_json, user_id, locals().get("vresult"))
-
-                from app.services.metrics import flush_metrics
-                await flush_metrics(body_json)
-
+                response_data = await finalize_response(
+                    response_data,
+                    status_code,
+                    body_json,
+                    user_id,
+                    request_headers,
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    timeout=timeout,
+                    path=path,
+                )
                 return JSONResponse(status_code=status_code, content=response_data)
         except Exception:
             logger.exception("Driver-callable loop failed, falling through to normal forward")
@@ -1836,279 +1562,19 @@ async def _forward_non_streaming_verified(
             model_requested=body_json.get("model", ""),
         )
 
-    if status_code == 200 and user_id:
-        response_data = await _apply_post_driver_processing(
-            response_data, body_json, user_id, request_headers
-        )
-
-        conversation_id = request_headers.get("x-conversation-id", "")
-        try:
-            response_data, vresult = await run_verification_loop(
-                response_data, body_json, method, url, headers, timeout,
-                user_id, conversation_id, body_json.get("_gitv_tags"), path,
-            )
-            if vresult:
-                logger.info(
-                    "Verification: approved=%s retries=%d violations_total=%d",
-                    vresult.approved,
-                    vresult.retries_used,
-                    sum(len(c.violations) for c in vresult.check_history),
-                )
-        except Exception:
-            logger.exception("Verification loop failed, returning original response")
-
-        # Package 3: same placement as the verified path above -- final
-        # content only, before post-Navigator cantrips.
-        from app.services.response_tags import process_response_capture
-        response_data = await process_response_capture(
-            response_data, user_id, body_json
-        )
-
-        try:
-            response_data = await _apply_post_navigator_processing(
-                response_data, body_json, user_id, request_headers
-            )
-        except Exception:
-            logger.exception("Post-navigator processing failed")
-
-    if status_code == 200 and user_id and body_json.get("_gitv_chat_id"):
-        response_data = await _handle_response_memories(response_data, user_id, body_json)
-    if status_code == 200:
-        response_data = _append_pending_notices(response_data, body_json)
-
-    if isinstance(response_data, dict):
-        response_data.pop("_gitv_forbidden_summary", None)
-
-    if status_code == 200 and body_json.get("_gitv_bypass_method"):
-        from app.services.bypass import apply_bypass_decode
-        response_data = apply_bypass_decode(response_data, body_json["_gitv_bypass_method"])
-
-    if body_json.get("_gitv_debug") and user_id:
-        await _save_debug_exchange(response_data, body_json, user_id, locals().get("vresult"))
-
-    from app.services.metrics import flush_metrics
-    await flush_metrics(body_json)
-
-    return JSONResponse(status_code=status_code, content=response_data)
-
-
-async def _save_debug_exchange(
-    response_data: dict[str, Any],
-    body_json: dict[str, Any],
-    user_id: str,
-    vresult: Any = None,
-) -> None:
-    """Capture pipeline data and response for debug mode."""
-    from app.services.debug import capture_exchange, debug_capture_response
-
-    response_content = ""
-    response_thinking = ""
-    choices = response_data.get("choices", []) if isinstance(response_data, dict) else []
-    if choices:
-        message = choices[0].get("message", {})
-        response_content = message.get("content", "")
-        response_thinking = message.get("reasoning_content", "") or message.get("thinking", "")
-
-    verification_data: dict[str, Any] = {}
-    if vresult:
-        verification_data = {
-            "approved": vresult.approved,
-            "retries_used": vresult.retries_used,
-            "check_history": [
-                {
-                    "approved": c.approved,
-                    "violations": _serialize_violations(c.violations),
-                    "thinking": c.judgments[0].thinking if c.judgments else "",
-                }
-                for c in vresult.check_history
-            ],
-        }
-        debug_capture_response(body_json, "verification", "Verification",
-            content_after=response_content,
-            detail=f"{'Approved' if vresult.approved else 'Rejected'}, {vresult.retries_used} retry/retries",
-            metadata=verification_data)
-    elif body_json.get("_gitv_debug"):
-        debug_capture_response(body_json, "verification", "Verification",
-            detail="Not enabled")
-
-    if body_json.get("_gitv_bypass_method"):
-        debug_capture_response(body_json, "bypass_decoding", "Bypass Decoding",
-            content_after=response_content,
-            detail=f"Method: {body_json['_gitv_bypass_method']}")
-
-    # Content and reasoning are stored whole. A comparison built on text clipped
-    # at 500 characters cannot show where two runs diverged, which was the point.
-    # The size bound is applied to the serialized trace in capture_exchange.
-    debug_capture_response(body_json, "llm_response", "LLM Response",
-        content_after=response_content,
-        detail="Final response from upstream LLM",
-        metadata={"thinking": response_thinking} if response_thinking else None)
-
-    pipeline_data = body_json.get("_gitv_debug", {})
-
-    from app.services.debug_metrics import summarize_run
-    started = body_json.get("_gitv_request_started")
-    total_ms = (time.monotonic() - started) * 1000.0 if started else None
-    if isinstance(pipeline_data, dict):
-        pipeline_data.setdefault("run", {})["totals"] = summarize_run(
-            pipeline_data, total_latency_ms=total_ms
-        )
-
-    await capture_exchange(
-        user_id=user_id,
-        chat_id=body_json.get("_gitv_chat_id", ""),
-        model=body_json.get("model", ""),
-        pipeline_data=pipeline_data,
-        response_content=response_content,
-        verification_data=verification_data,
+    response_data = await finalize_response(
+        response_data,
+        status_code,
+        body_json,
+        user_id,
+        request_headers,
+        method=method,
+        url=url,
+        headers=headers,
+        timeout=timeout,
+        path=path,
     )
-
-
-def _serialize_violations(violations: Any) -> list[dict[str, Any]]:
-    """Convert VerificationJudgment dataclasses to plain dicts.
-
-    These used to reach the database through json.dumps(default=str), which
-    renders a dataclass as its Python repr. The UI printed that repr raw, and a
-    diff between two runs would have compared repr strings character by
-    character -- noise, not signal.
-    """
-    from dataclasses import asdict, is_dataclass
-
-    out: list[dict[str, Any]] = []
-    for v in violations or []:
-        if is_dataclass(v) and not isinstance(v, type):
-            out.append(asdict(v))
-        elif isinstance(v, dict):
-            out.append(v)
-        else:
-            out.append({"detail": str(v)})
-    return out
-
-
-async def _apply_post_driver_processing(
-    response_data: dict[str, Any],
-    body_json: dict[str, Any],
-    user_id: str,
-    request_headers: dict[str, str],
-) -> dict[str, Any]:
-    """Run pre-Navigator cantrips and forbidden word scan on Driver response."""
-    choices = response_data.get("choices", [])
-    if not choices:
-        return response_data
-
-    content = choices[0].get("message", {}).get("content", "")
-    if not content:
-        return response_data
-
-    from app.services.cantrip import process_cantrips_post_driver
-
-    tags = body_json.get("_gitv_tags", [])
-    debug_on = body_json.get("_gitv_debug") is not None
-
-    try:
-        # Full body, not a _gitv_-stripped copy: the pass needs _gitv_chat_id
-        # (header-less clients' store writes), the sandbox/replay isolation
-        # flags, the shared Passenger handler and the metrics accumulator.
-        # The stripped copy silently dropped all four.
-        from app.services.cantrip import embedded_jslb_scripts
-
-        new_content = await process_cantrips_post_driver(
-            content, body_json, user_id, request_headers,
-            tags=tags, position="pre_navigator",
-            embedded_scripts=embedded_jslb_scripts(body_json, "pre_navigator"),
-        )
-        if new_content != content:
-            # 0.42.0 (N4a): capture the BEFORE text before it is overwritten.
-            # Both snapshots used to read the post-cantrip content, so the
-            # stage's diff always showed "no change".
-            original_content = content
-            response_data["choices"][0]["message"]["content"] = new_content
-            content = new_content
-            logger.info("Pre-navigator cantrips modified response")
-            if debug_on:
-                from app.services.debug import debug_capture_response
-                debug_capture_response(body_json, "pre_navigator_cantrips", "Pre-Navigator Cantrips",
-                    content_before=original_content,
-                    content_after=new_content,
-                    detail="Response modified by pre-navigator cantrips")
-        elif debug_on:
-            from app.services.debug import debug_capture_response
-            debug_capture_response(body_json, "pre_navigator_cantrips", "Pre-Navigator Cantrips",
-                detail="No changes")
-    except Exception:
-        logger.exception("Pre-navigator cantrip processing failed")
-
-    try:
-        from app.services.forbidden_words import scan_response
-        cmd_overrides = body_json.get("_gitv_command_overrides", {})
-        if cmd_overrides.get("forbidden") is not False:
-            scan_result = await scan_response(content, user_id)
-            if scan_result.has_matches:
-                response_data["_gitv_forbidden_summary"] = scan_result.summary
-                logger.info(
-                    "Forbidden words: %d phrase(s) matched",
-                    len(scan_result.matches),
-                )
-                if debug_on:
-                    from app.services.debug import debug_capture_response
-                    debug_capture_response(body_json, "forbidden_words", "Forbidden Words Scan",
-                        detail=f"{len(scan_result.matches)} match(es) found",
-                        metadata={"matches": [m.word if hasattr(m, 'word') else str(m) for m in scan_result.matches]})
-            elif debug_on:
-                from app.services.debug import debug_capture_response
-                debug_capture_response(body_json, "forbidden_words", "Forbidden Words Scan",
-                    detail="No matches")
-    except Exception:
-        logger.exception("Forbidden word scan failed")
-
-    return response_data
-
-
-async def _apply_post_navigator_processing(
-    response_data: dict[str, Any],
-    body_json: dict[str, Any],
-    user_id: str,
-    request_headers: dict[str, str],
-) -> dict[str, Any]:
-    """Run post-Navigator cantrips (final cleanup) on the approved response."""
-    choices = response_data.get("choices", [])
-    if not choices:
-        return response_data
-
-    content = choices[0].get("message", {}).get("content", "")
-    if not content:
-        return response_data
-
-    from app.services.cantrip import process_cantrips_post_driver
-
-    tags = body_json.get("_gitv_tags", [])
-    debug_on = body_json.get("_gitv_debug") is not None
-
-    try:
-        # Full body — same four keys as the pre-navigator site above.
-        from app.services.cantrip import embedded_jslb_scripts
-
-        new_content = await process_cantrips_post_driver(
-            content, body_json, user_id, request_headers,
-            tags=tags, position="post_navigator",
-            embedded_scripts=embedded_jslb_scripts(body_json, "post_navigator"),
-        )
-        if new_content != content:
-            response_data["choices"][0]["message"]["content"] = new_content
-            logger.info("Post-navigator cantrips modified response")
-            if debug_on:
-                from app.services.debug import debug_capture_response
-                debug_capture_response(body_json, "post_navigator_cantrips", "Post-Navigator Cantrips",
-                    content_before=content, content_after=new_content,
-                    detail="Response modified by post-navigator cantrips")
-        elif debug_on:
-            from app.services.debug import debug_capture_response
-            debug_capture_response(body_json, "post_navigator_cantrips", "Post-Navigator Cantrips",
-                detail="No changes")
-    except Exception:
-        logger.exception("Post-navigator cantrip processing failed")
-
-    return response_data
+    return JSONResponse(status_code=status_code, content=response_data)
 
 
 def _capture_cantrip_pass(body_json: dict[str, Any], position: str, label: str) -> None:
@@ -2151,437 +1617,6 @@ def _capture_cantrip_pass(body_json: dict[str, Any], position: str, label: str) 
             ),
         },
     )
-
-
-def _record_call(
-    body_json: dict[str, Any],
-    candidate: FailoverEndpoint,
-    attempt: int,
-    started: float,
-    *,
-    status_code: int,
-    response_data: dict[str, Any] | None,
-    error: str = "",
-) -> None:
-    """Record one upstream attempt on the debug trace.
-
-    Called for failures as well as successes: a run whose first endpoint 502'd
-    and whose second answered took the sum of both latencies, and a comparison
-    that only showed the winner would mis-attribute the wall-clock time.
-    """
-    from app.services.debug_metrics import PURPOSE_MAIN, record_llm_call
-
-    record_llm_call(
-        body_json,
-        purpose=PURPOSE_MAIN,
-        latency_ms=(time.monotonic() - started) * 1000.0,
-        status_code=status_code,
-        response_data=response_data,
-        messages=body_json.get("messages"),
-        endpoint_id=candidate.endpoint_id,
-        endpoint_name=candidate.endpoint_name,
-        provider=candidate.provider,
-        model_requested=candidate.model or body_json.get("model", ""),
-        failover_attempt=attempt,
-        error=error,
-    )
-
-
-async def _forward_with_failover(
-    body_json: dict[str, Any],
-    chain: list[FailoverEndpoint],
-    method: str,
-    path: str,
-    headers: dict[str, str],
-    timeout: httpx.Timeout,
-    body_bytes: bytes,
-) -> tuple[dict[str, Any], int]:
-    """Forward a request through the failover chain.
-
-    Iterates candidates in priority order. Any failure (any HTTP status != 200
-    or any exception) advances to the next candidate — there is no
-    retryable/non-retryable distinction, because different endpoints may carry
-    different models, API keys, or providers (e.g. a free OpenRouter key
-    failing over to a paid endpoint). Only total exhaustion returns an error.
-
-    The `path` is the request path (e.g. '/v1/chat/completions'); each
-    candidate's base_url + api_base_path produce a distinct upstream URL."""
-    if not chain:
-        return (
-            {"error": {"message": "No endpoint configured for this request", "type": "proxy_error"}},
-            503,
-        )
-
-    failover_notes: list[str] = []
-
-    for idx, candidate in enumerate(chain):
-        upstream_url = _build_upstream_url(candidate.base_url, path, candidate.api_base_path)
-
-        # Re-stash per-candidate fields so _do_forward picks them up.
-        body_json["_gitv_provider"] = candidate.provider
-        body_json["_gitv_base_url"] = candidate.base_url
-        body_json["_gitv_api_key"] = candidate.api_key
-        body_json["_gitv_endpoint_id"] = candidate.endpoint_id
-
-        trial_headers = {k: v for k, v in headers.items() if k.lower() != "authorization"}
-        if candidate.api_key:
-            trial_headers["Authorization"] = f"Bearer {candidate.api_key}"
-
-        effective_model = candidate.model or body_json.get("model", "")
-
-        # Candidates may carry different endpoint- and model-level parameters, so
-        # the first candidate's resolved set is not reusable. Re-resolve against
-        # this one. The pure user-settings layer travels on body_json from the
-        # driver path and does not include Candidate 0's endpoint/model params.
-        if idx == 0:
-            candidate_params = body_json.get("_gitv_llm_params", {})
-        else:
-            resolved = resolve(
-                [
-                    (
-                        f"endpoint '{candidate.endpoint_name}'"
-                        if candidate.endpoint_name
-                        else "endpoint",
-                        candidate.parameters,
-                    ),
-                    (f"model '{effective_model}'", candidate.params_for_model(effective_model)),
-                ]
-            )
-            user_params = body_json.get("_gitv_user_llm_params", {})
-            candidate_params = {**user_params, **resolved.values}
-
-        # Rebuild when this candidate changes the model or the parameters.
-        forward_body = body_bytes
-        needs_rebuild = (candidate.model and body_json.get("model") != candidate.model) or (
-            idx > 0 and candidate_params != body_json.get("_gitv_llm_params", {})
-        )
-        if needs_rebuild:
-            trial_body = dict(body_json)
-            if idx > 0:
-                for prev_key in body_json.get("_gitv_llm_params", {}):
-                    if prev_key not in candidate_params:
-                        trial_body.pop(prev_key, None)
-            if candidate.model:
-                trial_body["model"] = candidate.model
-            trial_body = apply_to_body(trial_body, candidate_params)
-            forward_body = json.dumps(
-                {k: v for k, v in trial_body.items() if not k.startswith("_gitv")}
-            ).encode()
-
-        started = time.monotonic()
-        try:
-            response_data, status_code = await _do_forward(
-                method, upstream_url, trial_headers, forward_body, timeout,
-                provider=candidate.provider,
-                base_url=candidate.base_url,
-                api_key=candidate.api_key,
-                configured=candidate_params,
-            )
-        except Exception as exc:
-            logger.exception(
-                "Failover: endpoint '%s' (%s) raised an exception, trying next",
-                candidate.endpoint_name, upstream_url,
-            )
-            _record_call(
-                body_json, candidate, idx, started,
-                status_code=0, response_data=None, error=str(exc)[:500],
-            )
-            failover_notes.append(f"'{candidate.endpoint_name}' failed with an exception")
-            continue
-
-        _record_call(body_json, candidate, idx, started,
-                     status_code=status_code, response_data=response_data)
-
-        if status_code == 200:
-            if failover_notes:
-                logger.info(
-                    "Failover: succeeded on candidate %d/%d '%s' after %d failure(s)",
-                    idx + 1, len(chain), candidate.endpoint_name, len(failover_notes),
-                )
-            return response_data, 200
-
-        logger.info(
-            "Failover: endpoint '%s' (%s) returned %d, trying next",
-            candidate.endpoint_name, upstream_url, status_code,
-        )
-        failover_notes.append(f"'{candidate.endpoint_name}' returned HTTP {status_code}")
-
-    logger.warning("Failover: all %d endpoint(s) exhausted", len(chain))
-    return (
-        {
-            "error": {
-                "message": f"All endpoints failed: {'; '.join(failover_notes)}",
-                "type": "proxy_error",
-            }
-        },
-        503,
-    )
-
-
-async def _do_forward(
-    method: str, url: str, headers: dict[str, str], body: bytes, timeout: httpx.Timeout,
-    provider: str = "", base_url: str = "", api_key: str = "",
-    configured: dict[str, Any] | None = None,
-) -> tuple[dict[str, Any], int]:
-    """Forward one request upstream.
-
-    `configured` is the resolved LLM parameter set. The raw httpx path does not
-    need it -- the caller already wrote those keys into `body`, which is
-    forwarded verbatim. LiteLLM does need it, because it builds its call from
-    named kwargs rather than the body, so it has to be told which keys are
-    deliberate rather than incidental.
-    """
-    if provider:
-        return await _do_forward_litellm(body, provider, base_url, api_key, timeout, configured)
-
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        try:
-            response = await client.request(method, url, headers=headers, content=body)
-        except httpx.ConnectError:
-            logger.error("proxy connection error: %s", url)
-            return (
-                {"error": {"message": "Failed to connect to upstream endpoint", "type": "proxy_error"}},
-                502,
-            )
-        except httpx.TimeoutException:
-            logger.error("proxy timeout: %s", url)
-            return (
-                {"error": {"message": "Upstream endpoint timed out", "type": "proxy_error"}},
-                504,
-            )
-
-    _log_response(response.status_code, response.elapsed.total_seconds(),
-                  response.text if response.status_code >= 400 else "")
-
-    try:
-        return response.json(), response.status_code
-    except Exception:
-        return (
-            {"error": {"message": response.text, "type": "upstream_error"}},
-            response.status_code,
-        )
-
-
-async def _do_forward_litellm(
-    body: bytes, provider: str, base_url: str, api_key: str, timeout: httpx.Timeout,
-    configured: dict[str, Any] | None = None,
-) -> tuple[dict[str, Any], int]:
-    """Forward request via LiteLLM for provider-specific compatibility.
-
-    Unlike the raw httpx path, which forwards the body verbatim, this builds the
-    call from named kwargs -- so anything not named here is silently dropped.
-    That is how a client's `reasoning_effort` reached a raw endpoint intact and
-    vanished the moment the endpoint had a provider set.
-    """
-    try:
-        import litellm
-    except ImportError:
-        return (
-            {"error": {"message": "LiteLLM is not installed. Provider-based endpoints require it. Run: pip install litellm==1.89.4", "type": "proxy_error"}},
-            500,
-        )
-
-    try:
-        body_json = json.loads(body)
-    except Exception:
-        return {"error": {"message": "Invalid JSON body", "type": "proxy_error"}}, 400
-
-    model = body_json.get("model", "")
-    messages = body_json.get("messages", [])
-    stream = body_json.get("stream", False)
-
-    if not model:
-        return {"error": {"message": "Model not specified", "type": "proxy_error"}}, 400
-
-    litellm_model = f"{provider}/{model}" if not model.startswith(f"{provider}/") else model
-
-    kwargs: dict[str, Any] = {"api_key": api_key}
-
-    if provider in ("openai_compatible", "custom_openai"):
-        litellm_model = f"openai/{model}"
-        kwargs["api_base"] = base_url
-
-    for param in LITELLM_NATIVE_PARAMS:
-        if param in body_json:
-            kwargs[param] = body_json[param]
-
-    # Configured parameters are applied after the client's, so a value the user
-    # set on an endpoint, model, rule or map stage wins. Names LiteLLM models
-    # natively go as kwargs; anything else rides in extra_body, which is how
-    # LiteLLM forwards provider-specific keys it has no opinion about. Without
-    # this an arbitrary user-named parameter could never reach a provider.
-    for name, value in (configured or {}).items():
-        if name in RESERVED_NAMES or name.startswith("_gitv"):
-            continue
-        if name in LITELLM_NATIVE_PARAMS:
-            kwargs[name] = value
-        else:
-            kwargs.setdefault("extra_body", {})[name] = value
-
-    if stream:
-        kwargs["stream"] = True
-
-    timeout_seconds = timeout.read if hasattr(timeout, "read") and timeout.read else settings.request_timeout
-
-    logger.info("litellm forward: provider=%s model=%s stream=%s", provider, model, stream)
-
-    try:
-        response = await litellm.acompletion(
-            model=litellm_model,
-            messages=messages,
-            timeout=timeout_seconds,
-            **kwargs,
-        )
-
-        if stream:
-            chunks: list[dict[str, Any]] = []
-            content_parts: list[str] = []
-            reasoning_parts: list[str] = []
-            final_metadata: dict[str, Any] = {}
-            async for chunk in response:
-                chunk_dict = chunk.model_dump() if hasattr(chunk, "model_dump") else chunk
-                chunks.append(chunk_dict)
-                if chunk_dict.get("choices"):
-                    delta = chunk_dict["choices"][0].get("delta", {})
-                    if delta.get("content"):
-                        content_parts.append(delta["content"])
-                    if delta.get("reasoning_content"):
-                        reasoning_parts.append(delta["reasoning_content"])
-                if chunk_dict.get("usage"):
-                    final_metadata["usage"] = chunk_dict["usage"]
-                if chunk_dict.get("model"):
-                    final_metadata["model"] = chunk_dict["model"]
-
-            combined = {
-                "id": chunks[0].get("id", "chatcmpl-litellm") if chunks else "chatcmpl-litellm",
-                "object": "chat.completion",
-                "model": final_metadata.get("model", model),
-                "choices": [{
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": "".join(content_parts),
-                        **({"reasoning_content": "".join(reasoning_parts)} if reasoning_parts else {}),
-                    },
-                    "finish_reason": chunks[-1]["choices"][0].get("finish_reason", "stop") if chunks and chunks[-1].get("choices") else "stop",
-                }],
-                **final_metadata,
-            }
-            _log_response(200, 0.0)
-            return combined, 200
-
-        result = response.model_dump() if hasattr(response, "model_dump") else dict(response)
-        _log_response(200, 0.0)
-        return result, 200
-
-    except Exception as exc:
-        import litellm as _litellm
-
-        status_code = 500
-        error_msg = str(exc)
-        error_type = type(exc).__name__
-
-        for exc_class, code, msg in [
-            ("AuthenticationError", 401, "Authentication failed"),
-            ("RateLimitError", 429, "Rate limited"),
-            ("BadRequestError", 400, None),
-            ("NotFoundError", 404, None),
-            ("Timeout", 504, "Request timed out"),
-            ("APIConnectionError", 502, "Failed to connect to provider"),
-            ("InternalServerError", 500, None),
-        ]:
-            exc_cls = getattr(_litellm.exceptions, exc_class, None)
-            if exc_cls and isinstance(exc, exc_cls):
-                status_code = code
-                error_msg = msg or str(exc)
-                break
-
-        if status_code < 500:
-            logger.warning("litellm forward error (%d): %s", status_code, error_msg[:200])
-        else:
-            logger.exception("litellm forward error: %s", exc)
-
-        _log_response(status_code, 0.0, error_msg)
-        return {"error": {"message": error_msg, "type": error_type}}, status_code
-
-
-class _StreamAccumulator:
-    """Reassembles an SSE stream into a non-streaming response shape.
-
-    Only what the debug trace needs: content, reasoning, finish reason and the
-    usage block some providers append to the final chunk. Chunk boundaries fall
-    anywhere, including mid-line, so a partial tail is carried between feeds.
-    """
-
-    def __init__(self) -> None:
-        self._buffer = ""
-        self.content: list[str] = []
-        self.reasoning: list[str] = []
-        self.usage: dict[str, Any] | None = None
-        self.finish_reason = ""
-        self.model = ""
-
-    def feed(self, chunk: bytes) -> None:
-        try:
-            self._buffer += chunk.decode("utf-8", "replace")
-        except Exception:
-            return
-
-        # Keep the last partial line; SSE events end with a newline.
-        *lines, self._buffer = self._buffer.split("\n")
-        for line in lines:
-            line = line.strip()
-            if not line.startswith("data:"):
-                continue
-            payload = line[5:].strip()
-            if not payload or payload == "[DONE]":
-                continue
-            try:
-                event = json.loads(payload)
-            except ValueError:
-                continue
-            self._absorb(event)
-
-    def _absorb(self, event: dict[str, Any]) -> None:
-        if not isinstance(event, dict):
-            return
-        if event.get("model"):
-            self.model = event["model"]
-        if isinstance(event.get("usage"), dict):
-            self.usage = event["usage"]
-        for choice in event.get("choices") or []:
-            if not isinstance(choice, dict):
-                continue
-            if choice.get("finish_reason"):
-                self.finish_reason = choice["finish_reason"]
-            delta = choice.get("delta") or {}
-            if delta.get("content"):
-                self.content.append(delta["content"])
-            if delta.get("reasoning_content"):
-                self.reasoning.append(delta["reasoning_content"])
-            elif delta.get("thinking"):
-                self.reasoning.append(delta["thinking"])
-
-    def as_response(self, fallback_model: str) -> dict[str, Any]:
-        message: dict[str, Any] = {
-            "role": "assistant",
-            "content": "".join(self.content),
-        }
-        if self.reasoning:
-            message["reasoning_content"] = "".join(self.reasoning)
-
-        response: dict[str, Any] = {
-            "object": "chat.completion",
-            "model": self.model or fallback_model,
-            "choices": [{
-                "index": 0,
-                "message": message,
-                "finish_reason": self.finish_reason or "stop",
-            }],
-        }
-        if self.usage:
-            response["usage"] = self.usage
-        return response
 
 
 def _record_stream_call(
@@ -2763,45 +1798,23 @@ async def _forward_streaming_with_memory(
 
     if status_code == 200:
         ux_settings = await _load_ux_settings(user_id)
-
-        # Response-side stages, when enabled (0.29.0, default on). The stream
-        # is already buffered, so these cost only their own execution -- and
-        # without this block a forbidden-word list or a post-navigator cantrip
-        # silently never ran on any streaming request that did not also enable
-        # verification. Order mirrors the non-streaming path: post-driver
-        # processing, post-navigator cantrips, then memory extraction.
-        if ux_settings.get("streaming_post_processing", True):
-            response_data = await _apply_post_driver_processing(
-                response_data, body_json, user_id, request_headers or {}
-            )
-
-        # Package 3: extraction between the passes, as on the buffered
-        # paths. When response checks are disabled the buffered stream
-        # still passes through here, so tags never leak to the client.
-        from app.services.response_tags import process_response_capture
-        response_data = await process_response_capture(
-            response_data, user_id, body_json
+        post_proc = ux_settings.get("streaming_post_processing", True)
+        response_data = await finalize_response(
+            response_data,
+            status_code,
+            body_json,
+            user_id,
+            request_headers,
+            run_post_driver=post_proc,
+            run_verification=False,
+            run_response_capture=True,
+            run_post_navigator=post_proc,
+            run_memories=True,
+            append_notices=True,
+            run_bypass_decode=True,
+            save_debug=True,
+            flush_metrics=True,
         )
-
-        if ux_settings.get("streaming_post_processing", True):
-            response_data = await _apply_post_navigator_processing(
-                response_data, body_json, user_id, request_headers or {}
-            )
-            if isinstance(response_data, dict):
-                response_data.pop("_gitv_forbidden_summary", None)
-
-        response_data = await _handle_response_memories(response_data, user_id, body_json)
-        response_data = _append_pending_notices(response_data, body_json)
-
-        if body_json.get("_gitv_bypass_method"):
-            from app.services.bypass import apply_bypass_decode
-            response_data = apply_bypass_decode(response_data, body_json["_gitv_bypass_method"])
-
-        if body_json.get("_gitv_debug"):
-            await _save_debug_exchange(response_data, body_json, user_id)
-
-        from app.services.metrics import flush_metrics
-        await flush_metrics(body_json)
 
         model = body_json.get("model", "")
         return _convert_to_sse(
@@ -2812,10 +1825,20 @@ async def _forward_streaming_with_memory(
             preserve_thinking=ux_settings.get("preserve_thinking", True),
         )
 
-    if body_json.get("_gitv_debug") and user_id:
-        await _save_debug_exchange(response_data, body_json, user_id)
-
-    from app.services.metrics import flush_metrics
-    await flush_metrics(body_json)
-
+    response_data = await finalize_response(
+        response_data,
+        status_code,
+        body_json,
+        user_id,
+        request_headers,
+        run_post_driver=False,
+        run_verification=False,
+        run_response_capture=False,
+        run_post_navigator=False,
+        run_memories=False,
+        append_notices=False,
+        run_bypass_decode=False,
+        save_debug=True,
+        flush_metrics=True,
+    )
     return JSONResponse(status_code=status_code, content=response_data)

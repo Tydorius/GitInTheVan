@@ -3,6 +3,7 @@
   import { onMount } from 'svelte'
   import { routeParams } from '../stores'
   import TagEditModal from '../lib/TagEditModal.svelte'
+  import TagBadge from '../lib/TagBadge.svelte'
   import { withScroll } from '../lib/scroll'
 
   type Tab = 'groups' | 'tags'
@@ -167,37 +168,25 @@
   async function saveTag(tag: string) {
     if (!tagModalResource) return
     try {
-      const endpoint = tagModalType === 'lore' ? 'lorebooks' : 'cantrips'
-      const resp = await fetch(`/api/${endpoint}/${tagModalResource.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('gitv_token')}`,
-        },
-        body: JSON.stringify({ tag }),
-      })
-      if (!resp.ok) {
-        const data = await resp.json()
-        tagModalError = data.detail || 'Failed to update tag'
-        return
+      if (tagModalType === 'lore') {
+        await api.updateLorebook(tagModalResource.id, { tag })
+      } else {
+        await api.updateCantrip(tagModalResource.id, { tag })
       }
       tagModalShow = false
       tagModalResource = null
       await load()
-    } catch (e: any) { tagModalError = e.message }
+    } catch (e: any) { tagModalError = e.message || 'Failed to update tag' }
   }
 
   async function togglePublic(resource: any, type: 'lore' | 'cantrip') {
     try {
-      const endpoint = type === 'lore' ? 'lorebooks' : 'cantrips'
-      await fetch(`/api/${endpoint}/${resource.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('gitv_token')}`,
-        },
-        body: JSON.stringify({ is_public: !resource.is_public }),
-      })
+      const payload = { is_public: !resource.is_public }
+      if (type === 'lore') {
+        await api.updateLorebook(resource.id, payload)
+      } else {
+        await api.updateCantrip(resource.id, payload)
+      }
       await load()
     } catch (e: any) { error = e.message }
   }
@@ -237,9 +226,7 @@
               <td><strong>{g.name}</strong></td>
               <td>
                 {#if g.tag}
-                  <span class="api-key-display" style="display: inline; font-size: 10px; padding: 2px 6px; cursor: pointer;"
-                        onclick={() => navigator.clipboard.writeText('<#' + g.tag + '#>') }
-                        title="Click to copy">&lt;#{g.tag}#&gt;</span>
+                  <TagBadge tag={`<#${g.tag}#>`} />
                 {:else}
                   <span style="color: var(--text-dim); font-size: 11px;">(none)</span>
                 {/if}
@@ -275,10 +262,7 @@
             <td><span class="badge inactive">Lorebook</span></td>
             <td>
               {#if lb.tag}
-                <span class="api-key-display" style="display: inline; font-size: 10px; padding: 2px 6px; cursor: pointer;"
-                      onclick={() => navigator.clipboard.writeText('<#lore-' + lb.tag + '#>') }
-                      title="Click to copy">&lt;#lore-{lb.tag}#&gt;</span>
-                <button onclick={() => openTagModal(lb, 'lore')} style="padding: 0 4px; font-size: 14px; border: none; background: none; cursor: pointer;" title="Edit tag">🖉</button>
+                <TagBadge tag={`<#lore-${lb.tag}#>`} onEdit={() => openTagModal(lb, 'lore')} />
               {:else}
                 <button onclick={() => openTagModal(lb, 'lore')} style="padding: 2px 8px; font-size: 11px;">+ Tag</button>
               {/if}
@@ -296,10 +280,7 @@
             <td><span class="badge inactive">Cantrip</span></td>
             <td>
               {#if c.tag}
-                <span class="api-key-display" style="display: inline; font-size: 10px; padding: 2px 6px; cursor: pointer;"
-                      onclick={() => navigator.clipboard.writeText('<#cantrip-' + c.tag + '#>') }
-                      title="Click to copy">&lt;#cantrip-{c.tag}#&gt;</span>
-                <button onclick={() => openTagModal(c, 'cantrip')} style="padding: 0 4px; font-size: 14px; border: none; background: none; cursor: pointer;" title="Edit tag">🖉</button>
+                <TagBadge tag={`<#cantrip-${c.tag}#>`} onEdit={() => openTagModal(c, 'cantrip')} />
               {:else}
                 <button onclick={() => openTagModal(c, 'cantrip')} style="padding: 2px 8px; font-size: 11px;">+ Tag</button>
               {/if}

@@ -293,21 +293,6 @@ async def get_sandbox(user_id: str, sandbox_id: str) -> dict[str, Any] | None:
     return await _load(user_id, sandbox_id)
 
 
-async def rename_sandbox(user_id: str, sandbox_id: str, name: str) -> bool:
-    async with async_session() as db:
-        result = await db.execute(
-            select(DebugSandbox).where(
-                DebugSandbox.id == sandbox_id, DebugSandbox.user_id == user_id
-            )
-        )
-        row = result.scalar_one_or_none()
-        if row is None:
-            return False
-        row.name = name[:128]
-        await db.commit()
-        return True
-
-
 async def update_messages(user_id: str, sandbox_id: str, messages: list[dict]) -> bool:
     """Edit the request a sandbox sends.
 

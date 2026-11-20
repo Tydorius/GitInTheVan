@@ -13,6 +13,7 @@ from app.dependencies import get_current_user
 from app.models.lorebook import Lorebook
 from app.models.lorebook_entry import LorebookEntry
 from app.models.user import User
+from app.routers._helpers import check_tag_unique, get_owned_or_404
 from app.services import snapshots
 from app.services.admin import get_admin_settings
 from app.services.content_guard import gate_scan_findings, log_scan_findings, sanitize_and_log
@@ -349,12 +350,7 @@ async def update_lorebook(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    result = await db.execute(
-        select(Lorebook).where(Lorebook.id == lorebook_id, Lorebook.user_id == current_user.id)
-    )
-    lorebook = result.scalar_one_or_none()
-    if lorebook is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lorebook not found")
+    lorebook = await get_owned_or_404(db, Lorebook, lorebook_id, current_user.id, "Lorebook")
 
     await snapshots.capture(db, current_user.id, "lorebook", lorebook_id)
 
@@ -367,14 +363,7 @@ async def update_lorebook(
     if req.is_active is not None:
         lorebook.is_active = req.is_active
     if req.tag is not None and req.tag != lorebook.tag:
-        if req.tag:
-            from sqlalchemy import text as sa_text
-            existing = await db.execute(
-                sa_text("SELECT id FROM lorebooks WHERE tag = :tag AND user_id = :uid AND id != :lid"),
-                {"tag": req.tag, "uid": current_user.id, "lid": lorebook_id}
-            )
-            if existing.scalar_one_or_none() is not None:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tag already in use")
+        await check_tag_unique(db, Lorebook, current_user.id, req.tag, exclude_id=lorebook_id)
         lorebook.tag = req.tag
     if req.run_pre_driver is not None:
         lorebook.run_pre_driver = req.run_pre_driver
@@ -423,12 +412,7 @@ async def delete_lorebook(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    result = await db.execute(
-        select(Lorebook).where(Lorebook.id == lorebook_id, Lorebook.user_id == current_user.id)
-    )
-    lorebook = result.scalar_one_or_none()
-    if lorebook is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lorebook not found")
+    lorebook = await get_owned_or_404(db, Lorebook, lorebook_id, current_user.id, "Lorebook")
 
     await snapshots.capture(db, current_user.id, "lorebook", lorebook_id)
     await db.delete(lorebook)
@@ -442,12 +426,7 @@ async def add_entry(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    result = await db.execute(
-        select(Lorebook).where(Lorebook.id == lorebook_id, Lorebook.user_id == current_user.id)
-    )
-    lorebook = result.scalar_one_or_none()
-    if lorebook is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lorebook not found")
+    await get_owned_or_404(db, Lorebook, lorebook_id, current_user.id, "Lorebook")
 
     req.content = await sanitize_entry_content(db, current_user.id, lorebook_id, req.content)
     await enforce_lorebook_size(db, lorebook_id, len(req.content))
@@ -470,11 +449,7 @@ async def update_entry(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    lb_result = await db.execute(
-        select(Lorebook).where(Lorebook.id == lorebook_id, Lorebook.user_id == current_user.id)
-    )
-    if lb_result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lorebook not found")
+    await get_owned_or_404(db, Lorebook, lorebook_id, current_user.id, "Lorebook")
 
     result = await db.execute(
         select(LorebookEntry).where(LorebookEntry.id == entry_id, LorebookEntry.lorebook_id == lorebook_id)
@@ -506,11 +481,7 @@ async def delete_entry(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    lb_result = await db.execute(
-        select(Lorebook).where(Lorebook.id == lorebook_id, Lorebook.user_id == current_user.id)
-    )
-    if lb_result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lorebook not found")
+    await get_owned_or_404(db, Lorebook, lorebook_id, current_user.id, "Lorebook")
 
     result = await db.execute(
         select(LorebookEntry).where(LorebookEntry.id == entry_id, LorebookEntry.lorebook_id == lorebook_id)

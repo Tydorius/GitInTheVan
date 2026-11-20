@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -11,6 +11,7 @@ from app.dependencies import get_current_user
 from app.models.endpoint import Endpoint
 from app.models.user import User
 from app.models.verification import VerificationLog, VerificationRule
+from app.routers._helpers import check_tag_unique, get_owned_or_404
 from app.services import snapshots
 from app.services.admin import get_admin_settings
 from app.services.content_guard import check_size, sanitize_and_log
@@ -80,24 +81,6 @@ class RuleListItem(BaseModel):
     verification_endpoint_id: str | None
     verification_model: str
     parameters: list[ParameterDef] = Field(default_factory=list)
-
-
-async def _check_tag_unique(
-    db: AsyncSession, user_id: str, resource_type: str, tag: str, exclude_id: str | None = None
-) -> bool:
-    if not tag:
-        return True
-    table_map = {"lore": "lorebooks", "cantrip": "cantrips", "verify": "verification_rules"}
-    table = table_map.get(resource_type, "")
-    if not table:
-        return True
-    query = f"SELECT id FROM {table} WHERE tag = :tag AND user_id = :user_id"
-    params = {"tag": tag, "user_id": user_id}
-    if exclude_id:
-        query += " AND id != :exclude_id"
-        params["exclude_id"] = exclude_id
-    result = await db.execute(text(query), params)
-    return result.scalar_one_or_none() is None
 
 
 class RuleListResponse(BaseModel):
@@ -209,14 +192,7 @@ async def get_rule(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    result = await db.execute(
-        select(VerificationRule).where(
-            VerificationRule.id == rule_id, VerificationRule.user_id == current_user.id
-        )
-    )
-    rule = result.scalar_one_or_none()
-    if rule is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
+    rule = await get_owned_or_404(db, VerificationRule, rule_id, current_user.id, "Rule")
     return _rule_to_response(rule)
 
 
@@ -257,20 +233,12 @@ async def update_rule(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    result = await db.execute(
-        select(VerificationRule).where(
-            VerificationRule.id == rule_id, VerificationRule.user_id == current_user.id
-        )
-    )
-    rule = result.scalar_one_or_none()
-    if rule is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
+    rule = await get_owned_or_404(db, VerificationRule, rule_id, current_user.id, "Rule")
 
     await snapshots.capture(db, current_user.id, "verification_rule", rule_id)
 
     if req.tag is not None and req.tag != rule.tag:
-        if not await _check_tag_unique(db, current_user.id, "verify", req.tag, rule_id):
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tag already in use")
+        await check_tag_unique(db, VerificationRule, current_user.id, req.tag, exclude_id=rule_id)
 
     update_data = req.model_dump(exclude_unset=True)
     # `parameters` is an API-shaped list but a JSON column on the model, so it
@@ -299,14 +267,7 @@ async def delete_rule(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    result = await db.execute(
-        select(VerificationRule).where(
-            VerificationRule.id == rule_id, VerificationRule.user_id == current_user.id
-        )
-    )
-    rule = result.scalar_one_or_none()
-    if rule is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
+    rule = await get_owned_or_404(db, VerificationRule, rule_id, current_user.id, "Rule")
 
     await snapshots.capture(db, current_user.id, "verification_rule", rule_id)
     await db.delete(rule)
@@ -324,14 +285,7 @@ async def export_rule(
 
     from fastapi.responses import Response
 
-    result = await db.execute(
-        select(VerificationRule).where(
-            VerificationRule.id == rule_id, VerificationRule.user_id == current_user.id
-        )
-    )
-    rule = result.scalar_one_or_none()
-    if rule is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
+    rule = await get_owned_or_404(db, VerificationRule, rule_id, current_user.id, "Rule")
 
     data = {
         "name": rule.name,
@@ -402,14 +356,7 @@ async def test_verification(
     rule_name = "ad-hoc"
 
     if req.rule_id:
-        rule_result = await db.execute(
-            select(VerificationRule).where(
-                VerificationRule.id == req.rule_id, VerificationRule.user_id == current_user.id
-            )
-        )
-        rule = rule_result.scalar_one_or_none()
-        if rule is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found")
+        rule = await get_owned_or_404(db, VerificationRule, req.rule_id, current_user.id, "Rule")
         prompt = rule.prompt
         rule_name = rule.name
 

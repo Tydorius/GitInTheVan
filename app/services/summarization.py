@@ -285,11 +285,8 @@ async def summarize_messages(
     choices = data.get("choices") or []
     if not choices:
         return _degraded("the endpoint returned no choices")
-    content = (
-        (choices[0].get("message") or {})
-        .get("content", "")
-        .strip()
-    )
+    from app.services.upstream import extract_response_text
+    content = extract_response_text(data).strip()
     if not content:
         return _degraded("the endpoint returned empty content")
 

@@ -53,7 +53,6 @@
 
   let form: any = { name: '', base_url: '', api_key: '', api_base_path: '', provider: '', default_model: '', bypass_method: 'none', enabled: true, role_tag: 'default', priority: 1, custom_tag: '', parameters: [], models: [] }
   let showApiKey = false
-  let visibleKeys: Record<string, boolean> = {}
   let copiedKeyId: string | null = null
   let revealedKeys: Record<string, string> = {}
 
@@ -74,7 +73,6 @@
   let keyFormIsDefault = false
   let keyFormLabel = ''
   let newKeyResult = ''
-  let newKeyId = ''
 
   function autoParseUrl() {
     const url = form.base_url.trim()
@@ -194,7 +192,6 @@
     keyFormIsDefault = epId === null
     keyFormLabel = ''
     newKeyResult = ''
-    newKeyId = ''
     showKeyForm = true
   }
 
@@ -203,7 +200,6 @@
     try {
       const result = await api.createApiKey({ label: keyFormLabel || 'default', endpoint_id: keyFormEndpointId })
       newKeyResult = result.api_key
-      newKeyId = result.id
       await withScroll(load)
     } catch (e: any) { error = e.message }
   }

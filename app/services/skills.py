@@ -5,6 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.skill import EndpointSkill, Skill
+from app.services.budget import estimate_tokens
+from app.services.messages import inject_into_system_message
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +43,7 @@ async def load_skills_for_endpoint(
     # and stashing it avoids widening a return type with several call sites.
     loaded_map = dict(_last_loaded_var.get() or {})
     loaded_map[endpoint_id] = [
-        {"id": s.id, "name": s.name, "type": s.type, "tokens": max(1, len(s.content) // 4)}
+        {"id": s.id, "name": s.name, "type": s.type, "tokens": estimate_tokens(s.content)}
         for s in items
         if s.content.strip()
     ]
@@ -82,17 +84,7 @@ def inject_skills(messages: list[dict], skill_contents: list[str]) -> list[dict]
 
     combined = "\n\n".join(skill_contents)
     wrapped = f"<skills>\n{combined}\n</skills>"
-
-    if messages and messages[0].get("role") == "system":
-        existing = messages[0].get("content")
-        if isinstance(existing, list):
-            messages[0]["content"] = [*existing, {"type": "text", "text": f"\n\n{wrapped}"}]
-        else:
-            messages[0]["content"] = f"{existing or ''}\n\n{wrapped}" if existing else wrapped
-    else:
-        messages.insert(0, {"role": "system", "content": wrapped})
-
-    return messages
+    return inject_into_system_message(messages, wrapped)
 
 
 def inject_samples(messages: list[dict], sample_contents: list[str]) -> list[dict]:

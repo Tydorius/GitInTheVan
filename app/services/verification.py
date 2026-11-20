@@ -152,40 +152,13 @@ def _parse_judgment(text: str, rule_name: str = "") -> VerificationJudgment:
         )
 
 
-def resolve_judge_params(
-    user_layer: list[ParamDef],
-    endpoint: Endpoint | None,
-    model: str,
-    rule: VerificationRule | None,
-) -> dict[str, Any]:
-    """Resolve one judge call's parameters.
-
-    Layers, broadest first: the user's verification settings, the endpoint the
-    judge will actually be called on, that endpoint's entry for the model in
-    play, and finally the rule itself -- which is the closest thing to the
-    message and therefore wins. This is what makes `reasoning_effort: low` on a
-    cheap verification rule beat `max` on the endpoint.
-    """
-    from app.services.routing import endpoint_parameters, model_parameter_map
-
-    layers: list[tuple[str, list[ParamDef]]] = [("user settings (verification)", user_layer)]
-    if endpoint is not None:
-        layers.append((f"endpoint '{endpoint.name}'", endpoint_parameters(endpoint)))
-        layers.append((f"model '{model}'", model_parameter_map(endpoint).get(model, [])))
-    if rule is not None:
-        layers.append(
-            (f"verification rule '{rule.name}'", parse_params(rule.parameters_json, "rule"))
-        )
-    return dict(resolve(layers).values)
-
-
 def resolve_judge_params_for_candidate(
     user_layer: list[ParamDef],
     candidate: FailoverEndpoint,
     model: str,
     rule: VerificationRule | None,
 ) -> dict[str, Any]:
-    """The same layers as `resolve_judge_params`, from a failover candidate.
+    """Resolve one judge call's parameters from a failover candidate.
 
     Candidates may differ in endpoint and model, so the endpoint and per-model
     layers have to be re-resolved for each one rather than reusing the first
@@ -373,9 +346,10 @@ async def check_response(
                 last_detail = "empty choices"
                 continue
 
-            message = choices[0].get("message", {})
-            llm_content = message.get("content", "")
-            thinking = message.get("reasoning_content", "") or message.get("thinking", "")
+            from app.services.upstream import extract_response_text
+            llm_content = extract_response_text(data)
+            message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
+            thinking = (message.get("reasoning_content", "") or message.get("thinking", "")) if isinstance(message, dict) else ""
 
             judgment = _parse_judgment(llm_content, rule.name)
             judgment.thinking = thinking
@@ -617,8 +591,6 @@ async def run_verification_loop(
     forbidden_summary = response_data.pop("_gitv_forbidden_summary", "")
 
     if not rules and not forbidden_summary:
-        if forbidden_summary:
-            response_data["_gitv_forbidden_summary"] = forbidden_summary
         return response_data, None
 
     if not v_endpoint:
@@ -789,7 +761,5 @@ async def run_verification_loop(
 
 
 def _extract_content(response_data: dict[str, Any]) -> str:
-    choices = response_data.get("choices", [])
-    if not choices:
-        return ""
-    return choices[0].get("message", {}).get("content", "")
+    from app.services.upstream import extract_response_text
+    return extract_response_text(response_data)

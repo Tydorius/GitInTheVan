@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, getToken } from '../api'
+  import { api } from '../api'
   import { onMount } from 'svelte'
   import { isAdmin, routeParams } from '../stores'
   import { downloadBlob } from '../lib/download'
@@ -43,7 +43,6 @@
     } catch {}
   }
 
-  let filterRepo = ''
   let filterType = ''
   let filterAuthor = ''
   let sortBy = 'name'
@@ -77,7 +76,6 @@
     try {
       browseData = await api.browseRepo(id)
       browseRepoId = id
-      filterRepo = id
     } catch (e: any) { error = e.message }
   }
 
@@ -423,7 +421,7 @@
                 {#if r.is_global}<span class="badge approved" style="font-size: 9px; margin-left: 4px;">Global</span>{/if}
                 {#if r.is_local}<span class="badge active" style="font-size: 9px; margin-left: 4px;">Local</span>{/if}
               </td>
-              <td style="font-size: 11px; color: var(--text-dim);">{r.is_local ? r.url : r.url}</td>
+              <td style="font-size: 11px; color: var(--text-dim);">{r.url}</td>
               <td style="font-size: 11px;">{r.branch}</td>
               <td>{r.file_count}</td>
               <td style="font-size: 11px; color: var(--text-dim);">{r.last_synced ? new Date(r.last_synced).toLocaleString() : 'Never'}</td>

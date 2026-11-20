@@ -117,7 +117,8 @@ async def _call_summarization_llm(
     body_json: dict[str, Any] | None = None,
 ) -> str | None:
     """Call a navigator LLM to summarize the scenario content."""
-    from app.services.proxy import _build_upstream_url, _do_forward, _do_forward_litellm, auth_headers
+    from app.services.proxy import _build_upstream_url, _do_forward, auth_headers
+    from app.services.upstream import extract_response_text
 
     async with async_session() as db:
         routing = await resolve_routing_by_rule(rule, user_id, db)
@@ -155,16 +156,15 @@ async def _call_summarization_llm(
 
     started = time.monotonic()
     try:
-        if provider:
-            response_data, status_code = await _do_forward_litellm(
-                body_bytes, provider, base_url, api_key, timeout, params
-            )
-        else:
-            upstream_url = _build_upstream_url(base_url, "/v1/chat/completions", api_base_path)
-            headers = auth_headers(api_key)
-            response_data, status_code = await _do_forward(
-                "POST", upstream_url, headers, body_bytes, timeout, configured=params
-            )
+        upstream_url = _build_upstream_url(base_url, "/v1/chat/completions", api_base_path)
+        headers = auth_headers(api_key)
+        response_data, status_code = await _do_forward(
+            "POST", upstream_url, headers, body_bytes, timeout,
+            provider=provider,
+            base_url=base_url,
+            api_key=api_key,
+            configured=params,
+        )
 
         record_llm_call(
             body_json or {},
@@ -186,11 +186,7 @@ async def _call_summarization_llm(
             )
             return None
 
-        choices = response_data.get("choices", [])
-        if not choices:
-            return None
-
-        summarized = choices[0].get("message", {}).get("content", "")
+        summarized = extract_response_text(response_data)
         return summarized.strip() if summarized else None
 
     except Exception as exc:

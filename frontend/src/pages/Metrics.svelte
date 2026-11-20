@@ -10,7 +10,7 @@
   import { onMount } from 'svelte'
   import { api } from '../api'
   import type {
-    LlmCallAggregate, LlmCallMetricRow, MetricsSummary, PromptObjectAggregate, PromptObjectMetricRow,
+    LlmCallMetricRow, MetricsSummary, PromptObjectMetricRow,
   } from '../api'
   import CollapsibleCard from '../lib/CollapsibleCard.svelte'
   import { CollapseController } from '../lib/collapse'

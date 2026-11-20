@@ -71,23 +71,66 @@ def embedded_jslb_scripts(
     ]
 
 
-async def _load_chat_data(db: AsyncSession, user_id: str, conversation_id: str) -> dict[str, Any]:
-    if not conversation_id:
-        return {}
-    result = await db.execute(
-        select(ChatData).where(
-            ChatData.user_id == user_id,
-            ChatData.conversation_id == conversation_id,
-        )
-    )
-    rows = result.scalars().all()
+async def _load_kv_store(
+    db: AsyncSession, model: type[Any], *filters: Any
+) -> dict[str, Any]:
+    result = await db.execute(select(model).where(*filters))
     data: dict[str, Any] = {}
-    for row in rows:
+    for row in result.scalars().all():
         try:
             data[row.key] = json.loads(row.value_json) if row.value_json else None
         except (json.JSONDecodeError, TypeError):
             data[row.key] = row.value_json
     return data
+
+
+async def _save_kv_store(
+    db: AsyncSession,
+    model: type[Any],
+    filters: tuple[Any, ...],
+    row_kwargs: dict[str, Any],
+    data: dict[str, Any],
+    deletes: set[str] | None = None,
+    before: dict[str, Any] | None = None,
+) -> None:
+    if before is not None:
+        to_write = {
+            k: v for k, v in data.items() if k not in before or before[k] != v
+        }
+        to_delete = [k for k in (deletes or ()) if k not in data]
+        if not to_write and not to_delete:
+            return
+    else:
+        to_write = data
+        to_delete = [k for k in (deletes or ()) if k not in data]
+
+    existing_result = await db.execute(select(model).where(*filters))
+    existing = {row.key: row for row in existing_result.scalars().all()}
+
+    for key, value in to_write.items():
+        value_json = json.dumps(value)
+        if key in existing:
+            if existing[key].value_json != value_json:
+                existing[key].value_json = value_json
+        else:
+            db.add(model(**row_kwargs, key=key, value_json=value_json))
+
+    # 0.42.0: delete() persists. A key deleted then re-set in the same run
+    # keeps its new value (the final dict is the truth).
+    for key in to_delete:
+        row = existing.get(key)
+        if row is not None:
+            await db.delete(row)
+
+    await db.commit()
+
+
+async def _load_chat_data(db: AsyncSession, user_id: str, conversation_id: str) -> dict[str, Any]:
+    if not conversation_id:
+        return {}
+    return await _load_kv_store(
+        db, ChatData, ChatData.user_id == user_id, ChatData.conversation_id == conversation_id
+    )
 
 
 async def _save_chat_data(
@@ -100,63 +143,19 @@ async def _save_chat_data(
 ) -> None:
     if not conversation_id:
         return
-
-    if before is not None:
-        to_write = {
-            k: v for k, v in chat_data.items() if k not in before or before[k] != v
-        }
-        to_delete = [k for k in (deletes or ()) if k not in chat_data]
-        if not to_write and not to_delete:
-            return
-    else:
-        to_write = chat_data
-        to_delete = [k for k in (deletes or ()) if k not in chat_data]
-
-    existing_result = await db.execute(
-        select(ChatData).where(
-            ChatData.user_id == user_id,
-            ChatData.conversation_id == conversation_id,
-        )
+    await _save_kv_store(
+        db,
+        ChatData,
+        (ChatData.user_id == user_id, ChatData.conversation_id == conversation_id),
+        {"user_id": user_id, "conversation_id": conversation_id},
+        chat_data,
+        deletes=deletes,
+        before=before,
     )
-    existing = {row.key: row for row in existing_result.scalars().all()}
-
-    for key, value in to_write.items():
-        value_json = json.dumps(value)
-        if key in existing:
-            if existing[key].value_json != value_json:
-                existing[key].value_json = value_json
-        else:
-            db.add(
-                ChatData(
-                    user_id=user_id,
-                    conversation_id=conversation_id,
-                    key=key,
-                    value_json=value_json,
-                )
-            )
-
-    # 0.42.0: delete() persists. A key deleted then re-set in the same run
-    # keeps its new value (the final dict is the truth).
-    for key in to_delete:
-        row = existing.get(key)
-        if row is not None:
-            await db.delete(row)
-
-    await db.commit()
 
 
 async def _load_user_data(db: AsyncSession, user_id: str) -> dict[str, Any]:
-    result = await db.execute(
-        select(UserData).where(UserData.user_id == user_id)
-    )
-    rows = result.scalars().all()
-    data: dict[str, Any] = {}
-    for row in rows:
-        try:
-            data[row.key] = json.loads(row.value_json) if row.value_json else None
-        except (json.JSONDecodeError, TypeError):
-            data[row.key] = row.value_json
-    return data
+    return await _load_kv_store(db, UserData, UserData.user_id == user_id)
 
 
 async def _save_user_data(
@@ -166,61 +165,23 @@ async def _save_user_data(
     deletes: set[str] | None = None,
     before: dict[str, Any] | None = None,
 ) -> None:
-    if before is not None:
-        to_write = {
-            k: v for k, v in user_data.items() if k not in before or before[k] != v
-        }
-        to_delete = [k for k in (deletes or ()) if k not in user_data]
-        if not to_write and not to_delete:
-            return
-    else:
-        to_write = user_data
-        to_delete = [k for k in (deletes or ()) if k not in user_data]
-
-    existing_result = await db.execute(
-        select(UserData).where(UserData.user_id == user_id)
+    await _save_kv_store(
+        db,
+        UserData,
+        (UserData.user_id == user_id,),
+        {"user_id": user_id},
+        user_data,
+        deletes=deletes,
+        before=before,
     )
-    existing = {row.key: row for row in existing_result.scalars().all()}
-
-    for key, value in to_write.items():
-        value_json = json.dumps(value)
-        if key in existing:
-            if existing[key].value_json != value_json:
-                existing[key].value_json = value_json
-        else:
-            db.add(
-                UserData(
-                    user_id=user_id,
-                    key=key,
-                    value_json=value_json,
-                )
-            )
-
-    for key in to_delete:
-        row = existing.get(key)
-        if row is not None:
-            await db.delete(row)
-
-    await db.commit()
 
 
 async def _load_cantrip_data(
     db: AsyncSession, user_id: str, cantrip_id: str
 ) -> dict[str, Any]:
-    result = await db.execute(
-        select(CantripData).where(
-            CantripData.user_id == user_id,
-            CantripData.cantrip_id == cantrip_id,
-        )
+    return await _load_kv_store(
+        db, CantripData, CantripData.user_id == user_id, CantripData.cantrip_id == cantrip_id
     )
-    rows = result.scalars().all()
-    data: dict[str, Any] = {}
-    for row in rows:
-        try:
-            data[row.key] = json.loads(row.value_json) if row.value_json else None
-        except (json.JSONDecodeError, TypeError):
-            data[row.key] = row.value_json
-    return data
 
 
 async def _save_cantrip_data(
@@ -231,46 +192,15 @@ async def _save_cantrip_data(
     deletes: set[str] | None = None,
     before: dict[str, Any] | None = None,
 ) -> None:
-    if before is not None:
-        to_write = {
-            k: v for k, v in cantrip_data.items() if k not in before or before[k] != v
-        }
-        to_delete = [k for k in (deletes or ()) if k not in cantrip_data]
-        if not to_write and not to_delete:
-            return
-    else:
-        to_write = cantrip_data
-        to_delete = [k for k in (deletes or ()) if k not in cantrip_data]
-
-    existing_result = await db.execute(
-        select(CantripData).where(
-            CantripData.user_id == user_id,
-            CantripData.cantrip_id == cantrip_id,
-        )
+    await _save_kv_store(
+        db,
+        CantripData,
+        (CantripData.user_id == user_id, CantripData.cantrip_id == cantrip_id),
+        {"user_id": user_id, "cantrip_id": cantrip_id},
+        cantrip_data,
+        deletes=deletes,
+        before=before,
     )
-    existing = {row.key: row for row in existing_result.scalars().all()}
-
-    for key, value in to_write.items():
-        value_json = json.dumps(value)
-        if key in existing:
-            if existing[key].value_json != value_json:
-                existing[key].value_json = value_json
-        else:
-            db.add(
-                CantripData(
-                    user_id=user_id,
-                    cantrip_id=cantrip_id,
-                    key=key,
-                    value_json=value_json,
-                )
-            )
-
-    for key in to_delete:
-        row = existing.get(key)
-        if row is not None:
-            await db.delete(row)
-
-    await db.commit()
 
 
 def _diff_store(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
@@ -729,6 +659,9 @@ async def _execute_cantrip_step(
         cantrip_data = await _load_cantrip_data(db, user_id, cantrip.id)
     before_cantrip_data = dict(cantrip_data)
 
+    uses_user_data = "user_data" in (cantrip.code or "")
+    user_data_seed = state["user_data"] if uses_user_data else {}
+
     started = time.monotonic()
     try:
         if internal_chat_id and (state["accumulated_memories"] or state.get("memory_deletes")):
@@ -742,7 +675,7 @@ async def _execute_cantrip_step(
             code=cantrip.code,
             context=context,
             chat_data=state["chat_data"],
-            user_data=state["user_data"],
+            user_data=user_data_seed,
             cantrip_data=cantrip_data,
             timeout_ms=cantrip.timeout_ms,
             passenger_handler=passenger_handler,
@@ -790,7 +723,7 @@ async def _execute_cantrip_step(
         },
         data_changes={
             "chat_data": _diff_store(state["chat_data"], result.chat_data),
-            "user_data": _diff_store(state["user_data"], result.user_data),
+            "user_data": _diff_store(user_data_seed, result.user_data),
             "cantrip_data": _diff_store(cantrip_data, result.cantrip_data),
             **({"lorebook_ops": result.lorebook_ops} if result.lorebook_ops else {}),
         },
@@ -827,12 +760,10 @@ async def _execute_cantrip_step(
                 nominations.append(tag)
 
     state["chat_data"] = result.chat_data
-    state["user_data"] = result.user_data
-    # 0.42.0: aggregate the pass's store deletes. Sequential cantrips share
-    # the state dict, so a later set of a deleted key simply wins (the
-    # final dict is the truth; the save skips keys still present).
     state.setdefault("chat_data_deletes", set()).update(result.chat_data_deletes)
-    state.setdefault("user_data_deletes", set()).update(result.user_data_deletes)
+    if uses_user_data:
+        state["user_data"] = result.user_data
+        state.setdefault("user_data_deletes", set()).update(result.user_data_deletes)
 
     if store_seeds is not None:
         if not ephemeral:
@@ -1003,8 +934,9 @@ async def _apply_prompt_requests(
     capture, never the request. Returns the delta rows for the caller to
     extend into DELTA_KEY. Never raises.
     """
+    from app.services.budget import estimate_tokens as _est_tokens
     from app.services.debug import debug_capture
-    from app.services.lorebook import MatchedEntry, match_book_entries
+    from app.services.lorebook import MatchedEntry, book_entries_to_dicts, match_book_entries
     from app.services.metrics import record_prompt_object
 
     rows: list = []
@@ -1029,30 +961,12 @@ async def _apply_prompt_requests(
                 notes.append({"kind": "activate", "book": name, "outcome": "refused",
                               "reason": "no lorebook of that name"})
                 continue
-            entry_dicts = [
-                {
-                    "lorebook_id": book.id,
-                    "lorebook_name": book.name,
-                    "entry_id": entry.id,
-                    "name": entry.name,
-                    "keys": entry.keys,
-                    "secondary_keys": entry.secondary_keys,
-                    "content": entry.content,
-                    "position": entry.position,
-                    "insertion_order": entry.insertion_order,
-                    "is_constant": entry.is_constant,
-                    "is_selective": entry.is_selective,
-                    "is_disabled": entry.is_disabled,
-                    "character_limit": entry.character_limit,
-                }
-                for entry in book.entries
-            ]
+            entry_dicts = book_entries_to_dicts(book.entries, book=book)
             matched = match_book_entries(messages, entry_dicts, scan_depth=book.scan_depth, word_boundary=book.word_boundary_keys)
             rows.extend(matched)
             notes.append({"kind": "activate", "book": name, "outcome": "activated",
                           "matched": len(matched), "entries": len(entry_dicts)})
             if matched:
-                from app.services.budget import estimate_tokens as _est_tokens
                 record_prompt_object(
                     body_json, "book_activation", book.id,
                     0, sum(_est_tokens(m.content) for m in matched),
@@ -1081,7 +995,7 @@ async def _apply_prompt_requests(
                 content=text, position=position,
                 insertion_order=1000 + i, name="",
             ))
-            record_prompt_object(body_json, "injection", "", 0, max(1, len(text) // 4))
+            record_prompt_object(body_json, "injection", "", 0, _est_tokens(text))
             notes.append({"kind": "inject", "index": i, "position": position,
                           "outcome": "injected", "chars": len(text)})
 
@@ -1246,6 +1160,9 @@ async def process_cantrips_post_driver(
                         mem_seed.pop(dk, None)
                 context["__memories"] = mem_seed
 
+            uses_user_data = "user_data" in (cantrip.code or "")
+            user_data_seed = user_data if uses_user_data else {}
+
             started = time.monotonic()
             try:
                 context["response"]["content"] = current_content
@@ -1253,7 +1170,7 @@ async def process_cantrips_post_driver(
                     code=cantrip.code,
                     context=context,
                     chat_data=chat_data,
-                    user_data=user_data,
+                    user_data=user_data_seed,
                     cantrip_data=cantrip_data,
                     timeout_ms=cantrip.timeout_ms,
                     passenger_handler=passenger_handler,
@@ -1307,18 +1224,17 @@ async def process_cantrips_post_driver(
                 },
                 data_changes={
                     "chat_data": _diff_store(chat_data, result.chat_data),
-                    "user_data": _diff_store(user_data, result.user_data),
+                    "user_data": _diff_store(user_data_seed, result.user_data),
                     "cantrip_data": _diff_store(cantrip_data, result.cantrip_data),
                     **({"lorebook_ops": result.lorebook_ops} if result.lorebook_ops else {}),
                 },
             )
 
             chat_data = result.chat_data
-            user_data = result.user_data
-            # 0.42.0: aggregate the pass's store deletes (same semantics as
-            # the pre-forward pass: a later set of a deleted key wins).
             chat_data_deletes.update(result.chat_data_deletes)
-            user_data_deletes.update(result.user_data_deletes)
+            if uses_user_data:
+                user_data = result.user_data
+                user_data_deletes.update(result.user_data_deletes)
             accumulated_memories.update(result.memories)
             for mk in result.memories:
                 memory_deletes.discard(mk)

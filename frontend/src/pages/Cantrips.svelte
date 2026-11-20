@@ -301,15 +301,9 @@
 <div class="page-header">
   <h2>Cantrips <a class="help-link" href="/help/user-guide.html#cantrips" target="_blank" title="Open documentation">?</a></h2>
   <div style="display: flex; gap: 4px; align-items: center;">
-    {#if showTemplates || showTest}
-      <button onclick={collapseAllCards}>Collapse All</button>
-      <button onclick={expandAllCards}>Expand All</button>
-      <span style="width: 1px; height: 20px; background: var(--border); margin: 0 4px;"></span>
-    {:else}
-      <button onclick={collapseAllCards}>Collapse All</button>
-      <button onclick={expandAllCards}>Expand All</button>
-      <span style="width: 1px; height: 20px; background: var(--border); margin: 0 4px;"></span>
-    {/if}
+    <button onclick={collapseAllCards}>Collapse All</button>
+    <button onclick={expandAllCards}>Expand All</button>
+    <span style="width: 1px; height: 20px; background: var(--border); margin: 0 4px;"></span>
     <button onclick={() => { loadTemplates(); showTemplates = !showTemplates; }}>Templates</button>
     <button onclick={() => { showTest = !showTest; testResults = null; }}>Test Panel</button>
     <button onclick={() => { showSequence = !showSequence; seqResults = null; }}>Sequence Tester</button>

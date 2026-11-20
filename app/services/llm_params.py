@@ -137,16 +137,6 @@ class ParameterDef(BaseModel):
             )
         return self
 
-    def to_def(self) -> ParamDef:
-        return ParamDef(
-            name=self.name,
-            type=self.type,
-            value=self.value,
-            description=self.description,
-            required=self.required,
-            options=tuple(self.options),
-        )
-
 
 def validate_params(items: Any, scope: str = "parameters") -> list[ParameterDef]:
     """Validate an incoming parameter list. Raises ValueError on any problem.

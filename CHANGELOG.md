@@ -2,6 +2,21 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.43.0] - 2026-11-20
+
+Internal architecture simplification, deduplication, and dead-code cleanup across backend and frontend, plus a performance improvement for cantrip `user_data` seeding. No schema migrations or breaking API changes.
+
+### Changed
+
+- **Core proxy modularized (`proxy.py`: 2,821 → 1,660 LOC).** Outbound LLM transport, SSE accumulation/conversion, `extract_response_text()`, and a unified `forward_llm_chain()` helper now live in `app/services/upstream.py`. Response-side post-processing (post-driver cantrips, verification, response tags, post-navigator, memory handling, bypass decoding, debug capture, metrics) is unified in `app/services/response_pipeline.py` (`finalize_response()`), eliminating the four duplicated response tails while preserving full re-export compatibility from `proxy.py`.
+- **Cantrip `user_data` seeding skips unused stores (perf).** Cantrips whose source code does not reference `user_data` no longer serialize and base64-embed the full `user_data` store into the Deno sandbox on every pass.
+- **Shared backend helpers.** Unified cantrip KV store persistence (`chat_data`, `user_data`, `cantrip_data`) behind generic dirty-key `_load_kv_store` / `_save_kv_store` helpers; centralized multimodal-safe message utilities in `app/services/messages.py`; added `lorebook.book_entries_to_dicts()`; standardized token estimation on `budget.estimate_tokens()`; consolidated `response_tags.process_response_capture()` into a single DB session; extracted `app/routers/_helpers.py` (`check_tag_unique`, `get_owned_or_404`) across five routers; simplified `app/routers/packs.py` model dispatch (`1,318 → 1,106 LOC`); and reduced `app/services/assistant/registry.py` (`2,379 → 2,149 LOC`) via a `_crud_tools` factory.
+- **Frontend modularization (`Admin.svelte`: 1,184 → 54 LOC).** Decomposed `Admin.svelte` into seven lazy-loaded tab components under `frontend/src/pages/admin/`; added shared `<Modal>` and `<TagBadge>` components; unified FastAPI error parsing (`parseApiError`) between `api.ts` and `lib/sse.ts`; added a `crud()` factory in `api.ts` (`952 → 862 LOC`); and replaced raw `fetch()` calls in `Dashboard.svelte` and `TagGroups.svelte` with `api.ts` methods.
+
+### Removed
+
+- **Dead code cleanup.** Removed unused `frontend/src/pages/Users.svelte`, unused `api.ts` / `stores.ts` / `download.ts` exports and dead component state, six unused pre-Deno functions in `app/services/memory.py` (`~200 → 32 LOC`), and unreferenced helpers across `verification.py`, `prefill.py`, `bypass.py`, `driver_callable.py`, `llm_params.py`, `conversation.py`, `command_tags.py`, `deno_template.mjs`, `budget.py`, `debug_sandbox.py`, `ssl_manager.py`, `safety_scanner.py`, `git_sync.py`, `proxy.py`, and `map_pipeline.py`.
+
 ## [0.42.1] - 2026-11-20
 
 Stability, security, and UI bug-fix batch following the 0.42.0 release.

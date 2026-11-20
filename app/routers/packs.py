@@ -128,8 +128,6 @@ def _fetch_local_repo_info(path: str) -> dict:
 
     if not manifest.get("files"):
         manifest["files"] = _discover_local_files(repo_path)
-    else:
-        manifest["has_manifest"] = True
 
     readme = ""
     for readme_name in ("README.md", "readme.md", "README.txt"):
@@ -503,16 +501,6 @@ async def install_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
     resource_type = req.file_path.split("/")[0].rstrip("s")
-    if resource_type == "rule":
-        resource_type = "rule"
-    elif resource_type == "cantrip":
-        resource_type = "cantrip"
-    elif resource_type == "lorebook":
-        resource_type = "lorebook"
-    elif resource_type == "map":
-        resource_type = "map"
-    elif resource_type == "scenario_rule":
-        resource_type = "scenario_rule"
 
     scan_result = scan_file(raw_content, resource_type)
     await log_scan_findings(current_user.id, scan_result, f"pack_{resource_type}", req.file_path)
@@ -1251,69 +1239,54 @@ async def _create_local_resource(
     return ""
 
 
+def _local_resource_models() -> dict[str, tuple[type, str]]:
+    from app.models.map import Map
+    from app.models.memory_rule import MemoryRule
+    from app.models.scenario_rule import ScenarioRule
+    from app.models.skill import Skill
+
+    return {
+        "cantrip": (Cantrip, "cantrip"),
+        "lorebook": (Lorebook, "lorebook"),
+        "rule": (VerificationRule, "verification_rule"),
+        "memory_rule": (MemoryRule, "memory_rule"),
+        "scenario_rule": (ScenarioRule, "scenario_rule"),
+        "skill": (Skill, "skill"),
+        "sample": (Skill, "skill"),
+        "map": (Map, "map"),
+    }
+
+
 async def _toggle_local_resource(
     db: AsyncSession, user_id: str, resource_type: str, local_id: str, enabled: bool
 ):
-    model = None
-    snap_type = "verification_rule" if resource_type == "rule" else resource_type
-    if resource_type == "cantrip":
-        model = Cantrip
-    elif resource_type == "lorebook":
-        model = Lorebook
-    elif resource_type == "rule":
-        model = VerificationRule
-    elif resource_type == "memory_rule":
-        from app.models.memory_rule import MemoryRule
-        model = MemoryRule
-    elif resource_type == "scenario_rule":
-        from app.models.scenario_rule import ScenarioRule
-        model = ScenarioRule
-    elif resource_type == "map":
-        from app.models.map import Map
-        model = Map
     # Skills have no is_active flag -- they apply wherever they are attached.
-    if model is not None:
-        result = await db.execute(
-            select(model).where(model.id == local_id, model.user_id == user_id)
-        )
-        obj = result.scalar_one_or_none()
-        if obj:
-            await snapshots.capture(db, user_id, snap_type, local_id)
-            obj.is_active = enabled
+    if resource_type in ("skill", "sample"):
+        return
+    entry = _local_resource_models().get(resource_type)
+    if entry is None:
+        return
+    model, snap_type = entry
+    result = await db.execute(
+        select(model).where(model.id == local_id, model.user_id == user_id)
+    )
+    obj = result.scalar_one_or_none()
+    if obj:
+        await snapshots.capture(db, user_id, snap_type, local_id)
+        obj.is_active = enabled
 
 
 async def _delete_local_resource(
     db: AsyncSession, user_id: str, resource_type: str, local_id: str
 ):
-    model = None
-    snap_type = (
-        "verification_rule" if resource_type == "rule"
-        else "skill" if resource_type == "sample"
-        else resource_type
+    entry = _local_resource_models().get(resource_type)
+    if entry is None:
+        return
+    model, snap_type = entry
+    result = await db.execute(
+        select(model).where(model.id == local_id, model.user_id == user_id)
     )
-    if resource_type == "cantrip":
-        model = Cantrip
-    elif resource_type == "lorebook":
-        model = Lorebook
-    elif resource_type == "rule":
-        model = VerificationRule
-    elif resource_type == "memory_rule":
-        from app.models.memory_rule import MemoryRule
-        model = MemoryRule
-    elif resource_type == "scenario_rule":
-        from app.models.scenario_rule import ScenarioRule
-        model = ScenarioRule
-    elif resource_type in ("skill", "sample"):
-        from app.models.skill import Skill
-        model = Skill
-    elif resource_type == "map":
-        from app.models.map import Map
-        model = Map
-    if model is not None:
-        result = await db.execute(
-            select(model).where(model.id == local_id, model.user_id == user_id)
-        )
-        obj = result.scalar_one_or_none()
-        if obj:
-            await snapshots.capture(db, user_id, snap_type, local_id)
-            await db.delete(obj)
+    obj = result.scalar_one_or_none()
+    if obj:
+        await snapshots.capture(db, user_id, snap_type, local_id)
+        await db.delete(obj)

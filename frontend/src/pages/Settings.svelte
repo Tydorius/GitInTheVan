@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, getApiKey, setApiKey } from '../api'
+  import { api } from '../api'
   import { onMount } from 'svelte'
   import CollapsibleCard from '../lib/CollapsibleCard.svelte'
   import ParameterEditor from '../lib/ParameterEditor.svelte'
@@ -75,14 +75,10 @@
   let defaultMapId: string = ''
   let maps: any[] = []
   let endpoints: any[] = []
-  let apiKey: string | null = null
   let error = ''
   let saved = false
   let sumSaved = false
   let lexSaved = false
-  let copied = false
-  let regenerating = false
-  let newKeyNotice = false
 
   // Phase 29: the lexicon compiler and the user half of the doubly-gated
   // cantrip auto-install. Both ride the general settings endpoint.
@@ -193,7 +189,6 @@
       passengerEffectiveCap = s.passenger_effective_cap ?? 0
       endpoints = e.endpoints
       maps = mapData.maps
-      apiKey = getApiKey()
       summarization.summarization_enabled = sum.summarization_enabled
       summarization.summarization_endpoint_id = sum.summarization_endpoint_id || ''
       summarization.summarization_model = sum.summarization_model || ''
@@ -307,25 +302,6 @@
       } as any)
       defaultMapId = (updated as any).default_map_id || ''
     } catch (e: any) { error = e.message }
-  }
-
-  function copyKey() {
-    if (!apiKey) return
-    navigator.clipboard.writeText(apiKey)
-    copied = true
-    setTimeout(() => copied = false, 2000)
-  }
-
-  async function regenerateKey() {
-    if (!confirm('Regenerate your API key? The old key will stop working immediately. The new key will be shown once.')) return
-    error = ''; regenerating = true
-    try {
-      const data = await api.regenerateApiKey()
-      apiKey = data.api_key
-      setApiKey(data.api_key)
-      newKeyNotice = true
-    } catch (e: any) { error = e.message }
-    finally { regenerating = false }
   }
 
   onMount(load)

@@ -251,25 +251,3 @@ async def execute_tool_call(
         tool_result = "Tool completed (no output)"
 
     return tool_result.strip()
-
-
-def extract_tool_result_content(content: str) -> tuple[str, str]:
-    """Extract tool result text and return (cleaned_content, result_text).
-
-    cleaned_content has tool result blocks removed.
-    result_text is the content of the last tool result block.
-    """
-    result_blocks = re.findall(
-        re.escape(TOOL_RESULT_OPEN) + r"(.*?)" + re.escape(TOOL_RESULT_CLOSE),
-        content,
-        re.DOTALL,
-    )
-    result_text = result_blocks[-1].strip() if result_blocks else ""
-    cleaned = re.sub(
-        re.escape(TOOL_RESULT_OPEN) + r".*?" + re.escape(TOOL_RESULT_CLOSE),
-        "",
-        content,
-        flags=re.DOTALL,
-    )
-    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
-    return cleaned, result_text

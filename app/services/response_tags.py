@@ -29,11 +29,13 @@ from __future__ import annotations
 import json
 import logging
 import re
+from typing import Any
 
 from sqlalchemy import select
 
 from app.database import async_session
 from app.models.cantrip import Cantrip
+from app.services.budget import estimate_tokens
 from app.services.debug import debug_capture_response
 
 logger = logging.getLogger(__name__)
@@ -189,6 +191,15 @@ def apply_strip_patterns(content: str, patterns: list[re.Pattern[str]]) -> str:
     return re.sub(r"\n{3,}", "\n\n", stripped).strip()
 
 
+def _collect_tag_names(rows: Any) -> list[str]:
+    names: list[str] = []
+    for row in rows:
+        for name in parse_tag_names(row):
+            if name not in names:
+                names.append(name)
+    return names
+
+
 async def registered_tag_names(user_id: str) -> list[str]:
     """Union of every tag name the user's cantrips register."""
     async with async_session() as db:
@@ -197,12 +208,7 @@ async def registered_tag_names(user_id: str) -> list[str]:
                 select(Cantrip.response_tags).where(Cantrip.user_id == user_id)
             )
         ).scalars().all()
-    names: list[str] = []
-    for row in rows:
-        for name in parse_tag_names(row):
-            if name not in names:
-                names.append(name)
-    return names
+    return _collect_tag_names(rows)
 
 
 async def process_response_capture(
@@ -225,11 +231,13 @@ async def process_response_capture(
         if not isinstance(content, str) or not content:
             return response_data
 
-        names = await registered_tag_names(user_id)
-        found = extract_tags(content, names)
-
         from app.models.user_settings import UserSettings
         async with async_session() as db:
+            tag_rows = (
+                await db.execute(
+                    select(Cantrip.response_tags).where(Cantrip.user_id == user_id)
+                )
+            ).scalars().all()
             settings = (
                 await db.execute(
                     select(UserSettings.response_strip_patterns).where(
@@ -237,6 +245,9 @@ async def process_response_capture(
                     )
                 )
             ).scalar_one_or_none()
+
+        names = _collect_tag_names(tag_rows)
+        found = extract_tags(content, names)
         patterns = compile_strip_patterns(settings or "[]")
 
         if not names and not patterns:
@@ -251,7 +262,7 @@ async def process_response_capture(
             for name, payloads in found.items():
                 record_prompt_object(
                     body_json, "response_tag", name,
-                    0, max(1, sum(len(p) for p in payloads) // 4),
+                    0, estimate_tokens("".join(payloads)),
                 )
 
         if stripped != content:

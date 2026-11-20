@@ -4,34 +4,10 @@ import json
 import logging
 import shutil
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class RepoFileEntry:
-    path: str
-    type: str
-    name: str
-    description: str
-    author: str
-    version: str
-    updated: str
-    tags: list[str]
-    min_gitv_version: str
-
-
-@dataclass
-class RepoManifest:
-    pack_name: str
-    pack_author: str
-    pack_version: str
-    pack_description: str
-    files: list[RepoFileEntry]
-    raw: dict
 
 
 def _build_auth_url(url: str, token: str) -> str:

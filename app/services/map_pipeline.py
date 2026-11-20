@@ -634,11 +634,8 @@ async def _verify_stage(
                 )
                 return True, _stage_verification_error_note(stage.name, f"a {status_code} error"), True
 
-            choices = data.get("choices") or []
-            llm_content = (
-                (choices[0].get("message") or {}).get("content", "")
-                if choices else ""
-            )
+            from app.services.upstream import extract_response_text
+            llm_content = extract_response_text(data)
 
             violation = False
             reason = ""
@@ -1277,11 +1274,8 @@ async def run_map_pipeline(
                         stage.name, retry_status,
                     )
                     return None
-                retry_choices = retry_data.get("choices") or []
-                new_content = (
-                    (retry_choices[0].get("message") or {}).get("content", "")
-                    if retry_choices else ""
-                )
+                from app.services.upstream import extract_response_text
+                new_content = extract_response_text(retry_data)
                 response_data = retry_data
                 content = new_content
                 if debug_on:
@@ -1391,11 +1385,6 @@ async def run_map_pipeline(
                 pass
 
             sticky_resources.extend(r for r in stage.resources if r.sticky)
-
-            # Message-level injections are undone by the snapshot reset at the top
-            # of the next iteration; only the out-of-band cantrip bookkeeping needs
-            # clearing here.
-            body_json.pop("_gitv_map_stage_cantrip_ids", None)
 
         logger.info("Map stage '%s' completed: %d chars output", stage.name, len(content))
         clear_metrics_stage_ref(body_json)

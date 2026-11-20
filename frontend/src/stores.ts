@@ -15,7 +15,6 @@ export const currentRoute = writable(window.location.hash.slice(1) || '/');
  * so every such link landed on the page with nothing selected.
  */
 export const routeParams = derived(currentRoute, ($route) => parseRoute($route));
-export const routePage = derived(currentRoute, ($route) => parseRoute($route).page);
 export const isAdmin = writable(false);
 export const siteBanner = writable<{ banner: string; level: string } | null>(null);
 export const certIpWarning = writable<CertIPCheck | null>(null);

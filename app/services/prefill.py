@@ -5,34 +5,15 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-PREFILL_PROVIDERS = {
-    "openai": "openai",
-    "openrouter": "openai",
-    "anthropic": "anthropic",
-    "google": "google",
-    "mistral": "openai",
-    "groq": "openai",
-    "together": "openai",
-    "generic": "openai",
-}
-
 
 def detect_provider(base_url: str, model: str = "") -> str:
     """Detect the provider type from the endpoint URL or model name."""
     url_lower = base_url.lower()
 
-    if "openrouter.ai" in url_lower:
-        return "openai"
     if "anthropic.com" in url_lower:
         return "anthropic"
     if "generativelanguage.googleapis.com" in url_lower or "gemini" in model.lower():
         return "google"
-    if "mistral.ai" in url_lower:
-        return "openai"
-    if "groq.com" in url_lower:
-        return "openai"
-    if "together.xyz" in url_lower or "together.ai" in url_lower:
-        return "openai"
 
     return "openai"
 

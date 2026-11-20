@@ -393,10 +393,6 @@ if (context.response) {
     if (typeof context.response.modified !== 'boolean') context.response.modified = false;
 }
 
-let __hasToolCall = false;
-if (context.tool_call) {
-    __hasToolCall = true;
-}
 if (typeof context.tool_result !== 'string') context.tool_result = "";
 
 let __error = null;

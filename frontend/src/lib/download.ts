@@ -29,11 +29,6 @@ export function downloadJson(data: unknown, filename: string): void {
   downloadBlob(blob, filename)
 }
 
-/** Download plain text (Markdown, CSV, logs) under a given media type. */
-export function downloadText(text: string, filename: string, type = 'text/plain'): void {
-  downloadBlob(new Blob([text], { type: `${type};charset=utf-8` }), filename)
-}
-
 /**
  * Fetch an authenticated endpoint that returns a file, and download the result.
  *

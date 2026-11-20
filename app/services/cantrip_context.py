@@ -6,21 +6,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from app.services.messages import extract_text
+
 logger = logging.getLogger(__name__)
 
-
-def _extract_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for item in content:
-            if isinstance(item, dict):
-                text = item.get("text", "")
-                if text:
-                    parts.append(str(text))
-        return " ".join(parts)
-    return str(content) if content else ""
+_extract_text = extract_text
 
 
 # ============================================================================

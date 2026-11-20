@@ -26,6 +26,31 @@ export function setApiKey(key: string): void {
   localStorage.setItem('gitv_api_key', key);
 }
 
+export async function parseApiError(resp: Response): Promise<Error & { status?: number; detail?: unknown }> {
+  const text = await resp.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
+  }
+  const detail = (data as any)?.detail;
+  let msg: string;
+  if (typeof detail === 'string') {
+    msg = detail;
+  } else if (Array.isArray(detail)) {
+    msg = detail.map((e: any) => `${e.loc?.join('.') || e.msg}: ${e.msg || ''}`).join('; ');
+  } else if (typeof detail === 'object' && detail) {
+    msg = JSON.stringify(detail);
+  } else {
+    msg = resp.statusText;
+  }
+  const err = new Error(msg || resp.statusText) as Error & { status?: number; detail?: unknown };
+  err.status = resp.status;
+  err.detail = detail;
+  return err;
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -50,6 +75,10 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     return undefined as T;
   }
 
+  if (!resp.ok) {
+    throw await parseApiError(resp);
+  }
+
   const text = await resp.text();
   let data: unknown;
   try {
@@ -57,27 +86,28 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   } catch {
     data = text;
   }
-
-  if (!resp.ok) {
-    const detail = (data as any)?.detail;
-    let msg: string;
-    if (typeof detail === 'string') {
-      msg = detail;
-    } else if (Array.isArray(detail)) {
-      msg = detail.map((e: any) => `${e.loc?.join('.') || e.msg}: ${e.msg || ''}`).join('; ');
-    } else if (typeof detail === 'object' && detail) {
-      msg = JSON.stringify(detail);
-    } else {
-      msg = resp.statusText;
-    }
-    const err = new Error(msg || resp.statusText) as Error & { status?: number; detail?: unknown };
-    err.status = resp.status;
-    err.detail = detail;
-    throw err;
-  }
-
   return data as T;
 }
+
+function crud<TList = any>(basePath: string) {
+  return {
+    list: () => request<TList>(basePath),
+    get: (id: string) => request<any>(`${basePath}/${id}`),
+    create: (data: any) => request<any>(basePath, { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: any) => request<any>(`${basePath}/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    delete: (id: string) => request<void>(`${basePath}/${id}`, { method: 'DELETE' }),
+    export: (id: string) => request<any>(`${basePath}/${id}/export`),
+  };
+}
+
+const cantripsCrud = crud<{ cantrips: any[] }>('/api/cantrips');
+const lorebooksCrud = crud<{ lorebooks: any[] }>('/api/lorebooks');
+const skillsCrud = crud<{ skills: any[] }>('/api/skills');
+const scenarioRulesCrud = crud<{ rules: any[] }>('/api/scenario-rules');
+const verificationRulesCrud = crud<{ rules: any[] }>('/api/verification/rules');
+const memoryRulesCrud = crud<{ rules: any[] }>('/api/memory-rules');
+const mapsCrud = crud<{ maps: any[] }>('/api/maps');
+const tagGroupsCrud = crud<{ groups: any[] }>('/api/tag-groups');
 
 /** Retry helper for the safety-scanner blocking gate (HTTP 422).
  *
@@ -320,16 +350,6 @@ export interface DebugExchange {
   created_at: string;
 }
 
-/** One line-level diff between a baseline and another run. */
-export interface DebugTextDiff {
-  identical: boolean;
-  similarity: number;
-  /** 'word' for short prose, 'line' for code and long output, 'none' when equal. */
-  granularity: string;
-  baseline_empty: boolean;
-  hunks: { op: string; baseline: string[]; other: string[] }[];
-}
-
 /** A forked copy of one request, re-runnable without touching the original. */
 export interface DebugSandbox {
   id: string;
@@ -504,18 +524,12 @@ export const api = {
     request<any>('/api/settings', { method: 'PUT', body: JSON.stringify(data) }),
 
   // Cantrips
-  listCantrips: () => request<{ cantrips: any[] }>('/api/cantrips'),
-  createCantrip: (data: any) =>
-    request<any>('/api/cantrips', { method: 'POST', body: JSON.stringify(data) }),
-  getCantrip: (id: string) => request<any>(`/api/cantrips/${id}`),
-  updateCantrip: (id: string, data: any) =>
-    request<any>(`/api/cantrips/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteCantrip: (id: string) =>
-    request<void>(`/api/cantrips/${id}`, { method: 'DELETE' }),
-  exportCantrip: (id: string) =>
-    request<any>(`/api/cantrips/${id}/export`),
-  testCantrip: (data: any) =>
-    request<any>('/api/cantrips/test', { method: 'POST', body: JSON.stringify(data) }),
+  listCantrips: cantripsCrud.list,
+  createCantrip: cantripsCrud.create,
+  getCantrip: cantripsCrud.get,
+  updateCantrip: cantripsCrud.update,
+  deleteCantrip: cantripsCrud.delete,
+  exportCantrip: cantripsCrud.export,
   testCantripById: (id: string, data: any) =>
     request<any>(`/api/cantrips/${id}/test`, { method: 'POST', body: JSON.stringify(data) }),
   testCantripSequence: (data: any) =>
@@ -561,17 +575,20 @@ export const api = {
     request<any>('/api/cantrips/templates/install', { method: 'POST', body: JSON.stringify({ template_name: name }) }),
 
   // Diagnostics
-  runAudit: () => request<{ results: any[]; all_passed: boolean }>('/api/diagnostics/audit'),
+  runAudit: (endpointId?: string, model?: string) => {
+    const q = new URLSearchParams()
+    if (endpointId) q.set('endpoint_id', endpointId)
+    if (model) q.set('model', model)
+    const qs = q.toString()
+    return request<{ results: any[]; all_passed: boolean }>(`/api/diagnostics/audit${qs ? `?${qs}` : ''}`)
+  },
 
   // Lorebooks
-  listLorebooks: () => request<{ lorebooks: any[] }>('/api/lorebooks'),
-  createLorebook: (data: any) =>
-    request<any>('/api/lorebooks', { method: 'POST', body: JSON.stringify(data) }),
-  getLorebook: (id: string) => request<any>(`/api/lorebooks/${id}`),
-  updateLorebook: (id: string, data: any) =>
-    request<any>(`/api/lorebooks/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteLorebook: (id: string) =>
-    request<void>(`/api/lorebooks/${id}`, { method: 'DELETE' }),
+  listLorebooks: lorebooksCrud.list,
+  createLorebook: lorebooksCrud.create,
+  getLorebook: lorebooksCrud.get,
+  updateLorebook: lorebooksCrud.update,
+  deleteLorebook: lorebooksCrud.delete,
   addLorebookEntry: (lbId: string, data: any) =>
     request<any>(`/api/lorebooks/${lbId}/entries`, { method: 'POST', body: JSON.stringify(data) }),
   updateLorebookEntry: (lbId: string, entryId: string, data: any) =>
@@ -580,48 +597,37 @@ export const api = {
     request<void>(`/api/lorebooks/${lbId}/entries/${entryId}`, { method: 'DELETE' }),
   importLorebook: (data: any) =>
     request<any>('/api/lorebooks/import', { method: 'POST', body: JSON.stringify(data) }),
-  exportLorebook: (id: string) =>
-    request<any>(`/api/lorebooks/${id}/export`),
+  exportLorebook: lorebooksCrud.export,
 
   // Skills & Samples
-  listSkills: () => request<{ skills: any[] }>('/api/skills'),
+  listSkills: skillsCrud.list,
   createSkill: (data: { name: string; description?: string; content?: string; type: string }) =>
-    request<any>('/api/skills', { method: 'POST', body: JSON.stringify(data) }),
-  getSkill: (id: string) => request<any>(`/api/skills/${id}`),
-  updateSkill: (id: string, data: any) =>
-    request<any>(`/api/skills/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteSkill: (id: string) =>
-    request<void>(`/api/skills/${id}`, { method: 'DELETE' }),
+    skillsCrud.create(data),
+  getSkill: skillsCrud.get,
+  updateSkill: skillsCrud.update,
+  deleteSkill: skillsCrud.delete,
   attachSkill: (skillId: string, endpointId: string) =>
     request<any>(`/api/skills/${skillId}/attach`, { method: 'POST', body: JSON.stringify({ endpoint_id: endpointId }) }),
   detachSkill: (skillId: string, endpointId: string) =>
     request<void>(`/api/skills/${skillId}/attach/${endpointId}`, { method: 'DELETE' }),
-  exportSkill: (id: string) =>
-    request<any>(`/api/skills/${id}/export`),
+  exportSkill: skillsCrud.export,
 
   // Scenario Rules
-  listScenarioRules: () => request<{ rules: any[] }>('/api/scenario-rules'),
-  createScenarioRule: (data: any) =>
-    request<any>('/api/scenario-rules', { method: 'POST', body: JSON.stringify(data) }),
-  getScenarioRule: (id: string) => request<any>(`/api/scenario-rules/${id}`),
-  updateScenarioRule: (id: string, data: any) =>
-    request<any>(`/api/scenario-rules/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteScenarioRule: (id: string) =>
-    request<void>(`/api/scenario-rules/${id}`, { method: 'DELETE' }),
+  listScenarioRules: scenarioRulesCrud.list,
+  createScenarioRule: scenarioRulesCrud.create,
+  getScenarioRule: scenarioRulesCrud.get,
+  updateScenarioRule: scenarioRulesCrud.update,
+  deleteScenarioRule: scenarioRulesCrud.delete,
   getScenarioDefaultPrompt: () =>
     request<{ prompt: string }>('/api/scenario-rules/default-prompt'),
 
   // Verification
-  listVerificationRules: () => request<{ rules: any[] }>('/api/verification/rules'),
-  getVerificationRule: (id: string) => request<any>(`/api/verification/rules/${id}`),
-  createVerificationRule: (data: any) =>
-    request<any>('/api/verification/rules', { method: 'POST', body: JSON.stringify(data) }),
-  updateVerificationRule: (id: string, data: any) =>
-    request<any>(`/api/verification/rules/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteVerificationRule: (id: string) =>
-    request<void>(`/api/verification/rules/${id}`, { method: 'DELETE' }),
-  exportVerificationRule: (id: string) =>
-    request<any>(`/api/verification/rules/${id}/export`),
+  listVerificationRules: verificationRulesCrud.list,
+  getVerificationRule: verificationRulesCrud.get,
+  createVerificationRule: verificationRulesCrud.create,
+  updateVerificationRule: verificationRulesCrud.update,
+  deleteVerificationRule: verificationRulesCrud.delete,
+  exportVerificationRule: verificationRulesCrud.export,
   getVerificationSettings: () =>
     request<{ verification_enabled: boolean; verification_endpoint_id: string | null; verification_model: string }>('/api/verification/settings'),
   updateVerificationSettings: (data: any) =>
@@ -639,30 +645,19 @@ export const api = {
     request<void>(`/api/memories/${id}`, { method: 'DELETE' }),
 
   // Memory Rules
-  listMemoryRules: () =>
-    request<{ rules: any[] }>('/api/memory-rules'),
-  getMemoryRule: (id: string) =>
-    request<any>(`/api/memory-rules/${id}`),
-  createMemoryRule: (data: any) =>
-    request<any>('/api/memory-rules', { method: 'POST', body: JSON.stringify(data) }),
-  updateMemoryRule: (id: string, data: any) =>
-    request<any>(`/api/memory-rules/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteMemoryRule: (id: string) =>
-    request<void>(`/api/memory-rules/${id}`, { method: 'DELETE' }),
-  exportMemoryRule: (id: string) =>
-    request<any>(`/api/memory-rules/${id}/export`),
+  listMemoryRules: memoryRulesCrud.list,
+  getMemoryRule: memoryRulesCrud.get,
+  createMemoryRule: memoryRulesCrud.create,
+  updateMemoryRule: memoryRulesCrud.update,
+  deleteMemoryRule: memoryRulesCrud.delete,
+  exportMemoryRule: memoryRulesCrud.export,
 
   // Maps
-  listMaps: () =>
-    request<{ maps: any[] }>('/api/maps'),
-  getMap: (id: string) =>
-    request<any>(`/api/maps/${id}`),
-  createMap: (data: any) =>
-    request<any>('/api/maps', { method: 'POST', body: JSON.stringify(data) }),
-  updateMap: (id: string, data: any) =>
-    request<any>(`/api/maps/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteMap: (id: string) =>
-    request<void>(`/api/maps/${id}`, { method: 'DELETE' }),
+  listMaps: mapsCrud.list,
+  getMap: mapsCrud.get,
+  createMap: mapsCrud.create,
+  updateMap: mapsCrud.update,
+  deleteMap: mapsCrud.delete,
   exportMap: (id: string, mode: 'embedded' | 'linked' = 'embedded') =>
     request<any>(`/api/maps/${id}/export?mode=${mode}`),
   importMap: (data: any, name?: string, resourceMode?: string, overrideScan: boolean = false) =>
@@ -680,10 +675,6 @@ export const api = {
     request<void>(`/api/api-keys/${id}`, { method: 'DELETE' }),
   toggleApiKey: (id: string) =>
     request<any>(`/api/api-keys/${id}/toggle`, { method: 'PUT' }),
-
-  // Audit Logs
-  listAuditLogs: (limit = 100, offset = 0) =>
-    request<{ logs: any[]; total: number }>(`/api/audit?limit=${limit}&offset=${offset}`),
 
   // Metrics
   getMetricsSummary: (days = 30, chatId = '', includeFlagged = false) =>
@@ -731,8 +722,6 @@ export const api = {
   checkUpdate: () =>
     request<{ current_version: string; latest_version: string; update_available: boolean; release_url: string; release_notes: string;
     zip_url: string; step_count: number; error: string }>('/api/admin/update/check'),
-  getUpdateDownloadInfo: () =>
-    request<{ zip_url: string; current_version: string; latest_version: string; instructions: string }>('/api/admin/update/download-info'),
   executeUpdate: () =>
     request<{ success: boolean; message: string; error: string }>('/api/admin/update/execute', { method: 'POST' }),
   getUpdateChain: () =>
@@ -858,10 +847,6 @@ export const api = {
   uninstallItem: (id: string) =>
     request<void>(`/api/packs/installed/${id}`, { method: 'DELETE' }),
 
-  // Tags - browse public tagged resources
-  listPublicLorebooks: () => request<{ lorebooks: any[] }>('/api/lorebooks/public'),
-  listPublicCantrips: () => request<{ cantrips: any[] }>('/api/cantrips/public'),
-
   // Assistant Pane
   getAssistantConfig: () => request<AssistantConfig>('/api/assistant/config'),
   updateAssistantConfig: (data: { endpoint_id?: string | null; model?: string; parameters?: LlmParameter[]; context_tokens?: number }) =>
@@ -869,9 +854,6 @@ export const api = {
   getAssistantPermissions: () => request<AssistantPermissions>('/api/assistant/permissions'),
   updateAssistantPermissions: (data: { groups: Record<string, AssistantMode>; tools: Record<string, AssistantToolMode> }) =>
     request<AssistantPermissions>('/api/assistant/permissions', { method: 'PUT', body: JSON.stringify(data) }),
-  // Shape beyond "compact catalog" is not pinned down anywhere in the design doc;
-  // nothing in this sub-phase's UI consumes it yet.
-  getAssistantCatalog: () => request<any>('/api/assistant/catalog'),
   listAssistantConversations: () =>
     request<{ conversations: AssistantConversationSummary[] }>('/api/assistant/conversations'),
   createAssistantConversation: () =>
@@ -940,13 +922,13 @@ export const api = {
   },
 
   // Tag Groups
-  listTagGroups: () => request<{ groups: any[] }>('/api/tag-groups'),
+  listTagGroups: tagGroupsCrud.list,
   createTagGroup: (data: { name: string; tag?: string; is_active?: boolean; activate_members?: boolean; members?: any[] }) =>
-    request<any>('/api/tag-groups', { method: 'POST', body: JSON.stringify(data) }),
-  getTagGroup: (id: string) => request<any>(`/api/tag-groups/${id}`),
+    tagGroupsCrud.create(data),
+  getTagGroup: tagGroupsCrud.get,
   updateTagGroup: (id: string, data: { name?: string; tag?: string; is_active?: boolean; activate_members?: boolean }) =>
-    request<any>(`/api/tag-groups/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteTagGroup: (id: string) => request<void>(`/api/tag-groups/${id}`, { method: 'DELETE' }),
+    tagGroupsCrud.update(id, data),
+  deleteTagGroup: tagGroupsCrud.delete,
   updateTagGroupMembers: (id: string, members: any[]) =>
     request<any>(`/api/tag-groups/${id}/members`, { method: 'PUT', body: JSON.stringify({ members }) }),
 };

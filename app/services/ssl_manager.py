@@ -177,10 +177,6 @@ def generate_self_signed_cert(
     return cert_path, key_path
 
 
-def get_ca_cert_path() -> Path | None:
-    return CA_CERT_PATH if CA_CERT_PATH.exists() else None
-
-
 def get_ssl_status() -> dict:
     cert_exists = LEAF_CERT_PATH.exists()
     key_exists = LEAF_KEY_PATH.exists()

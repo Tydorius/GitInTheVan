@@ -63,7 +63,7 @@ def estimate_context_window(
         return 128000
     if "gpt-4" in model_lower and "mini" not in model_lower:
         return 8192
-    if "gpt-4-mini" in model_lower or "gpt-4o-mini" in model_lower:
+    if "gpt-4-mini" in model_lower:
         return 128000
     if "gpt-3.5" in model_lower:
         return 16385

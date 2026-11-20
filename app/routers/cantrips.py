@@ -4,13 +4,14 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.cantrip import Cantrip
 from app.models.user import User
+from app.routers._helpers import check_tag_unique, get_owned_or_404
 from app.services import snapshots
 from app.services.admin import get_admin_settings
 from app.services.cantrip import test_cantrip
@@ -452,20 +453,10 @@ async def update_cantrip(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    result = await db.execute(
-        select(Cantrip).where(Cantrip.id == cantrip_id, Cantrip.user_id == current_user.id)
-    )
-    cantrip = result.scalar_one_or_none()
-    if cantrip is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cantrip not found")
+    cantrip = await get_owned_or_404(db, Cantrip, cantrip_id, current_user.id, "Cantrip")
 
     if req.tag and req.tag != cantrip.tag:
-        existing = await db.execute(
-            text("SELECT id FROM cantrips WHERE tag = :tag AND user_id = :uid AND id != :cid"),
-            {"tag": req.tag, "uid": current_user.id, "cid": cantrip_id}
-        )
-        if existing.scalar_one_or_none() is not None:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tag already in use")
+        await check_tag_unique(db, Cantrip, current_user.id, req.tag, exclude_id=cantrip_id)
 
     update_data = req.model_dump(exclude_unset=True)
     update_data.pop("override_scan", None)
@@ -498,12 +489,7 @@ async def delete_cantrip(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    result = await db.execute(
-        select(Cantrip).where(Cantrip.id == cantrip_id, Cantrip.user_id == current_user.id)
-    )
-    cantrip = result.scalar_one_or_none()
-    if cantrip is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cantrip not found")
+    cantrip = await get_owned_or_404(db, Cantrip, cantrip_id, current_user.id, "Cantrip")
 
     await snapshots.capture(db, current_user.id, "cantrip", cantrip_id)
     await db.delete(cantrip)
@@ -710,12 +696,7 @@ async def export_cantrip(
 
     from fastapi.responses import Response
 
-    result = await db.execute(
-        select(Cantrip).where(Cantrip.id == cantrip_id, Cantrip.user_id == current_user.id)
-    )
-    c = result.scalar_one_or_none()
-    if c is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cantrip not found")
+    c = await get_owned_or_404(db, Cantrip, cantrip_id, current_user.id, "Cantrip")
 
     data = {
         "name": c.name,

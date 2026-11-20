@@ -7,7 +7,7 @@
  * behaviour, same FastAPI `detail` unwrapping for error bodies.
  */
 
-import { getToken, clearToken } from '../api'
+import { getToken, clearToken, parseApiError } from '../api'
 import { isAuthenticated, isAdmin } from '../stores'
 
 /** One decoded SSE event: `name` defaults to `'message'` per the spec. */
@@ -54,25 +54,7 @@ export async function postEventStream(
   }
 
   if (!resp.ok) {
-    const text = await resp.text()
-    let data: unknown
-    try {
-      data = text ? JSON.parse(text) : null
-    } catch {
-      data = text
-    }
-    const detail = (data as any)?.detail
-    let msg: string
-    if (typeof detail === 'string') {
-      msg = detail
-    } else if (Array.isArray(detail)) {
-      msg = detail.map((e: any) => `${e.loc?.join('.') || e.msg}: ${e.msg || ''}`).join('; ')
-    } else if (typeof detail === 'object' && detail) {
-      msg = JSON.stringify(detail)
-    } else {
-      msg = resp.statusText
-    }
-    throw new Error(msg || resp.statusText)
+    throw await parseApiError(resp)
   }
 
   if (!resp.body) return

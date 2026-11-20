@@ -227,11 +227,8 @@ class PassengerHandler:
                     configured=configured,
                 )
                 if status_code == 200 and isinstance(data, dict):
-                    choices = data.get("choices") or []
-                    content = ""
-                    if choices:
-                        message = choices[0].get("message") or {}
-                        content = str(message.get("content") or "")
+                    from app.services.upstream import extract_response_text
+                    content = extract_response_text(data)
                     if content.strip():
                         if len(content) > RESULT_CAP:
                             content = content[:RESULT_CAP] + RESULT_TRUNCATION_MARKER

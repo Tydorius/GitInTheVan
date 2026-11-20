@@ -36,9 +36,7 @@
     if (!selectedEndpoint) return
     loadingModels = true
     try {
-      const data = await fetch(`/api/endpoints/${selectedEndpoint}/models`, {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('gitv_token')}` }
-      }).then(r => r.json())
+      const data = await api.listEndpointModels(selectedEndpoint)
       endpointModels = data.models || []
       if (endpointModels.length > 0) {
         modelsAvailable = true
@@ -77,14 +75,7 @@
   async function runAudit() {
     auditRunning = true; auditDone = false
     try {
-      const params = new URLSearchParams()
-      if (selectedEndpoint) params.set('endpoint_id', selectedEndpoint)
-      const model = effectiveModel()
-      if (model) params.set('model', model)
-      const qs = params.toString()
-      const data = await fetch(`/api/diagnostics/audit${qs ? '?' + qs : ''}`, {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('gitv_token')}` }
-      }).then(r => r.json())
+      const data = await api.runAudit(selectedEndpoint || undefined, effectiveModel() || undefined)
       auditResults = data.results
       auditDone = true
     } catch {}

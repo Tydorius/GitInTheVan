@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from typing import Any
+
+from app.services.messages import extract_text, inject_into_system_message
 
 # Package 3 (item 4) added in_chat_system: its own system message placed
 # after the last user message (end of the list) -- the in-chat directive
@@ -137,19 +140,7 @@ def inject_entries(
 
     if system_entries:
         combined = "\n\n".join(m.content for m in system_entries)
-        existing_system = None
-        for i, msg in enumerate(result):
-            if msg.get("role") == "system":
-                existing_system = i
-                break
-
-        if existing_system is not None:
-            result[existing_system] = {
-                **result[existing_system],
-                "content": f"{result[existing_system]['content']}\n\n{combined}",
-            }
-        else:
-            result.insert(0, {"role": "system", "content": combined})
+        result = inject_into_system_message(result, combined)
 
     if message_entries and result:
         combined = "\n\n".join(m.content for m in message_entries)
@@ -192,18 +183,38 @@ def _keyword_matches(keyword: str, text: str, word_boundary: bool = False) -> bo
 
 
 def _extract_conversation_text(messages: list[dict]) -> str:
-    parts = []
-    for msg in messages:
-        content = msg.get("content", "")
-        if isinstance(content, str):
-            parts.append(content)
-        elif isinstance(content, list):
-            for item in content:
-                if isinstance(item, dict):
-                    text = item.get("text", "")
-                    if text:
-                        parts.append(text)
-    return " ".join(parts)
+    parts = [extract_text(msg.get("content", "")) for msg in messages]
+    return " ".join(p for p in parts if p)
+
+
+def book_entries_to_dicts(
+    entries: Any,
+    *,
+    book: Any = None,
+    lorebook_id: str = "",
+    lorebook_name: str = "",
+) -> list[dict[str, Any]]:
+    """Convert ORM lorebook entries into matcher-ready dicts."""
+    lb_id = getattr(book, "id", lorebook_id) if book is not None else lorebook_id
+    lb_name = getattr(book, "name", lorebook_name) if book is not None else lorebook_name
+    return [
+        {
+            "lorebook_id": lb_id or getattr(entry, "lorebook_id", ""),
+            "lorebook_name": lb_name or getattr(entry, "lorebook_name", ""),
+            "entry_id": entry.id,
+            "name": entry.name,
+            "keys": entry.keys,
+            "secondary_keys": entry.secondary_keys,
+            "content": entry.content,
+            "position": entry.position,
+            "insertion_order": entry.insertion_order,
+            "is_constant": entry.is_constant,
+            "is_selective": entry.is_selective,
+            "is_disabled": entry.is_disabled,
+            "character_limit": entry.character_limit,
+        }
+        for entry in entries
+    ]
 
 
 def _to_matched_entry(entry: dict) -> MatchedEntry:

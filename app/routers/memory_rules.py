@@ -1,15 +1,16 @@
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.memory_rule import MemoryRule
 from app.models.user import User
+from app.routers._helpers import check_tag_unique, get_owned_or_404
 from app.services import snapshots
 from app.services.admin import get_admin_settings
 from app.services.content_guard import check_size, sanitize_and_log
@@ -101,19 +102,6 @@ def _rule_to_list_item(rule: MemoryRule) -> MemoryRuleListItem:
     )
 
 
-async def _check_tag_unique(db: AsyncSession, tag: str, user_id: str, exclude_id: str | None = None) -> None:
-    if not tag:
-        return
-    query = text("SELECT id FROM memory_rules WHERE tag = :tag AND user_id = :uid")
-    params: dict = {"tag": tag, "uid": user_id}
-    if exclude_id:
-        query = text("SELECT id FROM memory_rules WHERE tag = :tag AND user_id = :uid AND id != :rid")
-        params["rid"] = exclude_id
-    result = await db.execute(query, params)
-    if result.scalar_one_or_none() is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tag already in use")
-
-
 @router.get("", response_model=MemoryRuleListResponse)
 async def list_rules(
     current_user: Annotated[User, Depends(get_current_user)],
@@ -134,22 +122,17 @@ async def get_rule(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    result = await db.execute(
-        select(MemoryRule).where(MemoryRule.id == rule_id, MemoryRule.user_id == current_user.id)
-    )
-    rule = result.scalar_one_or_none()
-    if rule is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory rule not found")
+    rule = await get_owned_or_404(db, MemoryRule, rule_id, current_user.id, "Memory rule")
     return _rule_to_response(rule)
 
 
-@router.post("", response_model=MemoryRuleResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=MemoryRuleResponse, status_code=201)
 async def create_rule(
     req: MemoryRuleCreate,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    await _check_tag_unique(db, req.tag, current_user.id)
+    await check_tag_unique(db, MemoryRule, current_user.id, req.tag)
 
     admin_settings = await get_admin_settings()
     check_size(req.prompt, admin_settings.max_rule_size_kb * 1024, "Memory rule prompt")
@@ -180,17 +163,12 @@ async def update_rule(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    result = await db.execute(
-        select(MemoryRule).where(MemoryRule.id == rule_id, MemoryRule.user_id == current_user.id)
-    )
-    rule = result.scalar_one_or_none()
-    if rule is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory rule not found")
+    rule = await get_owned_or_404(db, MemoryRule, rule_id, current_user.id, "Memory rule")
 
     await snapshots.capture(db, current_user.id, "memory_rule", rule_id)
 
     if req.tag is not None and req.tag != rule.tag:
-        await _check_tag_unique(db, req.tag, current_user.id, rule_id)
+        await check_tag_unique(db, MemoryRule, current_user.id, req.tag, exclude_id=rule_id)
         rule.tag = req.tag
     if req.name is not None:
         rule.name = req.name
@@ -216,18 +194,13 @@ async def update_rule(
     return _rule_to_response(rule)
 
 
-@router.delete("/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{rule_id}", status_code=204)
 async def delete_rule(
     rule_id: str,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    result = await db.execute(
-        select(MemoryRule).where(MemoryRule.id == rule_id, MemoryRule.user_id == current_user.id)
-    )
-    rule = result.scalar_one_or_none()
-    if rule is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory rule not found")
+    rule = await get_owned_or_404(db, MemoryRule, rule_id, current_user.id, "Memory rule")
 
     await snapshots.capture(db, current_user.id, "memory_rule", rule_id)
     await db.delete(rule)
@@ -245,12 +218,7 @@ async def export_memory_rule(
 
     from fastapi.responses import Response
 
-    result = await db.execute(
-        select(MemoryRule).where(MemoryRule.id == rule_id, MemoryRule.user_id == current_user.id)
-    )
-    rule = result.scalar_one_or_none()
-    if rule is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory rule not found")
+    rule = await get_owned_or_404(db, MemoryRule, rule_id, current_user.id, "Memory rule")
 
     data = {
         "name": rule.name,
