@@ -8,7 +8,8 @@ Lorebook 2, Cantrip 2 ... any interleaving. Everything a step outputs lands
 before the next step runs, so a lorebook slot matches against text an
 earlier cantrip stripped or injected.
 
-Design: ``Planning/pipeline-order-2026-11.md``. Two invariants:
+Design: ``Planning/past-phases.md`` (full plan archived at
+``Planning/archive/pipeline-order-2026-11.md``). Two invariants:
 
 - **The list orders, it never activates** (rule 19). A listed item still
   must pass ``should_activate_resource`` to run; a listed-but-inactive,
