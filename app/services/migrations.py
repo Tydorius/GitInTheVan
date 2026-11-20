@@ -1530,6 +1530,36 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             """,
         },
     ),
+    (
+        "064_map_final_verification",
+        # 0.44.0: opt-in map-level final verification toggle (off by default).
+        {
+            "sqlite": """
+            ALTER TABLE maps ADD COLUMN final_verification_enabled BOOLEAN NOT NULL DEFAULT 0;
+            """,
+            "postgresql": """
+            ALTER TABLE maps ADD COLUMN final_verification_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+            """,
+            "mysql": """
+            ALTER TABLE maps ADD COLUMN final_verification_enabled BOOLEAN NOT NULL DEFAULT 0;
+            """,
+        },
+    ),
+    (
+        "065_verification_regex_pattern",
+        # 0.44.0: optional regex pattern on verification rules for deterministic pre-checks.
+        {
+            "sqlite": """
+            ALTER TABLE verification_rules ADD COLUMN regex_pattern TEXT NOT NULL DEFAULT '';
+            """,
+            "postgresql": """
+            ALTER TABLE verification_rules ADD COLUMN regex_pattern TEXT NOT NULL DEFAULT '';
+            """,
+            "mysql": """
+            ALTER TABLE verification_rules ADD COLUMN regex_pattern TEXT;
+            """,
+        },
+    ),
 ]
 
 

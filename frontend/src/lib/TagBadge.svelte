@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte'
+
   let {
     tag,
     onEdit,
@@ -18,6 +20,10 @@
       copied = false
     }, 1500)
   }
+
+  onDestroy(() => {
+    if (timer) clearTimeout(timer)
+  })
 </script>
 
 <button

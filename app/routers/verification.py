@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -29,6 +30,7 @@ class RuleCreate(BaseModel):
     name: str
     description: str = ""
     prompt: str = ""
+    regex_pattern: str = ""
     is_active: bool = True
     max_retries: int = 2
     execution_order: int = 10
@@ -43,6 +45,7 @@ class RuleUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     prompt: str | None = None
+    regex_pattern: str | None = None
     is_active: bool | None = None
     max_retries: int | None = None
     execution_order: int | None = None
@@ -58,6 +61,7 @@ class RuleResponse(BaseModel):
     name: str
     description: str
     prompt: str
+    regex_pattern: str = ""
     is_active: bool
     max_retries: int
     execution_order: int
@@ -73,6 +77,7 @@ class RuleListItem(BaseModel):
     name: str
     description: str
     prompt: str
+    regex_pattern: str = ""
     is_active: bool
     max_retries: int
     execution_order: int
@@ -138,12 +143,26 @@ class VerificationSettingsUpdate(BaseModel):
     verification_model: str | None = None
 
 
+def _validate_regex_pattern(pattern: str, max_rule_chars: int) -> None:
+    if not pattern:
+        return
+    check_size(pattern, max_rule_chars, "Regex pattern")
+    try:
+        re.compile(pattern)
+    except re.error as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid regex pattern: {exc}",
+        ) from exc
+
+
 def _rule_to_response(rule: VerificationRule) -> RuleResponse:
     return RuleResponse(
         id=rule.id,
         name=rule.name,
         description=rule.description,
         prompt=rule.prompt,
+        regex_pattern=rule.regex_pattern,
         is_active=rule.is_active,
         max_retries=rule.max_retries,
         execution_order=rule.execution_order,
@@ -161,6 +180,7 @@ def _rule_to_list_item(rule: VerificationRule) -> RuleListItem:
         name=rule.name,
         description=rule.description,
         prompt=rule.prompt,
+        regex_pattern=rule.regex_pattern,
         is_active=rule.is_active,
         max_retries=rule.max_retries,
         execution_order=rule.execution_order,
@@ -203,7 +223,9 @@ async def create_rule(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     admin_settings = await get_admin_settings()
-    check_size(req.prompt, admin_settings.max_rule_size_kb * 1024, "Verification rule prompt")
+    max_rule_chars = admin_settings.max_rule_size_kb * 1024
+    check_size(req.prompt, max_rule_chars, "Verification rule prompt")
+    _validate_regex_pattern(req.regex_pattern, max_rule_chars)
     req.prompt = await sanitize_and_log(db, current_user.id, req.prompt, "verification_rule")
 
     rule = VerificationRule(
@@ -211,6 +233,7 @@ async def create_rule(
         name=req.name,
         description=req.description,
         prompt=req.prompt,
+        regex_pattern=req.regex_pattern,
         is_active=req.is_active,
         max_retries=req.max_retries,
         execution_order=req.execution_order,
@@ -248,10 +271,16 @@ async def update_rule(
         rule.parameters_json = params_from_api(
             update_data.pop("parameters"), "verification rule parameters"
         )
-    if update_data.get("prompt") is not None:
+    if update_data.get("prompt") is not None or update_data.get("regex_pattern") is not None:
         admin_settings = await get_admin_settings()
-        check_size(update_data["prompt"], admin_settings.max_rule_size_kb * 1024, "Verification rule prompt")
-        update_data["prompt"] = await sanitize_and_log(db, current_user.id, update_data["prompt"], "verification_rule", rule_id)
+        max_rule_chars = admin_settings.max_rule_size_kb * 1024
+        if update_data.get("prompt") is not None:
+            check_size(update_data["prompt"], max_rule_chars, "Verification rule prompt")
+            update_data["prompt"] = await sanitize_and_log(
+                db, current_user.id, update_data["prompt"], "verification_rule", rule_id
+            )
+        if update_data.get("regex_pattern") is not None:
+            _validate_regex_pattern(update_data["regex_pattern"], max_rule_chars)
 
     for key, value in update_data.items():
         setattr(rule, key, value)
@@ -291,6 +320,7 @@ async def export_rule(
         "name": rule.name,
         "description": rule.description or "",
         "prompt": rule.prompt or "",
+        "regex_pattern": rule.regex_pattern or "",
         "max_retries": rule.max_retries,
         "execution_order": rule.execution_order,
         "resubmission_strategy": rule.resubmission_strategy,

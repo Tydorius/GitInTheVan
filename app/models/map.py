@@ -28,6 +28,9 @@ class Map(Base):
     version: Mapped[str] = mapped_column(String(32), nullable=False, default="1.0")
     author: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     global_llm_instructions: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    final_verification_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

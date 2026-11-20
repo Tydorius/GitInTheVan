@@ -23,6 +23,7 @@ class VerificationRule(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    regex_pattern: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     tag: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     max_retries: Mapped[int] = mapped_column(Integer, default=2, nullable=False)

@@ -89,24 +89,42 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return data as T;
 }
 
-function crud<TList = any>(basePath: string) {
-  return {
+function crud<TList = any>(basePath: string, opts: { exportable: true }): {
+  list: () => Promise<TList>;
+  get: (id: string) => Promise<any>;
+  create: (data: any) => Promise<any>;
+  update: (id: string, data: any) => Promise<any>;
+  delete: (id: string) => Promise<void>;
+  export: (id: string) => Promise<any>;
+};
+function crud<TList = any>(basePath: string, opts?: { exportable?: false }): {
+  list: () => Promise<TList>;
+  get: (id: string) => Promise<any>;
+  create: (data: any) => Promise<any>;
+  update: (id: string, data: any) => Promise<any>;
+  delete: (id: string) => Promise<void>;
+};
+function crud<TList = any>(basePath: string, opts?: { exportable?: boolean }) {
+  const base = {
     list: () => request<TList>(basePath),
     get: (id: string) => request<any>(`${basePath}/${id}`),
     create: (data: any) => request<any>(basePath, { method: 'POST', body: JSON.stringify(data) }),
     update: (id: string, data: any) => request<any>(`${basePath}/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: string) => request<void>(`${basePath}/${id}`, { method: 'DELETE' }),
-    export: (id: string) => request<any>(`${basePath}/${id}/export`),
   };
+  if (opts?.exportable) {
+    return { ...base, export: (id: string) => request<any>(`${basePath}/${id}/export`) };
+  }
+  return base;
 }
 
-const cantripsCrud = crud<{ cantrips: any[] }>('/api/cantrips');
-const lorebooksCrud = crud<{ lorebooks: any[] }>('/api/lorebooks');
-const skillsCrud = crud<{ skills: any[] }>('/api/skills');
+const cantripsCrud = crud<{ cantrips: any[] }>('/api/cantrips', { exportable: true });
+const lorebooksCrud = crud<{ lorebooks: any[] }>('/api/lorebooks', { exportable: true });
+const skillsCrud = crud<{ skills: any[] }>('/api/skills', { exportable: true });
 const scenarioRulesCrud = crud<{ rules: any[] }>('/api/scenario-rules');
-const verificationRulesCrud = crud<{ rules: any[] }>('/api/verification/rules');
-const memoryRulesCrud = crud<{ rules: any[] }>('/api/memory-rules');
-const mapsCrud = crud<{ maps: any[] }>('/api/maps');
+const verificationRulesCrud = crud<{ rules: VerificationRule[] }>('/api/verification/rules', { exportable: true });
+const memoryRulesCrud = crud<{ rules: any[] }>('/api/memory-rules', { exportable: true });
+const mapsCrud = crud<{ maps: MapResponse[] }>('/api/maps', { exportable: true });
 const tagGroupsCrud = crud<{ groups: any[] }>('/api/tag-groups');
 
 /** Retry helper for the safety-scanner blocking gate (HTTP 422).
@@ -394,6 +412,43 @@ export interface EndpointModel {
   parameters?: LlmParameter[]
 }
 
+export interface VerificationRule {
+  id: string
+  name: string
+  description?: string
+  prompt: string
+  regex_pattern?: string
+  is_active: boolean
+  max_retries: number
+  execution_order: number
+  resubmission_strategy: string
+  verification_endpoint_id?: string | null
+  verification_model?: string
+  parameters?: LlmParameter[]
+  tag?: string
+  [key: string]: any
+}
+
+export type VerificationRuleCreate = Partial<VerificationRule> & { name: string; prompt: string }
+export type VerificationRuleUpdate = Partial<VerificationRule>
+
+export interface MapResponse {
+  id: string
+  name: string
+  description?: string
+  tag?: string
+  is_public?: boolean
+  version?: string
+  author?: string
+  global_llm_instructions?: string
+  final_verification_enabled?: boolean
+  stages: any[]
+  [key: string]: any
+}
+
+export type MapCreate = Partial<MapResponse> & { name: string; stages: any[] }
+export type MapUpdate = Partial<MapResponse>
+
 // Assistant Pane (Phase 26). The backend router (app/routers/assistant.py) is
 // being written concurrently -- these shapes follow Planning/project-plan.md
 // > "Phase 26 Design: Assistant Pane" > Architecture/Data model/Modules.
@@ -623,9 +678,9 @@ export const api = {
 
   // Verification
   listVerificationRules: verificationRulesCrud.list,
-  getVerificationRule: verificationRulesCrud.get,
-  createVerificationRule: verificationRulesCrud.create,
-  updateVerificationRule: verificationRulesCrud.update,
+  getVerificationRule: (id: string) => verificationRulesCrud.get(id) as Promise<VerificationRule>,
+  createVerificationRule: (data: VerificationRuleCreate) => verificationRulesCrud.create(data) as Promise<VerificationRule>,
+  updateVerificationRule: (id: string, data: VerificationRuleUpdate) => verificationRulesCrud.update(id, data) as Promise<VerificationRule>,
   deleteVerificationRule: verificationRulesCrud.delete,
   exportVerificationRule: verificationRulesCrud.export,
   getVerificationSettings: () =>
@@ -654,9 +709,9 @@ export const api = {
 
   // Maps
   listMaps: mapsCrud.list,
-  getMap: mapsCrud.get,
-  createMap: mapsCrud.create,
-  updateMap: mapsCrud.update,
+  getMap: (id: string) => mapsCrud.get(id) as Promise<MapResponse>,
+  createMap: (data: MapCreate) => mapsCrud.create(data) as Promise<MapResponse>,
+  updateMap: (id: string, data: MapUpdate) => mapsCrud.update(id, data) as Promise<MapResponse>,
   deleteMap: mapsCrud.delete,
   exportMap: (id: string, mode: 'embedded' | 'linked' = 'embedded') =>
     request<any>(`/api/maps/${id}/export?mode=${mode}`),

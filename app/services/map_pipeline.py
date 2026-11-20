@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 from app.database import async_session
 from app.models.endpoint import Endpoint
 from app.models.map import Map, MapStage
+from app.services.budget import estimate_tokens
 from app.services.llm_params import apply_to_body, parse_params, resolve
 from app.services.routing import endpoint_parameters, model_parameter_map
 
@@ -367,31 +368,12 @@ async def _inject_stage_lorebooks(
         if not lorebooks:
             return body_json
 
-        from app.services.lorebook import inject_entries, match_book_entries
+        from app.services.lorebook import book_entries_to_dicts, inject_entries, match_book_entries
         messages = body_json.get("messages", [])
         pre_matched: list = []
         deferred_matched: list = []
         for lb in lorebooks:
-            book_entries = [
-                {
-                    # Provenance for the per-entry metrics rows (and any
-                    # matched-entry metadata), mirroring proxy.py.
-                    "lorebook_id": lb.id,
-                    "lorebook_name": lb.name,
-                    "entry_id": entry.id,
-                    "name": entry.name,
-                    "keys": entry.keys,
-                    "secondary_keys": entry.secondary_keys,
-                    "content": entry.content,
-                    "position": entry.position,
-                    "insertion_order": entry.insertion_order,
-                    "is_constant": entry.is_constant,
-                    "is_selective": entry.is_selective,
-                    "is_disabled": entry.is_disabled,
-                    "character_limit": entry.character_limit,
-                }
-                for entry in lb.entries
-            ]
+            book_entries = book_entries_to_dicts(lb.entries, book=lb)
             # Per-book matching with the book's own scan depth, and the same
             # inject-after-cantrips split as the global pass (0.35.0).
             book_matched = match_book_entries(
@@ -423,7 +405,7 @@ async def _inject_stage_lorebooks(
         for e in pre_matched + deferred_matched:
             record_prompt_object(
                 body_json, "lorebook_entry", e.entry_id,
-                0, max(1, len(e.content) // 4),
+                0, estimate_tokens(e.content),
                 parent_id=e.lorebook_id,
             )
 
@@ -462,7 +444,7 @@ async def _inject_stage_skills(
         from app.services.metrics import record_prompt_object
         for s in skills:
             if s.content:
-                record_prompt_object(body_json, s.type, s.id, 0, max(1, len(s.content) // 4))
+                record_prompt_object(body_json, s.type, s.id, 0, estimate_tokens(s.content))
 
         messages = body_json.get("messages", [])
         if skill_contents:
@@ -842,12 +824,119 @@ class _MapVerificationResult:
                     "detail": entry["reason"],
                 }]
             )
-            self.judgments: list[Any] = []
+            self.judgments: list[Any] = list(entry.get("judgments", []))
 
     def __init__(self, stage_results: list[dict[str, Any]]) -> None:
         self.approved = all(r["approved"] for r in stage_results)
         self.retries_used = 0
         self.check_history = [self._Check(r) for r in stage_results]
+
+
+async def _run_final_map_verification(
+    response_data: dict[str, Any],
+    body_json: dict[str, Any],
+    user_id: str,
+    map_obj: Map,
+    tags: list | None,
+    debug_on: bool,
+) -> dict[str, Any] | None:
+    """Run a report-only Navigator check on the map's final output.
+
+    Logs to VerificationLog and attaches rule-level judgments to the debug
+    adapter, but never re-runs the map.
+    """
+    from app.services.debug import debug_capture_response
+    from app.services.upstream import extract_response_text
+    from app.services.verification import (
+        _create_log_entry,
+        check_response,
+        prepare_verification_run,
+    )
+
+    async with async_session() as db:
+        (
+            rules,
+            v_endpoint,
+            v_model,
+            _max_retries,
+            user_verification_layer,
+            rule_endpoints,
+            rule_chains,
+        ) = await prepare_verification_run(db, user_id, tags)
+
+    if not rules or not v_endpoint:
+        return None
+
+    final_content = extract_response_text(response_data)
+    check_result = await check_response(
+        final_content,
+        rules,
+        v_endpoint,
+        v_model,
+        rule_endpoints=rule_endpoints or None,
+        rule_chains=rule_chains or None,
+        user_param_layer=user_verification_layer,
+        body_json=body_json,
+    )
+
+    conversation_id = body_json.get("_gitv_conversation_id", "")
+    async with async_session() as db:
+        await _create_log_entry(
+            db,
+            user_id,
+            rules[0].name,
+            conversation_id,
+            final_content,
+            check_result,
+            retries_used=0,
+            approved=check_result.approved,
+        )
+
+    errored = bool(check_result.errors) and check_result.approved
+    reason = check_result.combined_reason
+    if check_result.errors:
+        note = check_result.combined_error_note
+        reason = f"{reason} {note}".strip() if reason else note
+
+    if not check_result.approved:
+        logger.warning(
+            "Map '%s' final-output verification failed (report-only): %s",
+            map_obj.name, reason,
+        )
+    elif errored:
+        logger.warning("Map '%s' final-output verification: %s", map_obj.name, reason)
+
+    if debug_on:
+        debug_capture_response(
+            body_json,
+            "map_final_verification",
+            "Map Final-Output Verification",
+            content_after=final_content,
+            detail=(
+                f"Not checked: {reason}" if errored
+                else "Approved" if check_result.approved
+                else f"Rejected (report-only): {reason}"
+            ),
+            metadata={
+                "map_id": map_obj.id,
+                "map_name": map_obj.name,
+                "approved": check_result.approved,
+                "reason": reason,
+                "report_only": True,
+                "rule_count": len(rules),
+                "violation_count": len(check_result.violations),
+            },
+        )
+
+    return {
+        "stage_index": -1,
+        "stage_id": map_obj.id,
+        "stage_name": f"{map_obj.name} (final)",
+        "approved": check_result.approved,
+        "reason": reason,
+        "errored": errored,
+        "judgments": check_result.judgments,
+    }
 
 
 async def run_map_pipeline(
@@ -1085,7 +1174,7 @@ async def run_map_pipeline(
             for e in stage_dynamic_delta:
                 record_prompt_object(
                     body_json, "lorebook_entry", e.entry_id,
-                    0, max(1, len(e.content) // 4), parent_id=e.lorebook_id,
+                    0, estimate_tokens(e.content), parent_id=e.lorebook_id,
                 )
             if debug_on:
                 debug_capture(
@@ -1393,6 +1482,18 @@ async def run_map_pipeline(
     # the loop (post-map cantrip positions) would still claim to be inside the
     # last stage.
     body_json.pop("_gitv_stage_info", None)
+
+    if (
+        response_data is not None
+        and body_json.get("_gitv_map_status_code", 200) == 200
+        and getattr(map_obj, "final_verification_enabled", False)
+        and body_json.get("_gitv_command_overrides", {}).get("verify") is not False
+    ):
+        final_entry = await _run_final_map_verification(
+            response_data, body_json, user_id, map_obj, tags, debug_on
+        )
+        if final_entry is not None:
+            stage_verifications.append(final_entry)
 
     # Handed to _save_debug_exchange by the map branch in proxy.py. Shaped like
     # VerificationLoopResult so the one consumer needs no special case: a map

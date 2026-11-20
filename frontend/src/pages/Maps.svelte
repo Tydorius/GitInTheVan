@@ -30,7 +30,7 @@
 
   let editForm: any = {
     name: '', description: '', tag: '', is_public: false, version: '1.0',
-    author: '', global_llm_instructions: '',
+    author: '', global_llm_instructions: '', final_verification_enabled: false,
     stages: [],
   }
 
@@ -51,7 +51,7 @@
   function newMap() {
     editForm = {
       name: '', description: '', tag: '', is_public: false, version: '1.0',
-      author: '', global_llm_instructions: '',
+      author: '', global_llm_instructions: '', final_verification_enabled: false,
       stages: [createEmptyStage('Writing LLM')],
     }
     editing = true
@@ -130,6 +130,7 @@
         name: data.name, description: data.description, tag: data.tag,
         is_public: data.is_public, version: data.version, author: data.author,
         global_llm_instructions: data.global_llm_instructions,
+        final_verification_enabled: !!data.final_verification_enabled,
         stages: data.stages.map((s: any) => ({
           ...s,
           resources: s.resources || [],
@@ -294,6 +295,12 @@
     <div class="form-group"><label for="map-author">Author</label><input id="map-author" bind:value={editForm.author} /></div>
     <div class="form-group">
       <label><input type="checkbox" bind:checked={editForm.is_public} style="width: auto;"> Public</label>
+    </div>
+    <div class="form-group">
+      <label><input type="checkbox" bind:checked={editForm.final_verification_enabled} style="width: auto;"> Final-Output Navigator Pass (report-only)</label>
+      <p style="color: var(--text-dim); font-size: 11px; margin-top: 2px;">
+        Report-only check after all stages finish (respects <code>&lt;VERIFY:off&gt;</code>, never re-runs the map). If a map needs verification with retries, enable verification inside the specific stage instead — the end-of-map pass judges output after every stage is already paid for.
+      </p>
     </div>
     <div class="form-group">
       <label for="map-global">Global LLM Instructions (shown to all stages)</label>

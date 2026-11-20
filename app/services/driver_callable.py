@@ -199,9 +199,11 @@ async def execute_tool_call(
             return final[len(seeded):]
         return final
 
+    uses_user_data = "user_data" in (tool.code or "")
+
     async with async_session() as db:
         chat_data = await _load_chat_data(db, user_id, params["conversation_id"])
-        user_data = await _load_user_data(db, user_id)
+        user_data = await _load_user_data(db, user_id) if uses_user_data else {}
         cantrip_data = await _load_cantrip_data(db, user_id, tool.id)
 
         try:
@@ -230,10 +232,11 @@ async def execute_tool_call(
                 deletes=set(result.chat_data_deletes),
             )
         if persist_shared:
-            await _save_user_data(
-                db, user_id, result.user_data,
-                deletes=set(result.user_data_deletes),
-            )
+            if uses_user_data:
+                await _save_user_data(
+                    db, user_id, result.user_data,
+                    deletes=set(result.user_data_deletes),
+                )
             if result.cantrip_data != cantrip_data:
                 await _save_cantrip_data(
                     db, user_id, tool.id, result.cantrip_data,

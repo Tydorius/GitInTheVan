@@ -120,6 +120,7 @@ class MapCreate(BaseModel):
     version: str = "1.0"
     author: str = ""
     global_llm_instructions: str = ""
+    final_verification_enabled: bool = False
     stages: list[StageInput] = []
 
 
@@ -132,6 +133,7 @@ class MapUpdate(BaseModel):
     version: str | None = None
     author: str | None = None
     global_llm_instructions: str | None = None
+    final_verification_enabled: bool | None = None
     stages: list[StageInput] | None = None
 
 
@@ -176,6 +178,7 @@ class MapResponse(BaseModel):
     version: str
     author: str
     global_llm_instructions: str
+    final_verification_enabled: bool = False
     stages: list[StageResponse]
     # Populated by /import only: resources that could not be resolved, and the
     # repos that would resolve them. Empty everywhere else.
@@ -229,6 +232,7 @@ def _map_to_response(m: Map) -> MapResponse:
         id=m.id, name=m.name, description=m.description, tag=m.tag,
         is_public=m.is_public, is_active=m.is_active, version=m.version,
         author=m.author, global_llm_instructions=m.global_llm_instructions,
+        final_verification_enabled=m.final_verification_enabled,
         stages=[_stage_to_response(s) for s in m.stages],
     )
 
@@ -385,6 +389,7 @@ async def create_map(
         version=req.version,
         author=req.author,
         global_llm_instructions=req.global_llm_instructions,
+        final_verification_enabled=req.final_verification_enabled,
     )
     db.add(m)
     await db.flush()
@@ -442,6 +447,8 @@ async def update_map(
         m.author = req.author
     if req.global_llm_instructions is not None:
         m.global_llm_instructions = req.global_llm_instructions
+    if req.final_verification_enabled is not None:
+        m.final_verification_enabled = req.final_verification_enabled
 
     if req.stages is not None:
         for stage in m.stages:

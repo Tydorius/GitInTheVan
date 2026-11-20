@@ -28,14 +28,44 @@ class EmbeddedScript:
 def _desanitize_content(raw: str) -> str:
     """Decode HTML entities from upstream platforms and restore escaped newlines/tabs
     only outside JavaScript string literals so string escapes like ``"a\\nb"`` stay valid.
+    Tracks ``//`` line comments and ``/* ... */`` block comments so apostrophes inside
+    comments (e.g. ``// don't``) do not flip into single-quote string mode.
     """
     decoded = html.unescape(raw)
     out: list[str] = []
     in_quote: str | None = None
+    in_line_comment = False
+    in_block_comment = False
     i = 0
     n = len(decoded)
     while i < n:
         ch = decoded[i]
+        if in_line_comment:
+            if ch == "\\" and i + 1 < n and decoded[i + 1] in ("n", "t"):
+                nl = "\n" if decoded[i + 1] == "n" else "\t"
+                out.append(nl)
+                if nl == "\n":
+                    in_line_comment = False
+                i += 2
+                continue
+            out.append(ch)
+            if ch in ("\n", "\r"):
+                in_line_comment = False
+            i += 1
+            continue
+        if in_block_comment:
+            if ch == "*" and i + 1 < n and decoded[i + 1] == "/":
+                out.append("*/")
+                in_block_comment = False
+                i += 2
+                continue
+            if ch == "\\" and i + 1 < n and decoded[i + 1] in ("n", "t"):
+                out.append("\n" if decoded[i + 1] == "n" else "\t")
+                i += 2
+                continue
+            out.append(ch)
+            i += 1
+            continue
         if in_quote is not None:
             out.append(ch)
             if ch == "\\" and i + 1 < n:
@@ -45,6 +75,16 @@ def _desanitize_content(raw: str) -> str:
             if ch == in_quote:
                 in_quote = None
             i += 1
+            continue
+        if ch == "/" and i + 1 < n and decoded[i + 1] == "/":
+            in_line_comment = True
+            out.append("//")
+            i += 2
+            continue
+        if ch == "/" and i + 1 < n and decoded[i + 1] == "*":
+            in_block_comment = True
+            out.append("/*")
+            i += 2
             continue
         if ch in ("'", '"', "`"):
             in_quote = ch

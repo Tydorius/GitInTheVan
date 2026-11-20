@@ -26,7 +26,7 @@ from app.services.content_guard import (
     sanitize_and_log,
 )
 from app.services.git_sync import GitCloneError, fetch_file_content, fetch_repo_info
-from app.services.safety_scanner import scan_file
+from app.services.safety_scanner import MAX_CONTENT_SIZE, scan_file
 
 logger = logging.getLogger(__name__)
 
@@ -501,8 +501,14 @@ async def install_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
     resource_type = req.file_path.split("/")[0].rstrip("s")
+    admin_settings = await get_admin_settings()
 
-    scan_result = scan_file(raw_content, resource_type)
+    max_content_size = (
+        max(MAX_CONTENT_SIZE, admin_settings.max_script_size_kb * 1024)
+        if resource_type == "cantrip"
+        else None
+    )
+    scan_result = scan_file(raw_content, resource_type, max_content_size=max_content_size)
     await log_scan_findings(current_user.id, scan_result, f"pack_{resource_type}", req.file_path)
     if resource_type != "map":
         gate_scan_findings(scan_result, req.override_scan, f"Pack {resource_type}")
@@ -518,7 +524,6 @@ async def install_file(
     outcome = None
 
     if resource_type == "map":
-        admin_settings = await get_admin_settings()
         stages = data.get("stages", []) or []
         if isinstance(stages, list) and len(stages) > admin_settings.max_map_stages:
             raise HTTPException(
@@ -1156,13 +1161,25 @@ async def _create_local_resource(
 
     if resource_type == "rule":
         prompt = data.get("prompt", "") or ""
-        check_size(prompt, admin_settings.max_rule_size_kb * 1024, "Rule prompt")
+        regex_pattern = data.get("regex_pattern", "") or ""
+        max_rule_chars = admin_settings.max_rule_size_kb * 1024
+        check_size(prompt, max_rule_chars, "Rule prompt")
+        if regex_pattern:
+            check_size(regex_pattern, max_rule_chars, "Regex pattern")
+            try:
+                re.compile(regex_pattern)
+            except re.error as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Invalid regex pattern: {exc}",
+                ) from exc
         prompt = await sanitize_and_log(db, user_id, prompt, "verification_rule")
         rule = VerificationRule(
             user_id=user_id,
             name=data.get("name", "Imported"),
             description=data.get("description", ""),
             prompt=prompt,
+            regex_pattern=regex_pattern,
             is_active=False,
         )
         db.add(rule)

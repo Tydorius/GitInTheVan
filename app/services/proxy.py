@@ -965,7 +965,10 @@ async def _forward_request_impl(
                 setting="driver_callable_enabled", setting_value=False)
 
         from app.services.bypass import apply_bypass_encode
+        from app.services.macros import expand_macros_in_messages
         from app.services.prefill import normalize_prefill
+
+        expand_macros_in_messages(body_json, request_headers)
 
         async with async_session() as db:
             from app.models.user_settings import UserSettings
@@ -1191,35 +1194,14 @@ async def _apply_lorebook_injection(
             # pass's injection. Both buckets still sort by insertion_order
             # (stable) so cross-book ordering matches the old flattened
             # single-pass behavior exactly.
-            from app.services.lorebook import match_book_entries
+            from app.services.lorebook import book_entries_to_dicts, match_book_entries
 
             messages = body_json.get("messages", [])
             pre_matched: list = []
             deferred_matched: list = []
             deferred_pending = False
             for lb in active_lorebooks:
-                book_entries = [
-                    {
-                        # Provenance for the debug trace's matched-entry
-                        # metadata and the per-entry metrics rows. Absent
-                        # since the lorebook engine shipped, which left
-                        # MatchedEntry.lorebook_id/entry_id always empty.
-                        "lorebook_id": lb.id,
-                        "lorebook_name": lb.name,
-                        "entry_id": entry.id,
-                        "name": entry.name,
-                        "keys": entry.keys,
-                        "secondary_keys": entry.secondary_keys,
-                        "content": entry.content,
-                        "position": entry.position,
-                        "insertion_order": entry.insertion_order,
-                        "is_constant": entry.is_constant,
-                        "is_selective": entry.is_selective,
-                        "is_disabled": entry.is_disabled,
-                        "character_limit": entry.character_limit,
-                    }
-                    for entry in lb.entries
-                ]
+                book_entries = book_entries_to_dicts(lb.entries, book=lb)
                 book_matched = match_book_entries(
                     messages, book_entries, lb.scan_depth,
                     word_boundary=lb.word_boundary_keys,

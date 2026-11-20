@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onMount, onDestroy } from 'svelte'
+  import { api } from '../api'
   import { routeParams } from '../stores'
   import { CollapseController } from '../lib/collapse'
   import AdminCapsTab from './admin/AdminCapsTab.svelte'
@@ -22,6 +24,32 @@
   let collapse = new CollapseController('admin', ['caps-limits', 'caps-sizes', 'caps-debug', 'caps-blocklist', 'caps-assistant', 'caps-logging', 'caps-banner', 'logs-viewer', 'network-ssl', 'update-panel', 'backup-schedule', 'backup-list'])
   let updateInfo: any = $state(null)
   let updateChain: any = $state(null)
+  let chainPoll: ReturnType<typeof setInterval> | null = null
+
+  async function refreshUpdateChain() {
+    try {
+      updateChain = await api.getUpdateChain()
+    } catch { /* chain state is advisory */ }
+  }
+
+  onMount(() => {
+    refreshUpdateChain()
+  })
+
+  $effect(() => {
+    if (updateChain?.active && tab !== 'update') {
+      if (!chainPoll) {
+        chainPoll = setInterval(refreshUpdateChain, 5000)
+      }
+    } else if (chainPoll) {
+      clearInterval(chainPoll)
+      chainPoll = null
+    }
+  })
+
+  onDestroy(() => {
+    if (chainPoll) clearInterval(chainPoll)
+  })
 </script>
 
 <div class="page-header">

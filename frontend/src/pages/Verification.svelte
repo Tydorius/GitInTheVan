@@ -26,7 +26,7 @@
   let tab = 'rules'
 
   let form = {
-    name: '', description: '', prompt: '',
+    name: '', description: '', prompt: '', regex_pattern: '',
     is_active: true, max_retries: 2, execution_order: 10,
     resubmission_strategy: 'add_instructions',
     verification_endpoint_id: null as string | null,
@@ -78,13 +78,13 @@
   }
 
   function resetForm() {
-    form = { name: '', description: '', prompt: '', is_active: true, max_retries: 2, execution_order: 10, resubmission_strategy: 'add_instructions', verification_endpoint_id: null, verification_model: '', parameters: [] }
+    form = { name: '', description: '', prompt: '', regex_pattern: '', is_active: true, max_retries: 2, execution_order: 10, resubmission_strategy: 'add_instructions', verification_endpoint_id: null, verification_model: '', parameters: [] }
     editingId = null
   }
 
   function startEdit(r: any) {
     editingId = r.id
-    form = { name: r.name, description: r.description, prompt: r.prompt, is_active: r.is_active, max_retries: r.max_retries, execution_order: r.execution_order, resubmission_strategy: r.resubmission_strategy, verification_endpoint_id: r.verification_endpoint_id || null, verification_model: r.verification_model || '', parameters: structuredClone(r.parameters || []) }
+    form = { name: r.name, description: r.description, prompt: r.prompt, regex_pattern: r.regex_pattern || '', is_active: r.is_active, max_retries: r.max_retries, execution_order: r.execution_order, resubmission_strategy: r.resubmission_strategy, verification_endpoint_id: r.verification_endpoint_id || null, verification_model: r.verification_model || '', parameters: structuredClone(r.parameters || []) }
     showForm = true
   }
 
@@ -276,6 +276,9 @@
           <div class="card-header">
             <div>
               <strong>{r.name}</strong>
+              {#if r.regex_pattern}
+                <span class="badge" style="margin-left: 6px; font-size: 10px;" title={r.regex_pattern}>Regex</span>
+              {/if}
               {#if r.tag}
                 <span style="display: inline-flex; align-items: center; gap: 4px; margin-left: 8px;">
                   <span class="api-key-display" style="display: inline; font-size: 10px; padding: 2px 6px; cursor: pointer;"
@@ -508,6 +511,13 @@
         <div class="form-group">
           <label>Verification Prompt</label>
           <CodeEditor bind:value={form.prompt} language="markdown" minHeight="150px" placeholder="The response must stay in character at all times. The character must never mention being an AI..." />
+        </div>
+        <div class="form-group">
+          <label for="rule-regex">Regex Pre-Check (optional)</label>
+          <input id="rule-regex" bind:value={form.regex_pattern} placeholder="e.g. \b(as an AI|I cannot)\b" />
+          <p style="color: var(--text-dim); font-size: 11px; margin-top: 2px;">
+            Optional regex checked before calling the Navigator LLM — rejects matching replies without an API call.
+          </p>
         </div>
         <div class="form-row">
           <div class="form-group"><label>Max Retries</label><input type="number" bind:value={form.max_retries} /></div>

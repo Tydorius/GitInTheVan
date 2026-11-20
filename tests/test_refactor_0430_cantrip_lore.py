@@ -111,7 +111,6 @@ class TestLorebookEntryDicts:
                 "is_constant": False,
                 "is_selective": False,
                 "is_disabled": False,
-                "character_limit": 500,
             }
         ]
 

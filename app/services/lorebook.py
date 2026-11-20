@@ -211,7 +211,6 @@ def book_entries_to_dicts(
             "is_constant": entry.is_constant,
             "is_selective": entry.is_selective,
             "is_disabled": entry.is_disabled,
-            "character_limit": entry.character_limit,
         }
         for entry in entries
     ]

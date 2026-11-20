@@ -189,6 +189,7 @@ async def build_map_from_export(
         version=data.get("version", "1.0"),
         author=data.get("author", ""),
         global_llm_instructions=data.get("global_llm_instructions", ""),
+        final_verification_enabled=bool(data.get("final_verification_enabled", False)),
     )
     db.add(m)
     await db.flush()
@@ -839,6 +840,7 @@ async def serialize_map_to_export(
         "version": m.version,
         "author": m.author,
         "global_llm_instructions": m.global_llm_instructions,
+        "final_verification_enabled": m.final_verification_enabled,
         "stages": [],
     }
 

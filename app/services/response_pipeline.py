@@ -1,26 +1,15 @@
 from __future__ import annotations
 
 import logging
-import sys
 import time
 from typing import Any
 
 import httpx
 
-from app.services.upstream import extract_response_text
+from app.services.upstream import _resolve_proxy_override, extract_response_text
 from app.services.verification import run_verification_loop
 
 logger = logging.getLogger(__name__)
-
-
-def _resolve_proxy_override(name: str, local_fn: Any) -> Any:
-    """Resolve a response-pipeline helper through ``app.services.proxy`` when patched."""
-    proxy_mod = sys.modules.get("app.services.proxy")
-    if proxy_mod is not None:
-        candidate = getattr(proxy_mod, name, None)
-        if candidate is not None and candidate is not local_fn:
-            return candidate
-    return local_fn
 
 
 async def _record_conversation_anchor(

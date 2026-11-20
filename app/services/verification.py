@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -51,6 +52,7 @@ class VerificationJudgment:
     # indistinguishable from a clean pass at every surface -- which is exactly
     # how the LiteLLM transport gap stayed invisible.
     errored: bool = False
+    rule_id: str = ""
 
     @property
     def passed(self) -> bool:
@@ -245,6 +247,51 @@ async def check_response(
         violations.append(judgment)
         return VerificationCheckResult(
             approved=False, judgments=judgments, violations=violations
+        )
+
+    # Hybrid verification: run per-rule regex pre-checks before any LLM judge
+    # call. If any regex matches, short-circuit immediately with zero Navigator
+    # API calls so the caller can retry or log at zero judge cost.
+    for rule in rules:
+        pattern = (getattr(rule, "regex_pattern", "") or "").strip()
+        if not pattern:
+            continue
+        try:
+            if re.search(pattern, content):
+                judgment = VerificationJudgment(
+                    violation=True,
+                    reason=f"Regex pre-check matched: {pattern}",
+                    severity="high",
+                    rule_name=rule.name,
+                    rule_id=getattr(rule, "id", ""),
+                )
+                judgments.append(judgment)
+                violations.append(judgment)
+        except re.error as exc:
+            logger.warning(
+                "Invalid regex pattern on verification rule '%s': %s",
+                rule.name, exc,
+            )
+
+    if violations:
+        if body_json is not None:
+            from app.services.debug import debug_capture_response
+
+            debug_capture_response(
+                body_json,
+                "verification_regex_precheck",
+                "Verification Regex Pre-Check",
+                content_after=content,
+                detail="; ".join(v.reason for v in violations),
+                metadata={
+                    "matched_rules": [v.rule_name for v in violations],
+                    "violation_count": len(violations),
+                },
+            )
+        return VerificationCheckResult(
+            approved=False,
+            judgments=judgments,
+            violations=violations,
         )
 
     for rule in rules:
@@ -527,6 +574,72 @@ async def is_verification_enabled(user_id: str, tags: list | None = None) -> boo
         return len(rules) > 0 and endpoint is not None
 
 
+async def prepare_verification_run(
+    db: AsyncSession,
+    user_id: str,
+    tags: list | None = None,
+) -> tuple[
+    list[VerificationRule],
+    Endpoint | None,
+    str,
+    int,
+    list[ParamDef],
+    dict[str, tuple[Endpoint, str]],
+    dict[str, list[FailoverEndpoint]],
+]:
+    """Load active rules, judge endpoint/model, failover chains, and param layer."""
+    from app.services.routing import _build_failover_chain, _endpoint_to_candidate
+
+    rules, v_endpoint, v_model, max_retries = await load_verification_config(
+        db, user_id, tags
+    )
+    user_verification_layer = await _load_verification_param_layer(db, user_id)
+
+    rule_endpoints: dict[str, tuple[Endpoint, str]] = {}
+    # A judge gets the same failover treatment as the driver and map stages:
+    # the configured endpoint first, then its tag-mates. Built here because
+    # `_build_failover_chain` needs the session, and every caller closes it
+    # before any upstream call.
+    rule_chains: dict[str, list[FailoverEndpoint]] = {}
+    chain_cache: dict[str, list[FailoverEndpoint]] = {}
+    for rule in rules:
+        if rule.verification_endpoint_id:
+            ep_result = await db.execute(
+                select(Endpoint).where(
+                    Endpoint.id == rule.verification_endpoint_id,
+                    Endpoint.enabled.is_(True),
+                )
+            )
+            rule_ep = ep_result.scalar_one_or_none()
+            if rule_ep:
+                rule_endpoints[rule.id] = (rule_ep, rule.verification_model or v_model)
+        elif rule.verification_model and rule.verification_model != v_model:
+            rule_endpoints[rule.id] = (v_endpoint, rule.verification_model)
+
+        judge_ep, judge_model = rule_endpoints.get(rule.id, (v_endpoint, v_model))
+        if judge_ep is None:
+            continue
+        if judge_ep.id not in chain_cache:
+            chain_cache[judge_ep.id] = await _build_failover_chain(db, judge_ep, user_id)
+        # The chain's own candidates carry each endpoint's default model; the
+        # judge model the user configured wins on the primary, and a fallback
+        # keeps whatever model it was configured with.
+        chain = list(chain_cache[judge_ep.id])
+        if chain:
+            chain[0] = _endpoint_to_candidate(judge_ep, judge_model)
+        rule_chains[rule.id] = chain
+
+    return (
+        rules,
+        v_endpoint,
+        v_model,
+        max_retries,
+        user_verification_layer,
+        rule_endpoints,
+        rule_chains,
+    )
+
+
 async def run_verification_loop(
     response_data: dict[str, Any],
     body_json: dict[str, Any],
@@ -539,8 +652,6 @@ async def run_verification_loop(
     tags: list | None = None,
     path: str = "",
 ) -> tuple[dict[str, Any], VerificationLoopResult | None]:
-    from app.services.routing import _build_failover_chain, _endpoint_to_candidate
-
     # Command override applies on every path that reaches the loop; the streaming
     # branch checks it earlier only to decide whether to buffer the request.
     if body_json.get("_gitv_command_overrides", {}).get("verify") is False:
@@ -548,45 +659,15 @@ async def run_verification_loop(
         return response_data, None
 
     async with async_session() as db:
-        rules, v_endpoint, v_model, max_retries = await load_verification_config(
-            db, user_id, tags
-        )
-
-        user_verification_layer = await _load_verification_param_layer(db, user_id)
-
-        rule_endpoints: dict[str, tuple[Endpoint, str]] = {}
-        # A judge gets the same failover treatment as the driver and map stages:
-        # the configured endpoint first, then its tag-mates. Built here because
-        # `_build_failover_chain` needs the session, and every caller closes it
-        # before any upstream call.
-        rule_chains: dict[str, list[FailoverEndpoint]] = {}
-        chain_cache: dict[str, list[FailoverEndpoint]] = {}
-        for rule in rules:
-            if rule.verification_endpoint_id:
-                ep_result = await db.execute(
-                    select(Endpoint).where(
-                        Endpoint.id == rule.verification_endpoint_id,
-                        Endpoint.enabled.is_(True),
-                    )
-                )
-                rule_ep = ep_result.scalar_one_or_none()
-                if rule_ep:
-                    rule_endpoints[rule.id] = (rule_ep, rule.verification_model or v_model)
-            elif rule.verification_model and rule.verification_model != v_model:
-                rule_endpoints[rule.id] = (v_endpoint, rule.verification_model)
-
-            judge_ep, judge_model = rule_endpoints.get(rule.id, (v_endpoint, v_model))
-            if judge_ep is None:
-                continue
-            if judge_ep.id not in chain_cache:
-                chain_cache[judge_ep.id] = await _build_failover_chain(db, judge_ep, user_id)
-            # The chain's own candidates carry each endpoint's default model; the
-            # judge model the user configured wins on the primary, and a fallback
-            # keeps whatever model it was configured with.
-            chain = list(chain_cache[judge_ep.id])
-            if chain:
-                chain[0] = _endpoint_to_candidate(judge_ep, judge_model)
-            rule_chains[rule.id] = chain
+        (
+            rules,
+            v_endpoint,
+            v_model,
+            max_retries,
+            user_verification_layer,
+            rule_endpoints,
+            rule_chains,
+        ) = await prepare_verification_run(db, user_id, tags)
 
     forbidden_summary = response_data.pop("_gitv_forbidden_summary", "")
 

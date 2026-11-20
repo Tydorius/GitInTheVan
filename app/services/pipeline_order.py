@@ -132,29 +132,14 @@ async def _inject_book_now(
     here -- in manual mode, position in the list is the truth."""
     from app.services.budget import estimate_tokens as _est_tokens
     from app.services.debug import debug_capture
-    from app.services.lorebook import inject_entries, match_book_entries
+    from app.services.lorebook import book_entries_to_dicts, inject_entries, match_book_entries
     from app.services.metrics import record_prompt_object
 
     messages = body_json.get("messages", [])
-    entry_dicts = [
-        {
-            "lorebook_id": lb.id,
-            "lorebook_name": lb.name,
-            "entry_id": entry.id,
-            "name": entry.name,
-            "keys": entry.keys,
-            "secondary_keys": entry.secondary_keys,
-            "content": entry.content,
-            "position": entry.position,
-            "insertion_order": entry.insertion_order,
-            "is_constant": entry.is_constant,
-            "is_selective": entry.is_selective,
-            "is_disabled": entry.is_disabled,
-            "character_limit": entry.character_limit,
-        }
-        for entry in lb.entries
-        if not entry.is_disabled
-    ]
+    entry_dicts = book_entries_to_dicts(
+        (entry for entry in lb.entries if not entry.is_disabled),
+        book=lb,
+    )
     if not entry_dicts:
         return 0
     matched = match_book_entries(messages, entry_dicts, lb.scan_depth, word_boundary=lb.word_boundary_keys)

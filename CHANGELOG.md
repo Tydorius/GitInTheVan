@@ -2,6 +2,26 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.44.0] - 2026-11-20
+
+Feature & hygiene release adding `{{user}}`/`{{char}}` macro expansion, hybrid regex pre-check verification, optional map final-output Navigator verification, and an honest Lorebook UI.
+
+### Added
+
+- **Macro expansion (`{{user}}` / `{{char}}`).** Request-side case-insensitive expansion runs before forwarding (after lorebooks, cantrips, and skills inject) so macros inside lorebook entries and `context.inject()` expand cleanly. Names resolve from `X-User-Name` / `X-Char-Name` / `X-Character-Name` headers, persona tags, or `User:` / `Character:` lines; unknown `{{char}}` tokens stay untouched, `<jslorebook>` blocks are skipped, multimodal messages are supported, and expansions appear in the Debug timeline (`macro_expansion`).
+- **Hybrid verification (optional regex pre-check).** Verification rules now support an optional `regex_pattern` (validated on save, surfaced in the Verification UI with a `Regex` badge). Matching replies are rejected and logged to `VerificationLog` + Debug (`verification_regex_precheck`) before calling the Navigator LLM, avoiding unnecessary judge API calls.
+- **Map final-output Navigator pass (per-map opt-in, default off).** Maps now have a `final_verification_enabled` toggle that runs active verification rules once on the map's final output (report-only, respects `<VERIFY:off>`, never re-runs the map, preserves rule-level judgments in Debug/Metrics).
+
+### Changed
+
+- **Honest Lorebook UI.** Removed the four inert lorebook position checkboxes (`run_pre_driver`, `run_driver_callable`, `run_pre_navigator`, `run_post_navigator`) from the Lorebooks Positions modal and stopped carrying the unused `character_limit` field in runtime lorebook entry dicts (database columns remain intact for backward compatibility).
+- **Hygiene & dedup polish.** Applied the N6 `user_data` seeding skip to driver-callable tool execution (`driver_callable.py`); made `jslorebook._desanitize_content` comment-aware (`//` and `/* ... */`) so apostrophes in comments don't disrupt newline restoration; passed the admin script cap to `packs.py`'s `scan_file`; finished folding remaining inline lorebook entry-dict builders and token estimators in `proxy.py`, `pipeline_order.py`, and `map_pipeline.py` into `book_entries_to_dicts()` and `estimate_tokens()`; deduplicated `_resolve_proxy_override`; restricted `api.ts` `crud().export` to exportable resources; cleared `TagBadge`'s copy timer on destroy; and kept Admin's active update-chain badge polling across tab switches.
+
+### Schema
+
+- `064_map_final_verification`: adds `maps.final_verification_enabled` (`BOOLEAN NOT NULL DEFAULT FALSE`).
+- `065_verification_regex_pattern`: adds `verification_rules.regex_pattern` (`TEXT NOT NULL DEFAULT ''`).
+
 ## [0.43.1] - 2026-11-20
 
 ### Fixed
