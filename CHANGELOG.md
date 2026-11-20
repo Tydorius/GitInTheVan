@@ -23,6 +23,43 @@ User guide restructured; long-standing frontend type errors fixed.
   `string | null` error in the lorebook entry form was fixed by capturing
   the entry id before the callback.
 
+### Known issues — planned for 0.42.0
+
+This release is documentation and type fixes only. The following
+reported issues are verified in the code, not yet fixed, and planned for
+0.42.0:
+
+- **Tag groups** do not activate when the group's tag begins with (or
+  contains) a resource-type prefix such as `taggroup-`, `lore-` or
+  `cantrip-`. A group member whose own tag is blank also never activates
+  through its group, even when the group is Active. Workaround until
+  fixed: give group tags a prefix-free name and give every member its
+  own tag.
+- **`context.chat_data` / `user_data` / `cantrip_data` `.delete(key)`**
+  removes the key for the current run only; it reappears on the next
+  request. Workaround: `set(key, null)`, or delete the row on the
+  Storage page.
+- **`<MEMORY:off>`** on a non-streaming request also skips recording the
+  conversation for matching, so the next request starts a new chat.
+- **Debug**: the Pre-Navigator capture shows identical before/after text
+  even when cantrips changed the reply; over the per-run size cap every
+  stage snapshot is dropped at once rather than progressively;
+  Navigator-position console output appears only at debug log level; and
+  Navigator captures are cut to 500 characters.
+- **Lorebook keywords match inside words** — "Rook" fires on "rookie",
+  "Crow" on "crowd".
+- **Dynamic lorebooks**: an entry that is both keyword-matched and
+  updated in the same turn injects twice; an `add` that overwrites an
+  existing entry is not always undoable from History; and a `delete`
+  cannot see an entry added earlier in the same run.
+- **Context budgeting** counts every skill and writing sample you own
+  (not only the ones attached to the endpoint in use), and lorebook text
+  is injected before the budget is computed.
+
+One report — a Windows "cannot reuse already awaited coroutine" log line
+— was investigated against this codebase and could not originate from
+it; if you see it, please report the exact log line and version.
+
 ## [0.41.0] - 2026-11-19
 
 Pipeline ordering: drag cantrips and lorebooks into one exact interleaved
