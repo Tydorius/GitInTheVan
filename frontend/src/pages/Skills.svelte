@@ -252,7 +252,7 @@
         {/if}
 
         <div class="modal-actions">
-          <button onclick={() => { showForm = false; resetForm(); }}>Cancel</button>
+          <button type="button" onclick={() => { showForm = false; resetForm(); }}>Cancel</button>
           <button type="submit" class="primary">{editingId ? 'Update' : 'Create'}</button>
         </div>
       </form>

@@ -702,7 +702,7 @@ async def _create_resource(
             timeout_ms=content.get("timeout_ms", 5000),
             execution_order=content.get("execution_order", 10),
             is_active=is_active,
-            run_driver_callable=content.get("run_driver_callable", True),
+            run_driver_callable=content.get("run_driver_callable", False),
             run_pre_driver=content.get("run_pre_driver", True),
             run_pre_navigator=content.get("run_pre_navigator", False),
             run_post_navigator=content.get("run_post_navigator", False),
@@ -750,6 +750,12 @@ def _build_entry(lorebook_id: str, entry_data: dict, entry_model):
 
 
 async def _update_resource(db: AsyncSession, res_type: str, row, content: dict) -> None:
+    from app.services import snapshots
+
+    snap_type = "skill" if res_type == "sample" else res_type
+    if hasattr(row, "user_id") and hasattr(row, "id"):
+        await snapshots.capture(db, row.user_id, snap_type, row.id)
+
     if res_type == "lorebook":
         from sqlalchemy import delete as sa_delete
 

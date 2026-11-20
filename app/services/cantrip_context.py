@@ -414,9 +414,13 @@ def _inject_blocks(result: list[dict[str, Any]], finals: dict[str, str]) -> None
         combined = "\n".join(personality_parts)
         block = f"[Personality]\n{combined}\n[/Personality]"
         if system_idx is not None:
-            result.insert(system_idx + 1, {"role": "system", "content": block})
+            insert_at = system_idx + 1
+            result.insert(insert_at, {"role": "system", "content": block})
         else:
+            insert_at = 0
             result.insert(0, {"role": "system", "content": block})
+        if last_user_idx is not None and insert_at <= last_user_idx:
+            last_user_idx += 1
 
     if dialog_parts:
         combined = "\n".join(dialog_parts)

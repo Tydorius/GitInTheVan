@@ -123,10 +123,14 @@
   function resetForm() {
     form = { name: '', description: '', llm_instructions: '', code: '', hook_type: 'pre', is_active: true, is_public: false, run_pre_driver: true, run_driver_callable: false, run_pre_navigator: false, run_post_navigator: false, execution_order: 10, timeout_ms: 5000, budget_weight: 1.0, lorebook_reads_text: '', response_tags_text: '' }
     editingId = null
+    validationStatus = null
+    errorLine = null
   }
 
   function startEdit(s: any) {
     editingId = s.id
+    validationStatus = null
+    errorLine = null
     form = {
       name: s.name, description: s.description, llm_instructions: s.llm_instructions || '', code: s.code || '',
       hook_type: s.hook_type, is_active: s.is_active, is_public: s.is_public,
@@ -639,7 +643,7 @@
           </div>
         </div>
         <div class="modal-actions">
-          <button onclick={() => { showForm = false; resetForm(); }}>Cancel</button>
+          <button type="button" onclick={() => { showForm = false; resetForm(); }}>Cancel</button>
           <button type="submit" class="primary">{editingId ? 'Update' : 'Create'}</button>
         </div>
       </form>

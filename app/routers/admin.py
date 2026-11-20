@@ -15,7 +15,7 @@ from app.services.admin import (
     get_admin_settings,
     update_admin_settings,
 )
-from app.services.audit import list_logs
+from app.services.audit import count_logs, list_logs
 
 logger = logging.getLogger(__name__)
 
@@ -264,10 +264,11 @@ async def get_audit_logs(
     limit: int = 100,
     offset: int = 0,
 ):
-    logs = await list_logs(db, admin.id, limit, offset)
+    logs = await list_logs(db, None, limit, offset)
+    total = await count_logs(db, None)
     return AuditLogListResponse(
         logs=[AuditLogItem(**log) for log in logs],
-        total=len(logs),
+        total=total,
     )
 
 

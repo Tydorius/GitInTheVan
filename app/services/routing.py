@@ -201,7 +201,7 @@ async def resolve_routing(bearer_token: str, db: AsyncSession) -> RoutingResult 
             endpoint = ep_result.scalar_one_or_none()
 
         if endpoint is None:
-            endpoint = await _resolve_default_endpoint(db, user.id)
+            endpoint = await _resolve_user_default_endpoint(db, user.id)
 
         if endpoint is None:
             logger.warning("Routing failed: no enabled endpoint for user %s", user.username)
@@ -272,7 +272,7 @@ async def resolve_routing_for_user(user_id: str, db: AsyncSession) -> RoutingRes
     the user's default endpoint exactly as an API key with no endpoint binding
     would.
     """
-    endpoint = await _resolve_default_endpoint(db, user_id)
+    endpoint = await _resolve_user_default_endpoint(db, user_id)
     if endpoint is None:
         logger.warning("Routing failed: no enabled endpoint for user %s", user_id[:8])
         return None
@@ -298,6 +298,24 @@ async def resolve_endpoints_by_tag(
         .order_by(Endpoint.priority, Endpoint.created_at)
     )
     return list(result.scalars().all())
+
+
+async def _resolve_user_default_endpoint(db: AsyncSession, user_id: str) -> Endpoint | None:
+    """Resolve user_settings.default_endpoint_id if set and enabled, else priority fallback."""
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+    user_settings = settings_result.scalar_one_or_none()
+    if user_settings and user_settings.default_endpoint_id:
+        ep_result = await db.execute(
+            select(Endpoint).where(
+                Endpoint.id == user_settings.default_endpoint_id,
+                Endpoint.user_id == user_id,
+                Endpoint.enabled.is_(True),
+            )
+        )
+        endpoint = ep_result.scalar_one_or_none()
+        if endpoint is not None:
+            return endpoint
+    return await _resolve_default_endpoint(db, user_id)
 
 
 async def _resolve_default_endpoint(db: AsyncSession, user_id: str) -> Endpoint | None:

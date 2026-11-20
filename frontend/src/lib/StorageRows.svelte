@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from '../api'
+  import { onDestroy } from 'svelte'
 
   export let scope: 'chat-data' | 'user-data' | 'cantrip-data'
   export let contextId: string | null = null
@@ -7,7 +8,9 @@
 
   let rows: any[] = []
   let total = 0
+  let searchInput = ''
   let search = ''
+  let searchTimer: ReturnType<typeof setTimeout> | null = null
   let offset = 0
   const limit = 100
   let loading = false
@@ -39,6 +42,28 @@
   }
 
   $: scope, contextId, search, offset, reloadKey, refresh()
+
+  function onSearchInput() {
+    if (searchTimer) clearTimeout(searchTimer)
+    searchTimer = setTimeout(() => {
+      offset = 0
+      search = searchInput
+    }, 250)
+  }
+
+  function onSearchEnter() {
+    if (searchTimer) clearTimeout(searchTimer)
+    offset = 0
+    if (search !== searchInput) {
+      search = searchInput
+    } else {
+      refresh()
+    }
+  }
+
+  onDestroy(() => {
+    if (searchTimer) clearTimeout(searchTimer)
+  })
 
   async function toggleExpand(row: any) {
     if (expandedId === row.id) {
@@ -108,8 +133,9 @@
 <div class="form-row" style="align-items: center; margin-bottom: 8px;">
   <input
     placeholder="Search keys..."
-    bind:value={search}
-    onkeydown={(e) => { if (e.key === 'Enter') { offset = 0; refresh(); } }}
+    bind:value={searchInput}
+    oninput={onSearchInput}
+    onkeydown={(e) => { if (e.key === 'Enter') onSearchEnter(); }}
     style="flex: 1;"
   />
   <span style="color: var(--text-dim); font-size: 12px; white-space: nowrap;">

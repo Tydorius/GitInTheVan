@@ -8,15 +8,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import require_admin
+from app.models.api_key import ApiKey
+from app.models.assistant_conversation import AssistantConversation
+from app.models.audit_log import AuditLog
 from app.models.cantrip import Cantrip
+from app.models.cantrip_data import CantripData
+from app.models.cantrip_request import CantripRequest
 from app.models.chat_data import ChatData
+from app.models.conversation_dynamic_lorebook import ConversationDynamicLorebook
 from app.models.conversation_hash import ConversationHash
+from app.models.conversation_lorebook_binding import ConversationLorebookBinding
 from app.models.conversation_summary import ConversationSummary
+from app.models.conversation_turn_counter import ConversationTurnCounter
+from app.models.debug_exchange import DebugExchange
+from app.models.debug_sandbox import DebugSandbox
 from app.models.endpoint import Endpoint
 from app.models.forbidden_word import ForbiddenWord
+from app.models.linked_repo import InstalledItem, LinkedRepo
 from app.models.lorebook import Lorebook
+from app.models.map import Map
 from app.models.memory import Memory
+from app.models.memory_rule import MemoryRule
+from app.models.metrics import LlmCallMetric, PromptObjectMetric
+from app.models.resource_snapshot import ResourceSnapshot
+from app.models.scenario_rule import ScenarioRule
+from app.models.skill import Skill
+from app.models.tag_group import TagGroup
 from app.models.user import User
+from app.models.user_data import UserData
 from app.models.user_settings import UserSettings
 from app.models.verification import VerificationLog, VerificationRule
 from app.services.auth import generate_api_key, hash_password, validate_password_strength
@@ -235,6 +254,27 @@ async def _cascade_delete_user_data(db: AsyncSession, user_id: str) -> None:
     This ensures complete cleanup regardless of FK enforcement state.
     """
     tables_with_user_id = [
+        ApiKey,
+        AssistantConversation,
+        AuditLog,
+        CantripData,
+        CantripRequest,
+        ConversationDynamicLorebook,
+        ConversationLorebookBinding,
+        ConversationTurnCounter,
+        DebugExchange,
+        DebugSandbox,
+        InstalledItem,
+        LinkedRepo,
+        LlmCallMetric,
+        Map,
+        MemoryRule,
+        PromptObjectMetric,
+        ResourceSnapshot,
+        ScenarioRule,
+        Skill,
+        TagGroup,
+        UserData,
         VerificationLog,
         VerificationRule,
         Memory,

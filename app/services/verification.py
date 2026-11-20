@@ -364,7 +364,16 @@ async def check_response(
                 last_detail = f"a {status_code} error"
                 continue
 
-            message = data.get("choices", [{}])[0].get("message", {})
+            choices = data.get("choices") or []
+            if not choices:
+                logger.warning(
+                    "Verification LLM returned empty choices for rule '%s' on endpoint '%s'",
+                    rule.name, candidate.endpoint_name,
+                )
+                last_detail = "empty choices"
+                continue
+
+            message = choices[0].get("message", {})
             llm_content = message.get("content", "")
             thinking = message.get("reasoning_content", "") or message.get("thinking", "")
 
@@ -399,6 +408,7 @@ def _apply_resubmission_strategy(
     body_json: dict[str, Any],
     violations: list[VerificationJudgment],
     strategy: str,
+    current_content: str = "",
 ) -> dict[str, Any]:
     # Deep-copy only the upstream-facing keys; _gitv_* internals (including the
     # failover chain, which holds non-serializable FailoverEndpoint objects) are
@@ -409,15 +419,16 @@ def _apply_resubmission_strategy(
     combined_reason = "; ".join(v.reason for v in violations if v.reason)
 
     if strategy == "rewrite":
-        last_assistant_content = ""
-        for msg in reversed(result.get("messages", [])):
-            if msg.get("role") == "assistant":
-                last_assistant_content = msg.get("content", "")
-                break
+        violating_content = current_content
+        if not violating_content:
+            for msg in reversed(result.get("messages", [])):
+                if msg.get("role") == "assistant":
+                    violating_content = msg.get("content", "")
+                    break
 
-        if last_assistant_content:
+        if violating_content:
             result.setdefault("messages", []).append(
-                {"role": "assistant", "content": last_assistant_content}
+                {"role": "assistant", "content": violating_content}
             )
         result["messages"].append(
             {
@@ -623,142 +634,147 @@ async def run_verification_loop(
     current_data = response_data
     current_content = _extract_content(current_data)
 
-    while True:
-        # Rows recorded from here on belong to a retry cycle once one has
-        # started: the re-judge and the regeneration are real cost, but they
-        # must not inflate the first-pass stats of the objects that built the
-        # original prompt.
-        from app.services.metrics import set_metrics_retry
-        set_metrics_retry(body_json, retries > 0)
+    from app.services.metrics import set_metrics_retry
 
-        check_result = await check_response(
-            current_content, rules, v_endpoint, v_model,
-            forbidden_context=forbidden_summary,
-            rule_endpoints=rule_endpoints if rule_endpoints else None,
-            rule_chains=rule_chains if rule_chains else None,
-            user_param_layer=user_verification_layer,
-            body_json=body_json,
-        )
-        check_history.append(check_result)
+    try:
+        while True:
+            # Rows recorded from here on belong to a retry cycle once one has
+            # started: the re-judge and the regeneration are real cost, but they
+            # must not inflate the first-pass stats of the objects that built the
+            # original prompt.
+            set_metrics_retry(body_json, retries > 0)
 
-        if check_result.errors:
-            logger.warning(
-                "Verification: %d of %d rule(s) did not run -- %s",
-                len(check_result.errors), len(check_result.judgments),
-                check_result.combined_error_note,
+            check_result = await check_response(
+                current_content, rules, v_endpoint, v_model,
+                forbidden_context=forbidden_summary,
+                rule_endpoints=rule_endpoints if rule_endpoints else None,
+                rule_chains=rule_chains if rule_chains else None,
+                user_param_layer=user_verification_layer,
+                body_json=body_json,
+            )
+            check_history.append(check_result)
+
+            if check_result.errors:
+                logger.warning(
+                    "Verification: %d of %d rule(s) did not run -- %s",
+                    len(check_result.errors), len(check_result.judgments),
+                    check_result.combined_error_note,
+                )
+
+            logger.info(
+                "Verification check %d: approved=%s, violations=%d",
+                retries + 1,
+                check_result.approved,
+                len(check_result.violations),
             )
 
-        logger.info(
-            "Verification check %d: approved=%s, violations=%d",
-            retries + 1,
-            check_result.approved,
-            len(check_result.violations),
-        )
+            if check_result.approved:
+                async with async_session() as db:
+                    log = await _create_log_entry(
+                        db, user_id, rules[0].name, conversation_id,
+                        current_content, check_result, retries, approved=True,
+                    )
+                    logs.append(log)
+                break
 
-        if check_result.approved:
-            async with async_session() as db:
-                log = await _create_log_entry(
-                    db, user_id, rules[0].name, conversation_id,
-                    current_content, check_result, retries, approved=True,
+            if retries >= max_retries:
+                async with async_session() as db:
+                    log = await _create_log_entry(
+                        db, user_id, rules[0].name, conversation_id,
+                        current_content, check_result, retries, approved=False,
+                    )
+                    logs.append(log)
+                logger.warning(
+                    "Verification: max retries (%d) exceeded, returning unapproved response",
+                    max_retries,
                 )
-                logs.append(log)
-            break
+                break
 
-        if retries >= max_retries:
             async with async_session() as db:
                 log = await _create_log_entry(
                     db, user_id, rules[0].name, conversation_id,
                     current_content, check_result, retries, approved=False,
                 )
                 logs.append(log)
-            logger.warning(
-                "Verification: max retries (%d) exceeded, returning unapproved response",
-                max_retries,
+
+            retry_body = _apply_resubmission_strategy(
+                body_json, check_result.violations, strategy,
+                current_content=current_content,
             )
-            break
+            retry_body["stream"] = False
+            retry_body_bytes = json.dumps(retry_body).encode()
 
-        async with async_session() as db:
-            log = await _create_log_entry(
-                db, user_id, rules[0].name, conversation_id,
-                current_content, check_result, retries, approved=False,
-            )
-            logs.append(log)
+            logger.info("Verification: retrying request (attempt %d)", retries + 1)
+            # The regeneration is retry-cycle output from this point on, even on
+            # the first cycle (the loop-top flag only sees it one iteration later).
+            set_metrics_retry(body_json, True)
+            # The retry re-sends the user's own request, so it takes the driver's
+            # transport and the driver's failover chain -- including LiteLLM when the
+            # endpoint has a provider. Sending it raw here was the same gap the judge
+            # had, one layer up.
+            from app.services.debug_metrics import PURPOSE_MAIN, record_llm_call
+            from app.services.proxy import _do_forward, _forward_with_failover
 
-        retry_body = _apply_resubmission_strategy(
-            body_json, check_result.violations, strategy
-        )
-        retry_body["stream"] = False
-        retry_body_bytes = json.dumps(retry_body).encode()
-
-        logger.info("Verification: retrying request (attempt %d)", retries + 1)
-        # The regeneration is retry-cycle output from this point on, even on
-        # the first cycle (the loop-top flag only sees it one iteration later).
-        set_metrics_retry(body_json, True)
-        # The retry re-sends the user's own request, so it takes the driver's
-        # transport and the driver's failover chain -- including LiteLLM when the
-        # endpoint has a provider. Sending it raw here was the same gap the judge
-        # had, one layer up.
-        from app.services.debug_metrics import PURPOSE_MAIN, record_llm_call
-        from app.services.proxy import _do_forward, _forward_with_failover
-
-        driver_chain = body_json.get("_gitv_failover_chain") or []
-        try:
-            if driver_chain and path:
-                retry_data, retry_status = await _forward_with_failover(
-                    body_json, driver_chain, method, path, headers, timeout, retry_body_bytes,
-                )
-            else:
-                retry_started = time.monotonic()
-                retry_data, retry_status = await _do_forward(
-                    method, url, headers, retry_body_bytes, timeout,
-                    provider=body_json.get("_gitv_provider", ""),
-                    base_url=body_json.get("_gitv_base_url", ""),
-                    api_key=body_json.get("_gitv_api_key", ""),
-                    configured=body_json.get("_gitv_llm_params"),
-                )
-                # The failover branch records through _record_call; this raw
-                # branch was the one unrecorded retry path left.
-                record_llm_call(
-                    body_json,
-                    purpose=PURPOSE_MAIN,
-                    latency_ms=(time.monotonic() - retry_started) * 1000.0,
-                    status_code=retry_status,
-                    response_data=retry_data,
-                    messages=retry_body.get("messages"),
-                    endpoint_id=body_json.get("_gitv_endpoint_id", ""),
-                    provider=body_json.get("_gitv_provider", ""),
-                    model_requested=body_json.get("model", ""),
-                )
-        except Exception:
-            logger.exception("Verification retry request failed")
-            break
-
-        # A failed retry keeps the last good response, exactly as before -- the
-        # error body must never become what the user is handed.
-        if retry_status != 200:
-            logger.warning("Verification retry returned status %d", retry_status)
-            break
-
-        current_data = retry_data
-        current_content = _extract_content(current_data)
-
-        # A retry is a fresh generation, not a re-judgement of the old one:
-        # re-scan it, or a retry that swaps one forbidden phrase for another
-        # passes against the first response's stale findings (and a clean
-        # retry keeps being judged against findings it already fixed).
-        # scan_response is a no-op when the user's forbidden-words check is
-        # disabled; the command override is honoured here exactly as it was
-        # for the original scan.
-        if body_json.get("_gitv_command_overrides", {}).get("forbidden") is not False:
+            driver_chain = body_json.get("_gitv_failover_chain") or []
             try:
-                from app.services.forbidden_words import scan_response
-
-                rescan = await scan_response(current_content, user_id)
-                forbidden_summary = rescan.summary if rescan.has_matches else ""
+                if driver_chain and path:
+                    retry_data, retry_status = await _forward_with_failover(
+                        body_json, driver_chain, method, path, headers, timeout, retry_body_bytes,
+                    )
+                else:
+                    retry_started = time.monotonic()
+                    retry_data, retry_status = await _do_forward(
+                        method, url, headers, retry_body_bytes, timeout,
+                        provider=body_json.get("_gitv_provider", ""),
+                        base_url=body_json.get("_gitv_base_url", ""),
+                        api_key=body_json.get("_gitv_api_key", ""),
+                        configured=body_json.get("_gitv_llm_params"),
+                    )
+                    # The failover branch records through _record_call; this raw
+                    # branch was the one unrecorded retry path left.
+                    record_llm_call(
+                        body_json,
+                        purpose=PURPOSE_MAIN,
+                        latency_ms=(time.monotonic() - retry_started) * 1000.0,
+                        status_code=retry_status,
+                        response_data=retry_data,
+                        messages=retry_body.get("messages"),
+                        endpoint_id=body_json.get("_gitv_endpoint_id", ""),
+                        provider=body_json.get("_gitv_provider", ""),
+                        model_requested=body_json.get("model", ""),
+                    )
             except Exception:
-                logger.exception("Forbidden words re-scan on retry failed")
+                logger.exception("Verification retry request failed")
+                break
 
-        retries += 1
+            # A failed retry keeps the last good response, exactly as before -- the
+            # error body must never become what the user is handed.
+            if retry_status != 200:
+                logger.warning("Verification retry returned status %d", retry_status)
+                break
+
+            current_data = retry_data
+            current_content = _extract_content(current_data)
+
+            # A retry is a fresh generation, not a re-judgement of the old one:
+            # re-scan it, or a retry that swaps one forbidden phrase for another
+            # passes against the first response's stale findings (and a clean
+            # retry keeps being judged against findings it already fixed).
+            # scan_response is a no-op when the user's forbidden-words check is
+            # disabled; the command override is honoured here exactly as it was
+            # for the original scan.
+            if body_json.get("_gitv_command_overrides", {}).get("forbidden") is not False:
+                try:
+                    from app.services.forbidden_words import scan_response
+
+                    rescan = await scan_response(current_content, user_id)
+                    forbidden_summary = rescan.summary if rescan.has_matches else ""
+                except Exception:
+                    logger.exception("Forbidden words re-scan on retry failed")
+
+            retries += 1
+    finally:
+        set_metrics_retry(body_json, False)
 
     loop_result = VerificationLoopResult(
         approved=check_history[-1].approved if check_history else True,

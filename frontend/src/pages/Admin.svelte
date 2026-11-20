@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api } from '../api'
   import { onMount, onDestroy } from 'svelte'
-  import { routeParams } from '../stores'
+  import { routeParams, loadSiteBanner } from '../stores'
   import { downloadFromApi } from '../lib/download'
   import CollapsibleCard from '../lib/CollapsibleCard.svelte'
   import { CollapseController } from '../lib/collapse'
@@ -206,6 +206,7 @@
       saved = true
       setTimeout(() => saved = false, 2000)
       await load()
+      await loadSiteBanner()
     } catch (e: any) { error = e.message }
   }
 
@@ -875,7 +876,7 @@
             <span style="font-size: 18px;">⟳</span>
             <strong style="font-size: 14px; color: #3b82f6;">
               {#if updateChain?.total_steps > 1}
-                Update in Progress &mdash; step {updateChain.current_step} of {updateChain.total_steps}
+                Update in Progress &mdash; step {updateChain.current_step + 1} of {updateChain.total_steps}
               {:else}
                 Update in Progress
               {/if}
@@ -1137,7 +1138,7 @@
         <div class="form-group"><label for="user-name">Username</label><input id="user-name" bind:value={newUsername} required /></div>
         <div class="form-group"><label for="user-pass">Password</label><input id="user-pass" type="password" bind:value={newPassword} required /></div>
         <div class="modal-actions">
-          <button onclick={() => showUserForm = false}>Cancel</button>
+          <button type="button" onclick={() => showUserForm = false}>Cancel</button>
           <button type="submit" class="primary">Create</button>
         </div>
       </form>
@@ -1155,7 +1156,7 @@
           <input id="edit-name" bind:value={editUsername} required />
         </div>
         <div class="modal-actions">
-          <button onclick={() => editingUser = null}>Cancel</button>
+          <button type="button" onclick={() => editingUser = null}>Cancel</button>
           <button type="submit" class="primary">Save</button>
         </div>
       </form>
@@ -1173,7 +1174,7 @@
           <input id="reset-pass" type="password" bind:value={resetPasswordValue} required />
         </div>
         <div class="modal-actions">
-          <button onclick={() => resettingPasswordId = null}>Cancel</button>
+          <button type="button" onclick={() => resettingPasswordId = null}>Cancel</button>
           <button type="submit" class="primary">Reset</button>
         </div>
       </form>

@@ -367,13 +367,14 @@ async def update_lorebook(
     if req.is_active is not None:
         lorebook.is_active = req.is_active
     if req.tag is not None and req.tag != lorebook.tag:
-        from sqlalchemy import text as sa_text
-        existing = await db.execute(
-            sa_text("SELECT id FROM lorebooks WHERE tag = :tag AND user_id = :uid AND id != :lid"),
-            {"tag": req.tag, "uid": current_user.id, "lid": lorebook_id}
-        )
-        if existing.scalar_one_or_none() is not None:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tag already in use")
+        if req.tag:
+            from sqlalchemy import text as sa_text
+            existing = await db.execute(
+                sa_text("SELECT id FROM lorebooks WHERE tag = :tag AND user_id = :uid AND id != :lid"),
+                {"tag": req.tag, "uid": current_user.id, "lid": lorebook_id}
+            )
+            if existing.scalar_one_or_none() is not None:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tag already in use")
         lorebook.tag = req.tag
     if req.run_pre_driver is not None:
         lorebook.run_pre_driver = req.run_pre_driver
@@ -482,13 +483,13 @@ async def update_entry(
     if entry is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entry not found")
 
-    await snapshots.capture(db, current_user.id, "lorebook", lorebook_id)
-
     req.content = await sanitize_entry_content(db, current_user.id, lorebook_id, req.content)
     await enforce_lorebook_size(db, lorebook_id, len(req.content), exclude_entry_id=entry_id)
 
     scan = await scan_entry(current_user.id, req.name, req.content, lorebook_id)
     gate_scan_findings(scan, req.override_scan, "Lorebook entry")
+
+    await snapshots.capture(db, current_user.id, "lorebook", lorebook_id)
 
     for key, value in _entry_input_to_dict(req).items():
         setattr(entry, key, value)

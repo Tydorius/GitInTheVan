@@ -4,7 +4,7 @@
   import { downloadJson } from '../lib/download'
   import ParameterEditor from '../lib/ParameterEditor.svelte'
   import ModelSelect from '../lib/ModelSelect.svelte'
-  import { onMount } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
   import { routeParams } from '../stores'
   import CodeEditor from '../lib/CodeEditor.svelte'
   import TagEditModal from '../lib/TagEditModal.svelte'
@@ -54,6 +54,7 @@
   let forbiddenSettings = { forbidden_words_enabled: false, forbidden_words_case_sensitive: false }
   let forbiddenWords: any[] = []
   let newForbiddenPhrase = ''
+  let newForbiddenIsRegex = false
   let forbiddenTestContent = ''
   let forbiddenTestResult: any = null
   let forbiddenTesting = false
@@ -147,8 +148,9 @@
     if (!newForbiddenPhrase.trim()) return
     error = ''
     try {
-      await api.createForbiddenWord(newForbiddenPhrase.trim())
+      await api.createForbiddenWord(newForbiddenPhrase.trim(), newForbiddenIsRegex)
       newForbiddenPhrase = ''
+      newForbiddenIsRegex = false
       forbiddenWords = (await api.listForbiddenWords()).words
     } catch (e: any) { error = e.message }
   }
@@ -187,6 +189,13 @@
       refreshTimer = null
     }
   }
+
+  onDestroy(() => {
+    if (refreshTimer) {
+      clearInterval(refreshTimer)
+      refreshTimer = null
+    }
+  })
 
   $: if (tab === 'logs') refreshLogs()
 
@@ -373,8 +382,11 @@
   </CollapsibleCard>
 
   <CollapsibleCard title="Forbidden Phrases" cardKey="forbidden-list" {collapse}>
-    <div style="display: flex; gap: 8px; margin-bottom: 12px;">
-      <input bind:value={newForbiddenPhrase} placeholder="Enter a word or phrase..." onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addForbiddenWord(); } }} />
+    <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px;">
+      <input bind:value={newForbiddenPhrase} placeholder="Enter a word or phrase..." onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addForbiddenWord(); } }} style="flex: 1;" />
+      <label style="display: flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap;">
+        <input type="checkbox" bind:checked={newForbiddenIsRegex} style="width: auto;" /> Regex
+      </label>
       <button class="primary" onclick={addForbiddenWord} disabled={!newForbiddenPhrase.trim()}>Add</button>
     </div>
     {#if forbiddenWords.length === 0}
@@ -537,7 +549,7 @@
           />
         </div>
         <div class="modal-actions">
-          <button onclick={() => { showForm = false; resetForm(); }}>Cancel</button>
+          <button type="button" onclick={() => { showForm = false; resetForm(); }}>Cancel</button>
           <button type="submit" class="primary">{editingId ? 'Update' : 'Create'}</button>
         </div>
       </form>

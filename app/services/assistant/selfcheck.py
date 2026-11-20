@@ -211,22 +211,30 @@ async def _dry_run_activation(ctx: Any, args: dict[str, Any]) -> list[CheckResul
     )
 
     async with async_session() as db:
+        direct_cantrips = _direct.get("cantrip", set())
+        direct_lore = _direct.get("lore", set())
         cantrips = (
             await db.execute(
                 select(Cantrip).where(or_(Cantrip.user_id == ctx.user_id, Cantrip.is_public.is_(True)))
             )
         ).scalars().all()
         for c in cantrips:
-            would = tagging.should_activate_resource(
+            hierarchy = tagging.should_activate_resource(
                 c.tag, "cantrip", c.is_active, c.is_public, c.user_id, ctx.user_id, expanded_tags
+            )
+            would = c.id in direct_cantrips or hierarchy
+            reason = (
+                "Activated via tag group direct membership"
+                if (c.id in direct_cantrips and not hierarchy)
+                else _activation_reason(
+                    would, c.tag, "cantrip", c.is_active, c.is_public, c.user_id, ctx.user_id, expanded_tags
+                )
             )
             results.append(
                 CheckResult(
                     name=f"cantrip: {c.name}",
                     passed=would,
-                    message=_activation_reason(
-                        would, c.tag, "cantrip", c.is_active, c.is_public, c.user_id, ctx.user_id, expanded_tags
-                    ),
+                    message=reason,
                     detail=json.dumps({"id": c.id, "tag": c.tag, "owned": c.user_id == ctx.user_id}),
                 )
             )
@@ -237,16 +245,22 @@ async def _dry_run_activation(ctx: Any, args: dict[str, Any]) -> list[CheckResul
             )
         ).scalars().all()
         for lb in lorebooks:
-            would = tagging.should_activate_resource(
+            hierarchy = tagging.should_activate_resource(
                 lb.tag, "lore", lb.is_active, lb.is_public, lb.user_id, ctx.user_id, expanded_tags
+            )
+            would = lb.id in direct_lore or hierarchy
+            reason = (
+                "Activated via tag group direct membership"
+                if (lb.id in direct_lore and not hierarchy)
+                else _activation_reason(
+                    would, lb.tag, "lore", lb.is_active, lb.is_public, lb.user_id, ctx.user_id, expanded_tags
+                )
             )
             results.append(
                 CheckResult(
                     name=f"lorebook: {lb.name}",
                     passed=would,
-                    message=_activation_reason(
-                        would, lb.tag, "lore", lb.is_active, lb.is_public, lb.user_id, ctx.user_id, expanded_tags
-                    ),
+                    message=reason,
                     detail=json.dumps({"id": lb.id, "tag": lb.tag, "owned": lb.user_id == ctx.user_id}),
                 )
             )
@@ -536,7 +550,13 @@ async def _explain_parameters(ctx: Any, args: dict[str, Any]) -> list[CheckResul
             )
             if endpoint_id:
                 endpoint = (
-                    await db.execute(select(Endpoint).where(Endpoint.id == endpoint_id, Endpoint.enabled.is_(True)))
+                    await db.execute(
+                        select(Endpoint).where(
+                            Endpoint.id == endpoint_id,
+                            Endpoint.user_id == ctx.user_id,
+                            Endpoint.enabled.is_(True),
+                        )
+                    )
                 ).scalar_one_or_none()
             model = (
                 model
@@ -576,7 +596,13 @@ async def _explain_parameters(ctx: Any, args: dict[str, Any]) -> list[CheckResul
                 endpoint = tagged[0] if tagged else None
             if endpoint is None and stage.endpoint_id:
                 endpoint = (
-                    await db.execute(select(Endpoint).where(Endpoint.id == stage.endpoint_id, Endpoint.enabled.is_(True)))
+                    await db.execute(
+                        select(Endpoint).where(
+                            Endpoint.id == stage.endpoint_id,
+                            Endpoint.user_id == ctx.user_id,
+                            Endpoint.enabled.is_(True),
+                        )
+                    )
                 ).scalar_one_or_none()
             model = model or stage.model_override or (endpoint.default_model if endpoint else "")
             layers.append(("user settings", parse_params(us.parameters_json, "user settings") if us else []))

@@ -1,3 +1,4 @@
+import contextvars
 import logging
 
 from sqlalchemy import select
@@ -7,10 +8,11 @@ from app.models.skill import EndpointSkill, Skill
 
 logger = logging.getLogger(__name__)
 
-# endpoint_id -> the skills/samples its last load returned. Written by
-# load_skills_for_endpoint, drained by take_loaded_detail. Bounded by the
-# number of endpoints, and each entry is replaced on every load.
-_last_loaded: dict[str, list[dict]] = {}
+# Per-request/task storage for endpoint_id -> the skills/samples its last load
+# returned. Written by load_skills_for_endpoint, drained by take_loaded_detail.
+_last_loaded_var: contextvars.ContextVar[dict[str, list[dict]] | None] = (
+    contextvars.ContextVar("skills_last_loaded", default=None)
+)
 
 
 async def load_skills_for_endpoint(
@@ -37,11 +39,13 @@ async def load_skills_for_endpoint(
     # Identity for the debug trace. The rows are already loaded here; a bare
     # count cannot answer "which skill did this run use that the other did not",
     # and stashing it avoids widening a return type with several call sites.
-    _last_loaded[endpoint_id] = [
+    loaded_map = dict(_last_loaded_var.get() or {})
+    loaded_map[endpoint_id] = [
         {"id": s.id, "name": s.name, "type": s.type, "tokens": max(1, len(s.content) // 4)}
         for s in items
         if s.content.strip()
     ]
+    _last_loaded_var.set(loaded_map)
 
     if skills:
         logger.debug("Loaded %d skill(s) for endpoint %s", len(skills), endpoint_id)
@@ -59,7 +63,13 @@ def take_loaded_detail(endpoint_id: str | None) -> list[dict]:
     """
     if not endpoint_id:
         return []
-    return _last_loaded.pop(endpoint_id, [])
+    loaded_map = _last_loaded_var.get()
+    if not loaded_map or endpoint_id not in loaded_map:
+        return []
+    new_map = dict(loaded_map)
+    detail = new_map.pop(endpoint_id, [])
+    _last_loaded_var.set(new_map)
+    return detail
 
 
 def inject_skills(messages: list[dict], skill_contents: list[str]) -> list[dict]:
@@ -74,7 +84,11 @@ def inject_skills(messages: list[dict], skill_contents: list[str]) -> list[dict]
     wrapped = f"<skills>\n{combined}\n</skills>"
 
     if messages and messages[0].get("role") == "system":
-        messages[0]["content"] = messages[0]["content"] + "\n\n" + wrapped
+        existing = messages[0].get("content")
+        if isinstance(existing, list):
+            messages[0]["content"] = [*existing, {"type": "text", "text": f"\n\n{wrapped}"}]
+        else:
+            messages[0]["content"] = f"{existing or ''}\n\n{wrapped}" if existing else wrapped
     else:
         messages.insert(0, {"role": "system", "content": wrapped})
 

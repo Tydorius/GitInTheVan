@@ -161,8 +161,20 @@ async def update_settings(
         user_settings = UserSettings(user_id=current_user.id)
         db.add(user_settings)
 
-    if req.default_endpoint_id is not None:
-        user_settings.default_endpoint_id = req.default_endpoint_id or None
+    if "default_endpoint_id" in req.model_fields_set:
+        if req.default_endpoint_id:
+            from app.models.endpoint import Endpoint
+            ep = (await db.execute(
+                select(Endpoint.id).where(
+                    Endpoint.id == req.default_endpoint_id,
+                    Endpoint.user_id == current_user.id,
+                )
+            )).scalar_one_or_none()
+            if ep is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Endpoint not found")
+            user_settings.default_endpoint_id = req.default_endpoint_id
+        else:
+            user_settings.default_endpoint_id = None
     if req.default_model is not None:
         user_settings.default_model = req.default_model
     if req.preserve_thinking is not None:
@@ -185,12 +197,36 @@ async def update_settings(
         user_settings.context_window_override = max(0, req.context_window_override)
     if req.debug_mode is not None:
         user_settings.debug_mode = req.debug_mode
-    if req.default_map_id is not None:
-        user_settings.default_map_id = req.default_map_id or None
+    if "default_map_id" in req.model_fields_set:
+        if req.default_map_id:
+            from app.models.map import Map
+            m = (await db.execute(
+                select(Map.id).where(
+                    Map.id == req.default_map_id,
+                    Map.user_id == current_user.id,
+                )
+            )).scalar_one_or_none()
+            if m is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Map not found")
+            user_settings.default_map_id = req.default_map_id
+        else:
+            user_settings.default_map_id = None
     if req.lexicon_enabled is not None:
         user_settings.lexicon_enabled = req.lexicon_enabled
-    if req.lexicon_endpoint_id is not None:
-        user_settings.lexicon_endpoint_id = req.lexicon_endpoint_id or None
+    if "lexicon_endpoint_id" in req.model_fields_set:
+        if req.lexicon_endpoint_id:
+            from app.models.endpoint import Endpoint
+            ep = (await db.execute(
+                select(Endpoint.id).where(
+                    Endpoint.id == req.lexicon_endpoint_id,
+                    Endpoint.user_id == current_user.id,
+                )
+            )).scalar_one_or_none()
+            if ep is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Endpoint not found")
+            user_settings.lexicon_endpoint_id = req.lexicon_endpoint_id
+        else:
+            user_settings.lexicon_endpoint_id = None
     if req.cantrip_auto_install_enabled is not None:
         user_settings.cantrip_auto_install_enabled = req.cantrip_auto_install_enabled
     if req.passenger_calling_enabled is not None:

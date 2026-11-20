@@ -126,7 +126,7 @@ async def _call_summarization_llm(
         logger.warning("Scenario summarization: no endpoint configured for rule %s", rule.name)
         return None
 
-    base_url, api_key, provider, model, params = routing
+    base_url, api_key, provider, model, params, api_base_path, endpoint_id, endpoint_name = routing
 
     if not model:
         logger.warning("Scenario summarization: no model configured for rule %s", rule.name)
@@ -160,7 +160,6 @@ async def _call_summarization_llm(
                 body_bytes, provider, base_url, api_key, timeout, params
             )
         else:
-            api_base_path = ""
             upstream_url = _build_upstream_url(base_url, "/v1/chat/completions", api_base_path)
             headers = auth_headers(api_key)
             response_data, status_code = await _do_forward(
@@ -174,6 +173,8 @@ async def _call_summarization_llm(
             status_code=status_code,
             response_data=response_data,
             messages=messages,
+            endpoint_id=endpoint_id,
+            endpoint_name=endpoint_name,
             provider=provider,
             model_requested=model,
         )
@@ -194,12 +195,25 @@ async def _call_summarization_llm(
 
     except Exception as exc:
         logger.warning("Scenario summarization LLM call failed: %s", exc)
+        record_llm_call(
+            body_json or {},
+            purpose=PURPOSE_SUMMARIZER,
+            latency_ms=(time.monotonic() - started) * 1000.0,
+            status_code=0,
+            response_data=None,
+            messages=messages,
+            endpoint_id=endpoint_id,
+            endpoint_name=endpoint_name,
+            provider=provider,
+            model_requested=model,
+            error=f"{type(exc).__name__}: {exc}"[:500],
+        )
         return None
 
 
 async def resolve_routing_by_rule(
     rule: ScenarioRule, user_id: str, db: AsyncSession
-) -> tuple[str, str, str, str, dict] | None:
+) -> tuple[str, str, str, str, dict, str, str, str] | None:
     """Resolve endpoint/key/provider/model/parameters for a scenario rule.
 
     Returns (base_url, api_key, provider, model, parameters) or None. The
@@ -265,4 +279,7 @@ async def resolve_routing_by_rule(
         endpoint.provider or "",
         model,
         dict(params),
+        endpoint.api_base_path or "",
+        endpoint.id,
+        endpoint.name,
     )

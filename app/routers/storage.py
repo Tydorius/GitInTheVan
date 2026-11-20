@@ -521,6 +521,15 @@ async def delete_cantrip_data_row(
 # Export / import
 
 
+def _decode_row_value(value_json: str | None) -> Any:
+    if not value_json:
+        return None
+    try:
+        return json.loads(value_json)
+    except (json.JSONDecodeError, ValueError):
+        return value_json
+
+
 def _export_payload(
     scope: str,
     rows: list[Any],
@@ -535,7 +544,7 @@ def _export_payload(
         "cantrip_name": cantrip_name,
         "exported_at": datetime.now(UTC).isoformat(),
         "rows": [
-            {"key": r.key, "value": (json.loads(r.value_json) if r.value_json else None)}
+            {"key": r.key, "value": _decode_row_value(r.value_json)}
             for r in rows
         ],
     }
@@ -569,7 +578,7 @@ async def export_storage(
             )).scalars().all()
             payloads.append(_export_payload("chat", rows, context_id=conv))
 
-    if scope in ("chat", "all") and conversation_id:
+    if scope == "chat" and conversation_id:
         rows = (await db.execute(
             select(ChatData).where(
                 ChatData.user_id == current_user.id,
@@ -601,6 +610,27 @@ async def export_storage(
         )).scalars().all()
         payloads.append(_export_payload("cantrip", rows, cantrip_name=cantrip.name))
         name_parts.append(_slug(cantrip.name))
+    elif scope == "all":
+        cantrip_ids = (await db.execute(
+            select(CantripData.cantrip_id).where(
+                CantripData.user_id == current_user.id
+            ).distinct()
+        )).scalars().all()
+        for cid in cantrip_ids:
+            cantrip = (await db.execute(
+                select(Cantrip).where(
+                    Cantrip.id == cid, Cantrip.user_id == current_user.id
+                )
+            )).scalar_one_or_none()
+            if cantrip is None:
+                continue
+            rows = (await db.execute(
+                select(CantripData).where(
+                    CantripData.user_id == current_user.id,
+                    CantripData.cantrip_id == cid,
+                ).order_by(CantripData.key)
+            )).scalars().all()
+            payloads.append(_export_payload("cantrip", rows, cantrip_name=cantrip.name))
 
     if not payloads:
         raise HTTPException(
@@ -680,6 +710,14 @@ async def import_storage(
             if not cantrip_id:
                 skipped.append("(cantrip bundle without a target cantrip)")
                 continue
+            owned_cantrip = (await db.execute(
+                select(Cantrip.id).where(
+                    Cantrip.id == cantrip_id,
+                    Cantrip.user_id == current_user.id,
+                )
+            )).scalar_one_or_none()
+            if owned_cantrip is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cantrip not found")
             model, extra = CantripData, {"cantrip_id": cantrip_id}
         else:
             skipped.append(f"(unknown scope '{scope}')")

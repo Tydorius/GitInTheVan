@@ -232,7 +232,6 @@ async def run_pre_forward_ordered(
     params = extract_context_params(body_json, request_headers)
     conversation_id = params.get("conversation_id", "")
     isolated = _store_writes_isolated(body_json)
-    messages = body_json.get("messages", [])
 
     async with async_session() as db:
         # Activation (rule 19): the plan orders, it never activates. The
@@ -378,7 +377,7 @@ async def run_pre_forward_ordered(
                 deletes=state.get("user_data_deletes"),
             )
 
-    if internal_chat_id and state["accumulated_memories"]:
+    if internal_chat_id and state["accumulated_memories"] and not body_json.get("_gitv_replay"):
         from app.services.conversation import save_memories_for_chat
         await save_memories_for_chat(
             internal_chat_id, user_id, state["accumulated_memories"]
@@ -393,7 +392,7 @@ async def run_pre_forward_ordered(
         or final_example_dialogs != seeded_character["example_dialogs"]
     ):
         body_json["messages"] = apply_cantrip_result_to_messages(
-            messages,
+            body_json.get("messages", []),
             final_personality,
             final_scenario,
             final_example_dialogs,

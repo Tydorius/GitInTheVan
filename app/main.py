@@ -393,6 +393,7 @@ if __name__ == "__main__":
                 pass
             finally:
                 try:
+                    writer.close()
                     await writer.wait_closed()
                 except Exception:
                     pass

@@ -87,14 +87,15 @@ def _find_line(text: str, pattern: str, start: int = 0) -> int:
     return 0
 
 
-def scan_cantrip(code: str) -> ScanResult:
+def scan_cantrip(code: str, max_content_size: int | None = None) -> ScanResult:
     result = ScanResult(safe=True)
+    limit = MAX_CONTENT_SIZE if max_content_size is None else max_content_size
 
-    if len(code) > MAX_CONTENT_SIZE:
+    if len(code) > limit:
         result.findings.append(ScanFinding(
             severity="warning",
             pattern="size",
-            description=f"Large content: {len(code)} chars (max {MAX_CONTENT_SIZE})",
+            description=f"Large content: {len(code)} chars (max {limit})",
         ))
 
     for pattern, description in CRITICAL_PATTERNS:
@@ -147,7 +148,9 @@ def scan_lorebook(entries: list[dict]) -> ScanResult:
     return result
 
 
-def scan_json_content(raw_json: str, resource_type: str) -> ScanResult:
+def scan_json_content(
+    raw_json: str, resource_type: str, max_content_size: int | None = None
+) -> ScanResult:
     try:
         data = json.loads(raw_json)
     except json.JSONDecodeError as e:
@@ -162,7 +165,7 @@ def scan_json_content(raw_json: str, resource_type: str) -> ScanResult:
 
     if resource_type == "cantrip":
         code = data.get("code", "")
-        base = scan_cantrip(code)
+        base = scan_cantrip(code, max_content_size=max_content_size)
         return base
 
     if resource_type == "lorebook":
@@ -363,10 +366,12 @@ def scan_map(data: dict) -> ScanResult:
     return scan_map_report(data).aggregate
 
 
-def scan_file(raw_content: str, resource_type: str) -> ScanResult:
+def scan_file(
+    raw_content: str, resource_type: str, max_content_size: int | None = None
+) -> ScanResult:
     """Scan a raw file content for safety issues.
 
     Returns ScanResult with findings. Files with critical findings
     should not be installed without explicit user override.
     """
-    return scan_json_content(raw_content, resource_type)
+    return scan_json_content(raw_content, resource_type, max_content_size=max_content_size)

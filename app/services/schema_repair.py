@@ -210,7 +210,13 @@ def _backfill_sql(drift: Drift) -> str | None:
     if default is None:
         return None
 
-    literal = default if _looks_numeric(default) else f"'{str(default)}'"
+    if isinstance(default, bool):
+        literal = "TRUE" if default else "FALSE"
+    elif isinstance(default, (int, float)) or _looks_numeric(default):
+        literal = str(default)
+    else:
+        escaped = str(default).replace("'", "''")
+        literal = f"'{escaped}'"
     return (
         f"UPDATE {drift.table} SET {drift.column} = {literal} "
         f"WHERE {drift.column} IS NULL;"

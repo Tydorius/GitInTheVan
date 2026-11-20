@@ -190,10 +190,10 @@ class PassengerHandler:
             )
             return None, "no_endpoint"
 
-        started = time.monotonic()
         last_error = "chain_failed"
         summary = ""
         for attempt, candidate in enumerate(chain):
+            started = time.monotonic()
             call_model = model or candidate.model or "gpt-4"
             configured = self._layers(candidate, call_model)
             url = _build_upstream_url(

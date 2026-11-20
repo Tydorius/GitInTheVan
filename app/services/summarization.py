@@ -201,6 +201,7 @@ async def summarize_messages(
     def _degraded(detail: str) -> str:
         logger.warning("Summarization did not run: %s", detail)
         if body_json is not None:
+            body_json["_gitv_summarizer_degraded"] = True
             debug_capture(
                 body_json, "summarization_error", "Summarization",
                 detail=f"Did not run: {detail}. Conversation forwarded unsummarized.",
@@ -281,9 +282,11 @@ async def summarize_messages(
     if status_code != 200:
         return _degraded(f"the endpoint returned {status_code}")
 
+    choices = data.get("choices") or []
+    if not choices:
+        return _degraded("the endpoint returned no choices")
     content = (
-        data.get("choices", [{}])[0]
-        .get("message", {})
+        (choices[0].get("message") or {})
         .get("content", "")
         .strip()
     )
@@ -435,6 +438,7 @@ async def maybe_summarize(
                 len(to_compress),
             )
         else:
+            body_json.pop("_gitv_summarizer_degraded", None)
             summary_text = await summarize_messages(
                 to_compress,
                 endpoint,
@@ -446,7 +450,8 @@ async def maybe_summarize(
                 ),
                 body_json=body_json,
             )
-            if summary_text:
+            degraded = bool(body_json.pop("_gitv_summarizer_degraded", False))
+            if summary_text and not degraded:
                 async with async_session() as db:
                     await save_summary(
                         db, user_id, internal_chat_id, summary_text,

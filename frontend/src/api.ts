@@ -1,3 +1,5 @@
+import { isAuthenticated, isAdmin } from './stores';
+
 const API_BASE = '';
 
 export function getToken(): string | null {
@@ -38,6 +40,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (resp.status === 401) {
     clearToken();
+    isAuthenticated.set(false);
+    isAdmin.set(false);
     window.location.hash = '#/login';
     throw new Error('Unauthorized');
   }
@@ -928,6 +932,7 @@ export const api = {
       verification_rule: '/api/verification/rules',
       memory_rule: '/api/memory-rules',
       scenario_rule: '/api/scenario-rules',
+      map: '/api/maps',
     }
     const base = routes[resourceType]
     if (!base) return Promise.resolve(null)

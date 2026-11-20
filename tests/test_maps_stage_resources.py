@@ -34,7 +34,7 @@ async def _endpoint(client, name, host, tag):
     return resp.json()["id"]
 
 
-def _cantrip_resource(name, code):
+def _cantrip_resource(name, code, *, run_driver_callable: bool = False):
     return {
         "resource_type": "cantrip",
         "position": "pre_driver",
@@ -43,6 +43,7 @@ def _cantrip_resource(name, code):
         "resource_content": {
             "name": name, "description": "", "llm_instructions": "", "code": code,
             "timeout_ms": CANTRIP_TIMEOUT_MS,
+            "run_driver_callable": run_driver_callable,
         },
     }
 
@@ -634,7 +635,7 @@ class TestDriverCallableInStages:
             "name": "Tooled",
             "stages": [
                 _stage(1, "Worker", "tooler", "persist",
-                       [_cantrip_resource("Weather", WEATHER_TOOL)]),
+                       [_cantrip_resource("Weather", WEATHER_TOOL, run_driver_callable=True)]),
             ],
         }})
         assert created.status_code == 201, created.text

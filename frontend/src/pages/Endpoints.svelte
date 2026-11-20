@@ -508,7 +508,7 @@
           </label>
         </div>
         <div class="modal-actions">
-          <button onclick={() => { showForm = false; resetForm(); }}>Cancel</button>
+          <button type="button" onclick={() => { showForm = false; resetForm(); }}>Cancel</button>
           <button type="submit" class="primary">{editingId ? 'Update' : 'Create'}</button>
         </div>
       </form>
@@ -541,7 +541,7 @@
             <input id="key-label" autocomplete="off" bind:value={keyFormLabel} placeholder={keyFormIsDefault ? 'Default' : 'JanitorAI'} />
           </div>
           <div class="modal-actions">
-            <button onclick={() => showKeyForm = false}>Cancel</button>
+            <button type="button" onclick={() => showKeyForm = false}>Cancel</button>
             <button type="submit" class="primary">Create Key</button>
           </div>
         </form>

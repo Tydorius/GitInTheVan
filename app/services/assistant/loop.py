@@ -160,9 +160,13 @@ async def run_turn(
         yield "error", {"code": "busy", "message": "This conversation already has a turn running."}
         return
 
-    async with lock:
-        async for event in _run_locked(ctx, user_message=user_message, decision=decision):
-            yield event
+    try:
+        async with lock:
+            async for event in _run_locked(ctx, user_message=user_message, decision=decision):
+                yield event
+    finally:
+        if not lock.locked() and _LOCKS.get(ctx.conversation_id) is lock:
+            _LOCKS.pop(ctx.conversation_id, None)
 
 
 async def _run_locked(  # noqa: C901 - the turn algorithm is one readable sequence
@@ -244,8 +248,10 @@ async def _run_locked(  # noqa: C901 - the turn algorithm is one readable sequen
                         {"rejected": True, "detail": "The user rejected this call.", "note": note},
                     )
                 )
-            elif tool is None:
-                messages.append(_tool_message(call_id, name, {"error": {"status": 0, "detail": "Unknown tool."}}))
+            elif tool is None or name not in allowed_names:
+                messages.append(
+                    _tool_message(call_id, name, {"error": {"status": 0, "detail": "Tool is not allowed or unknown."}})
+                )
             else:
                 if choice == "allow_session":
                     session_allows.add(name)

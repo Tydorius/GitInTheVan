@@ -821,8 +821,9 @@ async def _forward_request_impl(
                 body_json["messages"] = inject_samples(body_json["messages"], map_samples)
 
             response_data = await run_map_pipeline(body_json, user_id, request_headers, map_active, map_timeout)
+            map_status = body_json.pop("_gitv_map_status_code", 200)
 
-            if body_json.get("_gitv_chat_id"):
+            if map_status == 200 and body_json.get("_gitv_chat_id"):
                 # Package 3: map output gets extraction + stripping too. No
                 # post-Navigator pass runs on the final map output (stage
                 # cantrips ran inside the pipeline), so the seeded key only
@@ -831,7 +832,8 @@ async def _forward_request_impl(
                 response_data = await process_response_capture(
                     response_data, user_id, body_json
                 )
-                response_data = await _extract_response_memories(response_data, user_id, body_json)
+                response_data = await _handle_response_memories(response_data, user_id, body_json)
+            if map_status == 200:
                 response_data = _append_pending_notices(response_data, body_json)
 
             if body_json.get("_gitv_debug") and user_id:
@@ -846,7 +848,7 @@ async def _forward_request_impl(
             from app.services.metrics import flush_metrics
             await flush_metrics(body_json)
 
-            if stream:
+            if map_status == 200 and stream:
                 ux_settings = await _load_ux_settings(user_id)
                 return _convert_to_sse(
                     JSONResponse(status_code=200, content=response_data),
@@ -856,7 +858,7 @@ async def _forward_request_impl(
                     preserve_thinking=ux_settings.get("preserve_thinking", True),
                 )
 
-            return JSONResponse(status_code=200, content=response_data)
+            return JSONResponse(status_code=map_status, content=response_data)
 
         # The global pre-driver pass already ran above (before map selection,
         # so cantrip nominations could be counted). Anything between here and
@@ -1139,6 +1141,7 @@ def _apply_llm_parameters(
     so the LiteLLM forwarder can pass keys it does not model through extra_body;
     it is stripped with every other `_gitv` key before serialization.
     """
+    user_resolved = resolve([("user settings", user_layer)])
     layers: list[tuple[str, list[ParamDef]]] = [("user settings", user_layer)]
     if candidate is not None:
         label = f"endpoint '{candidate.endpoint_name}'" if candidate.endpoint_name else "endpoint"
@@ -1147,6 +1150,7 @@ def _apply_llm_parameters(
 
     resolved = resolve(layers)
     out = apply_to_body(body_json, resolved)
+    out["_gitv_user_llm_params"] = dict(user_resolved.values)
     out["_gitv_llm_params"] = dict(resolved.values)
     out["_gitv_llm_param_sources"] = dict(resolved.sources)
     return out
@@ -1343,11 +1347,15 @@ async def _apply_lorebook_injection(
                     # injection (the cap existed but no caller passed it).
                     # Tokens -> chars via the canonical len//4 estimator.
                     total_budget=(
-                        (body_json.get("_gitv_budget_allocations") or {})
-                        .get("allocations", {})
-                        .get(lb.id, {})
-                        .get("share", 0)
-                        * 4
+                        (
+                            (body_json.get("_gitv_budget_allocations") or {})
+                            .get("allocations", {})
+                            .get(lb.id, {})
+                            .get("share", 0)
+                            * 4
+                        )
+                        if lb.budget_weight > 0 and body_json.get("_gitv_budget_allocations")
+                        else 0
                     ),
                 )
                 if lb.inject_after_cantrips:
@@ -1506,6 +1514,29 @@ async def _extract_response_memories(
     return response_data
 
 
+async def _handle_response_memories(
+    response_data: dict[str, Any], user_id: str, body_json: dict[str, Any]
+) -> dict[str, Any]:
+    """Extract/save memories unless <MEMORY:off> is active; when off, strip
+    <memstore> tags so raw tags never leak and record the conversation anchor."""
+    if body_json.get("_gitv_command_overrides", {}).get("memory") is not False:
+        return await _extract_response_memories(response_data, user_id, body_json)
+
+    choices = response_data.get("choices", []) if isinstance(response_data, dict) else []
+    if choices:
+        content = choices[0].get("message", {}).get("content", "")
+        if content:
+            from app.services.memory import parse_memstore_tags
+
+            cleaned, _ = parse_memstore_tags(content)
+            if cleaned != content:
+                response_data["choices"][0]["message"]["content"] = cleaned
+
+    if body_json.get("_gitv_chat_id"):
+        await _record_conversation_anchor(response_data, user_id, body_json)
+    return response_data
+
+
 def inject_tool_notification_safe(
     messages: list[dict[str, Any]], notification: str
 ) -> list[dict[str, Any]]:
@@ -1552,13 +1583,32 @@ async def _run_driver_callable_loop(
     turns_remaining = body_json.get("_gitv_driver_callable_turns", 0)
 
     from app.services.cantrip import _load_active_cantrips
+    from app.services.group_resolver import group_direct_members
+    from app.services.tagging import should_activate_resource
 
+    direct_ids = group_direct_members(body_json)
+    load_extra_ids = direct_ids | tool_only_ids if tool_only_ids else direct_ids
+    tags = body_json.get("_gitv_tags") or []
     async with async_session() as db:
-        all_cantrips = await _load_active_cantrips(db, user_id, "pre_driver")
-        tool_cantrips = {c.name.lower(): c for c in all_cantrips if c.run_driver_callable}
-    if tool_only_ids is not None:
+        all_cantrips = await _load_active_cantrips(
+            db, user_id, "pre_driver", direct_member_ids=load_extra_ids
+        )
         tool_cantrips = {
-            name: c for name, c in tool_cantrips.items() if c.id in tool_only_ids
+            c.name.lower(): c
+            for c in all_cantrips
+            if c.run_driver_callable
+            and (
+                (tool_only_ids is not None and c.id in tool_only_ids)
+                or (
+                    tool_only_ids is None
+                    and (
+                        c.id in direct_ids
+                        or should_activate_resource(
+                            c.tag, "cantrip", c.is_active, c.is_public, c.user_id, user_id, tags
+                        )
+                    )
+                )
+            )
         }
 
     loop_messages = [msg.copy() for msg in body_json.get("messages", [])]
@@ -1603,6 +1653,7 @@ async def _run_driver_callable_loop(
                 provider=body_json.get("_gitv_provider", ""),
                 base_url=body_json.get("_gitv_base_url", ""),
                 api_key=body_json.get("_gitv_api_key", ""),
+                configured=body_json.get("_gitv_llm_params"),
             )
             _record_loop_call(started, response_data, status_code)
             return response_data, status_code
@@ -1615,11 +1666,11 @@ async def _run_driver_callable_loop(
 
         if status_code != 200:
             logger.warning("Driver-callable loop: forward returned %d", status_code)
-            return response_data
+            return response_data, status_code
 
         choices = response_data.get("choices", [])
         if not choices:
-            return response_data
+            return response_data, status_code
 
         content = choices[0].get("message", {}).get("content", "")
         calls = parse_call_tags(content)
@@ -1628,7 +1679,7 @@ async def _run_driver_callable_loop(
             cleaned = strip_call_tags(content)
             if cleaned != content:
                 response_data["choices"][0]["message"]["content"] = cleaned
-            return response_data
+            return response_data, status_code
 
         turns_remaining -= 1
         rounds += 1
@@ -1678,7 +1729,7 @@ async def _run_driver_callable_loop(
             if cleaned != content:
                 response_data["choices"][0]["message"]["content"] = cleaned
 
-    return response_data
+    return response_data, status_code
 
 
 async def _forward_non_streaming_verified(
@@ -1699,8 +1750,7 @@ async def _forward_non_streaming_verified(
             )
             if loop_result is not None:
                 body_json["_gitv_driver_callable_completed"] = True
-                response_data = loop_result
-                status_code = 200
+                response_data, status_code = loop_result
 
                 if status_code == 200 and user_id:
                     response_data = await _apply_post_driver_processing(
@@ -1739,8 +1789,9 @@ async def _forward_non_streaming_verified(
                         logger.exception("Post-navigator processing failed")
 
                 if status_code == 200 and body_json.get("_gitv_chat_id"):
-                    response_data = await _extract_response_memories(response_data, user_id, body_json)
-                response_data = _append_pending_notices(response_data, body_json)
+                    response_data = await _handle_response_memories(response_data, user_id, body_json)
+                if status_code == 200:
+                    response_data = _append_pending_notices(response_data, body_json)
 
                 if isinstance(response_data, dict):
                     response_data.pop("_gitv_forbidden_summary", None)
@@ -1770,6 +1821,7 @@ async def _forward_non_streaming_verified(
             provider=body_json.get("_gitv_provider", ""),
             base_url=body_json.get("_gitv_base_url", ""),
             api_key=body_json.get("_gitv_api_key", ""),
+            configured=body_json.get("_gitv_llm_params"),
         )
         from app.services.debug_metrics import PURPOSE_MAIN, record_llm_call
         record_llm_call(
@@ -1820,14 +1872,9 @@ async def _forward_non_streaming_verified(
             logger.exception("Post-navigator processing failed")
 
     if status_code == 200 and user_id and body_json.get("_gitv_chat_id"):
-        if body_json.get("_gitv_command_overrides", {}).get("memory") is not False:
-            response_data = await _extract_response_memories(response_data, user_id, body_json)
-            response_data = _append_pending_notices(response_data, body_json)
-        else:
-            # 0.42.0 (B6.1): memory is off, but the conversation anchor is
-            # not part of memory -- record it or the next request starts a
-            # new chat.
-            await _record_conversation_anchor(response_data, user_id, body_json)
+        response_data = await _handle_response_memories(response_data, user_id, body_json)
+    if status_code == 200:
+        response_data = _append_pending_notices(response_data, body_json)
 
     if isinstance(response_data, dict):
         response_data.pop("_gitv_forbidden_summary", None)
@@ -2176,12 +2223,16 @@ async def _forward_with_failover(
         body_json["_gitv_api_key"] = candidate.api_key
         body_json["_gitv_endpoint_id"] = candidate.endpoint_id
 
+        trial_headers = {k: v for k, v in headers.items() if k.lower() != "authorization"}
+        if candidate.api_key:
+            trial_headers["Authorization"] = f"Bearer {candidate.api_key}"
+
         effective_model = candidate.model or body_json.get("model", "")
 
         # Candidates may carry different endpoint- and model-level parameters, so
         # the first candidate's resolved set is not reusable. Re-resolve against
-        # this one. The user-settings layer travels on body_json from the driver
-        # path and does not change between candidates.
+        # this one. The pure user-settings layer travels on body_json from the
+        # driver path and does not include Candidate 0's endpoint/model params.
         if idx == 0:
             candidate_params = body_json.get("_gitv_llm_params", {})
         else:
@@ -2196,9 +2247,8 @@ async def _forward_with_failover(
                     (f"model '{effective_model}'", candidate.params_for_model(effective_model)),
                 ]
             )
-            # Keep whatever the user-settings layer contributed on the first
-            # pass, then let this candidate's own layers win over it.
-            candidate_params = {**body_json.get("_gitv_llm_params", {}), **resolved.values}
+            user_params = body_json.get("_gitv_user_llm_params", {})
+            candidate_params = {**user_params, **resolved.values}
 
         # Rebuild when this candidate changes the model or the parameters.
         forward_body = body_bytes
@@ -2207,6 +2257,10 @@ async def _forward_with_failover(
         )
         if needs_rebuild:
             trial_body = dict(body_json)
+            if idx > 0:
+                for prev_key in body_json.get("_gitv_llm_params", {}):
+                    if prev_key not in candidate_params:
+                        trial_body.pop(prev_key, None)
             if candidate.model:
                 trial_body["model"] = candidate.model
             trial_body = apply_to_body(trial_body, candidate_params)
@@ -2217,7 +2271,7 @@ async def _forward_with_failover(
         started = time.monotonic()
         try:
             response_data, status_code = await _do_forward(
-                method, upstream_url, headers, forward_body, timeout,
+                method, upstream_url, trial_headers, forward_body, timeout,
                 provider=candidate.provider,
                 base_url=candidate.base_url,
                 api_key=candidate.api_key,
@@ -2692,6 +2746,7 @@ async def _forward_streaming_with_memory(
             provider=body_json.get("_gitv_provider", "") if body_json else "",
             base_url=body_json.get("_gitv_base_url", "") if body_json else "",
             api_key=body_json.get("_gitv_api_key", "") if body_json else "",
+            configured=body_json.get("_gitv_llm_params") if body_json else None,
         )
         from app.services.debug_metrics import PURPOSE_MAIN, record_llm_call
         record_llm_call(
@@ -2719,26 +2774,29 @@ async def _forward_streaming_with_memory(
             response_data = await _apply_post_driver_processing(
                 response_data, body_json, user_id, request_headers or {}
             )
-            # Package 3: extraction between the passes, as on the buffered
-            # paths. When response checks are disabled the buffered stream
-            # still passes through here, so tags never leak to the client.
-            from app.services.response_tags import process_response_capture
-            response_data = await process_response_capture(
-                response_data, user_id, body_json
-            )
+
+        # Package 3: extraction between the passes, as on the buffered
+        # paths. When response checks are disabled the buffered stream
+        # still passes through here, so tags never leak to the client.
+        from app.services.response_tags import process_response_capture
+        response_data = await process_response_capture(
+            response_data, user_id, body_json
+        )
+
+        if ux_settings.get("streaming_post_processing", True):
             response_data = await _apply_post_navigator_processing(
                 response_data, body_json, user_id, request_headers or {}
             )
             if isinstance(response_data, dict):
                 response_data.pop("_gitv_forbidden_summary", None)
 
-        response_data = await _extract_response_memories(response_data, user_id, body_json)
+        response_data = await _handle_response_memories(response_data, user_id, body_json)
         response_data = _append_pending_notices(response_data, body_json)
 
-        # This path buffers the whole response before re-emitting it as SSE, so
-        # the exchange is as complete as the non-streaming one. It was simply
-        # never saved -- which is why a user whose client streams saw an empty
-        # Debug tab while the pipeline was working normally.
+        if body_json.get("_gitv_bypass_method"):
+            from app.services.bypass import apply_bypass_decode
+            response_data = apply_bypass_decode(response_data, body_json["_gitv_bypass_method"])
+
         if body_json.get("_gitv_debug"):
             await _save_debug_exchange(response_data, body_json, user_id)
 
@@ -2749,8 +2807,13 @@ async def _forward_streaming_with_memory(
         return _convert_to_sse(
             JSONResponse(status_code=200, content=response_data),
             model,
+            gitv_status=ux_settings.get("gitv_status", False),
+            simulated_speed=ux_settings.get("simulated_streaming_speed", 0),
             preserve_thinking=ux_settings.get("preserve_thinking", True),
         )
+
+    if body_json.get("_gitv_debug") and user_id:
+        await _save_debug_exchange(response_data, body_json, user_id)
 
     from app.services.metrics import flush_metrics
     await flush_metrics(body_json)

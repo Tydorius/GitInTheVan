@@ -1,5 +1,7 @@
+import asyncio
 import json
 import logging
+import re
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -15,6 +17,14 @@ from app.models.lorebook import Lorebook
 from app.models.lorebook_entry import LorebookEntry
 from app.models.user import User
 from app.models.verification import VerificationRule
+from app.services import snapshots
+from app.services.admin import get_admin_settings
+from app.services.content_guard import (
+    check_size,
+    gate_scan_findings,
+    log_scan_findings,
+    sanitize_and_log,
+)
 from app.services.git_sync import GitCloneError, fetch_file_content, fetch_repo_info
 from app.services.safety_scanner import scan_file
 
@@ -57,6 +67,14 @@ To share this pack with other GitInTheVan users:
 not be friendly to NSFW content. Consider using Gitea, Forgejo, or other
 self-hosted git platforms for adult content packs.
 """
+
+
+def _safe_slug(raw: str, fallback: str = "resource") -> str:
+    cleaned = re.sub(r"[^a-z0-9._-]+", "_", (raw or "").lower())
+    while ".." in cleaned:
+        cleaned = cleaned.replace("..", "_")
+    cleaned = cleaned.strip("._")[:64].strip("._")
+    return cleaned or fallback
 
 
 def _repo_to_response(r: LinkedRepo, counts: dict[str, int]) -> dict:
@@ -227,6 +245,7 @@ class InstallRequest(BaseModel):
     repo_id: str
     file_path: str
     fork: bool = False
+    override_scan: bool = False
 
 
 class InstalledItemResponse(BaseModel):
@@ -300,7 +319,7 @@ async def link_repo(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     try:
-        info = fetch_repo_info(req.url, req.branch, req.token)
+        info = await asyncio.to_thread(fetch_repo_info, req.url, req.branch, req.token)
     except GitCloneError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
@@ -388,7 +407,7 @@ async def sync_repo(
         if repo.is_local:
             info = _fetch_local_repo_info(repo.url)
         else:
-            info = fetch_repo_info(repo.url, repo.branch, repo.token)
+            info = await asyncio.to_thread(fetch_repo_info, repo.url, repo.branch, repo.token)
     except GitCloneError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -425,7 +444,7 @@ async def browse_repo(
             if repo.is_local:
                 info = _fetch_local_repo_info(repo.url)
             else:
-                info = fetch_repo_info(repo.url, repo.branch, repo.token)
+                info = await asyncio.to_thread(fetch_repo_info, repo.url, repo.branch, repo.token)
             repo.descriptions_cache = json.dumps(info)
             await db.commit()
         except GitCloneError as e:
@@ -475,7 +494,9 @@ async def install_file(
         if repo.is_local:
             raw_content = _fetch_local_file_content(repo.url, req.file_path)
         else:
-            raw_content = fetch_file_content(repo.url, req.file_path, repo.token)
+            raw_content = await asyncio.to_thread(
+                fetch_file_content, repo.url, req.file_path, repo.token, repo.branch
+            )
     except GitCloneError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except FileNotFoundError as e:
@@ -494,6 +515,9 @@ async def install_file(
         resource_type = "scenario_rule"
 
     scan_result = scan_file(raw_content, resource_type)
+    await log_scan_findings(current_user.id, scan_result, f"pack_{resource_type}", req.file_path)
+    if resource_type != "map":
+        gate_scan_findings(scan_result, req.override_scan, f"Pack {resource_type}")
 
     try:
         data = json.loads(raw_content)
@@ -506,6 +530,13 @@ async def install_file(
     outcome = None
 
     if resource_type == "map":
+        admin_settings = await get_admin_settings()
+        stages = data.get("stages", []) or []
+        if isinstance(stages, list) and len(stages) > admin_settings.max_map_stages:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Map exceeds maximum stages limit ({len(stages)} > {admin_settings.max_map_stages})",
+            )
         # A map is a collection: each object it carries is resolved, scanned and
         # recorded in its own right rather than the map being treated as a blob.
         from app.services.map_transfer import build_map_from_export
@@ -729,7 +760,7 @@ async def toggle_installed(
     item.is_enabled = not item.is_enabled
 
     if item.local_id:
-        await _toggle_local_resource(db, item.type, item.local_id, item.is_enabled)
+        await _toggle_local_resource(db, current_user.id, item.type, item.local_id, item.is_enabled)
 
     # A map is useless with its cantrips left disabled, so the toggle carries to
     # the objects it brought with it.
@@ -742,7 +773,7 @@ async def toggle_installed(
     for child in children_result.scalars().all():
         child.is_enabled = item.is_enabled
         if child.local_id:
-            await _toggle_local_resource(db, child.type, child.local_id, item.is_enabled)
+            await _toggle_local_resource(db, current_user.id, child.type, child.local_id, item.is_enabled)
 
     await db.commit()
     return {"is_enabled": item.is_enabled}
@@ -786,7 +817,7 @@ async def uninstall_item(
     # else still refers to each resource.
     for res_type, local_id in doomed:
         if not await _is_still_referenced(db, current_user.id, local_id):
-            await _delete_local_resource(db, res_type, local_id)
+            await _delete_local_resource(db, current_user.id, res_type, local_id)
 
     await db.commit()
 
@@ -836,7 +867,7 @@ async def check_updates(
         for i in items
     ]
 
-    results = do_check(repo.url, repo.branch, repo.token, item_dicts)
+    results = await asyncio.to_thread(do_check, repo.url, repo.branch, repo.token, item_dicts)
 
     update_count = 0
     for item, result_data in zip(items, results, strict=False):
@@ -890,7 +921,7 @@ async def create_pack(
         manifest_files.append(manifest_entry)
         contents_summary.append(f"- {manifest_entry['type']}: {manifest_entry['name']} ({file_path})")
 
-    pack_slug = req.pack_name.lower().replace(" ", "-").replace("/", "-")[:64] or "content-pack"
+    pack_slug = _safe_slug(req.pack_name, "content-pack")
     manifest = {
         "pack_name": req.pack_name,
         "pack_author": req.pack_author,
@@ -942,7 +973,7 @@ async def _serialize_resource(
             "author": "", "version": "1.0.0",
             "updated": obj.created_at.isoformat() if obj.created_at else "",
         }
-        slug = obj.name.lower().replace(" ", "_")[:64]
+        slug = _safe_slug(obj.name, "cantrip")
         return data, f"cantrips/{slug}.json", {"path": f"cantrips/{slug}.json", "type": "cantrip", **data}
 
     if rtype == "lorebook":
@@ -971,7 +1002,7 @@ async def _serialize_resource(
             "entries": entry_list, "author": "", "version": "1.0.0",
             "updated": obj.created_at.isoformat() if obj.created_at else "",
         }
-        slug = obj.name.lower().replace(" ", "_")[:64]
+        slug = _safe_slug(obj.name, "lorebook")
         return data, f"lorebooks/{slug}.json", {"path": f"lorebooks/{slug}.json", "type": "lorebook", **data}
 
     if rtype == "skill":
@@ -986,7 +1017,7 @@ async def _serialize_resource(
             "author": "", "version": "1.0.0",
             "updated": obj.created_at.isoformat() if obj.created_at else "",
         }
-        slug = obj.name.lower().replace(" ", "_")[:64]
+        slug = _safe_slug(obj.name, "skill")
         return data, f"skills/{slug}.json", {"path": f"skills/{slug}.json", "type": "skill", **data}
 
     if rtype == "scenario_rule":
@@ -1003,7 +1034,7 @@ async def _serialize_resource(
             "author": "", "version": "1.0.0",
             "updated": obj.created_at.isoformat() if obj.created_at else "",
         }
-        slug = obj.name.lower().replace(" ", "_")[:64]
+        slug = _safe_slug(obj.name, "scenario_rule")
         return data, f"scenario_rules/{slug}.json", {"path": f"scenario_rules/{slug}.json", "type": "scenario_rule", **data}
 
     if rtype == "rule":
@@ -1020,7 +1051,7 @@ async def _serialize_resource(
             "author": "", "version": "1.0.0",
             "updated": obj.created_at.isoformat() if obj.created_at else "",
         }
-        slug = obj.name.lower().replace(" ", "_")[:64]
+        slug = _safe_slug(obj.name, "rule")
         return data, f"rules/{slug}.json", {"path": f"rules/{slug}.json", "type": "rule", **data}
 
     if rtype == "memory_rule":
@@ -1040,7 +1071,7 @@ async def _serialize_resource(
             "author": "", "version": "1.0.0",
             "updated": obj.created_at.isoformat() if obj.created_at else "",
         }
-        slug = obj.name.lower().replace(" ", "_")[:64]
+        slug = _safe_slug(obj.name, "memory_rule")
         return data, f"memory_rules/{slug}.json", {
             "path": f"memory_rules/{slug}.json", "type": "memory_rule", **data,
         }
@@ -1065,7 +1096,7 @@ async def _serialize_resource(
         data.setdefault("author", "")
         data["version"] = data.get("version") or "1.0.0"
         data["updated"] = obj.updated_at.isoformat() if obj.updated_at else ""
-        slug = obj.name.lower().replace(" ", "_")[:64]
+        slug = _safe_slug(obj.name, "map")
         return data, f"maps/{slug}.json", {"path": f"maps/{slug}.json", "type": "map", **data}
 
     return None, "", {}
@@ -1075,13 +1106,17 @@ async def _create_local_resource(
     db: AsyncSession, user_id: str, resource_type: str, data: dict
 ) -> str:
     """Create a local resource from pack data. Always disabled."""
+    admin_settings = await get_admin_settings()
+
     if resource_type == "cantrip":
+        code = data.get("code", "") or ""
+        check_size(code, admin_settings.max_script_size_kb * 1024, "Cantrip code")
         cantrip = Cantrip(
             user_id=user_id,
             name=data.get("name", "Imported"),
             description=data.get("description", ""),
             llm_instructions=data.get("llm_instructions", ""),
-            code=data.get("code", ""),
+            code=code,
             is_active=False,
             is_public=False,
         )
@@ -1090,6 +1125,17 @@ async def _create_local_resource(
         return cantrip.id
 
     if resource_type == "lorebook":
+        entries = data.get("entries", [])
+        if isinstance(entries, dict):
+            entries = list(entries.values())
+        max_lb_chars = admin_settings.max_lorebook_size_kb * 1024
+        total_chars = sum(len(e.get("content", "") or "") for e in entries)
+        if total_chars > max_lb_chars:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Lorebook exceeds size limit ({total_chars} chars, max {max_lb_chars})",
+            )
+
         lb = Lorebook(
             user_id=user_id,
             name=data.get("name", "Imported"),
@@ -1099,17 +1145,17 @@ async def _create_local_resource(
         db.add(lb)
         await db.flush()
 
-        entries = data.get("entries", [])
-        if isinstance(entries, dict):
-            entries = list(entries.values())
         for entry_data in entries:
             import json as _json
+            content = await sanitize_and_log(
+                db, user_id, entry_data.get("content", "") or "", "lorebook_entry", lb.id
+            )
             entry = LorebookEntry(
                 lorebook_id=lb.id,
                 name=entry_data.get("name", ""),
                 keys=_json.dumps(entry_data.get("keys", [])),
                 secondary_keys=_json.dumps(entry_data.get("secondary_keys", [])),
-                content=entry_data.get("content", ""),
+                content=content,
                 position=entry_data.get("position", "before_last_message"),
                 insertion_order=entry_data.get("insertion_order", 10),
                 is_constant=entry_data.get("is_constant", False),
@@ -1121,11 +1167,14 @@ async def _create_local_resource(
         return lb.id
 
     if resource_type == "rule":
+        prompt = data.get("prompt", "") or ""
+        check_size(prompt, admin_settings.max_rule_size_kb * 1024, "Rule prompt")
+        prompt = await sanitize_and_log(db, user_id, prompt, "verification_rule")
         rule = VerificationRule(
             user_id=user_id,
             name=data.get("name", "Imported"),
             description=data.get("description", ""),
-            prompt=data.get("prompt", ""),
+            prompt=prompt,
             is_active=False,
         )
         db.add(rule)
@@ -1134,6 +1183,9 @@ async def _create_local_resource(
 
     if resource_type == "memory_rule":
         from app.models.memory_rule import MemoryRule
+        prompt = data.get("prompt", "") or ""
+        check_size(prompt, admin_settings.max_rule_size_kb * 1024, "Memory rule prompt")
+        prompt = await sanitize_and_log(db, user_id, prompt, "memory_rule")
         memory_rule = MemoryRule(
             user_id=user_id,
             name=data.get("name", "Imported"),
@@ -1141,7 +1193,7 @@ async def _create_local_resource(
             summarization_enabled=bool(data.get("summarization_enabled", True)),
             token_threshold=data.get("token_threshold", 0),
             keep_recent=data.get("keep_recent", 0),
-            prompt=data.get("prompt", ""),
+            prompt=prompt,
             is_active=False,
         )
         db.add(memory_rule)
@@ -1150,13 +1202,16 @@ async def _create_local_resource(
 
     if resource_type == "scenario_rule":
         from app.models.scenario_rule import ScenarioRule
+        prompt = data.get("prompt", "") or ""
+        check_size(prompt, admin_settings.max_rule_size_kb * 1024, "Scenario rule prompt")
+        prompt = await sanitize_and_log(db, user_id, prompt, "scenario_rule")
         sr = ScenarioRule(
             user_id=user_id,
             name=data.get("name", "Imported"),
             token_threshold=data.get("token_threshold", 2000),
             fire_position=data.get("fire_position", "pre"),
             model=data.get("model", ""),
-            prompt=data.get("prompt", ""),
+            prompt=prompt,
             is_active=False,
         )
         db.add(sr)
@@ -1165,11 +1220,14 @@ async def _create_local_resource(
 
     if resource_type in ("skill", "sample"):
         from app.models.skill import Skill
+        content = data.get("content", "") or ""
+        check_size(content, admin_settings.max_rule_size_kb * 1024, "Skill content")
+        content = await sanitize_and_log(db, user_id, content, "skill")
         skill = Skill(
             user_id=user_id,
             name=data.get("name", "Imported"),
             description=data.get("description", ""),
-            content=data.get("content", ""),
+            content=content,
             # A published "sample" is a Skill row with type=sample; the folder it
             # ships in cannot carry that distinction, so it comes from the file.
             type=data.get("type", "skill") if data.get("type") in ("skill", "sample") else "skill",
@@ -1194,85 +1252,68 @@ async def _create_local_resource(
 
 
 async def _toggle_local_resource(
-    db: AsyncSession, resource_type: str, local_id: str, enabled: bool
+    db: AsyncSession, user_id: str, resource_type: str, local_id: str, enabled: bool
 ):
+    model = None
+    snap_type = "verification_rule" if resource_type == "rule" else resource_type
     if resource_type == "cantrip":
-        result = await db.execute(select(Cantrip).where(Cantrip.id == local_id))
-        obj = result.scalar_one_or_none()
-        if obj:
-            obj.is_active = enabled
+        model = Cantrip
     elif resource_type == "lorebook":
-        result = await db.execute(select(Lorebook).where(Lorebook.id == local_id))
-        obj = result.scalar_one_or_none()
-        if obj:
-            obj.is_active = enabled
+        model = Lorebook
     elif resource_type == "rule":
-        result = await db.execute(select(VerificationRule).where(VerificationRule.id == local_id))
-        obj = result.scalar_one_or_none()
-        if obj:
-            obj.is_active = enabled
+        model = VerificationRule
     elif resource_type == "memory_rule":
         from app.models.memory_rule import MemoryRule
-        result = await db.execute(select(MemoryRule).where(MemoryRule.id == local_id))
-        obj = result.scalar_one_or_none()
-        if obj:
-            obj.is_active = enabled
+        model = MemoryRule
     elif resource_type == "scenario_rule":
         from app.models.scenario_rule import ScenarioRule
-        result = await db.execute(select(ScenarioRule).where(ScenarioRule.id == local_id))
-        obj = result.scalar_one_or_none()
-        if obj:
-            obj.is_active = enabled
+        model = ScenarioRule
     elif resource_type == "map":
         from app.models.map import Map
-        result = await db.execute(select(Map).where(Map.id == local_id))
+        model = Map
+    # Skills have no is_active flag -- they apply wherever they are attached.
+    if model is not None:
+        result = await db.execute(
+            select(model).where(model.id == local_id, model.user_id == user_id)
+        )
         obj = result.scalar_one_or_none()
         if obj:
+            await snapshots.capture(db, user_id, snap_type, local_id)
             obj.is_active = enabled
-    # Skills have no is_active flag -- they apply wherever they are attached.
 
 
 async def _delete_local_resource(
-    db: AsyncSession, resource_type: str, local_id: str
+    db: AsyncSession, user_id: str, resource_type: str, local_id: str
 ):
+    model = None
+    snap_type = (
+        "verification_rule" if resource_type == "rule"
+        else "skill" if resource_type == "sample"
+        else resource_type
+    )
     if resource_type == "cantrip":
-        result = await db.execute(select(Cantrip).where(Cantrip.id == local_id))
-        obj = result.scalar_one_or_none()
-        if obj:
-            await db.delete(obj)
+        model = Cantrip
     elif resource_type == "lorebook":
-        result = await db.execute(select(Lorebook).where(Lorebook.id == local_id))
-        obj = result.scalar_one_or_none()
-        if obj:
-            await db.delete(obj)
+        model = Lorebook
     elif resource_type == "rule":
-        result = await db.execute(select(VerificationRule).where(VerificationRule.id == local_id))
-        obj = result.scalar_one_or_none()
-        if obj:
-            await db.delete(obj)
+        model = VerificationRule
     elif resource_type == "memory_rule":
         from app.models.memory_rule import MemoryRule
-        result = await db.execute(select(MemoryRule).where(MemoryRule.id == local_id))
-        obj = result.scalar_one_or_none()
-        if obj:
-            await db.delete(obj)
+        model = MemoryRule
     elif resource_type == "scenario_rule":
         from app.models.scenario_rule import ScenarioRule
-        result = await db.execute(select(ScenarioRule).where(ScenarioRule.id == local_id))
-        obj = result.scalar_one_or_none()
-        if obj:
-            await db.delete(obj)
+        model = ScenarioRule
     elif resource_type in ("skill", "sample"):
         from app.models.skill import Skill
-        result = await db.execute(select(Skill).where(Skill.id == local_id))
-        obj = result.scalar_one_or_none()
-        if obj:
-            await db.delete(obj)
+        model = Skill
     elif resource_type == "map":
         from app.models.map import Map
-        result = await db.execute(select(Map).where(Map.id == local_id))
+        model = Map
+    if model is not None:
+        result = await db.execute(
+            select(model).where(model.id == local_id, model.user_id == user_id)
+        )
         obj = result.scalar_one_or_none()
         if obj:
-            # Stages and stage-resource rows cascade; the lorebooks, cantrips and
-            # skills the import created are standalone and are left in place.
+            await snapshots.capture(db, user_id, snap_type, local_id)
             await db.delete(obj)

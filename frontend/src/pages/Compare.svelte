@@ -185,10 +185,12 @@
       (c.trigger_changed?.length || 0) + (c.data_changed?.length || 0) +
       (d.lorebooks?.added?.length || 0) + (d.lorebooks?.removed?.length || 0) +
       (d.skills?.added?.length || 0) + (d.skills?.removed?.length || 0) +
+      (d.samples?.added?.length || 0) + (d.samples?.removed?.length || 0) +
       (d.stages?.only_in_baseline?.length || 0) + (d.stages?.only_in_other?.length || 0) +
       (d.stages?.changed?.length || 0) +
       (d.identity?.same ? 0 : 1) +
       (d.verification?.same ? 0 : 1) +
+      (d.reasoning && !d.reasoning.identical && !d.reasoning.baseline_empty ? 1 : 0) +
       (d.response?.identical ? 0 : 1)
     )
   }

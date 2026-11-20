@@ -60,6 +60,7 @@ class CantripResult:
     user_data_deletes: list[str] = field(default_factory=list)
     cantrip_data_deletes: list[str] = field(default_factory=list)
     memories: dict = field(default_factory=dict)
+    memory_deletes: list[str] = field(default_factory=list)
     # Map tags the cantrip asked to activate via context.maps.activate(tag).
     # A nomination, not a command: maps are a selection resource under repo
     # rule 19, so the nominated tag competes in tag_matches_resource
@@ -211,6 +212,7 @@ async def run_cantrip(
             user_data_deletes=result_data.get("user_data_deletes", []),
             cantrip_data_deletes=result_data.get("cantrip_data_deletes", []),
             memories=result_data.get("memories", {}),
+            memory_deletes=result_data.get("memory_deletes", []),
             maps_nominated=result_data.get("maps_nominated", []),
             lorebook_ops=result_data.get("lorebook_ops", []),
             book_activations=result_data.get("book_activations", []),
@@ -399,7 +401,7 @@ def _validate_syntax_sync(code: str) -> str:
         return ""
 
     wrapper = (
-        f"const __userCode = {code!r};\n"
+        f"const __userCode = {_json.dumps(code)};\n"
         "try {\n"
         "    try {\n"
         "        new Function('context', 'return (async () => {\\n' + __userCode + '\\n})();');\n"
@@ -420,7 +422,7 @@ def _validate_syntax_sync(code: str) -> str:
             f.write(wrapper)
 
         result = subprocess.run(
-            [DENO_PATH, "run", "--quiet", temp_path],
+            [DENO_PATH, "run", "--quiet", *_DENO_DENY_FLAGS, temp_path],
             capture_output=True, timeout=5,
         )
         stdout = result.stdout.decode("utf-8", errors="replace").strip() if result.stdout else ""

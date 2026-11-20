@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit_log import AuditLog
@@ -46,15 +46,14 @@ async def log_action(
 
 
 async def list_logs(
-    db: AsyncSession, user_id: str, limit: int = 100, offset: int = 0
+    db: AsyncSession, user_id: str | None = None, limit: int = 100, offset: int = 0
 ) -> list[dict[str, Any]]:
-    """List audit logs for a user."""
+    """List audit logs for a user, or all users when user_id is None."""
+    stmt = select(AuditLog)
+    if user_id is not None:
+        stmt = stmt.where(AuditLog.user_id == user_id)
     result = await db.execute(
-        select(AuditLog)
-        .where(AuditLog.user_id == user_id)
-        .order_by(AuditLog.created_at.desc())
-        .limit(limit)
-        .offset(offset)
+        stmt.order_by(AuditLog.created_at.desc()).limit(limit).offset(offset)
     )
     logs = result.scalars().all()
     return [
@@ -70,3 +69,11 @@ async def list_logs(
         }
         for log in logs
     ]
+
+
+async def count_logs(db: AsyncSession, user_id: str | None = None) -> int:
+    """Count total audit logs for a user, or all users when user_id is None."""
+    stmt = select(func.count()).select_from(AuditLog)
+    if user_id is not None:
+        stmt = stmt.where(AuditLog.user_id == user_id)
+    return int((await db.execute(stmt)).scalar() or 0)

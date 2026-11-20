@@ -139,16 +139,18 @@ async def build_seed(
     notes: list[dict[str, Any]] = []
 
     # Script-created books bound to this conversation: always seeded, writable.
-    dyn_rows = (
-        await db.execute(
-            select(ConversationDynamicLorebook)
-            .where(
-                ConversationDynamicLorebook.user_id == user_id,
-                ConversationDynamicLorebook.conversation_id == conversation_id,
+    dyn_rows = []
+    if conversation_id:
+        dyn_rows = (
+            await db.execute(
+                select(ConversationDynamicLorebook)
+                .where(
+                    ConversationDynamicLorebook.user_id == user_id,
+                    ConversationDynamicLorebook.conversation_id == conversation_id,
+                )
+                .order_by(ConversationDynamicLorebook.created_at)
             )
-            .order_by(ConversationDynamicLorebook.created_at)
-        )
-    ).scalars().all()
+        ).scalars().all()
     if dyn_rows:
         books = (
             await db.execute(
@@ -176,13 +178,17 @@ async def build_seed(
     # The chat's lexicon book (Phase 29): bound, so seeded too — read-only,
     # the lexicon compiler owns it.
     lex_binding = (
-        await db.execute(
-            select(ConversationLorebookBinding).where(
-                ConversationLorebookBinding.user_id == user_id,
-                ConversationLorebookBinding.conversation_id == conversation_id,
+        (
+            await db.execute(
+                select(ConversationLorebookBinding).where(
+                    ConversationLorebookBinding.user_id == user_id,
+                    ConversationLorebookBinding.conversation_id == conversation_id,
+                )
             )
-        )
-    ).scalar_one_or_none()
+        ).scalar_one_or_none()
+        if conversation_id
+        else None
+    )
     if lex_binding is not None:
         book = (
             await db.execute(
@@ -315,16 +321,21 @@ async def _find_dynamic_row(
     ).scalar_one_or_none()
 
 
-async def _find_entry(db: AsyncSession, lorebook_id: str, ref: str) -> LorebookEntry | None:
-    """Entry by exact name (case-sensitive), exact-key fallback — the same
-    rule the sandbox facade uses, so what a script updated is what gets
-    updated.
+async def _find_entry(
+    db: AsyncSession,
+    lorebook_id: str,
+    ref: str,
+    *,
+    allow_key_fallback: bool = True,
+) -> LorebookEntry | None:
+    """Entry by exact name (case-sensitive), with optional exact-key fallback.
 
     0.42.0 (B8b): name matching is case-sensitive. It used to fold case,
     so ``add({name: "tavern"})`` silently overwrote an entry named
     ``Tavern``; now the two are distinct entries and the upsert cannot
     clobber across case. The keys fallback still folds case (keys are
-    keyword lists, matched case-insensitively everywhere else)."""
+    keyword lists, matched case-insensitively everywhere else) and is
+    restricted to explicit update/delete by ref (never on add())."""
     if not ref:
         return None
     row = (
@@ -335,7 +346,7 @@ async def _find_entry(db: AsyncSession, lorebook_id: str, ref: str) -> LorebookE
             )
         )
     ).scalar_one_or_none()
-    if row is not None:
+    if row is not None or not allow_key_fallback:
         return row
     candidates = (
         await db.execute(select(LorebookEntry).where(LorebookEntry.lorebook_id == lorebook_id))
@@ -428,8 +439,12 @@ async def apply_ops(
     async def resolve(name: str, tag: str = "") -> str:
         if name in resolved:
             return resolved[name]
-        row = await _find_dynamic_row(db, user_id, conversation_id, name)
-        if row is None and tag:
+        row = (
+            await _find_dynamic_row(db, user_id, conversation_id, name)
+            if conversation_id
+            else None
+        )
+        if row is None:
             # Cross-conversation books live under the "" sentinel row.
             row = await _find_dynamic_row(db, user_id, "", name)
         if row is not None:
@@ -473,22 +488,25 @@ async def apply_ops(
             })
             continue
         used += 1
-        book_key = lorebook_id  # "" while the book is pending creation
+        book_key = lorebook_id or f"__pending__:{name}"
 
         if kind == "add":
             fields = _coerce_fields(op.get("entry"), partial=False)
             if fields is None:
                 outcomes.append({"op": "add", "book": name, "outcome": "refused", "reason": "entry needs content"})
                 continue
-            # The sandbox upserts by name-or-first-key; resolve the same way so
-            # a re-run replaces its entry instead of duplicating it.
+            # Match existing entries by exact name only on add() (no key
+            # fallback, so add({name: "tavern"}) never clobbers an entry named
+            # "The Gilded Cup" that happens to have "tavern" in its keys).
             ref = fields.get("name") or ""
             if not ref:
                 keys = parse_json_list(fields.get("keys", "[]"))
                 ref = keys[0] if keys else ""
             staged_hit = staged_by_key.get((book_key, ref))
             existing = staged_hit["existing"] if staged_hit else (
-                await _find_entry(db, lorebook_id, ref) if lorebook_id else None
+                await _find_entry(db, lorebook_id, ref, allow_key_fallback=False)
+                if lorebook_id and fields.get("name")
+                else None
             )
             reason = await _run_content_guards(
                 db, user_id, lorebook_id, fields,
@@ -556,15 +574,19 @@ async def apply_ops(
         # batch. The sandbox's working copy reflects same-run adds, so the
         # script saw its delete succeed -- the host used to refuse it and
         # land the add anyway. A staged add over nothing is simply dropped;
-        # a staged add over a stored row falls through to the normal DB
-        # delete (net delete, both snapshots owed).
+        # a staged add over a stored row cancels the upsert and proceeds to
+        # delete the stored row (net delete, no delta injection).
         staged_hit = staged_by_key.get((book_key, ref))
-        if staged_hit is not None and staged_hit["kind"] == "upsert" and staged_hit.get("existing") is None:
+        if staged_hit is not None and staged_hit["kind"] == "upsert":
             staged_hit["kind"] = "noop"
-            outcomes.append({"op": "delete", "book": name,
-                             "outcome": "deleted (staged add removed)"})
-            continue
-        existing = await _find_entry(db, lorebook_id, ref) if lorebook_id else None
+            staged_by_key.pop((book_key, ref), None)
+            if staged_hit.get("existing") is None:
+                outcomes.append({"op": "delete", "book": name,
+                                 "outcome": "deleted (staged add removed)"})
+                continue
+            existing = staged_hit["existing"]
+        else:
+            existing = await _find_entry(db, lorebook_id, ref) if lorebook_id else None
         if existing is None:
             outcomes.append({"op": "delete", "book": name, "outcome": "refused",
                              "reason": f"no entry '{ref}'"})

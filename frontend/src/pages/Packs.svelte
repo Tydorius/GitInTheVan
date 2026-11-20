@@ -611,7 +611,7 @@
           </div>
         </div>
         <div class="modal-actions">
-          <button onclick={() => showLinkForm = false}>Cancel</button>
+          <button type="button" onclick={() => showLinkForm = false}>Cancel</button>
           <button type="submit" class="primary" disabled={linking}>{linking ? 'Linking...' : 'Link'}</button>
         </div>
       </form>
@@ -639,7 +639,7 @@
           <label><input type="checkbox" bind:checked={localForm.is_global} style="width: auto;"> Make visible to all users (Global)</label>
         </div>
         <div class="modal-actions">
-          <button onclick={() => showLocalForm = false}>Cancel</button>
+          <button type="button" onclick={() => showLocalForm = false}>Cancel</button>
           <button type="submit" class="primary" disabled={localLinking}>{localLinking ? 'Linking...' : 'Link'}</button>
         </div>
       </form>
@@ -663,7 +663,7 @@
           </div>
         {/if}
         <div class="modal-actions">
-          <button onclick={() => editingResource = null}>Cancel</button>
+          <button type="button" onclick={() => editingResource = null}>Cancel</button>
           <button type="submit" class="primary" disabled={savingResource}>{savingResource ? 'Saving...' : 'Save'}</button>
         </div>
       </form>

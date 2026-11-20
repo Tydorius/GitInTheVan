@@ -40,6 +40,7 @@
   ]
 
   // Tag edit modal
+  let tagModalShow = false
   let tagModalResource: any = null
   let tagModalType: 'lore' | 'cantrip' = 'lore'
   let tagModalName = ''
@@ -160,6 +161,7 @@
     tagModalName = resource.name
     tagModalValue = resource.tag || ''
     tagModalError = ''
+    tagModalShow = true
   }
 
   async function saveTag(tag: string) {
@@ -179,6 +181,7 @@
         tagModalError = data.detail || 'Failed to update tag'
         return
       }
+      tagModalShow = false
       tagModalResource = null
       await load()
     } catch (e: any) { tagModalError = e.message }
@@ -395,10 +398,10 @@
 
 <!-- Tag Edit Modal -->
 <TagEditModal
-  show={!!tagModalResource}
+  bind:show={tagModalShow}
   resourceType={tagModalType}
   resourceName={tagModalName}
   currentTag={tagModalValue}
-  errorMsg={tagModalError}
+  bind:errorMsg={tagModalError}
   onSave={saveTag}
 />

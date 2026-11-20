@@ -239,10 +239,10 @@ async def process_response_capture(
             ).scalar_one_or_none()
         patterns = compile_strip_patterns(settings or "[]")
 
-        if not found and not patterns:
+        if not names and not patterns:
             return response_data
 
-        stripped = strip_tags(content, names) if found else content
+        stripped = strip_tags(content, names) if names else content
         stripped = apply_strip_patterns(stripped, patterns)
 
         if found:

@@ -138,6 +138,8 @@ async def record_post_hash(
     if not post_hash:
         return ""
 
+    from sqlalchemy.exc import IntegrityError
+
     async with async_session() as db:
         existing = await _find_by_hash(db, user_id, post_hash)
         if not existing:
@@ -148,7 +150,10 @@ async def record_post_hash(
                     internal_chat_id=internal_chat_id,
                 )
             )
-            await db.commit()
+            try:
+                await db.commit()
+            except IntegrityError:
+                await db.rollback()
 
     return post_hash
 
@@ -168,9 +173,12 @@ async def load_memories_for_chat(
 
 
 async def save_memories_for_chat(
-    internal_chat_id: str, user_id: str, memories: dict[str, str]
+    internal_chat_id: str,
+    user_id: str,
+    memories: dict[str, str],
+    deletes: set[str] | list[str] | None = None,
 ) -> None:
-    if not memories:
+    if not memories and not deletes:
         return
 
     async with async_session() as db:
@@ -195,6 +203,13 @@ async def save_memories_for_chat(
                         value=value,
                     )
                 )
+
+        for key in deletes or ():
+            if key in memories:
+                continue
+            row = existing.get(key)
+            if row is not None:
+                await db.delete(row)
 
         await db.commit()
 

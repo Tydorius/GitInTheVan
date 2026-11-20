@@ -57,6 +57,12 @@ class _WinTempDir:
         return False
 
 
+def _scrub_token(text: str, token: str) -> str:
+    if token:
+        return text.replace(token, "***")
+    return text
+
+
 def fetch_repo_info(url: str, branch: str = "main", token: str = "") -> dict[str, Any]:
     from dulwich import porcelain
 
@@ -64,13 +70,15 @@ def fetch_repo_info(url: str, branch: str = "main", token: str = "") -> dict[str
 
     with _WinTempDir() as tmpdir:
         try:
-            porcelain.clone(
-                auth_url,
-                target=str(tmpdir),
-                checkout=True,
-            )
+            clone_kwargs: dict[str, Any] = {
+                "target": str(tmpdir),
+                "checkout": True,
+            }
+            if branch:
+                clone_kwargs["branch"] = branch.encode()
+            porcelain.clone(auth_url, **clone_kwargs)
         except Exception as e:
-            err_msg = str(e)[:300]
+            err_msg = _scrub_token(str(e), token)[:300]
             logger.error("Git clone failed for %s: %s", url, err_msg)
             if "not found" in err_msg.lower() or "404" in err_msg:
                 raise GitCloneError(f"Repository not found: {url}") from e
@@ -247,7 +255,7 @@ def safe_repo_join(root: Path | str, rel_path: str) -> Path:
 
 
 def fetch_files_content(
-    url: str, file_paths: list[str], token: str = ""
+    url: str, file_paths: list[str], token: str = "", branch: str = "main"
 ) -> dict[str, str]:
     """Read several files from a repo with a single clone.
 
@@ -264,9 +272,16 @@ def fetch_files_content(
 
     with _WinTempDir() as tmpdir:
         try:
-            porcelain.clone(auth_url, target=str(tmpdir), checkout=True)
+            clone_kwargs: dict[str, Any] = {
+                "target": str(tmpdir),
+                "checkout": True,
+            }
+            if branch:
+                clone_kwargs["branch"] = branch.encode()
+            porcelain.clone(auth_url, **clone_kwargs)
         except Exception as e:
-            raise GitCloneError(f"Failed to clone repository: {e}") from e
+            err_msg = _scrub_token(str(e), token)[:300]
+            raise GitCloneError(f"Failed to clone repository: {err_msg}") from e
 
         out: dict[str, str] = {}
         for file_path in file_paths:
@@ -280,8 +295,10 @@ def fetch_files_content(
         return out
 
 
-def fetch_file_content(url: str, file_path: str, token: str = "") -> str:
-    contents = fetch_files_content(url, [file_path], token)
+def fetch_file_content(
+    url: str, file_path: str, token: str = "", branch: str = "main"
+) -> str:
+    contents = fetch_files_content(url, [file_path], token, branch=branch)
     if file_path not in contents:
         raise FileNotFoundError(f"File not found in repo: {file_path}")
     return contents[file_path]

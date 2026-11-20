@@ -18,13 +18,15 @@
 
   let mode: 'list' | 'other' = 'list'
   let lastSyncedValue: string | null = null
+  let lastSyncedModels: string[] | null = null
 
   // Re-derive the mode when the bound value or the list changes from outside
   // (loading a record, switching endpoint), but not on every keystroke the user
   // makes in the free-text box -- which is why the sync is guarded on value
   // actually having changed since we last looked.
-  $: if (value !== lastSyncedValue) {
+  $: if (value !== lastSyncedValue || models !== lastSyncedModels) {
     lastSyncedValue = value
+    lastSyncedModels = models
     mode = value && !models.includes(value) ? 'other' : 'list'
   }
 

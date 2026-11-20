@@ -26,13 +26,38 @@ class EmbeddedScript:
 
 
 def _desanitize_content(raw: str) -> str:
-    """Decode HTML entities and common escaping from upstream platforms."""
+    """Decode HTML entities from upstream platforms and restore escaped newlines/tabs
+    only outside JavaScript string literals so string escapes like ``"a\\nb"`` stay valid.
+    """
     decoded = html.unescape(raw)
-    decoded = decoded.replace("&amp;", "&")
-    decoded = decoded.replace("&lt;", "<").replace("&gt;", ">")
-    decoded = decoded.replace("&quot;", '"').replace("&#39;", "'")
-    decoded = decoded.replace("\\n", "\n").replace("\\t", "\t")
-    return decoded.strip()
+    out: list[str] = []
+    in_quote: str | None = None
+    i = 0
+    n = len(decoded)
+    while i < n:
+        ch = decoded[i]
+        if in_quote is not None:
+            out.append(ch)
+            if ch == "\\" and i + 1 < n:
+                out.append(decoded[i + 1])
+                i += 2
+                continue
+            if ch == in_quote:
+                in_quote = None
+            i += 1
+            continue
+        if ch in ("'", '"', "`"):
+            in_quote = ch
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "\\" and i + 1 < n and decoded[i + 1] in ("n", "t"):
+            out.append("\n" if decoded[i + 1] == "n" else "\t")
+            i += 2
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out).strip()
 
 
 def extract_jslorebook_scripts(text: str) -> list[EmbeddedScript]:

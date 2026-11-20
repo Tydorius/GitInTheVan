@@ -52,11 +52,12 @@ context.cantrip_data = {
 
 const __memories = context.__memories || {};
 delete context.__memories;
+const __memoryDeletes = new Set();
 context.memory = {
     get: (key) => key in __memories ? __memories[key] : null,
-    set: (key, value) => { __memories[key] = String(value); },
+    set: (key, value) => { __memories[key] = String(value); __memoryDeletes.delete(key); },
     keys: () => Object.keys(__memories),
-    delete: (key) => { delete __memories[key]; },
+    delete: (key) => { delete __memories[key]; __memoryDeletes.add(key); },
     all: () => Object.assign({}, __memories)
 };
 
@@ -165,13 +166,14 @@ function __lorebookOpAllowed() {
     return true;
 }
 
-function __findLorebookEntry(book, entryName) {
+function __findLorebookEntry(book, entryName, allowKeyFallback = true) {
     // 0.42.0 (B8b): name matching is case-sensitive, mirroring the host's
     // _find_entry -- add({name: "tavern"}) must not silently overwrite an
-    // entry named "Tavern". The keys fallback still folds case.
+    // entry named "Tavern". The keys fallback still folds case and is only
+    // used by update/delete, never add().
     const name = String(entryName);
     let hit = book.entries.find(e => (e.name || '') === name);
-    if (hit) return hit;
+    if (hit || !allowKeyFallback) return hit || null;
     // Exact-key fallback: an entry known by a keyword rather than its name.
     const lower = name.toLowerCase();
     return book.entries.find(e => (e.keys || []).some(k => String(k).toLowerCase() === lower));
@@ -195,9 +197,8 @@ function __wrapLorebook(name) {
             }
             if (!requireWritable('add')) return;
             __lorebookOps.push({ op: 'add', book: name, entry: norm });
-            // The host upserts by name (scripts run every turn; append-only
-            // would duplicate), so the working copy mirrors that.
-            const existing = __findLorebookEntry(book, norm.name || norm.keys[0] || '');
+            // The host upserts by exact name only (never key-fallback on add).
+            const existing = norm.name ? __findLorebookEntry(book, norm.name, false) : null;
             if (existing) Object.assign(existing, norm);
             else book.entries.push(norm);
         },
@@ -429,7 +430,7 @@ const __result = {
     personality: context.character.personality || "",
     scenario: context.character.scenario || "",
     example_dialogs: context.character.example_dialogs || "",
-    response_content: __hasResponse ? (context.response.content || null) : null,
+    response_content: __hasResponse ? (context.response.content !== undefined && context.response.content !== null ? context.response.content : null) : null,
     tool_result: context.tool_result || "",
     chat_data: Object.assign({}, __chatData),
     user_data: Object.assign({}, __userData),
@@ -438,6 +439,7 @@ const __result = {
     user_data_deletes: Array.from(__userDataDeletes),
     cantrip_data_deletes: Array.from(__cantripDataDeletes),
     memories: Object.assign({}, __memories),
+    memory_deletes: Array.from(__memoryDeletes),
     maps_nominated: __mapNominations,
     lorebook_ops: __lorebookOps,
     book_activations: __bookActivations,

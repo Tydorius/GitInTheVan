@@ -97,16 +97,18 @@ async def _postgres_backup(dest: Path) -> int:
 
 
 async def _mysql_backup(dest: Path) -> int:
+    import os
+
     url = make_url(settings.database_url)
     args = [
         "mariadb-dump" if shutil.which("mariadb-dump") else "mysqldump",
         "-h", url.host or "localhost",
         "-P", str(url.port or 3306),
         "-u", url.username or "",
-        f"-p{url.password or ''}",
         url.database or "",
     ]
-    return await _run_dump_subprocess(args, dest)
+    env = {**os.environ, "MYSQL_PWD": url.password or ""}
+    return await _run_dump_subprocess(args, dest, env=env)
 
 
 async def create_backup(triggered_by: str) -> BackupRun:
@@ -270,7 +272,15 @@ async def confirm_restore(backup_id: str, token: str) -> None:
     dialect = _dialect()
     if dialect == "sqlite":
         live_path = _sqlite_path()
+        for suffix in ("-wal", "-shm"):
+            wal_file = Path(f"{live_path}{suffix}")
+            if wal_file.exists():
+                wal_file.unlink()
         shutil.copy2(backup_file, live_path)
+        for suffix in ("-wal", "-shm"):
+            wal_file = Path(f"{live_path}{suffix}")
+            if wal_file.exists():
+                wal_file.unlink()
     else:
         raise ValueError(
             f"Automatic restore is only implemented for SQLite. For {dialect}, "

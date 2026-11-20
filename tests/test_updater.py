@@ -1025,8 +1025,8 @@ class TestUpdateScriptGuardRails:
     def test_unix_port_scanning_is_isolated_and_guarded(self, name):
         """Every port scan lives in kill_port_holders, which tolerates a missing tool."""
         lines = self._text(name).splitlines()
-        start = next(i for i, l in enumerate(lines) if l.startswith("kill_port_holders() {"))
-        end = next(i for i, l in enumerate(lines) if i > start and l == "}")
+        start = next(i for i, line in enumerate(lines) if line.startswith("kill_port_holders() {"))
+        end = next(i for i, line in enumerate(lines) if i > start and line == "}")
         body = "\n".join(lines[start : end + 1])
         assert "command -v lsof" in body, (
             f"{name}: kill_port_holders calls lsof without checking it exists; lsof is "
@@ -1034,11 +1034,11 @@ class TestUpdateScriptGuardRails:
         )
 
         stray = [
-            (i + 1, l.strip())
-            for i, l in enumerate(lines)
+            (i + 1, line.strip())
+            for i, line in enumerate(lines)
             if not (start <= i <= end)
-            and not l.strip().startswith("#")
-            and re.search(r"(?<![\w-])(lsof|fuser|ss)\b", l)
+            and not line.strip().startswith("#")
+            and re.search(r"(?<![\w-])(lsof|fuser|ss)\b", line)
         ]
         assert not stray, (
             f"{name} scans for port holders outside the guarded helper, so a missing "
@@ -1068,8 +1068,8 @@ class TestUpdateScriptGuardRails:
         hardened = next(
             (
                 i
-                for i, l in enumerate(lines)
-                if l.strip().lower().startswith('set "path=') and "system32" in l.lower()
+                for i, line in enumerate(lines)
+                if line.strip().lower().startswith('set "path=') and "system32" in line.lower()
             ),
             None,
         )
@@ -1089,8 +1089,8 @@ class TestUpdateScriptGuardRails:
         first_use = next(
             (
                 i
-                for i, l in enumerate(lines)
-                if not l.strip().upper().startswith("REM") and needs_path.search(l)
+                for i, line in enumerate(lines)
+                if not line.strip().upper().startswith("REM") and needs_path.search(line)
             ),
             None,
         )

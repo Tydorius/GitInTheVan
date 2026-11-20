@@ -96,9 +96,21 @@ async def _save_chat_data(
     conversation_id: str,
     chat_data: dict[str, Any],
     deletes: set[str] | None = None,
+    before: dict[str, Any] | None = None,
 ) -> None:
     if not conversation_id:
         return
+
+    if before is not None:
+        to_write = {
+            k: v for k, v in chat_data.items() if k not in before or before[k] != v
+        }
+        to_delete = [k for k in (deletes or ()) if k not in chat_data]
+        if not to_write and not to_delete:
+            return
+    else:
+        to_write = chat_data
+        to_delete = [k for k in (deletes or ()) if k not in chat_data]
 
     existing_result = await db.execute(
         select(ChatData).where(
@@ -108,7 +120,7 @@ async def _save_chat_data(
     )
     existing = {row.key: row for row in existing_result.scalars().all()}
 
-    for key, value in chat_data.items():
+    for key, value in to_write.items():
         value_json = json.dumps(value)
         if key in existing:
             if existing[key].value_json != value_json:
@@ -125,9 +137,7 @@ async def _save_chat_data(
 
     # 0.42.0: delete() persists. A key deleted then re-set in the same run
     # keeps its new value (the final dict is the truth).
-    for key in deletes or ():
-        if key in chat_data:
-            continue
+    for key in to_delete:
         row = existing.get(key)
         if row is not None:
             await db.delete(row)
@@ -154,13 +164,25 @@ async def _save_user_data(
     user_id: str,
     user_data: dict[str, Any],
     deletes: set[str] | None = None,
+    before: dict[str, Any] | None = None,
 ) -> None:
+    if before is not None:
+        to_write = {
+            k: v for k, v in user_data.items() if k not in before or before[k] != v
+        }
+        to_delete = [k for k in (deletes or ()) if k not in user_data]
+        if not to_write and not to_delete:
+            return
+    else:
+        to_write = user_data
+        to_delete = [k for k in (deletes or ()) if k not in user_data]
+
     existing_result = await db.execute(
         select(UserData).where(UserData.user_id == user_id)
     )
     existing = {row.key: row for row in existing_result.scalars().all()}
 
-    for key, value in user_data.items():
+    for key, value in to_write.items():
         value_json = json.dumps(value)
         if key in existing:
             if existing[key].value_json != value_json:
@@ -174,9 +196,7 @@ async def _save_user_data(
                 )
             )
 
-    for key in deletes or ():
-        if key in user_data:
-            continue
+    for key in to_delete:
         row = existing.get(key)
         if row is not None:
             await db.delete(row)
@@ -209,7 +229,19 @@ async def _save_cantrip_data(
     cantrip_id: str,
     cantrip_data: dict[str, Any],
     deletes: set[str] | None = None,
+    before: dict[str, Any] | None = None,
 ) -> None:
+    if before is not None:
+        to_write = {
+            k: v for k, v in cantrip_data.items() if k not in before or before[k] != v
+        }
+        to_delete = [k for k in (deletes or ()) if k not in cantrip_data]
+        if not to_write and not to_delete:
+            return
+    else:
+        to_write = cantrip_data
+        to_delete = [k for k in (deletes or ()) if k not in cantrip_data]
+
     existing_result = await db.execute(
         select(CantripData).where(
             CantripData.user_id == user_id,
@@ -218,7 +250,7 @@ async def _save_cantrip_data(
     )
     existing = {row.key: row for row in existing_result.scalars().all()}
 
-    for key, value in cantrip_data.items():
+    for key, value in to_write.items():
         value_json = json.dumps(value)
         if key in existing:
             if existing[key].value_json != value_json:
@@ -233,9 +265,7 @@ async def _save_cantrip_data(
                 )
             )
 
-    for key in deletes or ():
-        if key in cantrip_data:
-            continue
+    for key in to_delete:
         row = existing.get(key)
         if row is not None:
             await db.delete(row)
@@ -477,6 +507,8 @@ async def process_cantrips(
         else:
             chat_data = await _load_chat_data(db, user_id, conversation_id)
             user_data = await _load_user_data(db, user_id)
+        before_chat_data = dict(chat_data)
+        before_user_data = dict(user_data)
 
         lorebook_seed, lorebook_always, binding_conv_id = await _prepare_lorebook_seeding(
             db, body_json, user_id, request_headers, internal_chat_id, cantrips
@@ -520,6 +552,7 @@ async def process_cantrips(
             "chat_data": chat_data,
             "user_data": user_data,
             "accumulated_memories": accumulated_memories,
+            "memory_deletes": set(),
             "lorebook_seed": lorebook_seed,
             "lorebook_always": lorebook_always,
         }
@@ -577,20 +610,33 @@ async def process_cantrips(
                 await _save_chat_data(
                     db, user_id, conversation_id, chat_data,
                     deletes=state.get("chat_data_deletes"),
+                    before=before_chat_data,
                 )
 
             if not isolated:
                 await _save_user_data(
                     db, user_id, user_data,
                     deletes=state.get("user_data_deletes"),
+                    before=before_user_data,
                 )
 
-    if internal_chat_id and state["accumulated_memories"]:
+    if (
+        internal_chat_id
+        and not body_json.get("_gitv_replay")
+        and (state["accumulated_memories"] or state["memory_deletes"])
+    ):
         from app.services.conversation import save_memories_for_chat
-        await save_memories_for_chat(internal_chat_id, user_id, state["accumulated_memories"])
+        await save_memories_for_chat(
+            internal_chat_id,
+            user_id,
+            state["accumulated_memories"],
+            deletes=state["memory_deletes"],
+        )
         logger.info(
-            "Cantrip memory updates: %d keys for chat %s",
-            len(state["accumulated_memories"]), internal_chat_id[:12],
+            "Cantrip memory updates: %d keys, %d deletes for chat %s",
+            len(state["accumulated_memories"]),
+            len(state["memory_deletes"]),
+            internal_chat_id[:12],
         )
 
     final_personality = context["character"]["personality"]
@@ -663,6 +709,8 @@ async def _execute_cantrip_step(
         context["budget"] = build_cantrip_budget_context(
             budget_allocations, cantrip.id, cantrip.budget_weight
         )
+    else:
+        context.pop("budget", None)
 
     # Per-cantrip lorebook seed: bound books for everyone, this cantrip's
     # configured reads for it alone.
@@ -679,13 +727,16 @@ async def _execute_cantrip_step(
         cantrip_data = dict(store_seeds["cantrip_data"].get(cantrip.id, {}))
     else:
         cantrip_data = await _load_cantrip_data(db, user_id, cantrip.id)
+    before_cantrip_data = dict(cantrip_data)
 
     started = time.monotonic()
     try:
-        if internal_chat_id and state["accumulated_memories"]:
-            context["__memories"] = {
-                **context.get("__memories", {}), **state["accumulated_memories"]
-            }
+        if internal_chat_id and (state["accumulated_memories"] or state.get("memory_deletes")):
+            mem_seed = {**context.get("__memories", {}), **state["accumulated_memories"]}
+            for dk in state.get("memory_deletes", ()):
+                if dk not in state["accumulated_memories"]:
+                    mem_seed.pop(dk, None)
+            context["__memories"] = mem_seed
 
         result = await run_cantrip(
             code=cantrip.code,
@@ -762,6 +813,10 @@ async def _execute_cantrip_step(
     context["character"]["scenario"] = result.scenario
     context["character"]["example_dialogs"] = result.example_dialogs
     state["accumulated_memories"].update(result.memories)
+    mem_deletes = state.setdefault("memory_deletes", set())
+    for mk in result.memories:
+        mem_deletes.discard(mk)
+    mem_deletes.update(result.memory_deletes)
 
     # Map nominations ride the body like memories do; the proxy's map
     # branch merges them into selection after the cantrip pass.
@@ -786,6 +841,7 @@ async def _execute_cantrip_step(
         await _save_cantrip_data(
             db, user_id, cantrip.id, result.cantrip_data,
             deletes=set(result.cantrip_data_deletes),
+            before=before_cantrip_data,
         )
 
     # Phase 20: apply this cantrip's lorebook ops now, not after the
@@ -896,10 +952,11 @@ def apply_prompt_strips(
                 "removed_chars": removed_chars,
             },
         )
-        record_prompt_object(
-            body_json, "prompt_strip", cantrip_id or source,
-            0, -max(1, _est_tokens("x" * removed_chars)),
-        )
+        if removed_chars > 0:
+            record_prompt_object(
+                body_json, "prompt_strip", cantrip_id or source,
+                0, -max(1, _est_tokens("x" * removed_chars)),
+            )
     return applied
 
 
@@ -995,9 +1052,10 @@ async def _apply_prompt_requests(
             notes.append({"kind": "activate", "book": name, "outcome": "activated",
                           "matched": len(matched), "entries": len(entry_dicts)})
             if matched:
+                from app.services.budget import estimate_tokens as _est_tokens
                 record_prompt_object(
                     body_json, "book_activation", book.id,
-                    0, sum(len(m.content) for m in matched),
+                    0, sum(_est_tokens(m.content) for m in matched),
                 )
 
         total_chars = 0
@@ -1122,20 +1180,30 @@ async def process_cantrips_post_driver(
         else:
             chat_data = await _load_chat_data(db, user_id, conversation_id)
             user_data = await _load_user_data(db, user_id)
+        before_chat_data = dict(chat_data)
+        before_user_data = dict(user_data)
         # 0.42.0: keys deleted by this pass's scripts (persisted at the
         # pass-level save below).
         chat_data_deletes: set = set()
         user_data_deletes: set = set()
+
+        internal_chat_id = body_json.get("_gitv_chat_id", "")
 
         # Phase 20: same seeding/ops as the pre-forward pass, minus the
         # same-turn injection (the prompt has already been sent; entries
         # written here inject next turn via the conversation binding).
         lorebook_seed, lorebook_always, binding_conv_id = await _prepare_lorebook_seeding(
             db, body_json, user_id, request_headers,
-            body_json.get("_gitv_chat_id", ""), cantrips,
+            internal_chat_id, cantrips,
         )
 
         context = build_context(messages, **params)
+        if internal_chat_id:
+            from app.services.conversation import load_memories_for_chat
+
+            context["__memories"] = await load_memories_for_chat(internal_chat_id, user_id)
+        accumulated_memories: dict[str, str] = {}
+        memory_deletes: set[str] = set()
         context["response"] = {
             "content": response_content,
             "original_content": response_content,
@@ -1150,6 +1218,7 @@ async def process_cantrips_post_driver(
         current_content = response_content
 
         from app.services.budget import estimate_tokens as _est_tokens
+        from app.services.debug_metrics import record_cantrip
         from app.services.metrics import record_prompt_object
         from app.services.passenger import get_passenger_handler
 
@@ -1168,10 +1237,18 @@ async def process_cantrips_post_driver(
                 cantrip_data = dict(store_seeds["cantrip_data"].get(cantrip.id, {}))
             else:
                 cantrip_data = await _load_cantrip_data(db, user_id, cantrip.id)
+            before_cantrip_data = dict(cantrip_data)
 
+            if internal_chat_id and (accumulated_memories or memory_deletes):
+                mem_seed = {**context.get("__memories", {}), **accumulated_memories}
+                for dk in memory_deletes:
+                    if dk not in accumulated_memories:
+                        mem_seed.pop(dk, None)
+                context["__memories"] = mem_seed
+
+            started = time.monotonic()
             try:
                 context["response"]["content"] = current_content
-                started = time.monotonic()
                 result = await run_cantrip(
                     code=cantrip.code,
                     context=context,
@@ -1181,8 +1258,15 @@ async def process_cantrips_post_driver(
                     timeout_ms=cantrip.timeout_ms,
                     passenger_handler=passenger_handler,
                 )
-            except Exception:
+            except Exception as exc:
                 logger.exception("Post-driver cantrip '%s' failed", cantrip.name)
+                record_cantrip(
+                    body_json, cantrip_id=cantrip.id, name=cantrip.name, position=position,
+                    triggered=True, tag=cantrip.tag or "", code=cantrip.code,
+                    execution_order=cantrip.execution_order, timeout_ms=cantrip.timeout_ms,
+                    duration_ms=(time.monotonic() - started) * 1000.0,
+                    error=f"{type(exc).__name__}: {exc}"[:500],
+                )
                 continue
 
             if result.has_error:
@@ -1235,6 +1319,10 @@ async def process_cantrips_post_driver(
             # the pre-forward pass: a later set of a deleted key wins).
             chat_data_deletes.update(result.chat_data_deletes)
             user_data_deletes.update(result.user_data_deletes)
+            accumulated_memories.update(result.memories)
+            for mk in result.memories:
+                memory_deletes.discard(mk)
+            memory_deletes.update(result.memory_deletes)
 
             if store_seeds is not None:
                 if not ephemeral:
@@ -1243,6 +1331,7 @@ async def process_cantrips_post_driver(
                 await _save_cantrip_data(
                     db, user_id, cantrip.id, result.cantrip_data,
                     deletes=set(result.cantrip_data_deletes),
+                    before=before_cantrip_data,
                 )
 
             if result.lorebook_ops:
@@ -1252,7 +1341,7 @@ async def process_cantrips_post_driver(
                 )
                 lorebook_seed, lorebook_always, _ = await _prepare_lorebook_seeding(
                     db, body_json, user_id, request_headers,
-                    body_json.get("_gitv_chat_id", ""), cantrips, capture=False,
+                    internal_chat_id, cantrips, capture=False,
                 )
 
         if store_seeds is not None:
@@ -1268,10 +1357,29 @@ async def process_cantrips_post_driver(
                 await _save_chat_data(
                     db, user_id, conversation_id, chat_data,
                     deletes=chat_data_deletes or None,
+                    before=before_chat_data,
                 )
 
             if not isolated:
-                await _save_user_data(db, user_id, user_data, deletes=user_data_deletes or None)
+                await _save_user_data(
+                    db, user_id, user_data,
+                    deletes=user_data_deletes or None,
+                    before=before_user_data,
+                )
+
+        if (
+            internal_chat_id
+            and not body_json.get("_gitv_replay")
+            and (accumulated_memories or memory_deletes)
+        ):
+            from app.services.conversation import save_memories_for_chat
+
+            await save_memories_for_chat(
+                internal_chat_id,
+                user_id,
+                accumulated_memories,
+                deletes=memory_deletes,
+            )
 
     if current_content != response_content:
         logger.info(

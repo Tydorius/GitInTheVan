@@ -64,7 +64,9 @@
   }
 
   function toggleOverride() {
-    modelOverrideEnabled = !modelOverrideEnabled
+    if (!modelOverrideEnabled) {
+      modelOverrideText = ''
+    }
   }
 
   function effectiveModel(): string {

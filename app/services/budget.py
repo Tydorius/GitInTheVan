@@ -121,7 +121,10 @@ def compute_budget(
 
 
 async def load_weighted_resources(
-    user_id: str, tags: list | None = None, endpoint_id: str = ""
+    user_id: str,
+    tags: list | None = None,
+    endpoint_id: str = "",
+    direct_member_ids: dict[str, set[str]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Load active cantrips, lorebooks, and skills with their budget weights.
 
@@ -135,6 +138,9 @@ async def load_weighted_resources(
     from app.models.skill import EndpointSkill, Skill
     from app.services.tagging import should_activate_resource
 
+    lore_direct = (direct_member_ids or {}).get("lore", set())
+    cantrip_direct = (direct_member_ids or {}).get("cantrip", set())
+
     async with async_session() as db:
         lb_result = await db.execute(
             select(Lorebook).where(Lorebook.user_id == user_id)
@@ -143,19 +149,20 @@ async def load_weighted_resources(
 
         active_lorebooks = []
         for lb in lorebooks:
-            if not lb.run_pre_driver:
-                continue
-            if should_activate_resource(
+            if lb.id in lore_direct or should_activate_resource(
                 lb.tag, "lore", lb.is_active, lb.is_public, lb.user_id, user_id, tags or []
             ):
                 active_lorebooks.append(lb)
 
         # Candidates, not decisions: a tagged inactive cantrip has to reach
         # should_activate_resource for its tag to be able to switch it on.
+        cantrip_filters = [Cantrip.is_active.is_(True), Cantrip.tag != ""]
+        if cantrip_direct:
+            cantrip_filters.append(Cantrip.id.in_(cantrip_direct))
         cantrip_result = await db.execute(
             select(Cantrip).where(
                 Cantrip.user_id == user_id,
-                or_(Cantrip.is_active.is_(True), Cantrip.tag != ""),
+                or_(*cantrip_filters),
                 Cantrip.run_pre_driver.is_(True),
             )
         )
@@ -163,7 +170,7 @@ async def load_weighted_resources(
 
         active_cantrips = []
         for c in all_cantrips:
-            if should_activate_resource(
+            if c.id in cantrip_direct or should_activate_resource(
                 c.tag, "cantrip", c.is_active, c.is_public, c.user_id, user_id, tags or []
             ):
                 active_cantrips.append(c)
@@ -213,7 +220,20 @@ def allocate_budget(
     total_weight = sum(r["weight"] for r in all_resources)
 
     if total_weight <= 0:
-        total_weight = 1.0
+        allocations = {
+            f"{resource['id']}": {
+                "name": resource["name"],
+                "share": 0,
+                "weight": resource["weight"],
+                "detail_level": "bullets",
+            }
+            for resource in all_resources
+        }
+        return {
+            "total": injection_budget,
+            "remaining": injection_budget,
+            "allocations": allocations,
+        }
 
     allocations: dict[str, dict[str, Any]] = {}
     remaining = injection_budget
@@ -302,7 +322,10 @@ async def prepare_budget(
         return None
 
     cantrip_info, lorebook_info, skill_info = await load_weighted_resources(
-        user_id, tags, endpoint_id=endpoint_id
+        user_id,
+        tags,
+        endpoint_id=endpoint_id,
+        direct_member_ids=body_json.get("_gitv_group_member_ids"),
     )
     allocations = allocate_budget(injection_budget, cantrip_info, lorebook_info, skill_info)
 

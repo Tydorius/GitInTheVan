@@ -19,7 +19,7 @@ from app.services.content_guard import check_size, gate_scan_findings, log_scan_
 from app.services.deno_runner import CantripExecutionError, CantripResult, CantripTimeoutError
 from app.services.dynamic_lorebook import parse_reads
 from app.services.response_tags import parse_tag_names
-from app.services.safety_scanner import scan_cantrip
+from app.services.safety_scanner import MAX_CONTENT_SIZE, scan_cantrip
 from app.templates.cantrip_templates import get_templates
 
 logger = logging.getLogger(__name__)
@@ -60,8 +60,9 @@ async def _check_and_scan_cantrip_code(
     Planning/security-control-document.md.
     """
     admin_settings = await get_admin_settings()
-    check_size(code, admin_settings.max_script_size_kb * 1024, "Cantrip code")
-    scan = scan_cantrip(code)
+    max_chars = admin_settings.max_script_size_kb * 1024
+    check_size(code, max_chars, "Cantrip code")
+    scan = scan_cantrip(code, max_content_size=max(MAX_CONTENT_SIZE, max_chars))
     await log_scan_findings(user_id, scan, "cantrip", cantrip_id)
     gate_scan_findings(scan, override, "Cantrip code")
 
@@ -458,9 +459,7 @@ async def update_cantrip(
     if cantrip is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cantrip not found")
 
-    await snapshots.capture(db, current_user.id, "cantrip", cantrip_id)
-
-    if req.tag is not None and req.tag != cantrip.tag:
+    if req.tag and req.tag != cantrip.tag:
         existing = await db.execute(
             text("SELECT id FROM cantrips WHERE tag = :tag AND user_id = :uid AND id != :cid"),
             {"tag": req.tag, "uid": current_user.id, "cid": cantrip_id}
@@ -482,6 +481,8 @@ async def update_cantrip(
         await _check_and_scan_cantrip_code(
             current_user.id, update_data["code"], cantrip_id, override=req.override_scan
         )
+
+    await snapshots.capture(db, current_user.id, "cantrip", cantrip_id)
 
     for key, value in update_data.items():
         setattr(cantrip, key, value)

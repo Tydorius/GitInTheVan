@@ -322,7 +322,7 @@ if (context.passenger.enabled) {
                     });
                     adds++;
                     for (const r of rep) {
-                        if (r.toLowerCase() === name.toLowerCase()) continue;
+                        if (r === name) continue;
                         lb.delete(r);
                         dels++;
                     }

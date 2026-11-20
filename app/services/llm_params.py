@@ -345,6 +345,24 @@ class ResolvedParams:
         return bool(self.values)
 
 
+def _option_matches(p: ParamDef, value: Any) -> bool:
+    if not p.options:
+        return True
+    if isinstance(value, bool):
+        return str(value).lower() in {o.lower() for o in p.options}
+    if isinstance(value, float):
+        if str(value) in p.options:
+            return True
+        for o in p.options:
+            try:
+                if float(o) == value:
+                    return True
+            except ValueError:
+                continue
+        return False
+    return str(value) in p.options
+
+
 def resolve(layers: list[tuple[str, list[ParamDef]]]) -> ResolvedParams:
     """Merge layers broadest-first. Later layers overwrite earlier ones per key.
 
@@ -358,7 +376,7 @@ def resolve(layers: list[tuple[str, list[ParamDef]]]) -> ResolvedParams:
             ok, value = coerce(p)
             if not ok:
                 continue
-            if p.options and str(value) not in p.options:
+            if not _option_matches(p, value):
                 logger.warning(
                     "Dropping parameter '%s' from %s: value %r is not one of its options %s",
                     p.name,

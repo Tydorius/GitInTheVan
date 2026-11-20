@@ -93,7 +93,9 @@
   })
 
   $: if ($isAuthenticated) maybeLoadAssistantConfig()
+  else assistantConfigRequested = false
   function handleLogout() {
+    assistantConfigRequested = false
     logout()
   }
 

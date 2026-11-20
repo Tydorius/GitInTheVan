@@ -365,16 +365,18 @@ _TOOL_LIST: list[Tool] = [
         name="create_endpoint",
         group="endpoints",
         risk=Risk.WRITE,
-        summary="Create a new LLM endpoint.",
+        summary="Create a new LLM endpoint. The API key field is ignored.",
         method="POST",
         path="/api/endpoints",
         args_model=EndpointCreate,
+        project_args=_strip_api_key,
         doc=(
             "Creates an endpoint: base URL, optional provider, role tag, priority "
             "and default model.\n"
             "Use it when the user wants to add a new upstream to route through.\n"
-            "Ask the user for the API key rather than inventing one; an endpoint "
-            "created without a key will not answer."
+            "api_key is stripped before the call: the assistant cannot set "
+            "provider credentials. Never ask the user for a live API key; "
+            "tell them to add their key on the Endpoints page after creating it."
         ),
     ),
     Tool(

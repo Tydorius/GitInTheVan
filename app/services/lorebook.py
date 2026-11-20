@@ -41,16 +41,14 @@ def match_entries(
     word_boundary: bool = False,
 ) -> list[MatchedEntry]:
     conversation_text = _extract_conversation_text(messages)
-    matched: list[MatchedEntry] = []
-    used_chars = 0
+    candidates: list[MatchedEntry] = []
 
     for entry in entries:
         if entry.get("is_disabled"):
             continue
 
         if entry.get("is_constant"):
-            matched.append(_to_matched_entry(entry))
-            used_chars += len(matched[-1].content)
+            candidates.append(_to_matched_entry(entry))
             continue
 
         primary_keys = parse_json_list(entry.get("keys", "[]"))
@@ -75,13 +73,21 @@ def match_entries(
                 if not secondary_matched:
                     continue
 
-        matched.append(_to_matched_entry(entry))
-        used_chars += len(matched[-1].content)
+        candidates.append(_to_matched_entry(entry))
 
-        if total_budget > 0 and used_chars >= total_budget:
+    candidates.sort(key=lambda m: m.insertion_order)
+
+    if total_budget <= 0:
+        return candidates
+
+    matched: list[MatchedEntry] = []
+    used_chars = 0
+    for item in candidates:
+        matched.append(item)
+        used_chars += len(item.content)
+        if used_chars >= total_budget:
             break
 
-    matched.sort(key=lambda m: m.insertion_order)
     return matched
 
 
@@ -180,7 +186,7 @@ def _keyword_matches(keyword: str, text: str, word_boundary: bool = False) -> bo
         # behavior before and stays the default; the word-boundary branch
         # used to be dead code (a boundary match implies the substring
         # above had already matched).
-        pattern = r"\b" + re.escape(keyword_lower) + r"\b"
+        pattern = r"(?<!\w)" + re.escape(keyword_lower) + r"(?!\w)"
         return bool(re.search(pattern, text_lower))
     return keyword_lower in text_lower
 

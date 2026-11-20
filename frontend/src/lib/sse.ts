@@ -8,6 +8,7 @@
  */
 
 import { getToken, clearToken } from '../api'
+import { isAuthenticated, isAdmin } from '../stores'
 
 /** One decoded SSE event: `name` defaults to `'message'` per the spec. */
 export type SseHandler = (name: string, data: any) => void
@@ -46,6 +47,8 @@ export async function postEventStream(
 
   if (resp.status === 401) {
     clearToken()
+    isAuthenticated.set(false)
+    isAdmin.set(false)
     window.location.hash = '#/login'
     throw new Error('Unauthorized')
   }

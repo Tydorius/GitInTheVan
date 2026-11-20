@@ -5,6 +5,7 @@
   import ParameterEditor from '../lib/ParameterEditor.svelte'
   import ModelSelect from '../lib/ModelSelect.svelte'
   import { CollapseController } from '../lib/collapse'
+  import { loadConfig as loadAssistantConfig } from '../lib/assistant/store'
 
   let settings = {
     default_endpoint_id: '' as string | null,
@@ -47,12 +48,20 @@
   async function saveAssistant() {
     assistantError = ''; assistantSaved = false
     try {
-      await api.updateAssistantConfig({
+      const updated = await api.updateAssistantConfig({
         endpoint_id: assistantForm.endpoint_id || null,
         model: assistantForm.model,
         parameters: assistantParams,
         context_tokens: assistantForm.context_tokens,
       })
+      assistantForm = {
+        endpoint_id: updated.endpoint_id || '',
+        model: updated.model || '',
+        context_tokens: updated.context_tokens || 64000,
+      }
+      assistantParams = structuredClone(updated.parameters || [])
+      assistantEnabled = updated.enabled
+      loadAssistantConfig()
       assistantSaved = true
     } catch (e: any) { assistantError = e.message }
   }
@@ -63,7 +72,7 @@
   let budgetPercent = 10.0
   let contextWindowOverride = 0
   let debugMode = false
-  let defaultMapId: string | null = null
+  let defaultMapId: string = ''
   let maps: any[] = []
   let endpoints: any[] = []
   let apiKey: string | null = null
@@ -153,11 +162,11 @@
   let passengerEffectiveCap = 0
   let passengerSaved = false
 
-  let collapse = new CollapseController('settings', ['proxy', 'streaming', 'summarization', 'assistant', 'driver', 'prefill', 'budget', 'lexicon', 'passenger'])
+  let collapse = new CollapseController('settings', ['proxy', 'streaming', 'summarization', 'assistant', 'driver', 'prefill', 'budget', 'lexicon', 'passenger', 'strippatterns', 'order'])
 
   async function load() {
     try {
-      const [s, e, sum, , cList, lList]: any[] = await Promise.all([api.getSettings(), api.listEndpoints(), api.getSummarizationSettings(), api.listMaps(), api.listCantrips(), api.listLorebooks()])
+      const [s, e, sum, mapData, cList, lList]: any[] = await Promise.all([api.getSettings(), api.listEndpoints(), api.getSummarizationSettings(), api.listMaps(), api.listCantrips(), api.listLorebooks()])
       orderCantrips = cList.cantrips
       orderLorebooks = lList.lorebooks
       settings.default_endpoint_id = s.default_endpoint_id || ''
@@ -183,7 +192,6 @@
       passengerParams = structuredClone(s.passenger_parameters || [])
       passengerEffectiveCap = s.passenger_effective_cap ?? 0
       endpoints = e.endpoints
-      const mapData = await api.listMaps()
       maps = mapData.maps
       apiKey = getApiKey()
       summarization.summarization_enabled = sum.summarization_enabled
@@ -193,19 +201,13 @@
       summarization.summarization_keep_recent = sum.summarization_keep_recent ?? 6
       summarization.summarization_prompt = sum.summarization_prompt || ''
 
-      try {
-        const me = await api.getMe()
-        if (me.is_admin || true) {
-          const s = await api.getSettings()
-          driverCallableTurns = (s as any).driver_callable_turns ?? 1
-          bypassMethod = (s as any).bypass_method ?? 'none'
-          prefillEnabled = (s as any).prefill_enabled ?? false
-          budgetPercent = (s as any).context_budget_percent ?? 10.0
-          contextWindowOverride = (s as any).context_window_override ?? 0
-          debugMode = (s as any).debug_mode ?? false
-          defaultMapId = (s as any).default_map_id ?? null
-        }
-      } catch {}
+      driverCallableTurns = (s as any).driver_callable_turns ?? 1
+      bypassMethod = (s as any).bypass_method ?? 'none'
+      prefillEnabled = (s as any).prefill_enabled ?? false
+      budgetPercent = (s as any).context_budget_percent ?? 10.0
+      contextWindowOverride = (s as any).context_window_override ?? 0
+      debugMode = (s as any).debug_mode ?? false
+      defaultMapId = (s as any).default_map_id || ''
 
       try {
         const ac = await api.getAssistantConfig()
@@ -298,7 +300,12 @@
   async function saveBudget() {
     error = ''
     try {
-      await api.updateSettings({ context_budget_percent: budgetPercent, context_window_override: contextWindowOverride, default_map_id: defaultMapId } as any)
+      const updated = await api.updateSettings({
+        context_budget_percent: budgetPercent,
+        context_window_override: contextWindowOverride,
+        default_map_id: defaultMapId || null,
+      } as any)
+      defaultMapId = (updated as any).default_map_id || ''
     } catch (e: any) { error = e.message }
   }
 
@@ -690,7 +697,7 @@
   </div>
   <div class="form-group">
     <label for="assistant-context">Working Context (tokens)</label>
-    <input id="assistant-context" type="number" min="1000" step="1000" bind:value={assistantForm.context_tokens} style="width: 140px;" />
+    <input id="assistant-context" type="number" min="4000" step="1000" bind:value={assistantForm.context_tokens} style="width: 140px;" />
     <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
       Above 80% of this, the pane automatically compacts older tool results and, if still over,
       rolls the older half of the conversation into a summary. Set this to comfortably under the
@@ -752,7 +759,7 @@
   <div class="form-group">
     <label for="default-map">Default Map (applied when no <code>&lt;#map-tag#&gt;</code> is present)</label>
     <select id="default-map" bind:value={defaultMapId}>
-      <option value={null}>No default map (standard pipeline)</option>
+      <option value="">No default map (standard pipeline)</option>
       {#each maps as m}<option value={m.id}>{m.name} ({m.stage_count} stages)</option>{/each}
     </select>
   </div>

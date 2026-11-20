@@ -4,6 +4,7 @@ import logging
 import re
 import unicodedata
 from dataclasses import dataclass, field
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -71,9 +72,10 @@ def scan_urls(text: str, blocklist: list[str] | None = None) -> list[str]:
         return []
     blocked = []
     for url in _URL_RE.findall(text):
+        hostname = (urlparse(url).hostname or "").lower()
         for domain in blocklist:
-            domain = domain.strip().lower()
-            if domain and domain in url.lower():
+            domain = domain.strip().lower().lstrip(".")
+            if domain and (hostname == domain or hostname.endswith(f".{domain}")):
                 blocked.append(url)
                 break
     return blocked

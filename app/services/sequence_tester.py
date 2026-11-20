@@ -170,6 +170,19 @@ async def run_sequence(
                 turn_messages = [*history, {"role": "user", "content": turn.get("user_message", "")}]
 
             cleaned, tags, jslb_scripts = _strip_tagged_messages(turn_messages)
+
+            from app.services import cantrip as _cantrip_svc
+            from app.services.cantrip import apply_prompt_strips
+            from app.services.group_resolver import resolve_group_tags
+
+            async with _cantrip_svc.async_session() as group_db:
+                tags, _activated_groups, group_member_ids = await resolve_group_tags(
+                    group_db, user_id, tags
+                )
+            if group_member_ids:
+                body_json["_gitv_group_member_ids"] = group_member_ids
+
+            req_headers = {"x-user-name": user_name} if user_name else {}
             body_json["messages"] = cleaned
             body_json["_gitv_jslb_scripts"] = jslb_scripts
             body_json["_gitv_tags"] = tags
@@ -179,11 +192,14 @@ async def run_sequence(
 
             mark = len(_cantrip_records(body_json))
             await process_cantrips(
-                body_json, user_id, {}, tags=tags, position="pre_driver",
+                body_json, user_id, req_headers, tags=tags, position="pre_driver",
                 only_ids=only_cantrip_ids,
                 embedded_scripts=embedded_jslb_scripts(body_json, "pre_driver"),
                 store_seeds=seeds,
             )
+            pending_strips = body_json.pop("_gitv_prompt_strips", None)
+            if pending_strips:
+                apply_prompt_strips(body_json, pending_strips)
             pre_driver = [_slim_record(r) for r in _cantrip_records(body_json)[mark:]]
 
             # Pipeline order per turn: pre-Navigator on the raw reply, then
@@ -194,7 +210,7 @@ async def run_sequence(
             raw_reply = turn.get("reply", "")
             mark = len(_cantrip_records(body_json))
             after_pre_navigator = await process_cantrips_post_driver(
-                raw_reply, body_json, user_id, {}, tags=tags,
+                raw_reply, body_json, user_id, req_headers, tags=tags,
                 position="pre_navigator", only_ids=only_cantrip_ids,
                 embedded_scripts=embedded_jslb_scripts(body_json, "pre_navigator"),
                 store_seeds=seeds,
@@ -212,16 +228,19 @@ async def run_sequence(
 
             mark = len(_cantrip_records(body_json))
             final_reply = await process_cantrips_post_driver(
-                stripped_reply, body_json, user_id, {}, tags=tags,
+                stripped_reply, body_json, user_id, req_headers, tags=tags,
                 position="post_navigator", only_ids=only_cantrip_ids,
                 embedded_scripts=embedded_jslb_scripts(body_json, "post_navigator"),
                 store_seeds=seeds,
             )
             post_navigator = [_slim_record(r) for r in _cantrip_records(body_json)[mark:]]
 
-            # Per-turn tag delivery ends with the turn; the next turn's
-            # capture re-seeds the key.
+            # Per-turn delivery ends with the turn; the next turn re-seeds.
             body_json.pop("_gitv_response_tags", None)
+            body_json.pop("_gitv_map_nominations", None)
+            body_json.pop("_gitv_dynamic_lorebook_delta", None)
+            body_json.pop("_gitv_prompt_strips", None)
+            body_json.pop("_gitv_group_member_ids", None)
 
             turn_records.append({
                 "index": index,

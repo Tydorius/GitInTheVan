@@ -394,7 +394,9 @@ async def _inject_stage_lorebooks(
             ]
             # Per-book matching with the book's own scan depth, and the same
             # inject-after-cantrips split as the global pass (0.35.0).
-            book_matched = match_book_entries(messages, book_entries, lb.scan_depth)
+            book_matched = match_book_entries(
+                messages, book_entries, lb.scan_depth, word_boundary=lb.word_boundary_keys
+            )
             if lb.inject_after_cantrips:
                 deferred_matched.extend(book_matched)
             else:
@@ -556,6 +558,7 @@ async def _verify_stage(
     stage: MapStage,
     user_id: str,
     body_json: dict[str, Any] | None = None,
+    regenerate=None,
 ) -> tuple[bool, str, bool]:
     """Run verification on a stage's response.
 
@@ -574,37 +577,36 @@ async def _verify_stage(
     from app.services.metrics import set_metrics_retry
     from app.services.proxy import _build_upstream_url, _do_forward, auth_headers
 
-    messages = await _build_stage_verification_body(content, stage)
-
     headers = auth_headers(v_endpoint.api_key)
     url = _build_upstream_url(
         v_endpoint.base_url, "/v1/chat/completions", v_endpoint.api_base_path or ""
     )
-
-    # Defaults, not fixed values: a configured parameter at any layer wins.
-    body = {
-        "model": v_model or "gpt-4",
-        "messages": messages,
-        "max_tokens": 200,
-        "temperature": 0.1,
-        "stream": False,
-    }
-    body = apply_to_body(body, v_params)
 
     max_retries = stage.verification_max_retries
     from app.services.admin import get_caps
     caps = await get_caps()
     max_retries = min(max_retries, caps["max_verification_retries"])
 
-    body_bytes = json.dumps(body).encode()
     timeout = httpx.Timeout(120, connect=15.0)
+    current_content = content
 
     for attempt in range(max_retries + 1):
         # A re-judge inside the stage's own retry cycle is flagged, matching
         # the main verification loop's treatment of retries.
         set_metrics_retry(body_json or {}, attempt > 0)
+        messages = await _build_stage_verification_body(current_content, stage)
+        # Defaults, not fixed values: a configured parameter at any layer wins.
+        body = {
+            "model": v_model or "gpt-4",
+            "messages": messages,
+            "max_tokens": 200,
+            "temperature": 0.1,
+            "stream": False,
+        }
+        body = apply_to_body(body, v_params)
+        body_bytes = json.dumps(body).encode()
+        verify_started = time.monotonic()
         try:
-            verify_started = time.monotonic()
             data, status_code = await _do_forward(
                 "POST", url, headers, body_bytes, timeout,
                 provider=v_endpoint.provider or "",
@@ -632,10 +634,10 @@ async def _verify_stage(
                 )
                 return True, _stage_verification_error_note(stage.name, f"a {status_code} error"), True
 
+            choices = data.get("choices") or []
             llm_content = (
-                data.get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "")
+                (choices[0].get("message") or {}).get("content", "")
+                if choices else ""
             )
 
             violation = False
@@ -664,9 +666,28 @@ async def _verify_stage(
                 "Map stage '%s' verification: violation on attempt %d, retrying: %s",
                 stage.name, attempt + 1, reason,
             )
+            if regenerate is not None:
+                new_content = await regenerate(current_content, reason)
+                if new_content is None:
+                    return False, reason, False
+                current_content = new_content
 
-        except Exception:
+        except Exception as exc:
             logger.exception("Map stage '%s' verification failed", stage.name)
+            record_llm_call(
+                body_json or {},
+                purpose=PURPOSE_VERIFICATION,
+                latency_ms=(time.monotonic() - verify_started) * 1000.0,
+                status_code=0,
+                response_data=None,
+                messages=messages,
+                endpoint_id=v_endpoint.id,
+                endpoint_name=v_endpoint.name,
+                provider=v_endpoint.provider or "",
+                model_requested=v_model or "gpt-4",
+                failover_attempt=0,
+                error=f"{type(exc).__name__}: {exc}"[:500],
+            )
             return True, _stage_verification_error_note(stage.name, "an exception"), True
 
     return True, "", False
@@ -889,6 +910,7 @@ async def run_map_pipeline(
     # Resources flagged sticky carry forward into every later stage (README:
     # "Resource Attachments"). Everything else is stage-only.
     sticky_resources: list = []
+    response_data: dict[str, Any] | None = None
 
     for stage_idx, stage in enumerate(stages):
         is_last_stage = stage_idx == len(stages) - 1
@@ -1145,13 +1167,30 @@ async def run_map_pipeline(
             # parameters, recorded as map-stage LLM calls.
             from app.services.cantrip import _load_active_cantrips
             from app.services.driver_callable import build_tool_notification
+            from app.services.group_resolver import group_direct_members
             from app.services.proxy import inject_tool_notification_safe
+            from app.services.tagging import should_activate_resource
 
+            direct_ids = group_direct_members(body_json)
+            load_extra_ids = direct_ids | stage_cantrip_ids if stage_cantrip_ids else direct_ids
             async with async_session() as db:
                 stage_tools = [
-                    c for c in await _load_active_cantrips(db, user_id, "pre_driver")
+                    c for c in await _load_active_cantrips(
+                        db, user_id, "pre_driver", direct_member_ids=load_extra_ids
+                    )
                     if c.run_driver_callable
-                    and (not stage_cantrip_ids or c.id in stage_cantrip_ids)
+                    and (
+                        (stage_cantrip_ids and c.id in stage_cantrip_ids)
+                        or (
+                            not stage_cantrip_ids
+                            and (
+                                c.id in direct_ids
+                                or should_activate_resource(
+                                    c.tag, "cantrip", c.is_active, c.is_public, c.user_id, user_id, tags or []
+                                )
+                            )
+                        )
+                    )
                 ]
             dc_turns = min(stage.driver_callable_turns, caps["max_driver_callable_turns"])
             if stage_tools and dc_turns > 0:
@@ -1179,7 +1218,7 @@ async def run_map_pipeline(
                 stage_index=stage_idx,
             )
             if loop_result is not None:
-                response_data, status_code = loop_result, 200
+                response_data, status_code = loop_result
             else:
                 response_data, status_code = await _forward_stage_llm(
                     body_json, endpoints, model, timeout, stage_index=stage_idx,
@@ -1195,6 +1234,7 @@ async def run_map_pipeline(
 
         if status_code != 200:
             logger.warning("Map stage '%s': LLM returned %d", stage.name, status_code)
+            body_json["_gitv_map_status_code"] = status_code
             return response_data
 
         content = response_data.get("choices", [{}])[0].get("message", {}).get("content", "")
@@ -1215,7 +1255,40 @@ async def run_map_pipeline(
             )
 
         if stage.verification_enabled:
-            approved, reason, errored = await _verify_stage(content, stage, user_id, body_json)
+            async def _regenerate_stage(failed_content: str, violation_reason: str) -> str | None:
+                nonlocal response_data, content
+                retry_body = copy.deepcopy(body_json)
+                retry_body.setdefault("messages", []).append({
+                    "role": "system",
+                    "content": (
+                        f"[Verification Correction] The following issues were detected "
+                        f"in the previous generation: {violation_reason}\n"
+                        f"Regenerate the response addressing these issues. "
+                        f"Do not repeat the same mistakes."
+                    ),
+                })
+                retry_data, retry_status = await _forward_stage_llm(
+                    retry_body, endpoints, model, timeout, stage_index=stage_idx,
+                    configured=stage_params,
+                )
+                if retry_status != 200:
+                    logger.warning(
+                        "Map stage '%s': verification regeneration returned %d",
+                        stage.name, retry_status,
+                    )
+                    return None
+                retry_choices = retry_data.get("choices") or []
+                new_content = (
+                    (retry_choices[0].get("message") or {}).get("content", "")
+                    if retry_choices else ""
+                )
+                response_data = retry_data
+                content = new_content
+                return new_content
+
+            approved, reason, errored = await _verify_stage(
+                content, stage, user_id, body_json, regenerate=_regenerate_stage
+            )
             from app.services.metrics import set_metrics_retry
             set_metrics_retry(body_json, False)
             if not approved:
@@ -1316,32 +1389,28 @@ async def run_map_pipeline(
         clear_metrics_stage_ref(body_json)
 
     # Stage identity is per-stage; without this, response-side passes after
-    # the loop (scenario summarization, post-map cantrip positions) would
-    # still claim to be inside the last stage.
+    # the loop (post-map cantrip positions) would still claim to be inside the
+    # last stage.
     body_json.pop("_gitv_stage_info", None)
-
-    # Scenario summarization POST: applies to the stage-augmented system message
-    # after all stages complete, mirroring how the non-map pipeline runs POST
-    # (proxy.py ~line 365). PRE already ran at proxy.py:276 before the map branch.
-    if body_json.get("_gitv_command_overrides", {}).get("summary") is not False:
-        from app.services.scenario_summarizer import maybe_summarize_scenario
-        try:
-            from app.services.budget import estimate_messages_tokens
-            from app.services.metrics import record_prompt_object
-            pre_map_scn_tokens = estimate_messages_tokens(body_json.get("messages", []))
-            body_json = await maybe_summarize_scenario(body_json, user_id, "post")
-            record_prompt_object(
-                body_json, "summary_scenario", "post",
-                pre_map_scn_tokens, estimate_messages_tokens(body_json.get("messages", [])),
-                parent_id=map_obj.id,
-            )
-        except Exception:
-            logger.exception("Scenario summarization (POST, map) failed")
 
     # Handed to _save_debug_exchange by the map branch in proxy.py. Shaped like
     # VerificationLoopResult so the one consumer needs no special case: a map
     # "passes" only if every verified stage did.
     if stage_verifications:
         body_json["_gitv_map_vresult"] = _MapVerificationResult(stage_verifications)
+
+    if response_data is None:
+        return {
+            "id": "gitv-map-empty",
+            "object": "chat.completion",
+            "model": body_json.get("model", ""),
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": ""},
+                    "finish_reason": "stop",
+                }
+            ],
+        }
 
     return response_data

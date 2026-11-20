@@ -26,9 +26,6 @@
         setToken(data.access_token)
         setApiKey(data.api_key)
         createdApiKey = data.api_key
-        isAuthenticated.set(true)
-        await checkAdmin()
-        window.location.hash = '#/'
       } else {
         const data = await api.login(username, password)
         setToken(data.access_token)
@@ -41,6 +38,12 @@
     } finally {
       loading = false
     }
+  }
+
+  async function continueToDashboard() {
+    isAuthenticated.set(true)
+    await checkAdmin()
+    window.location.hash = '#/'
   }
 
   checkExisting()
@@ -58,26 +61,29 @@
         <div class="api-key-display">{createdApiKey}</div>
         Save this key - it's used for proxy requests.
       </div>
+      <button type="button" class="primary" onclick={continueToDashboard} style="width: 100%; margin-top: 12px;">
+        Continue to Dashboard
+      </button>
+    {:else}
+      <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }} autocomplete="off">
+        <div class="form-group">
+          <label for="username">Username</label>
+          <input id="username" type="text" autocomplete="off" spellcheck="false" bind:value={username} placeholder="admin" required />
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input id="password" type="password" autocomplete="new-password" bind:value={password} placeholder="password" required />
+        </div>
+        <button type="submit" class="primary" disabled={loading} style="width: 100%;">
+          {loading ? 'Please wait...' : (isSetup ? 'Create Admin' : 'Login')}
+        </button>
+      </form>
+
+      <div style="margin-top: 16px; text-align: center;">
+        <button type="button" onclick={() => isSetup = !isSetup} style="border: none; background: none; color: var(--accent); text-decoration: underline; cursor: pointer; font-size: 12px;">
+          {isSetup ? '← Back to login' : 'First run? Setup admin →'}
+        </button>
+      </div>
     {/if}
-
-    <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }} autocomplete="off">
-      <div class="form-group">
-        <label for="username">Username</label>
-        <input id="username" type="text" autocomplete="off" spellcheck="false" bind:value={username} placeholder="admin" required />
-      </div>
-      <div class="form-group">
-        <label for="password">Password</label>
-        <input id="password" type="password" autocomplete="new-password" bind:value={password} placeholder="password" required />
-      </div>
-      <button type="submit" class="primary" disabled={loading} style="width: 100%;">
-        {loading ? 'Please wait...' : (isSetup ? 'Create Admin' : 'Login')}
-      </button>
-    </form>
-
-    <div style="margin-top: 16px; text-align: center;">
-      <button onclick={() => isSetup = !isSetup} style="border: none; background: none; color: var(--accent); text-decoration: underline; cursor: pointer; font-size: 12px;">
-        {isSetup ? '← Back to login' : 'First run? Setup admin →'}
-      </button>
-    </div>
   </div>
 </div>

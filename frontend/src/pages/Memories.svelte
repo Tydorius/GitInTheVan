@@ -281,8 +281,6 @@
               <button onclick={() => editingId = null} style="font-size: 12px;">Cancel</button>
             {:else}
               <button onclick={() => startEdit(m)} style="font-size: 12px;">Edit</button>
-              <button onclick={() => openHistory(m)}>History</button>
-              <button onclick={() => handleExportRule(m.id)} style="font-size: 12px;">Export</button>
               <button class="danger" onclick={() => handleDelete(m.id)} style="font-size: 12px;">Delete</button>
             {/if}
           </td>
@@ -397,6 +395,8 @@
             </td>
             <td>
               <button onclick={() => startEditRule(r)} style="font-size: 12px;">Edit</button>
+              <button onclick={() => openHistory(r)} style="font-size: 12px;">History</button>
+              <button onclick={() => handleExportRule(r.id)} style="font-size: 12px;">Export</button>
               <button class="danger" onclick={() => handleDeleteRule(r.id)} style="font-size: 12px;">Delete</button>
             </td>
           </tr>

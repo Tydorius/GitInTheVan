@@ -13,7 +13,7 @@
   let error = ''
   let showForm = false
   let form = {
-    name: '', description: '', is_public: false,
+    name: '', description: '', is_public: false, budget_weight: 1.0,
     run_pre_driver: true, run_driver_callable: false,
     run_pre_navigator: false, run_post_navigator: false,
   }
@@ -77,7 +77,7 @@
     try {
       await api.createLorebook(form)
       showForm = false
-      form = { name: '', description: '', is_public: false, run_pre_driver: true, run_driver_callable: false, run_pre_navigator: false, run_post_navigator: false }
+      form = { name: '', description: '', is_public: false, budget_weight: 1.0, run_pre_driver: true, run_driver_callable: false, run_pre_navigator: false, run_post_navigator: false }
       await load()
     }
     catch (e: any) { error = e.message }
@@ -99,6 +99,7 @@
           ? Math.max(1, Math.floor(Number(positionLb.scanDepthValue) || 10))
           : 0,
         word_boundary_keys: positionLb.word_boundary_keys ?? false,
+        budget_weight: positionLb.budget_weight ?? 1.0,
       })
       positionLb = null
       await withScroll(load)
@@ -124,7 +125,7 @@
 
   async function saveTag(tag: string) {
     try { await api.updateLorebook(tagModal.id, { tag }); tagModal.show = false; await withScroll(load) }
-    catch (e: any) { error = e.message }
+    catch (e: any) { tagError = e.message }
   }
 
   async function toggleActive(lb: any) {
@@ -176,6 +177,9 @@
         entries = Object.values(data.entries)
       } else {
         entries = []
+      }
+      for (const existing of selectedLorebook.entries || []) {
+        await api.deleteLorebookEntry(selectedLorebook.id, existing.id)
       }
       for (const e of entries) {
         const fields = {
@@ -454,7 +458,7 @@
           <thead><tr><th>Name</th><th>Keywords</th><th>Position</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>
             {#each selectedLorebook.entries as e}
-              <tr>
+              <tr data-entry-id={e.id}>
                 <td>{e.name || '(unnamed)'}</td>
                 <td style="font-size: 11px; color: var(--text-dim);">{Array.isArray(e.keys) ? e.keys.join(', ') : ''}</td>
                 <td style="font-size: 11px;">{e.position}</td>
@@ -491,6 +495,7 @@
           <button onclick={() => {
             positionLb = {
               ...selectedLorebook,
+              budget_weight: selectedLorebook.budget_weight ?? 1.0,
               scanEnabled: (selectedLorebook.scan_depth ?? 0) > 0,
               scanDepthValue: (selectedLorebook.scan_depth ?? 0) > 0 ? selectedLorebook.scan_depth : 10,
             }
@@ -515,9 +520,14 @@
       <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
         <div class="form-group"><label for="lb-name">Name</label><input id="lb-name" autocomplete="off" bind:value={form.name} required /></div>
         <div class="form-group"><label for="lb-desc">Description</label><input id="lb-desc" autocomplete="off" bind:value={form.description} /></div>
+        <div class="form-group">
+          <label for="lb-budget">Budget Weight</label>
+          <input id="lb-budget" type="number" min="0" step="0.1" bind:value={form.budget_weight} />
+          <p style="color: var(--text-dim); font-size: 11px; margin-top: 2px;">Set to 0 to exempt this lorebook from context budget caps.</p>
+        </div>
         <div class="form-group"><label><input type="checkbox" bind:checked={form.is_public} style="width: auto;"> Public</label></div>
         <div class="modal-actions">
-          <button onclick={() => showForm = false}>Cancel</button>
+          <button type="button" onclick={() => showForm = false}>Cancel</button>
           <button type="submit" class="primary">Create</button>
         </div>
       </form>
@@ -537,7 +547,7 @@
           <div class="form-group"><label for="entry-skeys">Secondary Keys (comma-separated)</label><input id="entry-skeys" autocomplete="off" bind:value={entryForm.secondary_keys} placeholder="king, queen" /></div>
         </div>
         <div class="form-group"><label for="entry-content">Content</label>
-          <CodeEditor bind:value={entryForm.content} language="javascript" minHeight="120px" placeholder="The castle has seven towers..." />
+          <CodeEditor bind:value={entryForm.content} language="markdown" minHeight="120px" placeholder="The castle has seven towers..." />
         </div>
         <div class="form-row">
           <div class="form-group"><label for="entry-pos">Position</label>
@@ -554,7 +564,7 @@
         </div>
         <div class="form-group"><label><input type="checkbox" bind:checked={entryForm.is_disabled} style="width: auto;"> Disabled</label></div>
         <div class="modal-actions">
-          <button onclick={() => { showEntryForm = false; resetEntryForm(); }}>Cancel</button>
+          <button type="button" onclick={() => { showEntryForm = false; resetEntryForm(); }}>Cancel</button>
           <button type="submit" class="primary">{editingEntryId ? 'Update' : 'Create'}</button>
         </div>
       </form>
@@ -640,6 +650,11 @@
           Off (default) matches keywords anywhere inside a word ("Rook" fires on
           "rookie"). On, keywords match on word boundaries only — punctuation-suffix
           workaround keys like "Crow," become unnecessary.
+        </p>
+        <label for="pos-budget" style="display: block; font-size: 12px; margin-top: 8px;">Budget Weight</label>
+        <input id="pos-budget" type="number" min="0" step="0.1" bind:value={positionLb.budget_weight} style="width: 100px;" />
+        <p style="color: var(--text-dim); font-size: 11px; margin: 2px 0 0;">
+          Set to 0 to exempt this lorebook from context budget caps.
         </p>
       </div>
       <div class="modal-actions">
