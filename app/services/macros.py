@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app.services.cantrip_context import extract_context_params, parse_character_sections
+from app.services.cantrip_context import parse_character_sections
 from app.services.debug import debug_capture
 
 _MACRO_RE = re.compile(r"\{\{(user|char)\}\}", re.IGNORECASE)
@@ -21,7 +21,9 @@ _USER_LINE_RE = re.compile(r"^\s*User\s*:\s*([^\n<>{}]{1,80})", re.MULTILINE | r
 # bare ``Name:`` line for the *character*, so resolving the user from it
 # would silently swap the two names.
 _USER_PERSONA_LINE_RE = re.compile(r"^\s*(?:User|Name)\s*:\s*([^\n<>{}]{1,80})", re.MULTILINE | re.IGNORECASE)
-_CHAR_LINE_RE = re.compile(r"^\s*(?:Character|Persona)\s*:\s*([^\n<>{}]{1,80})", re.MULTILINE | re.IGNORECASE)
+# Never match bare ``Persona:`` as a character name — non-JanitorAI cards
+# commonly write trait lines like ``Persona: shy, observant``.
+_CHAR_LINE_RE = re.compile(r"^\s*Character(?:\s+Name)?\s*:\s*([^\n<>{}]{1,80})", re.MULTILINE | re.IGNORECASE)
 
 
 def _first_system_text(messages: list[dict[str, Any]]) -> str:
@@ -44,14 +46,13 @@ def resolve_macro_names(
     1. Explicit headers (``X-User-Name``, ``X-Char-Name`` / ``X-Character-Name``).
     2. Character name from JanitorAI ``<{NAME}'s Persona>`` sections via
        ``cantrip_context.parse_character_sections``, or a ``Character:`` /
-       ``Persona:`` line in the system prompt.
+       ``Character Name:`` line in the system prompt.
     3. User name from ``<UserPersona>`` (``User:`` / ``Name:`` inside it) or
-       a ``User:`` line in the system prompt, falling back to
-       ``cantrip_context.extract_context_params`` (which defaults
-       ``user_name`` to ``"User"``).
+       a ``User:`` line in the system prompt.
 
-    ``char_name`` stays ``""`` when genuinely unknown so ``{{char}}`` is left
-    intact rather than blanked out.
+    Both ``user_name`` and ``char_name`` stay ``""`` when genuinely unknown so
+    ``{{user}}`` and ``{{char}}`` are left intact rather than rewritten to a
+    placeholder like ``"User"``.
     """
     headers_lower = {
         k.lower(): v
@@ -77,18 +78,14 @@ def resolve_macro_names(
             if char_match:
                 char_name = char_match.group(1).strip()
 
-    if not user_name:
-        if system_text:
-            up_match = _USER_PERSONA_RE.search(system_text)
-            if up_match:
-                user_match = _USER_PERSONA_LINE_RE.search(up_match.group("body"))
-            else:
-                user_match = _USER_LINE_RE.search(system_text)
-            if user_match:
-                user_name = user_match.group(1).strip()
-        if not user_name:
-            params = extract_context_params(body_json or {}, headers_lower)
-            user_name = str(params.get("user_name", "") or "").strip()
+    if not user_name and system_text:
+        up_match = _USER_PERSONA_RE.search(system_text)
+        if up_match:
+            user_match = _USER_PERSONA_LINE_RE.search(up_match.group("body"))
+        else:
+            user_match = _USER_LINE_RE.search(system_text)
+        if user_match:
+            user_name = user_match.group(1).strip()
 
     return user_name, char_name
 

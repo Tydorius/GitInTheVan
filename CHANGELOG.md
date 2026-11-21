@@ -2,6 +2,24 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.45.1] - 2026-11-21
+
+Targeted fixes for map-turn hidden reply tags and macro name resolution, plus a reusable live end-to-end playtest harness.
+
+### Fixed
+
+- **Map turns now deliver hidden reply tags (`response_tags`) to Post-Navigator cantrips.** The map branch in `proxy.py` previously extracted and stripped registered response tags but left `run_post_navigator=False`, discarding the captured tags before any Post-Navigator cantrip could read `context.response_tags`. Map turns now run both `run_response_capture=True` and `run_post_navigator=True`, matching non-map turns.
+- **Macro expansion (`{{user}}` / `{{char}}`) no longer substitutes `"User"` when no user name is known, and no longer treats `Persona:` trait lines as character names.** `resolve_macro_names()` in `app/services/macros.py` now leaves `user_name` empty (keeping `{{user}}` intact) when no explicit `X-User-Name` header, `<UserPersona>` block, or `User:` line is present, and restricts character-line matching to `Character:` / `Character Name:` so non-JanitorAI card lines like `Persona: shy` are never mistaken for `{{char}}`.
+
+### Added
+
+- **Live end-to-end playtest suite (`testing/live_playtest.py`).** Boots a throwaway GitInTheVan instance against an OpenAI-compatible local LLM server (such as `llama-swap`) and runs 8 full multi-turn roleplay scenarios covering chat continuity, store deletes, N6 `user_data_prefixes`, lorebooks (whole-word punctuation, `reserved_tokens`, dynamic lorebooks), hidden response tags (JSON & SSE streaming), macro expansion safety, hybrid verification + Navigator judge, 2-stage maps with final verification & Post-Navigator tag capture, tag groups + manual pipeline order, and the MUD Spatial World Engine.
+
+### Behavior changes
+
+- **Unknown `{{user}}` macros** are now left untouched instead of expanding to the literal fallback `"User"`, and bare `Persona:` lines in system prompts no longer resolve `{{char}}`.
+- **Map turns** now execute active Post-Navigator cantrips on the map's final response (matching non-map requests) so registered `response_tags` captured from map outputs are delivered to cantrips.
+
 ## [0.45.0] - 2026-11-20
 
 Context-budgeting fixed token reservations, opt-in cantrip `user_data` prefix scoping, and token-delta counters for both the single-run Cantrip Tester and Sequence Tester.

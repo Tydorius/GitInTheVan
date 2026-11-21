@@ -87,11 +87,27 @@ class TestResolveMacroNames:
         assert user_name == "Rowan"
         assert char_name == "Aria"
 
-    def test_unknown_char_stays_empty_and_user_defaults(self):
+    def test_unknown_user_and_char_stay_empty(self):
         messages = [{"role": "user", "content": "Hello {{char}} and {{user}}"}]
         user_name, char_name = resolve_macro_names(messages)
-        assert user_name == "User"
+        assert user_name == ""
         assert char_name == ""
+
+    def test_persona_trait_line_not_treated_as_char_name(self):
+        messages = [
+            {"role": "system", "content": "Persona: shy, observant\nSetting: tavern\n"}
+        ]
+        user_name, char_name = resolve_macro_names(messages)
+        assert user_name == ""
+        assert char_name == ""
+
+    def test_unknown_user_macro_left_intact(self):
+        body_json = {
+            "messages": [{"role": "user", "content": "Hello {{user}} and {{char}}."}],
+        }
+        count = expand_macros_in_messages(body_json)
+        assert count == 0
+        assert body_json["messages"][0]["content"] == "Hello {{user}} and {{char}}."
 
     def test_bare_name_line_does_not_resolve_user(self):
         """Card-style prompts use a bare ``Name:`` line for the CHARACTER;
