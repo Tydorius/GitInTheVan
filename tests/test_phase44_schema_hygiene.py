@@ -84,6 +84,20 @@ async def test_upgrade_path_migrations_064_and_065(tmp_path):
             )
         )
 
+    # Vacuity check: prove the fixture really reproduces the pre-064/065
+    # schema before migrating, so a later fixture drift cannot turn this
+    # test into a no-op that passes for the wrong reason.
+    async with engine.connect() as conn:
+        map_cols = [
+            row[1] for row in (await conn.execute(text("PRAGMA table_info(maps)"))).fetchall()
+        ]
+        rule_cols = [
+            row[1]
+            for row in (await conn.execute(text("PRAGMA table_info(verification_rules)"))).fetchall()
+        ]
+    assert "final_verification_enabled" not in map_cols
+    assert "regex_pattern" not in rule_cols
+
     await run_migrations(engine)
 
     async with engine.connect() as conn:
@@ -304,3 +318,76 @@ async def test_driver_callable_skips_user_data_when_unused():
     mock_load_ud.assert_not_awaited()
     mock_save_ud.assert_not_awaited()
     assert mock_run.call_args.kwargs["user_data"] == {}
+
+
+@pytest.mark.asyncio
+async def test_driver_callable_propagates_unnamed_user_data_writes():
+    """Same safety net as cantrip.py (0.43.0): a tool whose code reaches the
+    store without the literal name (introspection, a runtime-built key) must
+    still have its writes persisted -- before this release the driver-callable
+    path saved unconditionally, so dropping unnamed writes is a regression."""
+    tool = Cantrip(
+        id="c2",
+        user_id="u1",
+        name="dynamic_ud_tool",
+        code="const k = 'user' + '_data'; context.tool_result = 'ok';",
+        timeout_ms=1000,
+    )
+    call = ToolCall(name="dynamic_ud_tool", args={})
+
+    fake_result = MagicMock(
+        has_error=False,
+        error="",
+        chat_data={},
+        chat_data_deletes=[],
+        user_data={"dyn": 1},
+        user_data_deletes=["old"],
+        cantrip_data={},
+        cantrip_data_deletes=[],
+        tool_result="ok",
+        scenario="",
+        personality="",
+    )
+
+    mock_session = AsyncMock()
+    mock_ctx = AsyncMock()
+    mock_ctx.__aenter__.return_value = mock_session
+    mock_ctx.__aexit__.return_value = False
+
+    with (
+        patch("app.services.driver_callable.async_session", return_value=mock_ctx),
+        patch("app.services.cantrip._load_chat_data", new_callable=AsyncMock, return_value={}),
+        patch("app.services.cantrip._load_user_data", new_callable=AsyncMock),
+        patch("app.services.cantrip._load_cantrip_data", new_callable=AsyncMock, return_value={}),
+        patch("app.services.cantrip._save_chat_data", new_callable=AsyncMock),
+        patch("app.services.cantrip._save_user_data", new_callable=AsyncMock) as mock_save_ud,
+        patch("app.services.cantrip._save_cantrip_data", new_callable=AsyncMock),
+        patch("app.services.deno_runner.run_cantrip", new_callable=AsyncMock, return_value=fake_result),
+    ):
+        out = await execute_tool_call(
+            tool=tool,
+            call=call,
+            messages=[{"role": "user", "content": "hi"}],
+            request_headers={},
+            user_id="u1",
+            conversation_id="conv-1",
+            persist_shared=True,
+        )
+
+    assert out == "ok"
+    mock_save_ud.assert_awaited_once()
+    assert mock_save_ud.call_args.args[2] == {"dyn": 1}  # positional store dict
+    assert mock_save_ud.call_args.kwargs["deletes"] == {"old"}
+
+
+def test_regex_pattern_length_capped():
+    """The pre-check pattern runs against every full reply; a pathological
+    multi-KB pattern is bounded to MAX_REGEX_PATTERN_CHARS."""
+    from fastapi import HTTPException
+
+    from app.routers.verification import MAX_REGEX_PATTERN_CHARS, _validate_regex_pattern
+
+    _validate_regex_pattern("a" * MAX_REGEX_PATTERN_CHARS, 50000)  # at the cap
+    with pytest.raises(HTTPException) as exc_info:
+        _validate_regex_pattern("a" * (MAX_REGEX_PATTERN_CHARS + 1), 50000)
+    assert exc_info.value.status_code == 422

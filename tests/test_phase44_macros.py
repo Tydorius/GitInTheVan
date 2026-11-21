@@ -93,6 +93,32 @@ class TestResolveMacroNames:
         assert user_name == "User"
         assert char_name == ""
 
+    def test_bare_name_line_does_not_resolve_user(self):
+        """Card-style prompts use a bare ``Name:`` line for the CHARACTER;
+        resolving the user from it would silently swap the two names. A bare
+        Name: line resolves neither name (char needs a Persona section or a
+        Character:/Persona: line)."""
+        messages = [
+            {"role": "system", "content": "Name: Dracula\nA gothic scenario.\n"}
+        ]
+        user_name, char_name = resolve_macro_names(messages)
+        assert user_name != "Dracula"
+        assert char_name == ""
+
+    def test_name_line_inside_user_persona_resolves_user(self):
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "<Vlad's Persona>The prince.</Vlad's Persona>\n"
+                    "<UserPersona>Name: Van Helsing\nA hunter.</UserPersona>"
+                ),
+            }
+        ]
+        user_name, char_name = resolve_macro_names(messages)
+        assert user_name == "Van Helsing"
+        assert char_name == "Vlad"
+
 
 class TestExpandMacrosInMessages:
     def test_multimodal_list_content_and_debug_capture(self):
@@ -229,6 +255,84 @@ class TestProxyEndToEndMacroExpansion:
         assert "I approach the castle as Elena." in joined
         assert "{{user}}" not in joined
         assert "{{char}}" not in joined
+
+    @pytest.mark.asyncio
+    async def test_map_path_macros_expand_before_stage_forward(
+        self, admin_client, httpx_mock, monkeypatch
+    ):
+        """The map branch returns before the non-map expansion site; without
+        the map-side expansion call, {{user}} ships literal to every stage."""
+        test_settings = Settings(
+            default_endpoint_url=MOCK_ENDPOINT_URL,
+            default_endpoint_api_key="sk-test-key",
+            default_endpoint_model="test-model",
+            default_endpoint_api_base_path="",
+        )
+        monkeypatch.setattr("app.services.proxy.settings", test_settings)
+
+        ac, _, api_key = admin_client
+        ep_resp = await ac.post(
+            "/api/endpoints",
+            json={"name": "Raw", "base_url": MOCK_ENDPOINT_URL, "api_key": "sk-test-key"},
+        )
+        assert ep_resp.status_code in (200, 201), ep_resp.text
+        ep_id = ep_resp.json()["id"]
+        await ac.put("/api/settings", json={"default_endpoint_id": ep_id})
+
+        map_resp = await ac.post("/api/maps/import", json={"data": {
+            "name": "MacroMap",
+            "stages": [{
+                "stage_order": 1,
+                "name": "Draft",
+                "system_instructions": "Write a reply.",
+                "endpoint_id": ep_id,
+                "model_override": "",
+                "output_mode": "persist",
+                "resources": [],
+            }],
+        }})
+        assert map_resp.status_code in (200, 201), map_resp.text
+        await ac.put("/api/settings", json={"default_map_id": map_resp.json()["id"]})
+
+        httpx_mock.add_response(
+            url=f"{MOCK_ENDPOINT_URL}/v1/chat/completions",
+            json={
+                "id": "chatcmpl-map-macro",
+                "object": "chat.completion",
+                "created": 1234567890,
+                "model": "test-model",
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "Mapped reply."},
+                    "finish_reason": "stop",
+                }],
+            },
+            status_code=200,
+        )
+
+        resp = await ac.post(
+            "/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "X-User-Name": "Elena"},
+            json={
+                "model": "test-model",
+                "stream": False,
+                "messages": [
+                    {"role": "system", "content": "You are a narrator."},
+                    {"role": "user", "content": "I approach the castle as {{user}}."},
+                ],
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["choices"][0]["message"]["content"] == "Mapped reply."
+
+        forwarded = httpx_mock.get_request()
+        assert forwarded is not None
+        forwarded_body = json.loads(forwarded.content)
+        joined = "\n".join(
+            m["content"] for m in forwarded_body["messages"] if isinstance(m.get("content"), str)
+        )
+        assert "I approach the castle as Elena." in joined
+        assert "{{user}}" not in joined
 
 
 class TestDedupCleanup0430:

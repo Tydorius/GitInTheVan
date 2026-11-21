@@ -143,9 +143,19 @@ class VerificationSettingsUpdate(BaseModel):
     verification_model: str | None = None
 
 
+# A pre-check pattern runs against every full reply; a short pattern is all a
+# deterministic gate ever needs, and bounding it limits pathological regexes.
+MAX_REGEX_PATTERN_CHARS = 1024
+
+
 def _validate_regex_pattern(pattern: str, max_rule_chars: int) -> None:
     if not pattern:
         return
+    if len(pattern) > MAX_REGEX_PATTERN_CHARS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Regex pattern too long (max {MAX_REGEX_PATTERN_CHARS} characters)",
+        )
     check_size(pattern, max_rule_chars, "Regex pattern")
     try:
         re.compile(pattern)

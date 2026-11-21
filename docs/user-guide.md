@@ -869,9 +869,9 @@ Each entry has:
 ### Lorebook Pipeline Positions
 
 Lorebooks inject at one point in the pipeline: **Pre-Driver**, before the request is forwarded.
-The four position toggles shown on some older installs (Pre-Driver, Driver-Callable,
-Pre-Navigator, Post-Navigator) were never wired up for lorebooks and have no effect; only
-cantrips run at the other positions.
+Older installs showed four position toggles here (Pre-Driver, Driver-Callable, Pre-Navigator,
+Post-Navigator) that were never wired up for lorebooks; they were removed from the editor
+entirely — only cantrips run at the other positions.
 
 ![Lorebook Positions Editor](media/gitv-lorebooks-word-boundary.png)
 
@@ -1219,6 +1219,22 @@ Action commands look like command tags but carry free text instead of on/off. Th
 
 ---
 
+<a id="macros"></a>
+
+## Macro Expansion
+
+`{{user}}` and `{{char}}` in the outgoing prompt are replaced with the user's and character's names before the request is forwarded — case-insensitively, in every message, after lorebooks, cantrips and skills have injected (so macros inside injected lorebook entries work). Map requests expand too: every stage sees expanded text.
+
+**Name resolution, in order:**
+
+1. `X-User-Name` / `X-Char-Name` (or `X-Character-Name`) request headers
+2. The character's name from JanitorAI persona sections, or a `Character:` / `Persona:` line in the system prompt
+3. The user's name from `<UserPersona>` (`User:` / `Name:` inside it) or a `User:` line
+
+A `Name:` line on its own is deliberately not trusted — card-style prompts use it for the *character*. When the character's name cannot be resolved, `{{char}}` is left untouched rather than blanked out. `<jslorebook>` blocks are skipped (their code sees the raw macros), the response side is never rewritten, and expansions appear in the Debug timeline as **Macro Expansion**.
+
+---
+
 <a id="verification"></a>
 
 ## 11. Verification
@@ -1231,10 +1247,13 @@ The Verification page has five tabs: **Rules**, **Settings**, **Logs**, **Forbid
 
 ![Verification Rules](media/gitv-verification-rules.png)
 
+*The rules list — the **Regex** badge marks rules carrying a pre-check pattern, captured 2026-11-20.*
+
 Each rule contains:
 - **Name**: A label for the rule
 - **Description**: Optional notes
 - **Verification Prompt**: Instructions for the Navigator (e.g., "The response must contain the string MARKER:")
+- **Regex Pre-Check** (optional): a regular expression checked against the reply *before* the Navigator LLM is called — a match rejects the reply immediately, saving a judge call on obviously-violating output. Validated on save (must compile; capped at 1024 characters). Rules with a pattern show a **Regex** badge on their card.
 - **Max Retries**: How many times to resubmit before giving up (default 2)
 - **Execution Order**: Sort order when multiple rules are active
 - **Resubmission Strategy**: How to handle violations:
@@ -1246,6 +1265,8 @@ Each rule contains:
 Each rule card has an **ON/OFF toggle** to enable/disable without editing. Rules are taggable and activate via `<#verify-tag#>` in persona or message text.
 
 ![Edit Verification Rule](media/gitv-verification-rules-edit-rule-example.png)
+
+*The rule editor with the Regex Pre-Check field, captured 2026-11-20.*
 
 ### Settings Tab
 
@@ -1497,8 +1518,11 @@ The editor is a vertical series of cards. The first card configures the map itse
 - **Version** and **Author**: Metadata for sharing
 - **Public**: Whether other users can see and use this map
 - **Global LLM Instructions**: Text shown to every LLM stage in the chain
+- **Final-Output Navigator Pass** (default off): when enabled, active verification rules are checked once against the map's **final** output. This pass is **report-only** — a failing rule is logged and shown in the Debug timeline but never re-runs the map or changes the reply (you have already paid for every stage by then). It respects `<VERIFY:off>`. For retries and regeneration, use per-stage verification instead; enabling both judges the same content twice.
 
 ![Map Editor - Settings](media/gitv-maps-edit-1.png)
+
+*The map settings card with the Final-Output Navigator Pass toggle, captured 2026-11-20.*
 
 Each subsequent card is a **stage**:
 

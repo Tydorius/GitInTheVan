@@ -16,7 +16,11 @@ from app.services.debug import debug_capture
 _MACRO_RE = re.compile(r"\{\{(user|char)\}\}", re.IGNORECASE)
 _JSLOREBOOK_RE = re.compile(r"<jslorebook\b[^>]*>.*?</jslorebook>", re.DOTALL | re.IGNORECASE)
 _USER_PERSONA_RE = re.compile(r"<UserPersona>(?P<body>.*?)</UserPersona>", re.DOTALL | re.IGNORECASE)
-_USER_LINE_RE = re.compile(r"^\s*(?:User|Name)\s*:\s*([^\n<>{}]{1,80})", re.MULTILINE | re.IGNORECASE)
+_USER_LINE_RE = re.compile(r"^\s*User\s*:\s*([^\n<>{}]{1,80})", re.MULTILINE | re.IGNORECASE)
+# ``Name:`` is only trusted inside <UserPersona>: card-style prompts use a
+# bare ``Name:`` line for the *character*, so resolving the user from it
+# would silently swap the two names.
+_USER_PERSONA_LINE_RE = re.compile(r"^\s*(?:User|Name)\s*:\s*([^\n<>{}]{1,80})", re.MULTILINE | re.IGNORECASE)
 _CHAR_LINE_RE = re.compile(r"^\s*(?:Character|Persona)\s*:\s*([^\n<>{}]{1,80})", re.MULTILINE | re.IGNORECASE)
 
 
@@ -41,9 +45,10 @@ def resolve_macro_names(
     2. Character name from JanitorAI ``<{NAME}'s Persona>`` sections via
        ``cantrip_context.parse_character_sections``, or a ``Character:`` /
        ``Persona:`` line in the system prompt.
-    3. User name from ``<UserPersona>`` / ``User:`` / ``Name:`` in the system
-       prompt, falling back to ``cantrip_context.extract_context_params``
-       (which defaults ``user_name`` to ``"User"``).
+    3. User name from ``<UserPersona>`` (``User:`` / ``Name:`` inside it) or
+       a ``User:`` line in the system prompt, falling back to
+       ``cantrip_context.extract_context_params`` (which defaults
+       ``user_name`` to ``"User"``).
 
     ``char_name`` stays ``""`` when genuinely unknown so ``{{char}}`` is left
     intact rather than blanked out.
@@ -75,8 +80,10 @@ def resolve_macro_names(
     if not user_name:
         if system_text:
             up_match = _USER_PERSONA_RE.search(system_text)
-            search_target = up_match.group("body") if up_match else system_text
-            user_match = _USER_LINE_RE.search(search_target)
+            if up_match:
+                user_match = _USER_PERSONA_LINE_RE.search(up_match.group("body"))
+            else:
+                user_match = _USER_LINE_RE.search(system_text)
             if user_match:
                 user_name = user_match.group(1).strip()
         if not user_name:

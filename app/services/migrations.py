@@ -1556,7 +1556,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             ALTER TABLE verification_rules ADD COLUMN regex_pattern TEXT NOT NULL DEFAULT '';
             """,
             "mysql": """
-            ALTER TABLE verification_rules ADD COLUMN regex_pattern TEXT;
+            ALTER TABLE verification_rules ADD COLUMN regex_pattern TEXT NOT NULL;
             """,
         },
     ),

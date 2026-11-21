@@ -374,3 +374,82 @@ class TestMapFinalOutputVerification:
 
         assert len(calls) == 1
         assert "_gitv_map_vresult" not in body_json
+
+    @pytest.mark.asyncio
+    async def test_final_verification_logs_conversation_id_from_header(self, admin_client):
+        """The final pass logs under the client's conversation header -- the
+        same identity the main verification loop uses (the old body key was
+        never written anywhere, so rows always logged conversation_id='')."""
+        user_id, map_ns = await self._seed_map_and_verification(
+            admin_client, final_enabled=True
+        )
+        driver_reply = {
+            "id": "resp-1",
+            "choices": [{"message": {"role": "assistant", "content": "Clean reply."}}],
+        }
+        judge_reply = {
+            "id": "judge-1",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": json.dumps({"violation": False, "reason": ""}),
+                }
+            }],
+        }
+        body_json = {
+            "model": "driver-model",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "_gitv_debug": {"stages": []},
+        }
+
+        patcher, _calls = _forward_returning((driver_reply, 200), (judge_reply, 200))
+        with patcher:
+            out = await run_map_pipeline(
+                body_json, user_id, {"x-conversation-id": "conv-map-1"},
+                map_ns, httpx.Timeout(30.0),
+            )
+
+        assert out["choices"][0]["message"]["content"] == "Clean reply."
+        async with map_pipeline_mod.async_session() as db:
+            logs = (
+                await db.execute(
+                    select(VerificationLog).where(VerificationLog.user_id == user_id)
+                )
+            ).scalars().all()
+            assert len(logs) == 1
+            assert logs[0].conversation_id == "conv-map-1"
+            assert logs[0].approved is True
+
+    @pytest.mark.asyncio
+    async def test_final_verification_failure_degrades_not_fails_request(self, admin_client):
+        """Report-only must degrade, never 500: every stage has already been
+        paid for when the final pass runs."""
+        user_id, map_ns = await self._seed_map_and_verification(
+            admin_client, final_enabled=True
+        )
+        driver_reply = {
+            "id": "resp-1",
+            "choices": [{"message": {"role": "assistant", "content": "Paid output."}}],
+        }
+        body_json = {
+            "model": "driver-model",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "_gitv_debug": {"stages": []},
+        }
+
+        patcher, calls = _forward_returning((driver_reply, 200))
+        with (
+            patcher,
+            patch(
+                "app.services.map_pipeline._run_final_map_verification",
+                side_effect=RuntimeError("simulated DB failure"),
+            ),
+        ):
+            out = await run_map_pipeline(
+                body_json, user_id, {}, map_ns, httpx.Timeout(30.0)
+            )
+
+        # The map's paid-for output is returned unverified, not a 500.
+        assert out["choices"][0]["message"]["content"] == "Paid output."
+        assert len(calls) == 1
+        assert "_gitv_map_vresult" not in body_json

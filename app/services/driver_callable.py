@@ -232,7 +232,18 @@ async def execute_tool_call(
                 deletes=set(result.chat_data_deletes),
             )
         if persist_shared:
-            if uses_user_data:
+            if uses_user_data or result.user_data or result.user_data_deletes:
+                if not uses_user_data:
+                    # Same safety net as cantrip.py: a script reaching the
+                    # store without the literal name (introspection, a
+                    # runtime-built key) still gets its writes propagated
+                    # rather than silently dropped.
+                    logger.warning(
+                        "Driver-callable cantrip '%s' wrote user_data without "
+                        "naming it; propagating writes (the store was seeded "
+                        "empty for this pass)",
+                        tool.name,
+                    )
                 await _save_user_data(
                     db, user_id, result.user_data,
                     deletes=set(result.user_data_deletes),

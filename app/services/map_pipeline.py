@@ -839,6 +839,7 @@ async def _run_final_map_verification(
     map_obj: Map,
     tags: list | None,
     debug_on: bool,
+    conversation_id: str = "",
 ) -> dict[str, Any] | None:
     """Run a report-only Navigator check on the map's final output.
 
@@ -879,7 +880,8 @@ async def _run_final_map_verification(
         body_json=body_json,
     )
 
-    conversation_id = body_json.get("_gitv_conversation_id", "")
+    # conversation_id comes from the caller (the client's x-conversation-id
+    # header) -- the same identity the main verification loop logs under.
     async with async_session() as db:
         await _create_log_entry(
             db,
@@ -1489,9 +1491,22 @@ async def run_map_pipeline(
         and getattr(map_obj, "final_verification_enabled", False)
         and body_json.get("_gitv_command_overrides", {}).get("verify") is not False
     ):
-        final_entry = await _run_final_map_verification(
-            response_data, body_json, user_id, map_obj, tags, debug_on
-        )
+        # Report-only must degrade, never fail the request: every stage has
+        # already been paid for by this point, so an exception here (DB error,
+        # logger failure) returns the response untouched with a log line --
+        # the same containment the main verification loop gets.
+        try:
+            final_entry = await _run_final_map_verification(
+                response_data, body_json, user_id, map_obj, tags, debug_on,
+                conversation_id=request_headers.get("x-conversation-id", ""),
+            )
+        except Exception:
+            logger.exception(
+                "Map final-output verification failed for map '%s'; "
+                "returning the response unverified",
+                getattr(map_obj, "name", map_obj.id),
+            )
+            final_entry = None
         if final_entry is not None:
             stage_verifications.append(final_entry)
 

@@ -826,6 +826,15 @@ async def _forward_request_impl(
                 )
                 body_json["messages"] = inject_samples(body_json["messages"], map_samples)
 
+            # Macros expand on the map path too: without this, a lorebook
+            # entry carrying {{user}} expands on plain requests but ships
+            # literal to every stage (the map branch returns before the
+            # non-map expansion site below). Runs after injections, same
+            # as the non-map path, and the conversation-hash anchor was
+            # captured pre-injection, so continuity is unaffected.
+            from app.services.macros import expand_macros_in_messages
+            expand_macros_in_messages(body_json, request_headers)
+
             response_data = await run_map_pipeline(body_json, user_id, request_headers, map_active, map_timeout)
             map_status = body_json.pop("_gitv_map_status_code", 200)
 
