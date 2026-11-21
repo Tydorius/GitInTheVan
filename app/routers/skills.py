@@ -2,7 +2,7 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +26,7 @@ class SkillCreate(BaseModel):
     content: str = ""
     type: str = "skill"
     budget_weight: float = 1.0
+    reserved_tokens: int = Field(default=0, ge=0)
 
 
 class SkillUpdate(BaseModel):
@@ -34,6 +35,7 @@ class SkillUpdate(BaseModel):
     content: str | None = None
     type: str | None = None
     budget_weight: float | None = None
+    reserved_tokens: int | None = Field(default=None, ge=0)
 
 
 class SkillResponse(BaseModel):
@@ -43,6 +45,7 @@ class SkillResponse(BaseModel):
     content: str
     type: str
     budget_weight: float
+    reserved_tokens: int = 0
     endpoints: list[str]
     created_at: str
 
@@ -63,6 +66,7 @@ def _skill_to_response(skill: Skill, endpoint_ids: list[str] | None = None) -> S
         content=skill.content,
         type=skill.type,
         budget_weight=skill.budget_weight,
+        reserved_tokens=getattr(skill, "reserved_tokens", 0) or 0,
         endpoints=endpoint_ids or [],
         created_at=skill.created_at.isoformat() if skill.created_at else "",
     )
@@ -113,6 +117,7 @@ async def create_skill(
         content=req.content,
         type=req.type,
         budget_weight=req.budget_weight,
+        reserved_tokens=req.reserved_tokens,
     )
     db.add(skill)
     await db.commit()
@@ -168,6 +173,8 @@ async def update_skill(
         skill.type = req.type
     if req.budget_weight is not None:
         skill.budget_weight = req.budget_weight
+    if req.reserved_tokens is not None:
+        skill.reserved_tokens = req.reserved_tokens
 
     await db.commit()
     await db.refresh(skill)
@@ -298,6 +305,7 @@ async def export_skill(
         "description": s.description or "",
         "content": s.content or "",
         "type": s.type,
+        "reserved_tokens": getattr(s, "reserved_tokens", 0) or 0,
         "author": "",
         "version": "1.0.0",
         "updated": s.updated_at.isoformat() if s.updated_at else "",

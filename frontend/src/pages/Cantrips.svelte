@@ -51,8 +51,9 @@
     hook_type: 'pre', is_active: true, is_public: false,
     run_pre_driver: true, run_driver_callable: false,
     run_pre_navigator: false, run_post_navigator: false,
-    execution_order: 10, timeout_ms: 5000, budget_weight: 1.0,
+    execution_order: 10, timeout_ms: 5000, budget_weight: 1.0, reserved_tokens: 0,
     lorebook_reads_text: '',
+    user_data_prefixes_text: '',
     response_tags_text: '',
   }
 
@@ -121,7 +122,7 @@
   }
 
   function resetForm() {
-    form = { name: '', description: '', llm_instructions: '', code: '', hook_type: 'pre', is_active: true, is_public: false, run_pre_driver: true, run_driver_callable: false, run_pre_navigator: false, run_post_navigator: false, execution_order: 10, timeout_ms: 5000, budget_weight: 1.0, lorebook_reads_text: '', response_tags_text: '' }
+    form = { name: '', description: '', llm_instructions: '', code: '', hook_type: 'pre', is_active: true, is_public: false, run_pre_driver: true, run_driver_callable: false, run_pre_navigator: false, run_post_navigator: false, execution_order: 10, timeout_ms: 5000, budget_weight: 1.0, reserved_tokens: 0, lorebook_reads_text: '', user_data_prefixes_text: '', response_tags_text: '' }
     editingId = null
     validationStatus = null
     errorLine = null
@@ -138,7 +139,9 @@
       run_pre_navigator: s.run_pre_navigator ?? false, run_post_navigator: s.run_post_navigator ?? false,
       execution_order: s.execution_order, timeout_ms: s.timeout_ms,
       budget_weight: s.budget_weight ?? 1.0,
+      reserved_tokens: s.reserved_tokens ?? 0,
       lorebook_reads_text: (s.lorebook_reads || []).join(', '),
+      user_data_prefixes_text: (s.user_data_prefixes || []).join(', '),
       response_tags_text: (s.response_tags || []).join(', '),
     }
     showForm = true
@@ -180,11 +183,12 @@
   async function handleSubmit() {
     error = ''
     try {
-      // lorebook_reads travels as an array; the form edits it as text.
-      const { lorebook_reads_text, response_tags_text, ...rest } = form
+      // lorebook_reads and user_data_prefixes travel as arrays; the form edits them as text.
+      const { lorebook_reads_text, user_data_prefixes_text, response_tags_text, ...rest } = form
       const payload = {
         ...rest,
         lorebook_reads: (lorebook_reads_text || '').split(',').map((s: string) => s.trim()).filter(Boolean),
+        user_data_prefixes: (user_data_prefixes_text || '').split(',').map((s: string) => s.trim()).filter(Boolean),
         response_tags: (response_tags_text || '').split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean),
         override_scan: false,
       }
@@ -367,6 +371,13 @@
         {#if testResults.error}
           <div class="error-msg">Error: {testResults.error}</div>
         {/if}
+        {#if testResults.tokens_before != null}
+          <div class="form-group">
+            <span class="badge">
+              Tokens: {testResults.tokens_before} → {testResults.tokens_after} ({(testResults.token_delta ?? 0) >= 0 ? '+' : ''}{testResults.token_delta ?? 0})
+            </span>
+          </div>
+        {/if}
         {#if testResults.scenario}
           <div class="form-group"><label>Scenario Output</label><div class="debug-output">{testResults.scenario}</div></div>
         {/if}
@@ -420,6 +431,11 @@
 
     {#if seqResults}
       <div style="margin-top: 16px;">
+        {#if seqResults.total_token_delta != null}
+          <div style="margin-bottom: 8px; font-size: 12px; color: var(--text-dim);">
+            Total prompt token delta: {seqResults.total_token_delta >= 0 ? '+' : ''}{seqResults.total_token_delta}
+          </div>
+        {/if}
         {#if seqResults.stop_reason}
           <div class="error-msg">Stopped at turn {seqResults.stopped_at_turn}: {seqResults.stop_reason}</div>
         {/if}
@@ -427,6 +443,11 @@
           <details style="margin-bottom: 8px; border: 1px solid var(--border); border-radius: 4px; padding: 8px;">
             <summary style="cursor: pointer;">
               <strong>Turn {turn.index}</strong>
+              {#if turn.tokens_before != null}
+                <span class="badge" style="margin-left: 6px;">
+                  {turn.tokens_before} → {turn.tokens_after} ({(turn.token_delta ?? 0) >= 0 ? '+' : ''}{turn.token_delta ?? 0} tok)
+                </span>
+              {/if}
               {#if turn.tags?.length}<span class="badge" style="margin-left: 6px;">tags: {turn.tags.join(', ')}</span>{/if}
               {#if turn.is_regenerate}<span class="badge" style="margin-left: 6px;">regenerate</span>{/if}
             </summary>
@@ -608,6 +629,11 @@
             <label for="cantrip-budget">Budget Weight</label>
             <input id="cantrip-budget" type="number" step="0.1" min="0" bind:value={form.budget_weight} />
           </div>
+          <div class="form-group">
+            <label for="cantrip-reserved-tokens">Reserved Tokens</label>
+            <input id="cantrip-reserved-tokens" type="number" min="0" step="50" bind:value={form.reserved_tokens} />
+            <small>Fixed token reservation (0 = use weighted share)</small>
+          </div>
         </div>
         <div class="form-row">
           <div class="form-group" style="flex: 1;">
@@ -616,6 +642,14 @@
               placeholder="e.g. World Codex, Faction Notes" />
             <small>Entries from these lorebooks are seeded read-only into the script's
               <code>context.lorebook</code> (max 20 books, capped by the admin lorebook size limit).</small>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex: 1;">
+            <label for="cantrip-user-data-prefixes">User Data Prefixes (comma-separated)</label>
+            <input id="cantrip-user-data-prefixes" type="text" bind:value={form.user_data_prefixes_text}
+              placeholder="e.g. player_, quest_" />
+            <small>Optional key prefixes to seed from user_data (blank = all keys; speeds up large stores)</small>
           </div>
         </div>
         <div class="form-row">

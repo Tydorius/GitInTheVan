@@ -520,6 +520,102 @@ export interface AssistantConversation {
   tool_calls: number
 }
 
+export interface Cantrip {
+  id: string
+  name: string
+  description?: string
+  llm_instructions?: string
+  code?: string
+  hook_type?: string
+  is_active?: boolean
+  is_public?: boolean
+  run_pre_driver?: boolean
+  run_driver_callable?: boolean
+  run_pre_navigator?: boolean
+  run_post_navigator?: boolean
+  execution_order?: number
+  timeout_ms?: number
+  budget_weight?: number
+  reserved_tokens?: number
+  lorebook_reads?: string[]
+  user_data_prefixes?: string[]
+  response_tags?: string[]
+  tag?: string
+  [key: string]: any
+}
+
+export type CantripCreate = Partial<Cantrip> & { name: string }
+export type CantripUpdate = Partial<Cantrip>
+
+export interface CantripTestResponse {
+  error?: string | null
+  scenario?: string
+  personality?: string
+  debug_logs?: string[]
+  chat_data?: Record<string, any>
+  tokens_before?: number
+  tokens_after?: number
+  token_delta?: number
+  [key: string]: any
+}
+
+export interface SequenceTurnResult {
+  index: number
+  tags?: string[]
+  is_regenerate?: boolean
+  cantrips?: Record<string, any[]>
+  response_tags?: Record<string, any>
+  reply?: string
+  chat_data?: Record<string, any>
+  tokens_before?: number
+  tokens_after?: number
+  token_delta?: number
+  [key: string]: any
+}
+
+export interface SequenceTestResponse {
+  turns: SequenceTurnResult[]
+  stopped_at_turn?: number | null
+  stop_reason?: string | null
+  final_chat_data?: Record<string, any>
+  final_user_data?: Record<string, any>
+  final_cantrip_data?: Record<string, any>
+  total_token_delta?: number
+  [key: string]: any
+}
+
+export interface Lorebook {
+  id: string
+  name: string
+  description?: string
+  is_public?: boolean
+  budget_weight?: number
+  reserved_tokens?: number
+  inject_after_cantrips?: boolean
+  scan_depth?: number
+  word_boundary_keys?: boolean
+  tag?: string
+  [key: string]: any
+}
+
+export type LorebookCreate = Partial<Lorebook> & { name: string }
+export type LorebookUpdate = Partial<Lorebook>
+
+export interface Skill {
+  id: string
+  name: string
+  description?: string
+  content?: string
+  type: string
+  budget_weight?: number
+  reserved_tokens?: number
+  endpoints?: string[]
+  [key: string]: any
+}
+
+export type SkillCreate = Partial<Skill> & { name: string; type: string }
+export type SkillUpdate = Partial<Skill>
+
 export const api = {
   // Auth
   setup: (username: string, password: string) =>
@@ -579,16 +675,16 @@ export const api = {
     request<any>('/api/settings', { method: 'PUT', body: JSON.stringify(data) }),
 
   // Cantrips
-  listCantrips: cantripsCrud.list,
-  createCantrip: cantripsCrud.create,
-  getCantrip: cantripsCrud.get,
-  updateCantrip: cantripsCrud.update,
+  listCantrips: () => cantripsCrud.list() as Promise<{ cantrips: Cantrip[] }>,
+  createCantrip: (data: CantripCreate) => cantripsCrud.create(data) as Promise<Cantrip>,
+  getCantrip: (id: string) => cantripsCrud.get(id) as Promise<Cantrip>,
+  updateCantrip: (id: string, data: CantripUpdate) => cantripsCrud.update(id, data) as Promise<Cantrip>,
   deleteCantrip: cantripsCrud.delete,
   exportCantrip: cantripsCrud.export,
   testCantripById: (id: string, data: any) =>
-    request<any>(`/api/cantrips/${id}/test`, { method: 'POST', body: JSON.stringify(data) }),
+    request<CantripTestResponse>(`/api/cantrips/${id}/test`, { method: 'POST', body: JSON.stringify(data) }),
   testCantripSequence: (data: any) =>
-    request<any>('/api/cantrips/test-sequence', { method: 'POST', body: JSON.stringify(data) }),
+    request<SequenceTestResponse>('/api/cantrips/test-sequence', { method: 'POST', body: JSON.stringify(data) }),
 
   // Storage browser
   listStorageChats: (search = '', limit = 100, offset = 0) =>
@@ -639,10 +735,10 @@ export const api = {
   },
 
   // Lorebooks
-  listLorebooks: lorebooksCrud.list,
-  createLorebook: lorebooksCrud.create,
-  getLorebook: lorebooksCrud.get,
-  updateLorebook: lorebooksCrud.update,
+  listLorebooks: () => lorebooksCrud.list() as Promise<{ lorebooks: Lorebook[] }>,
+  createLorebook: (data: LorebookCreate) => lorebooksCrud.create(data) as Promise<Lorebook>,
+  getLorebook: (id: string) => lorebooksCrud.get(id) as Promise<Lorebook>,
+  updateLorebook: (id: string, data: LorebookUpdate) => lorebooksCrud.update(id, data) as Promise<Lorebook>,
   deleteLorebook: lorebooksCrud.delete,
   addLorebookEntry: (lbId: string, data: any) =>
     request<any>(`/api/lorebooks/${lbId}/entries`, { method: 'POST', body: JSON.stringify(data) }),
@@ -655,11 +751,11 @@ export const api = {
   exportLorebook: lorebooksCrud.export,
 
   // Skills & Samples
-  listSkills: skillsCrud.list,
-  createSkill: (data: { name: string; description?: string; content?: string; type: string }) =>
-    skillsCrud.create(data),
-  getSkill: skillsCrud.get,
-  updateSkill: skillsCrud.update,
+  listSkills: () => skillsCrud.list() as Promise<{ skills: Skill[] }>,
+  createSkill: (data: SkillCreate) =>
+    skillsCrud.create(data) as Promise<Skill>,
+  getSkill: (id: string) => skillsCrud.get(id) as Promise<Skill>,
+  updateSkill: (id: string, data: SkillUpdate) => skillsCrud.update(id, data) as Promise<Skill>,
   deleteSkill: skillsCrud.delete,
   attachSkill: (skillId: string, endpointId: string) =>
     request<any>(`/api/skills/${skillId}/attach`, { method: 'POST', body: JSON.stringify({ endpoint_id: endpointId }) }),

@@ -50,6 +50,9 @@ async def _engine_missing_budget_weight(*, with_migration_042: bool = False):
             for statement in (s.strip() for s in sql.split(";")):
                 if statement and "endpoint_skills" not in statement:
                     await conn.execute(text(statement))
+            await conn.execute(
+                text("ALTER TABLE skills ADD COLUMN reserved_tokens INTEGER NOT NULL DEFAULT 0;")
+            )
 
     return engine
 

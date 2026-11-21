@@ -35,6 +35,7 @@ class Cantrip(Base):
     execution_order: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
     timeout_ms: Mapped[int] = mapped_column(Integer, default=5000, nullable=False)
     budget_weight: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    reserved_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     # Phase 20: JSON list of lorebook names whose entries are seeded read-only
     # into this cantrip's sandbox context (context.lorebook). The column is
     # nullable on MySQL (no literal TEXT defaults there); readers treat NULL
@@ -45,6 +46,9 @@ class Cantrip(Base):
     # the client, and delivers the extractions to post-Navigator cantrip
     # context the same turn. Same MySQL NULL-reads-as-empty convention.
     response_tags: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    # 0.45.0: JSON list of user_data key prefixes this cantrip can access.
+    # Same MySQL NULL-reads-as-empty convention.
+    user_data_prefixes: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

@@ -191,19 +191,46 @@ async def load_weighted_resources(
         all_skills = skill_result.scalars().all()
 
         lorebook_info = [
-            {"id": lb.id, "name": lb.name, "weight": lb.budget_weight}
+            {
+                "id": lb.id,
+                "name": lb.name,
+                "weight": lb.budget_weight,
+                "reserved_tokens": max(0, int(getattr(lb, "reserved_tokens", 0) or 0)),
+            }
             for lb in active_lorebooks
         ]
         cantrip_info = [
-            {"id": c.id, "name": c.name, "weight": c.budget_weight}
+            {
+                "id": c.id,
+                "name": c.name,
+                "weight": c.budget_weight,
+                "reserved_tokens": max(0, int(getattr(c, "reserved_tokens", 0) or 0)),
+            }
             for c in active_cantrips
         ]
         skill_info = [
-            {"id": s.id, "name": s.name, "weight": s.budget_weight}
+            {
+                "id": s.id,
+                "name": s.name,
+                "weight": s.budget_weight,
+                "reserved_tokens": max(0, int(getattr(s, "reserved_tokens", 0) or 0)),
+            }
             for s in all_skills
         ]
 
     return cantrip_info, lorebook_info, skill_info
+
+
+def _detail_level(share: int) -> str:
+    if share >= 4000:
+        return "full"
+    if share >= 1500:
+        return "summary"
+    return "bullets"
+
+
+def _reserved_amount(resource: dict[str, Any]) -> int:
+    return max(0, int(resource.get("reserved_tokens", 0) or 0))
 
 
 def allocate_budget(
@@ -212,54 +239,67 @@ def allocate_budget(
     lorebook_info: list[dict[str, Any]],
     skill_info: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Allocate the injection budget across active resources by weight.
+    """Allocate the injection budget across active resources.
+
+    Resources with ``reserved_tokens > 0`` receive fixed token reservations
+    first (scaled proportionally if total reservations exceed
+    ``injection_budget``); any remaining pool is divided proportionally by
+    ``weight`` across non-reserved resources.
 
     Returns a dict with per-resource token shares and detail levels.
     """
     all_resources = cantrip_info + lorebook_info + (skill_info or [])
-    total_weight = sum(r["weight"] for r in all_resources)
+    shares: list[int] = [0] * len(all_resources)
 
-    if total_weight <= 0:
-        allocations = {
-            f"{resource['id']}": {
-                "name": resource["name"],
-                "share": 0,
-                "weight": resource["weight"],
-                "detail_level": "bullets",
-            }
-            for resource in all_resources
-        }
-        return {
-            "total": injection_budget,
-            "remaining": injection_budget,
-            "allocations": allocations,
-        }
+    reserved_indices = [i for i, r in enumerate(all_resources) if _reserved_amount(r) > 0]
+    weighted_indices = [i for i, r in enumerate(all_resources) if _reserved_amount(r) <= 0]
+    total_reserved = sum(_reserved_amount(all_resources[i]) for i in reserved_indices)
+
+    if total_reserved == 0:
+        # Case A: pure weighted allocation (identical to pre-reservation behavior).
+        total_weight = sum(r["weight"] for r in all_resources)
+        if total_weight > 0:
+            remaining = injection_budget
+            for i, resource in enumerate(all_resources):
+                share = int(injection_budget * resource["weight"] / total_weight)
+                shares[i] = share
+                remaining -= share
+            if remaining != 0 and all_resources:
+                shares[0] += remaining
+    elif total_reserved <= injection_budget:
+        # Case B: honor fixed reservations; divide remaining pool by weight.
+        for i in reserved_indices:
+            shares[i] = _reserved_amount(all_resources[i])
+        pool = injection_budget - total_reserved
+        weighted_total = sum(all_resources[i]["weight"] for i in weighted_indices)
+        if weighted_total > 0 and weighted_indices:
+            remaining = pool
+            for i in weighted_indices:
+                share = int(pool * all_resources[i]["weight"] / weighted_total)
+                shares[i] = share
+                remaining -= share
+            if remaining != 0:
+                shares[weighted_indices[0]] += remaining
+    else:
+        # Case C: over-subscribed reservations scale proportionally; weighted get 0.
+        remaining = injection_budget
+        for i in reserved_indices:
+            share = int(injection_budget * _reserved_amount(all_resources[i]) / total_reserved)
+            shares[i] = share
+            remaining -= share
+        if remaining != 0 and reserved_indices:
+            shares[reserved_indices[0]] += remaining
 
     allocations: dict[str, dict[str, Any]] = {}
-    remaining = injection_budget
-
-    for resource in all_resources:
-        share = int(injection_budget * resource["weight"] / total_weight)
-        remaining -= share
-
-        if share >= 4000:
-            detail_level = "full"
-        elif share >= 1500:
-            detail_level = "summary"
-        else:
-            detail_level = "bullets"
-
-        key = f"{resource['id']}"
-        allocations[key] = {
+    for i, resource in enumerate(all_resources):
+        share = shares[i]
+        allocations[f"{resource['id']}"] = {
             "name": resource["name"],
             "share": share,
             "weight": resource["weight"],
-            "detail_level": detail_level,
+            "reserved_tokens": resource.get("reserved_tokens", 0),
+            "detail_level": _detail_level(share),
         }
-
-    if remaining != 0 and allocations:
-        first_key = next(iter(allocations))
-        allocations[first_key]["share"] += remaining
 
     return {
         "total": injection_budget,

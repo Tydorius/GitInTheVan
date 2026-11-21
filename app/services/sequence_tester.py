@@ -21,6 +21,7 @@ import time
 import uuid
 from typing import Any
 
+from app.services.budget import estimate_messages_tokens
 from app.services.cantrip import (
     embedded_jslb_scripts,
     process_cantrips,
@@ -191,6 +192,7 @@ async def run_sequence(
             raw_tags = [t.get("raw", "") for t in tags]
 
             mark = len(_cantrip_records(body_json))
+            tokens_before = estimate_messages_tokens(body_json.get("messages", []))
             await process_cantrips(
                 body_json, user_id, req_headers, tags=tags, position="pre_driver",
                 only_ids=only_cantrip_ids,
@@ -200,6 +202,8 @@ async def run_sequence(
             pending_strips = body_json.pop("_gitv_prompt_strips", None)
             if pending_strips:
                 apply_prompt_strips(body_json, pending_strips)
+            tokens_after = estimate_messages_tokens(body_json.get("messages", []))
+            token_delta = tokens_after - tokens_before
             pre_driver = [_slim_record(r) for r in _cantrip_records(body_json)[mark:]]
 
             # Pipeline order per turn: pre-Navigator on the raw reply, then
@@ -246,6 +250,9 @@ async def run_sequence(
                 "index": index,
                 "tags": raw_tags,
                 "is_regenerate": bool(turn.get("is_regenerate", False)),
+                "tokens_before": tokens_before,
+                "tokens_after": tokens_after,
+                "token_delta": token_delta,
                 "cantrips": {
                     "pre_driver": pre_driver,
                     "pre_navigator": pre_navigator,
@@ -272,6 +279,7 @@ async def run_sequence(
     return {
         "conversation_id": conv_id,
         "turns": turn_records,
+        "total_token_delta": sum(t["token_delta"] for t in turn_records),
         "stopped_at_turn": stopped_at_turn,
         "stop_reason": stop_reason,
         "final_chat_data": seeds["chat_data"],

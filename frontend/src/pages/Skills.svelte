@@ -16,7 +16,7 @@
 
   let showForm = false
   let editingId: string | null = null
-  let form = { name: '', description: '', content: '', type: 'skill' }
+  let form = { name: '', description: '', content: '', type: 'skill', budget_weight: 1.0, reserved_tokens: 0 }
 
   async function load() {
     loading = true
@@ -29,7 +29,7 @@
   }
 
   function resetForm() {
-    form = { name: '', description: '', content: '', type: tab }
+    form = { name: '', description: '', content: '', type: tab, budget_weight: 1.0, reserved_tokens: 0 }
     editingId = null
   }
 
@@ -41,7 +41,14 @@
 
   function startEdit(s: any) {
     editingId = s.id
-    form = { name: s.name, description: s.description || '', content: s.content || '', type: s.type }
+    form = {
+      name: s.name,
+      description: s.description || '',
+      content: s.content || '',
+      type: s.type,
+      budget_weight: s.budget_weight ?? 1.0,
+      reserved_tokens: s.reserved_tokens ?? 0,
+    }
     showForm = true
   }
 
@@ -230,6 +237,18 @@
         <div class="form-group">
           <label for="skill-content">Content</label>
           <CodeEditor bind:value={form.content} language="markdown" minHeight="200px" placeholder={form.type === 'skill' ? 'You are an expert at writing vivid, immersive combat scenes. Describe actions, injuries, and tactics in detail...' : 'Here is an example of the desired writing style:\n\nThe rain fell in sheets...'} />
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="skill-budget">Budget Weight</label>
+            <input id="skill-budget" type="number" min="0" step="0.1" bind:value={form.budget_weight} />
+            <p style="color: var(--text-dim); font-size: 11px; margin-top: 2px;">Set to 0 to exempt from context budget caps.</p>
+          </div>
+          <div class="form-group">
+            <label for="skill-reserved-tokens">Reserved Tokens</label>
+            <input id="skill-reserved-tokens" type="number" min="0" step="50" bind:value={form.reserved_tokens} />
+            <p style="color: var(--text-dim); font-size: 11px; margin-top: 2px;">Fixed token reservation (0 = use weighted share)</p>
+          </div>
         </div>
 
         {#if editingId && endpoints.length > 0}

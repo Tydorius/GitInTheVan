@@ -172,9 +172,11 @@ async def execute_tool_call(
         _load_cantrip_data,
         _load_chat_data,
         _load_user_data,
+        _merge_scoped_user_data,
         _save_cantrip_data,
         _save_chat_data,
         _save_user_data,
+        select_user_data_seed,
     )
     from app.services.cantrip_context import build_context
     from app.services.deno_runner import run_cantrip
@@ -203,7 +205,12 @@ async def execute_tool_call(
 
     async with async_session() as db:
         chat_data = await _load_chat_data(db, user_id, params["conversation_id"])
-        user_data = await _load_user_data(db, user_id) if uses_user_data else {}
+        full_user_data = await _load_user_data(db, user_id) if uses_user_data else {}
+        user_data_seed, user_data_scoped = select_user_data_seed(
+            full_user_data,
+            tool.code or "",
+            getattr(tool, "user_data_prefixes", "[]"),
+        )
         cantrip_data = await _load_cantrip_data(db, user_id, tool.id)
 
         try:
@@ -211,7 +218,7 @@ async def execute_tool_call(
                 code=tool.code,
                 context=context,
                 chat_data=chat_data,
-                user_data=user_data,
+                user_data=user_data_seed,
                 cantrip_data=cantrip_data,
                 timeout_ms=tool.timeout_ms,
                 passenger_handler=passenger_handler,
@@ -244,9 +251,20 @@ async def execute_tool_call(
                         "empty for this pass)",
                         tool.name,
                     )
+                data_to_save = (
+                    _merge_scoped_user_data(
+                        full_user_data,
+                        user_data_seed,
+                        result.user_data,
+                        result.user_data_deletes,
+                    )
+                    if uses_user_data and user_data_scoped
+                    else result.user_data
+                )
                 await _save_user_data(
-                    db, user_id, result.user_data,
+                    db, user_id, data_to_save,
                     deletes=set(result.user_data_deletes),
+                    before=full_user_data if uses_user_data else None,
                 )
             if result.cantrip_data != cantrip_data:
                 await _save_cantrip_data(

@@ -3,7 +3,7 @@ import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -78,6 +78,7 @@ class LorebookCreate(BaseModel):
     scan_depth: int = 0
     word_boundary_keys: bool = False
     budget_weight: float = 1.0
+    reserved_tokens: int = Field(default=0, ge=0)
 
 
 class LorebookUpdate(BaseModel):
@@ -95,6 +96,7 @@ class LorebookUpdate(BaseModel):
     scan_depth: int | None = None
     word_boundary_keys: bool | None = None
     budget_weight: float | None = None
+    reserved_tokens: int | None = Field(default=None, ge=0)
 
 
 class LorebookResponse(BaseModel):
@@ -113,6 +115,7 @@ class LorebookResponse(BaseModel):
     scan_depth: int
     word_boundary_keys: bool
     budget_weight: float
+    reserved_tokens: int = 0
     entries: list[EntryResponse]
 
 
@@ -132,6 +135,7 @@ class LorebookListItem(BaseModel):
     scan_depth: int
     word_boundary_keys: bool
     budget_weight: float
+    reserved_tokens: int = 0
     entry_count: int
 
 
@@ -142,12 +146,14 @@ class LorebookListResponse(BaseModel):
 class ExportData(BaseModel):
     name: str
     description: str
+    reserved_tokens: int = 0
     entries: list[EntryInput]
 
 
 class RawImport(BaseModel):
     name: str | None = None
     description: str | None = None
+    reserved_tokens: int = Field(default=0, ge=0)
     entries: Any = None
     override_scan: bool = False
 
@@ -214,6 +220,7 @@ async def list_lorebooks(
                 run_pre_navigator=lb.run_pre_navigator,
                 run_post_navigator=lb.run_post_navigator,
                 budget_weight=lb.budget_weight,
+                reserved_tokens=getattr(lb, "reserved_tokens", 0) or 0,
                 inject_after_cantrips=lb.inject_after_cantrips,
                 scan_depth=lb.scan_depth,
                 word_boundary_keys=lb.word_boundary_keys,
@@ -250,6 +257,7 @@ async def list_public_lorebooks(
                 run_pre_navigator=lb.run_pre_navigator,
                 run_post_navigator=lb.run_post_navigator,
                 budget_weight=lb.budget_weight,
+                reserved_tokens=getattr(lb, "reserved_tokens", 0) or 0,
                 inject_after_cantrips=lb.inject_after_cantrips,
                 scan_depth=lb.scan_depth,
                 word_boundary_keys=lb.word_boundary_keys,
@@ -290,6 +298,7 @@ async def get_lorebook(
         run_pre_navigator=lorebook.run_pre_navigator,
         run_post_navigator=lorebook.run_post_navigator,
         budget_weight=lorebook.budget_weight,
+        reserved_tokens=getattr(lorebook, "reserved_tokens", 0) or 0,
         inject_after_cantrips=lorebook.inject_after_cantrips,
         scan_depth=lorebook.scan_depth,
         word_boundary_keys=lorebook.word_boundary_keys,
@@ -316,6 +325,7 @@ async def create_lorebook(
         run_pre_navigator=req.run_pre_navigator,
         run_post_navigator=req.run_post_navigator,
         budget_weight=req.budget_weight,
+        reserved_tokens=req.reserved_tokens,
         inject_after_cantrips=req.inject_after_cantrips,
         scan_depth=max(0, req.scan_depth),
         word_boundary_keys=req.word_boundary_keys,
@@ -336,6 +346,7 @@ async def create_lorebook(
         run_pre_navigator=lorebook.run_pre_navigator,
         run_post_navigator=lorebook.run_post_navigator,
         budget_weight=lorebook.budget_weight,
+        reserved_tokens=getattr(lorebook, "reserved_tokens", 0) or 0,
         inject_after_cantrips=lorebook.inject_after_cantrips,
         scan_depth=lorebook.scan_depth,
         word_boundary_keys=lorebook.word_boundary_keys,
@@ -383,6 +394,8 @@ async def update_lorebook(
         lorebook.word_boundary_keys = req.word_boundary_keys
     if req.budget_weight is not None:
         lorebook.budget_weight = req.budget_weight
+    if req.reserved_tokens is not None:
+        lorebook.reserved_tokens = req.reserved_tokens
 
     await db.commit()
     await db.refresh(lorebook)
@@ -399,6 +412,7 @@ async def update_lorebook(
         run_pre_navigator=lorebook.run_pre_navigator,
         run_post_navigator=lorebook.run_post_navigator,
         budget_weight=lorebook.budget_weight,
+        reserved_tokens=getattr(lorebook, "reserved_tokens", 0) or 0,
         inject_after_cantrips=lorebook.inject_after_cantrips,
         scan_depth=lorebook.scan_depth,
         word_boundary_keys=lorebook.word_boundary_keys,
@@ -535,6 +549,7 @@ async def export_lorebook(
     return ExportData(
         name=lorebook.name,
         description=lorebook.description,
+        reserved_tokens=getattr(lorebook, "reserved_tokens", 0) or 0,
         entries=entries,
     )
 
@@ -611,6 +626,7 @@ async def import_lorebook(
         user_id=current_user.id,
         name=req.name or "Imported Lorebook",
         description=req.description or "",
+        reserved_tokens=req.reserved_tokens,
     )
     db.add(lorebook)
     await db.flush()
@@ -641,6 +657,7 @@ async def import_lorebook(
         run_pre_navigator=lorebook.run_pre_navigator,
         run_post_navigator=lorebook.run_post_navigator,
         budget_weight=lorebook.budget_weight,
+        reserved_tokens=getattr(lorebook, "reserved_tokens", 0) or 0,
         inject_after_cantrips=lorebook.inject_after_cantrips,
         scan_depth=lorebook.scan_depth,
         word_boundary_keys=lorebook.word_boundary_keys,

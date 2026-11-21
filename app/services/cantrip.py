@@ -158,6 +158,67 @@ async def _load_user_data(db: AsyncSession, user_id: str) -> dict[str, Any]:
     return await _load_kv_store(db, UserData, UserData.user_id == user_id)
 
 
+def parse_user_data_prefixes(raw: Any) -> list[str]:
+    """Parse user_data_prefixes from a list or JSON string into stripped non-empty strings."""
+    if raw is None or raw == "":
+        return []
+    items: Any = raw
+    if isinstance(raw, str):
+        try:
+            items = json.loads(raw)
+        except (ValueError, TypeError):
+            return []
+    if not isinstance(items, (list, tuple)):
+        return []
+    prefixes: list[str] = []
+    for item in items:
+        if isinstance(item, str):
+            stripped = item.strip()
+            if stripped:
+                prefixes.append(stripped)
+    return prefixes
+
+
+def select_user_data_seed(
+    user_data: dict[str, Any],
+    code: str,
+    raw_prefixes: Any,
+) -> tuple[dict[str, Any], bool]:
+    """Select the user_data subset visible to a cantrip and whether it is scoped.
+
+    Returns ``(seeded_dict, is_scoped)``:
+    - If ``"user_data"`` does not appear in ``code``: ``({}, True)``.
+    - If no prefixes are configured: ``(dict(user_data), False)`` (unrestricted).
+    - If prefixes are configured: ``(matching_subset, True)``.
+    """
+    if "user_data" not in (code or ""):
+        return {}, True
+    prefixes = parse_user_data_prefixes(raw_prefixes)
+    if not prefixes:
+        return dict(user_data), False
+    return {
+        k: v
+        for k, v in user_data.items()
+        if any(k == p or k.startswith(p) for p in prefixes)
+    }, True
+
+
+def _merge_scoped_user_data(
+    existing: dict[str, Any],
+    seed: dict[str, Any],
+    result_data: dict[str, Any],
+    deletes: Any,
+) -> dict[str, Any]:
+    """Merge only writes/changes and deletes from a scoped cantrip into existing user_data."""
+    merged = dict(existing)
+    for k, v in result_data.items():
+        if k not in seed or seed[k] != v:
+            merged[k] = v
+    for dk in deletes or ():
+        merged.pop(dk, None)
+    return merged
+
+
 async def _save_user_data(
     db: AsyncSession,
     user_id: str,
@@ -660,7 +721,11 @@ async def _execute_cantrip_step(
     before_cantrip_data = dict(cantrip_data)
 
     uses_user_data = "user_data" in (cantrip.code or "")
-    user_data_seed = state["user_data"] if uses_user_data else {}
+    user_data_seed, user_data_scoped = select_user_data_seed(
+        state["user_data"],
+        cantrip.code or "",
+        getattr(cantrip, "user_data_prefixes", "[]"),
+    )
 
     started = time.monotonic()
     try:
@@ -772,7 +837,15 @@ async def _execute_cantrip_step(
                 "writes (the store was seeded empty for this pass)",
                 cantrip.name,
             )
-        state["user_data"] = result.user_data
+        if uses_user_data and user_data_scoped:
+            state["user_data"] = _merge_scoped_user_data(
+                state["user_data"],
+                user_data_seed,
+                result.user_data,
+                result.user_data_deletes,
+            )
+        else:
+            state["user_data"] = result.user_data
         state.setdefault("user_data_deletes", set()).update(result.user_data_deletes)
 
     if store_seeds is not None:
@@ -1171,7 +1244,11 @@ async def process_cantrips_post_driver(
                 context["__memories"] = mem_seed
 
             uses_user_data = "user_data" in (cantrip.code or "")
-            user_data_seed = user_data if uses_user_data else {}
+            user_data_seed, user_data_scoped = select_user_data_seed(
+                user_data,
+                cantrip.code or "",
+                getattr(cantrip, "user_data_prefixes", "[]"),
+            )
 
             started = time.monotonic()
             try:
@@ -1251,7 +1328,15 @@ async def process_cantrips_post_driver(
                         "writes (the store was seeded empty for this pass)",
                         cantrip.name,
                     )
-                user_data = result.user_data
+                if uses_user_data and user_data_scoped:
+                    user_data = _merge_scoped_user_data(
+                        user_data,
+                        user_data_seed,
+                        result.user_data,
+                        result.user_data_deletes,
+                    )
+                else:
+                    user_data = result.user_data
                 user_data_deletes.update(result.user_data_deletes)
             accumulated_memories.update(result.memories)
             for mk in result.memories:

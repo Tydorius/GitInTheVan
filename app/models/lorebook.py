@@ -46,6 +46,7 @@ class Lorebook(Base):
         Boolean, default=False, server_default="0", nullable=False
     )
     budget_weight: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    reserved_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

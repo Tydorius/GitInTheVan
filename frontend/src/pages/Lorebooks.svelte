@@ -13,7 +13,7 @@
   let error = ''
   let showForm = false
   let form = {
-    name: '', description: '', is_public: false, budget_weight: 1.0,
+    name: '', description: '', is_public: false, budget_weight: 1.0, reserved_tokens: 0,
   }
 
   let selectedLorebook: any = null
@@ -75,7 +75,7 @@
     try {
       await api.createLorebook(form)
       showForm = false
-      form = { name: '', description: '', is_public: false, budget_weight: 1.0 }
+      form = { name: '', description: '', is_public: false, budget_weight: 1.0, reserved_tokens: 0 }
       await load()
     }
     catch (e: any) { error = e.message }
@@ -94,6 +94,7 @@
           : 0,
         word_boundary_keys: positionLb.word_boundary_keys ?? false,
         budget_weight: positionLb.budget_weight ?? 1.0,
+        reserved_tokens: positionLb.reserved_tokens ?? 0,
       })
       positionLb = null
       await withScroll(load)
@@ -478,6 +479,7 @@
             positionLb = {
               ...selectedLorebook,
               budget_weight: selectedLorebook.budget_weight ?? 1.0,
+              reserved_tokens: selectedLorebook.reserved_tokens ?? 0,
               scanEnabled: (selectedLorebook.scan_depth ?? 0) > 0,
               scanDepthValue: (selectedLorebook.scan_depth ?? 0) > 0 ? selectedLorebook.scan_depth : 10,
             }
@@ -502,10 +504,17 @@
       <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
         <div class="form-group"><label for="lb-name">Name</label><input id="lb-name" autocomplete="off" bind:value={form.name} required /></div>
         <div class="form-group"><label for="lb-desc">Description</label><input id="lb-desc" autocomplete="off" bind:value={form.description} /></div>
-        <div class="form-group">
-          <label for="lb-budget">Budget Weight</label>
-          <input id="lb-budget" type="number" min="0" step="0.1" bind:value={form.budget_weight} />
-          <p style="color: var(--text-dim); font-size: 11px; margin-top: 2px;">Set to 0 to exempt this lorebook from context budget caps.</p>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="lb-budget">Budget Weight</label>
+            <input id="lb-budget" type="number" min="0" step="0.1" bind:value={form.budget_weight} />
+            <p style="color: var(--text-dim); font-size: 11px; margin-top: 2px;">Set to 0 to exempt this lorebook from context budget caps.</p>
+          </div>
+          <div class="form-group">
+            <label for="lb-reserved-tokens">Reserved Tokens</label>
+            <input id="lb-reserved-tokens" type="number" min="0" step="50" bind:value={form.reserved_tokens} />
+            <p style="color: var(--text-dim); font-size: 11px; margin-top: 2px;">Fixed token reservation (0 = use weighted share)</p>
+          </div>
         </div>
         <div class="form-group"><label><input type="checkbox" bind:checked={form.is_public} style="width: auto;"> Public</label></div>
         <div class="modal-actions">
@@ -621,11 +630,22 @@
           "rookie"). On, keywords match on word boundaries only — punctuation-suffix
           workaround keys like "Crow," become unnecessary.
         </p>
-        <label for="pos-budget" style="display: block; font-size: 12px; margin-top: 8px;">Budget Weight</label>
-        <input id="pos-budget" type="number" min="0" step="0.1" bind:value={positionLb.budget_weight} style="width: 100px;" />
-        <p style="color: var(--text-dim); font-size: 11px; margin: 2px 0 0;">
-          Set to 0 to exempt this lorebook from context budget caps.
-        </p>
+        <div style="display: flex; gap: 16px; margin-top: 8px; flex-wrap: wrap;">
+          <div>
+            <label for="pos-budget" style="display: block; font-size: 12px;">Budget Weight</label>
+            <input id="pos-budget" type="number" min="0" step="0.1" bind:value={positionLb.budget_weight} style="width: 100px;" />
+            <p style="color: var(--text-dim); font-size: 11px; margin: 2px 0 0;">
+              Set to 0 to exempt this lorebook from context budget caps.
+            </p>
+          </div>
+          <div>
+            <label for="pos-reserved-tokens" style="display: block; font-size: 12px;">Reserved Tokens</label>
+            <input id="pos-reserved-tokens" type="number" min="0" step="50" bind:value={positionLb.reserved_tokens} style="width: 100px;" />
+            <p style="color: var(--text-dim); font-size: 11px; margin: 2px 0 0;">
+              Fixed token reservation (0 = use weighted share)
+            </p>
+          </div>
+        </div>
       </div>
       <div class="modal-actions">
         <button onclick={() => positionLb = null}>Cancel</button>

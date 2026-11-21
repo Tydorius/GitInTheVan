@@ -14,6 +14,7 @@ from app.models.user import User
 from app.routers._helpers import check_tag_unique, get_owned_or_404
 from app.services import snapshots
 from app.services.admin import get_admin_settings
+from app.services.budget import estimate_messages_tokens, estimate_tokens
 from app.services.cantrip import test_cantrip
 from app.services.cantrip_context import build_context
 from app.services.content_guard import check_size, gate_scan_findings, log_scan_findings
@@ -84,12 +85,15 @@ class CantripCreate(BaseModel):
     timeout_ms: int = 5000
     tag: str = ""
     budget_weight: float = 1.0
+    reserved_tokens: int = Field(default=0, ge=0)
     # Phase 20: lorebook names whose entries are seeded read-only into the
     # sandbox (context.lorebook reads).
     lorebook_reads: list[str] = []
     # Package 3 (item 3): tag names this cantrip registers for extraction
     # from the model's final reply. Normalized lowercase; per-user unique.
     response_tags: list[str] = []
+    # 0.45.0: user_data key prefixes this cantrip is allowed to access.
+    user_data_prefixes: list[str] = []
     # Set by a client that has already shown the scanner findings to the user
     # and been told to proceed anyway. Not a model column.
     override_scan: bool = False
@@ -111,8 +115,10 @@ class CantripUpdate(BaseModel):
     timeout_ms: int | None = None
     tag: str | None = None
     budget_weight: float | None = None
+    reserved_tokens: int | None = Field(default=None, ge=0)
     lorebook_reads: list[str] | None = None
     response_tags: list[str] | None = None
+    user_data_prefixes: list[str] | None = None
     override_scan: bool = False
 
 
@@ -133,8 +139,10 @@ class CantripResponse(BaseModel):
     timeout_ms: int
     tag: str
     budget_weight: float
+    reserved_tokens: int = 0
     lorebook_reads: list[str]
     response_tags: list[str] = []
+    user_data_prefixes: list[str] = []
 
 
 class CantripListItem(BaseModel):
@@ -154,8 +162,10 @@ class CantripListItem(BaseModel):
     timeout_ms: int
     tag: str
     budget_weight: float
+    reserved_tokens: int = 0
     lorebook_reads: list[str]
     response_tags: list[str] = []
+    user_data_prefixes: list[str] = []
 
 
 class CantripListResponse(BaseModel):
@@ -187,6 +197,9 @@ class CantripTestResponse(BaseModel):
     chat_data: dict[str, Any]
     debug_logs: list[str]
     error: str | None
+    tokens_before: int = 0
+    tokens_after: int = 0
+    token_delta: int = 0
 
 
 class SequenceTurnInput(BaseModel):
@@ -223,18 +236,67 @@ class SequenceTestResponse(BaseModel):
     final_chat_data: dict[str, Any]
     final_user_data: dict[str, Any]
     final_cantrip_data: dict[str, dict[str, Any]]
+    total_token_delta: int = 0
+
+
+def _normalize_string_list(items: list[str] | None) -> list[str]:
+    """Strip, deduplicate, and cap a config string list (max 20 items, 128 chars each)."""
+    out: list[str] = []
+    for item in items or []:
+        cleaned = str(item).strip()[:128]
+        if cleaned and cleaned not in out:
+            out.append(cleaned)
+    return out[:20]
 
 
 def _normalize_reads(names: list[str] | None) -> list[str]:
     """lorebook_reads as stored: stripped, de-duplicated, capped at 20 names
     of at most 128 chars each (a config list, not content — the cap keeps the
     column bounded, the names themselves name objects the user owns)."""
-    out: list[str] = []
-    for name in names or []:
-        cleaned = str(name).strip()[:128]
-        if cleaned and cleaned not in out:
-            out.append(cleaned)
-    return out[:20]
+    return _normalize_string_list(names)
+
+
+def _parse_prefixes(raw: str | None) -> list[str]:
+    """Parse stored JSON user_data_prefixes tolerantly (NULL on MySQL -> [])."""
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return _normalize_string_list([str(p) for p in parsed])
+
+
+def _compute_test_token_metrics(
+    context: dict[str, Any],
+    messages: list[dict[str, Any]],
+    result: CantripResult,
+) -> tuple[int, int, int]:
+    """Return (tokens_before, tokens_after, token_delta) for a single-run test."""
+    char = context.get("character") or {}
+    msg_tokens = estimate_messages_tokens(messages)
+    before_fields = (
+        str(char.get("personality", "") or ""),
+        str(char.get("scenario", "") or ""),
+        str(char.get("example_dialogs", "") or ""),
+    )
+    tokens_before = msg_tokens + sum(estimate_tokens(t) for t in before_fields if t)
+
+    after_fields = (
+        str(result.personality or ""),
+        str(result.scenario or ""),
+        str(result.example_dialogs or ""),
+    )
+    injections = getattr(result, "injections", None) or []
+    inject_tokens = sum(
+        estimate_tokens(str(inj.get("text", "")))
+        for inj in injections
+        if isinstance(inj, dict) and inj.get("text")
+    )
+    tokens_after = msg_tokens + sum(estimate_tokens(t) for t in after_fields if t) + inject_tokens
+    return tokens_before, tokens_after, tokens_after - tokens_before
 
 
 async def _validate_response_tags(
@@ -294,8 +356,10 @@ def _cantrip_to_response(cantrip: Cantrip) -> CantripResponse:
         timeout_ms=cantrip.timeout_ms,
         tag=cantrip.tag,
         budget_weight=cantrip.budget_weight,
+        reserved_tokens=getattr(cantrip, "reserved_tokens", 0) or 0,
         lorebook_reads=parse_reads(getattr(cantrip, "lorebook_reads", None)),
         response_tags=parse_tag_names(getattr(cantrip, "response_tags", None)),
+        user_data_prefixes=_parse_prefixes(getattr(cantrip, "user_data_prefixes", None)),
     )
 
 
@@ -317,8 +381,10 @@ def _cantrip_to_list_item(cantrip: Cantrip) -> CantripListItem:
         timeout_ms=cantrip.timeout_ms,
         tag=cantrip.tag,
         budget_weight=cantrip.budget_weight,
+        reserved_tokens=getattr(cantrip, "reserved_tokens", 0) or 0,
         lorebook_reads=parse_reads(getattr(cantrip, "lorebook_reads", None)),
         response_tags=parse_tag_names(getattr(cantrip, "response_tags", None)),
+        user_data_prefixes=_parse_prefixes(getattr(cantrip, "user_data_prefixes", None)),
     )
 
 
@@ -437,8 +503,10 @@ async def create_cantrip(
         timeout_ms=req.timeout_ms,
         tag=req.tag,
         budget_weight=req.budget_weight,
+        reserved_tokens=req.reserved_tokens,
         lorebook_reads=json.dumps(_normalize_reads(req.lorebook_reads)),
         response_tags=await _validate_response_tags(db, current_user.id, req.response_tags),
+        user_data_prefixes=json.dumps(_normalize_string_list(req.user_data_prefixes)),
     )
     db.add(cantrip)
     await db.commit()
@@ -467,6 +535,10 @@ async def update_cantrip(
         update_data["response_tags"] = await _validate_response_tags(
             db, current_user.id, update_data["response_tags"],
             exclude_cantrip_id=cantrip_id,
+        )
+    if "user_data_prefixes" in update_data and update_data["user_data_prefixes"] is not None:
+        update_data["user_data_prefixes"] = json.dumps(
+            _normalize_string_list(update_data["user_data_prefixes"])
         )
     if "code" in update_data and update_data["code"] is not None:
         await _check_and_scan_cantrip_code(
@@ -568,6 +640,9 @@ async def test_cantrip_endpoint(
             detail=str(e),
         )
 
+    tokens_before, tokens_after, token_delta = _compute_test_token_metrics(
+        context, messages, result
+    )
     return CantripTestResponse(
         personality=result.personality,
         scenario=result.scenario,
@@ -575,6 +650,9 @@ async def test_cantrip_endpoint(
         chat_data=result.chat_data,
         debug_logs=result.debug_logs,
         error=result.error,
+        tokens_before=tokens_before,
+        tokens_after=tokens_after,
+        token_delta=token_delta,
     )
 
 
@@ -629,6 +707,9 @@ async def test_stored_cantrip(
             detail=str(e),
         )
 
+    tokens_before, tokens_after, token_delta = _compute_test_token_metrics(
+        context, messages, test_result
+    )
     return CantripTestResponse(
         personality=test_result.personality,
         scenario=test_result.scenario,
@@ -636,6 +717,9 @@ async def test_stored_cantrip(
         chat_data=test_result.chat_data,
         debug_logs=test_result.debug_logs,
         error=test_result.error,
+        tokens_before=tokens_before,
+        tokens_after=tokens_after,
+        token_delta=token_delta,
     )
 
 
@@ -703,6 +787,8 @@ async def export_cantrip(
         "description": c.description or "",
         "llm_instructions": c.llm_instructions or "",
         "code": c.code or "",
+        "reserved_tokens": getattr(c, "reserved_tokens", 0) or 0,
+        "user_data_prefixes": _parse_prefixes(getattr(c, "user_data_prefixes", None)),
         "author": "",
         "version": "1.0.0",
         "updated": c.updated_at.isoformat() if c.updated_at else "",

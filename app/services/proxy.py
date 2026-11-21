@@ -1225,7 +1225,8 @@ async def _apply_lorebook_injection(
                             .get("share", 0)
                             * 4
                         )
-                        if lb.budget_weight > 0 and body_json.get("_gitv_budget_allocations")
+                        if (lb.budget_weight > 0 or (getattr(lb, "reserved_tokens", 0) or 0) > 0)
+                        and body_json.get("_gitv_budget_allocations")
                         else 0
                     ),
                 )

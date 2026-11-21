@@ -620,6 +620,23 @@ async def _content_of(db: AsyncSession, res_type: str, resource_id: str) -> dict
     return _content_of_row(res_type, row)
 
 
+def _normalize_prefixes(raw: Any) -> list[str]:
+    """Normalize a user_data_prefixes list (from DB JSON or import payload)."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw) if raw else []
+        except (ValueError, TypeError):
+            raw = []
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for item in raw:
+        cleaned = str(item).strip()[:128]
+        if cleaned and cleaned not in out:
+            out.append(cleaned)
+    return out[:20]
+
+
 def _content_of_row(res_type: str, row) -> dict:
     """A stored row rendered back into export-shaped content, for hashing."""
     if res_type == "cantrip":
@@ -630,6 +647,8 @@ def _content_of_row(res_type: str, row) -> dict:
             "llm_instructions": row.llm_instructions,
             "timeout_ms": row.timeout_ms,
             "execution_order": row.execution_order,
+            "reserved_tokens": getattr(row, "reserved_tokens", 0) or 0,
+            "user_data_prefixes": _normalize_prefixes(getattr(row, "user_data_prefixes", None)),
             "run_driver_callable": row.run_driver_callable,
             # Position flags: a capture-stage cantrip lives or dies by its
             # pre_navigator flag, so exports must carry all of them. Not part
@@ -643,6 +662,7 @@ def _content_of_row(res_type: str, row) -> dict:
         return {
             "name": row.name,
             "description": row.description,
+            "reserved_tokens": getattr(row, "reserved_tokens", 0) or 0,
             "entries": [
                 {
                     "name": e.name,
@@ -663,6 +683,7 @@ def _content_of_row(res_type: str, row) -> dict:
             "description": row.description,
             "content": row.content,
             "type": row.type,
+            "reserved_tokens": getattr(row, "reserved_tokens", 0) or 0,
         }
     return {"name": getattr(row, "name", "")}
 
@@ -683,6 +704,7 @@ async def _create_resource(
             user_id=user_id,
             name=content.get("name", "Imported Lorebook"),
             description=content.get("description", ""),
+            reserved_tokens=max(0, int(content.get("reserved_tokens") or 0)),
             is_active=is_active,
         )
         db.add(lb)
@@ -702,6 +724,8 @@ async def _create_resource(
             code=content.get("code", ""),
             timeout_ms=content.get("timeout_ms", 5000),
             execution_order=content.get("execution_order", 10),
+            reserved_tokens=max(0, int(content.get("reserved_tokens") or 0)),
+            user_data_prefixes=json.dumps(_normalize_prefixes(content.get("user_data_prefixes"))),
             is_active=is_active,
             run_driver_callable=content.get("run_driver_callable", False),
             run_pre_driver=content.get("run_pre_driver", True),
@@ -722,6 +746,7 @@ async def _create_resource(
             description=content.get("description", ""),
             content=content.get("content", ""),
             type=declared if declared in ("skill", "sample") else res_type,
+            reserved_tokens=max(0, int(content.get("reserved_tokens") or 0)),
         )
         db.add(s)
         await db.flush()
@@ -763,6 +788,7 @@ async def _update_resource(db: AsyncSession, res_type: str, row, content: dict) 
         from app.models.lorebook_entry import LorebookEntry
 
         row.description = content.get("description", "")
+        row.reserved_tokens = max(0, int(content.get("reserved_tokens") or 0))
         await db.flush()
         await db.execute(
             sa_delete(LorebookEntry).where(LorebookEntry.lorebook_id == row.id)
@@ -778,6 +804,8 @@ async def _update_resource(db: AsyncSession, res_type: str, row, content: dict) 
         row.code = content.get("code", "")
         row.timeout_ms = content.get("timeout_ms", row.timeout_ms)
         row.execution_order = content.get("execution_order", row.execution_order)
+        row.reserved_tokens = max(0, int(content.get("reserved_tokens") or 0))
+        row.user_data_prefixes = json.dumps(_normalize_prefixes(content.get("user_data_prefixes")))
         await db.flush()
         return
 
@@ -786,6 +814,7 @@ async def _update_resource(db: AsyncSession, res_type: str, row, content: dict) 
         row.description = content.get("description", "")
         row.content = content.get("content", "")
         row.type = declared if declared in ("skill", "sample") else res_type
+        row.reserved_tokens = max(0, int(content.get("reserved_tokens") or 0))
         await db.flush()
 
 
@@ -910,6 +939,7 @@ def _export_content(res_type: str, content: dict) -> dict:
         return {
             "name": content.get("name", ""),
             "description": content.get("description", ""),
+            "reserved_tokens": content.get("reserved_tokens", 0),
             "entries": content.get("entries", []),
         }
     if res_type == "cantrip":
@@ -920,6 +950,8 @@ def _export_content(res_type: str, content: dict) -> dict:
             "code": content.get("code", ""),
             "timeout_ms": content.get("timeout_ms", 5000),
             "execution_order": content.get("execution_order", 10),
+            "reserved_tokens": content.get("reserved_tokens", 0),
+            "user_data_prefixes": content.get("user_data_prefixes", []),
             "run_driver_callable": content.get("run_driver_callable", True),
             "run_pre_driver": content.get("run_pre_driver", True),
             "run_pre_navigator": content.get("run_pre_navigator", False),
@@ -930,6 +962,7 @@ def _export_content(res_type: str, content: dict) -> dict:
         "description": content.get("description", ""),
         "content": content.get("content", ""),
         "type": content.get("type", res_type),
+        "reserved_tokens": content.get("reserved_tokens", 0),
     }
 
 

@@ -1560,6 +1560,32 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             """,
         },
     ),
+    (
+        "066_budget_reserved_tokens",
+        # 0.45.0: per-resource reserved token budget floor.
+        """
+        ALTER TABLE cantrips ADD COLUMN reserved_tokens INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE lorebooks ADD COLUMN reserved_tokens INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE skills ADD COLUMN reserved_tokens INTEGER NOT NULL DEFAULT 0;
+        """,
+    ),
+    (
+        "067_cantrip_user_data_prefixes",
+        # 0.45.0: JSON list of user_data key prefixes this cantrip can access.
+        # MySQL TEXT columns follow the 055/059/060 precedent: nullable, NULL
+        # reads as empty by every reader.
+        {
+            "sqlite": """
+            ALTER TABLE cantrips ADD COLUMN user_data_prefixes TEXT DEFAULT '[]' NOT NULL;
+            """,
+            "postgresql": """
+            ALTER TABLE cantrips ADD COLUMN user_data_prefixes TEXT DEFAULT '[]' NOT NULL;
+            """,
+            "mysql": """
+            ALTER TABLE cantrips ADD COLUMN user_data_prefixes TEXT;
+            """,
+        },
+    ),
 ]
 
 

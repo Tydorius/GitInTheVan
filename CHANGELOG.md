@@ -2,6 +2,21 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.45.0] - 2026-11-20
+
+Context-budgeting fixed token reservations, opt-in cantrip `user_data` prefix scoping, and token-delta counters for both the single-run Cantrip Tester and Sequence Tester.
+
+### Added
+
+- **Fixed token reservation alongside weighted budget shares.** Cantrips, lorebooks, and skills now support an optional `reserved_tokens` setting (`0` = use weighted share, preserving existing behavior). Reserved resources receive their exact token share first, and the remaining injection budget is divided proportionally among weighted resources; if total reservations exceed the injection budget, reservations scale proportionally so total shares never exceed the cap. Lorebooks with `reserved_tokens > 0` enforce their allocated cap even when `budget_weight == 0`.
+- **Opt-in `user_data` prefix scoping on cantrips (N6).** Cantrips now support an optional `user_data_prefixes` list (blank = all keys, preserving existing behavior). When configured (e.g. `["kok:"]`), only matching `user_data` keys are serialized and seeded into the Deno sandbox across pre-driver, Navigator, and driver-callable passes, and dirty-key writeback merges only changed/deleted keys back without touching unseeded prefixes.
+- **Tester token-delta counters.** Both the single-run Cantrip Tester (`/api/cantrips/test`, `/api/cantrips/{id}/test`) and the multi-turn Sequence Tester (`/api/cantrips/test-sequence`) now return estimated `tokens_before`, `tokens_after`, and `token_delta` (plus `total_token_delta` on sequences), surfaced in the Cantrips UI.
+
+### Schema
+
+- `066_budget_reserved_tokens`: adds `reserved_tokens INTEGER NOT NULL DEFAULT 0` to `cantrips`, `lorebooks`, and `skills`.
+- `067_cantrip_user_data_prefixes`: adds `user_data_prefixes` (`TEXT DEFAULT '[]' NOT NULL` on SQLite/PostgreSQL; `TEXT` on MySQL) to `cantrips`.
+
 ## [0.44.0] - 2026-11-20
 
 Feature & hygiene release adding `{{user}}`/`{{char}}` macro expansion, hybrid regex pre-check verification, optional map final-output Navigator verification, and an honest Lorebook UI.
