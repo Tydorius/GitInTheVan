@@ -39,6 +39,16 @@ from app.services.safety_scanner import (
 
 logger = logging.getLogger(__name__)
 
+
+def _coerce_reserved_tokens(value: Any) -> int:
+    """Hand-edited map JSON may carry a non-numeric reserved_tokens; a
+    coerced 0 beats a 500 on import."""
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 VALID_RESOURCE_MODES = ("smart", "keep_both", "reuse", "overwrite")
 DEFAULT_RESOURCE_MODE = "smart"
 
@@ -704,7 +714,7 @@ async def _create_resource(
             user_id=user_id,
             name=content.get("name", "Imported Lorebook"),
             description=content.get("description", ""),
-            reserved_tokens=max(0, int(content.get("reserved_tokens") or 0)),
+            reserved_tokens=_coerce_reserved_tokens(content.get("reserved_tokens")),
             is_active=is_active,
         )
         db.add(lb)
@@ -724,7 +734,7 @@ async def _create_resource(
             code=content.get("code", ""),
             timeout_ms=content.get("timeout_ms", 5000),
             execution_order=content.get("execution_order", 10),
-            reserved_tokens=max(0, int(content.get("reserved_tokens") or 0)),
+            reserved_tokens=_coerce_reserved_tokens(content.get("reserved_tokens")),
             user_data_prefixes=json.dumps(_normalize_prefixes(content.get("user_data_prefixes"))),
             is_active=is_active,
             run_driver_callable=content.get("run_driver_callable", False),
@@ -746,7 +756,7 @@ async def _create_resource(
             description=content.get("description", ""),
             content=content.get("content", ""),
             type=declared if declared in ("skill", "sample") else res_type,
-            reserved_tokens=max(0, int(content.get("reserved_tokens") or 0)),
+            reserved_tokens=_coerce_reserved_tokens(content.get("reserved_tokens")),
         )
         db.add(s)
         await db.flush()
@@ -788,7 +798,7 @@ async def _update_resource(db: AsyncSession, res_type: str, row, content: dict) 
         from app.models.lorebook_entry import LorebookEntry
 
         row.description = content.get("description", "")
-        row.reserved_tokens = max(0, int(content.get("reserved_tokens") or 0))
+        row.reserved_tokens = _coerce_reserved_tokens(content.get("reserved_tokens"))
         await db.flush()
         await db.execute(
             sa_delete(LorebookEntry).where(LorebookEntry.lorebook_id == row.id)
@@ -804,7 +814,7 @@ async def _update_resource(db: AsyncSession, res_type: str, row, content: dict) 
         row.code = content.get("code", "")
         row.timeout_ms = content.get("timeout_ms", row.timeout_ms)
         row.execution_order = content.get("execution_order", row.execution_order)
-        row.reserved_tokens = max(0, int(content.get("reserved_tokens") or 0))
+        row.reserved_tokens = _coerce_reserved_tokens(content.get("reserved_tokens"))
         row.user_data_prefixes = json.dumps(_normalize_prefixes(content.get("user_data_prefixes")))
         await db.flush()
         return
@@ -814,7 +824,7 @@ async def _update_resource(db: AsyncSession, res_type: str, row, content: dict) 
         row.description = content.get("description", "")
         row.content = content.get("content", "")
         row.type = declared if declared in ("skill", "sample") else res_type
-        row.reserved_tokens = max(0, int(content.get("reserved_tokens") or 0))
+        row.reserved_tokens = _coerce_reserved_tokens(content.get("reserved_tokens"))
         await db.flush()
 
 

@@ -203,19 +203,47 @@ def select_user_data_seed(
     }, True
 
 
+def user_data_key_in_scope(key: str, prefixes: list[str]) -> bool:
+    """Whether a user_data key falls inside a cantrip's configured prefixes."""
+    return any(key == p or key.startswith(p) for p in prefixes or [])
+
+
 def _merge_scoped_user_data(
     existing: dict[str, Any],
     seed: dict[str, Any],
     result_data: dict[str, Any],
     deletes: Any,
+    prefixes: list[str] | None = None,
+    cantrip_name: str = "",
 ) -> dict[str, Any]:
-    """Merge only writes/changes and deletes from a scoped cantrip into existing user_data."""
+    """Merge only in-scope writes/changes and deletes from a scoped cantrip.
+
+    Scope is the configured prefixes: a write to or delete of a key that
+    matches no prefix is dropped with a log line -- a scoped cantrip cannot
+    touch the rest of the store, by name or otherwise. New keys inside a
+    prefix are legitimate writes.
+    """
     merged = dict(existing)
+    dropped: list[str] = []
+
     for k, v in result_data.items():
+        if prefixes and not user_data_key_in_scope(k, prefixes):
+            dropped.append(k)
+            continue
         if k not in seed or seed[k] != v:
             merged[k] = v
     for dk in deletes or ():
+        if prefixes and not user_data_key_in_scope(dk, prefixes):
+            dropped.append(dk)
+            continue
         merged.pop(dk, None)
+    if dropped:
+        logger.warning(
+            "Cantrip '%s': dropped user_data writes/deletes outside its "
+            "configured prefixes: %s",
+            cantrip_name,
+            sorted(dropped),
+        )
     return merged
 
 
@@ -838,15 +866,25 @@ async def _execute_cantrip_step(
                 cantrip.name,
             )
         if uses_user_data and user_data_scoped:
+            _prefixes = parse_user_data_prefixes(
+                getattr(cantrip, "user_data_prefixes", "[]")
+            )
             state["user_data"] = _merge_scoped_user_data(
                 state["user_data"],
                 user_data_seed,
                 result.user_data,
                 result.user_data_deletes,
+                prefixes=_prefixes,
+                cantrip_name=cantrip.name,
             )
+            scoped_deletes = {
+                d for d in result.user_data_deletes
+                if user_data_key_in_scope(d, _prefixes)
+            }
         else:
             state["user_data"] = result.user_data
-        state.setdefault("user_data_deletes", set()).update(result.user_data_deletes)
+            scoped_deletes = set(result.user_data_deletes)
+        state.setdefault("user_data_deletes", set()).update(scoped_deletes)
 
     if store_seeds is not None:
         if not ephemeral:
@@ -1329,15 +1367,24 @@ async def process_cantrips_post_driver(
                         cantrip.name,
                     )
                 if uses_user_data and user_data_scoped:
+                    _prefixes = parse_user_data_prefixes(
+                        getattr(cantrip, "user_data_prefixes", "[]")
+                    )
                     user_data = _merge_scoped_user_data(
                         user_data,
                         user_data_seed,
                         result.user_data,
                         result.user_data_deletes,
+                        prefixes=_prefixes,
+                        cantrip_name=cantrip.name,
+                    )
+                    user_data_deletes.update(
+                        d for d in result.user_data_deletes
+                        if user_data_key_in_scope(d, _prefixes)
                     )
                 else:
                     user_data = result.user_data
-                user_data_deletes.update(result.user_data_deletes)
+                    user_data_deletes.update(result.user_data_deletes)
             accumulated_memories.update(result.memories)
             for mk in result.memories:
                 memory_deletes.discard(mk)

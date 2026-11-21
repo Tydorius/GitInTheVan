@@ -13,6 +13,7 @@ import pytest
 
 from app.services.budget import allocate_budget, estimate_messages_tokens
 from app.services.cantrip import (
+    _merge_scoped_user_data,
     parse_user_data_prefixes,
     process_cantrips,
     process_cantrips_post_driver,
@@ -145,6 +146,112 @@ class TestUserDataPrefixScoping:
         )
         assert seed == {"kok:hp": 10}
         assert is_scoped is True
+
+    def test_merge_scoped_confinement(self):
+        """Scope is enforced on writes, not just reads: out-of-scope writes
+        and deletes are dropped (the sandbox records deletes for keys the
+        script never saw); in-scope new keys are legitimate writes."""
+        existing = {"kok:hp": 10, "other:ledger": 99}
+        seed = {"kok:hp": 10}
+        merged = _merge_scoped_user_data(
+            existing,
+            seed,
+            {"kok:hp": 20, "kok:new": 1, "other:ledger": 0, "rogue": 7},
+            ["other:ledger", "rogue", "kok:gone"],
+            prefixes=["kok:"],
+            cantrip_name="ScopedCantrip",
+        )
+        assert merged["kok:hp"] == 20
+        assert merged["kok:new"] == 1
+        assert "kok:gone" not in merged
+        # Out of scope: untouched even when explicitly named.
+        assert merged["other:ledger"] == 99
+        assert "rogue" not in merged
+
+    @pytest.mark.asyncio
+    async def test_driver_callable_scoping_confines_writes_and_deletes(self):
+        """The driver-callable pass enforces the same confinement, including
+        on the deletes set handed to the saver (a raw out-of-scope delete
+        would delete the row despite the merged dict preserving it)."""
+        from app.models.cantrip import Cantrip
+        from app.services.driver_callable import ToolCall, execute_tool_call
+
+        tool = Cantrip(
+            id="c-scoped-tool",
+            user_id="u1",
+            name="ScopedTool",
+            code="context.user_data.get('kok:x');",
+            timeout_ms=1000,
+        )
+        tool.user_data_prefixes = '["kok:"]'
+        call = ToolCall(name="ScopedTool", args={})
+
+        fake_result = MagicMock(
+            has_error=False,
+            error="",
+            chat_data={},
+            chat_data_deletes=[],
+            user_data={"kok:x": 2, "evil:set": 5},
+            user_data_deletes=["kok:old", "evil:del"],
+            cantrip_data={},
+            cantrip_data_deletes=[],
+            tool_result="ok",
+            scenario="",
+            personality="",
+        )
+
+        mock_session = AsyncMock()
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__.return_value = mock_session
+        mock_ctx.__aexit__.return_value = False
+
+        with (
+            patch("app.services.driver_callable.async_session", return_value=mock_ctx),
+            patch("app.services.cantrip._load_chat_data", new_callable=AsyncMock, return_value={}),
+            patch(
+                "app.services.cantrip._load_user_data",
+                new_callable=AsyncMock,
+                return_value={"kok:x": 1, "kok:old": 9, "evil:del": 1, "evil:set": 0},
+            ),
+            patch("app.services.cantrip._load_cantrip_data", new_callable=AsyncMock, return_value={}),
+            patch("app.services.cantrip._save_chat_data", new_callable=AsyncMock),
+            patch("app.services.cantrip._save_user_data", new_callable=AsyncMock) as mock_save_ud,
+            patch("app.services.cantrip._save_cantrip_data", new_callable=AsyncMock),
+            patch("app.services.deno_runner.run_cantrip", new_callable=AsyncMock, return_value=fake_result),
+        ):
+            out = await execute_tool_call(
+                tool=tool,
+                call=call,
+                messages=[{"role": "user", "content": "hi"}],
+                request_headers={},
+                user_id="u1",
+                conversation_id="conv-1",
+                persist_shared=True,
+            )
+
+        assert out == "ok"
+        mock_save_ud.assert_awaited_once()
+        saved = mock_save_ud.call_args.args[2]
+        # In-scope: write applied, delete removed from the dict.
+        assert saved["kok:x"] == 2
+        assert "kok:old" not in saved
+        # Out of scope: untouched in the dict, and excluded from the
+        # deletes set handed to the saver.
+        assert saved["evil:set"] == 0
+        assert "evil:del" in saved
+        assert mock_save_ud.call_args.kwargs["deletes"] == {"kok:old"}
+
+    def test_map_transfer_coerces_bad_reserved_tokens(self):
+        """Hand-edited map JSON with a non-numeric reserved_tokens coerces
+        to 0 instead of raising on import."""
+        from app.services.map_transfer import _coerce_reserved_tokens
+
+        assert _coerce_reserved_tokens("lots") == 0
+        assert _coerce_reserved_tokens("2.5") == 0
+        assert _coerce_reserved_tokens(None) == 0
+        assert _coerce_reserved_tokens(-3) == 0
+        assert _coerce_reserved_tokens(1500) == 1500
+        assert _coerce_reserved_tokens("1500") == 1500
 
     @pytest.mark.asyncio
     async def test_pre_and_post_driver_scoping_preserves_unseeded_keys(self):

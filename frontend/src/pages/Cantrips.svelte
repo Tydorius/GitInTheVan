@@ -374,7 +374,7 @@
         {#if testResults.tokens_before != null}
           <div class="form-group">
             <span class="badge">
-              Tokens: {testResults.tokens_before} → {testResults.tokens_after} ({(testResults.token_delta ?? 0) >= 0 ? '+' : ''}{testResults.token_delta ?? 0})
+              Tokens (est.): {testResults.tokens_before} → {testResults.tokens_after} ({(testResults.token_delta ?? 0) >= 0 ? '+' : ''}{testResults.token_delta ?? 0})
             </span>
           </div>
         {/if}
@@ -433,7 +433,7 @@
       <div style="margin-top: 16px;">
         {#if seqResults.total_token_delta != null}
           <div style="margin-bottom: 8px; font-size: 12px; color: var(--text-dim);">
-            Total prompt token delta: {seqResults.total_token_delta >= 0 ? '+' : ''}{seqResults.total_token_delta}
+            Total prompt token delta (est.): {seqResults.total_token_delta >= 0 ? '+' : ''}{seqResults.total_token_delta}
           </div>
         {/if}
         {#if seqResults.stop_reason}

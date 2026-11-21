@@ -1572,8 +1572,9 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
     (
         "067_cantrip_user_data_prefixes",
         # 0.45.0: JSON list of user_data key prefixes this cantrip can access.
-        # MySQL TEXT columns follow the 055/059/060 precedent: nullable, NULL
-        # reads as empty by every reader.
+        # MySQL TEXT cannot carry a literal default; NOT NULL stands (existing
+        # rows backfill '' via implicit default, which parses as []) -- the
+        # same parity fix migration 065 received in 0.44.0.
         {
             "sqlite": """
             ALTER TABLE cantrips ADD COLUMN user_data_prefixes TEXT DEFAULT '[]' NOT NULL;
@@ -1582,7 +1583,7 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             ALTER TABLE cantrips ADD COLUMN user_data_prefixes TEXT DEFAULT '[]' NOT NULL;
             """,
             "mysql": """
-            ALTER TABLE cantrips ADD COLUMN user_data_prefixes TEXT;
+            ALTER TABLE cantrips ADD COLUMN user_data_prefixes TEXT NOT NULL;
             """,
         },
     ),

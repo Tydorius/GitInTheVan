@@ -410,6 +410,7 @@ verification judge and the verification retry.</p>
 <p>The card footer displays the active pipeline positions, execution order, and timeout.</p>
 <h3 id="cantrip-tester">Cantrip Tester</h3>
 <p><img alt="Cantrip Test Panel" src="media/gitv-cantrips-test-example.png"></p>
+<p><em>The test panel with the token-delta readout, captured 2026-11-21.</em></p>
 <p>The test panel lets you run a cantrip against sample context without forwarding anything to an LLM:</p>
 <ol>
 <li><strong>Select a cantrip</strong> from the dropdown</li>
@@ -421,10 +422,11 @@ verification judge and the verification retry.</p>
 - <strong>Scenario Output</strong>: The final value of <code>context.character.scenario</code> (seeded from the test messages' card sections when present)
 - <strong>Personality Output</strong>: The final value of <code>context.character.personality</code>
 - <strong>Debug Logs</strong>: Output from <code>console.log()</code> calls in the cantrip
-- <strong>Chat Data Result</strong>: The final state of <code>context.chat_data</code> after execution</p>
+- <strong>Chat Data Result</strong>: The final state of <code>context.chat_data</code> after execution
+- <strong>Tokens (est.)</strong>: The estimated prompt-token change the cantrip caused (card-field output plus requested injections; the Sequence Tester below measures real message mutation and can differ for the same script)</p>
 <h3 id="sequence-tester">Sequence Tester</h3>
 <p><img alt="Sequence Tester" src="media/gitv-cantrips-sequence-tester.png"></p>
-<p><em>The Sequence Tester card with a three-turn script run: per-turn cantrip records, extracted response tags and the final store state. Captured 2026-11-19.</em></p>
+<p><em>The Sequence Tester card with a script run: per-turn cantrip records, extracted response tags, the final store state, and per-turn plus total estimated token deltas. Captured 2026-11-21.</em></p>
 <p>The one-shot tester runs a single cantrip against a single context. The
 <strong>Sequence Tester</strong> runs a whole <em>script of turns</em> through the real cantrip
 pipeline — the tool for stateful scripts that only misbehave on turn 30:</p>
@@ -476,9 +478,13 @@ endpoint path.</p>
 <li><strong>Execution Order</strong>: Lower numbers run first (when multiple cantrips are active)</li>
 <li><strong>Timeout</strong>: Maximum execution time in milliseconds</li>
 <li><strong>Budget Weight</strong>: Proportional weight for context budget allocation (default 1.0). Higher weights receive a larger share of the injection budget</li>
+<li><strong>Reserved Tokens</strong> (default 0 = weighted share): a fixed token share this cantrip's output is budgeted for, taken off the top before weighted resources split the rest (see <a href="#settings">Context Budgeting</a>)</li>
+<li><strong>User Data Prefixes</strong> (default blank = all keys): an optional comma-separated list of <code>user_data</code> key prefixes (e.g. <code>kok:</code>). When set, the cantrip only sees matching keys in <code>context.user_data</code>, and its writes/deletes are confined to those keys — everything else in the store is invisible and untouchable to it. Use it to hand a third-party cantrip exactly the slice of state it needs</li>
 <li><strong>Active</strong>: Whether the cantrip is enabled</li>
 <li><strong>Public</strong>: Whether other users can see and use this cantrip</li>
 </ul>
+<p><img alt="Cantrip Editor" src="media/gitv-cantrips-edit.png"></p>
+<p><em>The cantrip editor with Reserved Tokens and User Data Prefixes, captured 2026-11-21.</em></p>
 <h3 id="cantrip-context-api">Cantrip Context API</h3>
 <p>Cantrips have access to the JanitorAI context object:</p>
 <pre><code class="language-javascript">const lastMessage = context.chat.last_message;
@@ -767,7 +773,7 @@ Older installs showed four position toggles here (Pre-Driver, Driver-Callable, P
 Post-Navigator) that were never wired up for lorebooks; they were removed from the editor
 entirely — only cantrips run at the other positions.</p>
 <p><img alt="Lorebook Positions Editor" src="media/gitv-lorebooks-word-boundary.png"></p>
-<p><em>The Positions editor with its options (Inject After Cantrips, Scan only the newest N, Whole-word keywords only, Budget Weight), captured 2026-11-20.</em></p>
+<p><em>The Positions editor with its options (Inject After Cantrips, Scan only the newest N, Whole-word keywords only, Budget Weight, Reserved Tokens), captured 2026-11-21.</em></p>
 <p>Two options on the Pipeline Positions editor (the <strong>Edit Positions</strong> button on a lorebook)
 <em>are</em> wired:</p>
 <ul>
@@ -792,6 +798,11 @@ entirely — only cantrips run at the other positions.</p>
   book's entries may claim when budgeting is on. Books with a weight of 0 or less
   are exempt from per-book budget caps entirely — their matched entries inject
   uncapped (the whole-instance context limit still applies).</li>
+<li><strong>Reserved Tokens</strong> (default 0 = weighted share): a fixed token share for this
+  book, taken off the top of the injection budget before weighted resources
+  split the rest. A book with <code>Reserved Tokens &gt; 0</code> is capped at its reservation
+  even when its Budget Weight is 0 — reservation is the one way to cap a
+  weight-exempt book.</li>
 </ul>
 <p><a id="dynamic-lorebooks"></a></p>
 <h3 id="dynamic-lorebooks">Dynamic Lorebooks</h3>
@@ -893,7 +904,10 @@ cantrip-written lorebooks.</p>
 <li>Click <strong>New Skill</strong> or <strong>New Writing Sample</strong></li>
 <li>Fill in name, description, and content (markdown supported)</li>
 <li>Select the type if needed (Skill or Writing Sample)</li>
+<li>Optionally set <strong>Budget Weight</strong> and <strong>Reserved Tokens</strong> — skill content is always injected in full; these only shape how the injection budget is divided among other resources (see <a href="#settings">Context Budgeting</a>)</li>
 </ol>
+<p><img alt="Skill Editor" src="media/gitv-skills-editor.png"></p>
+<p><em>The skill editor with Budget Weight and Reserved Tokens, captured 2026-11-21.</em></p>
 <p>Each row also carries <strong>History</strong> (version history) and <strong>Export</strong> (download as JSON) buttons.</p>
 <h3 id="attaching-to-endpoints">Attaching to Endpoints</h3>
 <ol>
@@ -1671,6 +1685,7 @@ editable at runtime from the Storage page.</p>
 <li><strong>Context Window Override</strong>: Manually set the model's context window size in tokens. Set to 0 to auto-detect from the model name (e.g., GPT-4o = 128K, Claude 3.5 = 200K, Gemini 2 = 1M).</li>
 </ul>
 <p>When enabled, each active cantrip and lorebook receives a proportional share of the budget based on their <strong>Budget Weight</strong> field (found on each cantrip/lorebook edit form). Cantrips can read <code>context.budget.detail_level</code> to choose between full, summary, or bullet-point output. The budget is computed <strong>before</strong> anything is injected, and each lorebook's matched entries stop at its share (later entries stop matching once the share is spent). Only skills and samples attached to the endpoint in use count toward the share split.</p>
+<p><strong>Fixed reservations</strong> sit alongside the weights: any resource with <strong>Reserved Tokens</strong> &gt; 0 (cantrips, lorebooks, skills) receives its exact token share first, and the weighted resources split whatever remains. If total reservations exceed the injection budget, reservations scale down proportionally so shares never exceed the cap — over-reserving is safe. Skill content is always injected in full; a skill's weight or reservation only shapes how the rest of the budget is divided.</p>
 <h3 id="security-settings">Security Settings</h3>
 <p>Server-level security — CORS origins, rate limits, request size cap, JWT
 lifetime, password strength — is set at install time via <code>.env</code>

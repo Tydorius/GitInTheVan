@@ -242,7 +242,7 @@
           <div class="form-group">
             <label for="skill-budget">Budget Weight</label>
             <input id="skill-budget" type="number" min="0" step="0.1" bind:value={form.budget_weight} />
-            <p style="color: var(--text-dim); font-size: 11px; margin-top: 2px;">Set to 0 to exempt from context budget caps.</p>
+            <p style="color: var(--text-dim); font-size: 11px; margin-top: 2px;">Skill content is injected in full; the weight only shapes other resources' budget shares.</p>
           </div>
           <div class="form-group">
             <label for="skill-reserved-tokens">Reserved Tokens</label>
