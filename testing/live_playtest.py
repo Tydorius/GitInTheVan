@@ -806,7 +806,9 @@ class PlaytestRunner:
             },
             {"role": "user", "content": "Look around where I am right now."},
         ]
-        st1, txt1, _ = self._chat(msgs, chat_id=chat_id, max_tokens=180)
+        # 400 tokens: 180 let the model run out mid-closing-tag, leaving an
+        # unterminated <mud_move> that (by design) is never stripped.
+        st1, txt1, _ = self._chat(msgs, chat_id=chat_id, max_tokens=400)
         assert st1 == 200 and txt1.strip(), f"MUD turn 1 failed: {st1} {txt1}"
 
         # Turn 2: instruct LLM to record a coordinate delta and move East
@@ -820,7 +822,7 @@ class PlaytestRunner:
                 ),
             }
         )
-        st2, txt2, _ = self._chat(msgs, chat_id=chat_id, max_tokens=180)
+        st2, txt2, _ = self._chat(msgs, chat_id=chat_id, max_tokens=400)
         assert st2 == 200 and txt2.strip(), f"MUD turn 2 failed: {st2} {txt2}"
         assert "<mud_delta" not in txt2 and "<mud_move" not in txt2, f"MUD tags leaked: {txt2!r}"
 
