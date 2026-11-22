@@ -9,8 +9,10 @@ from app.services.messages import extract_text, inject_into_system_message
 
 # Package 3 (item 4) added in_chat_system: its own system message placed
 # after the last user message (end of the list) -- the in-chat directive
-# position. Unknown positions still fall through inject_entries' catch-all.
-INJECTION_POSITIONS = ("system_start", "before_last_message", "in_chat_system")
+# position. 0.46.0 (G1) added user_tail: appended to the newest user message
+# (multimodal-safe; falls back to appending a user message if none exists).
+# Unknown positions still fall through inject_entries' catch-all.
+INJECTION_POSITIONS = ("system_start", "before_last_message", "in_chat_system", "user_tail")
 
 
 @dataclass
@@ -132,6 +134,7 @@ def inject_entries(
 
     system_entries = [m for m in matched if m.position == "system_start"]
     message_entries = [m for m in matched if m.position == "before_last_message"]
+    user_tail_entries = [m for m in matched if m.position == "user_tail"]
     in_chat_entries = [m for m in matched if m.position == "in_chat_system"]
     other_entries = [
         m for m in matched
@@ -154,6 +157,27 @@ def inject_entries(
             result.insert(last_user_idx, {"role": "system", "content": combined})
         else:
             result.insert(len(result) - 1, {"role": "system", "content": combined})
+
+    if user_tail_entries:
+        combined = "\n\n".join(m.content for m in user_tail_entries)
+        last_user_idx = None
+        for i in range(len(result) - 1, -1, -1):
+            if result[i].get("role") == "user":
+                last_user_idx = i
+                break
+
+        if last_user_idx is not None:
+            target = result[last_user_idx]
+            content = target.get("content")
+            if isinstance(content, list):
+                parts = list(content)
+                parts.append({"type": "text", "text": "\n\n" + combined})
+                target["content"] = parts
+            else:
+                existing = content if isinstance(content, str) else ""
+                target["content"] = f"{existing}\n\n{combined}" if existing else combined
+        else:
+            result.append({"role": "user", "content": combined})
 
     if in_chat_entries:
         # Each in_chat_system entry is its own message at the very end --

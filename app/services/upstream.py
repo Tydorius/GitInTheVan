@@ -471,7 +471,7 @@ async def _do_forward_litellm(
         import litellm
     except ImportError:
         return (
-            {"error": {"message": "LiteLLM is not installed. Provider-based endpoints require it. Run: pip install litellm==1.89.4", "type": "proxy_error"}},
+            {"error": {"message": "LiteLLM is not installed. Provider-based endpoints require it. Run: pip install litellm==1.110.2", "type": "proxy_error"}},
             500,
         )
 
@@ -495,6 +495,12 @@ async def _do_forward_litellm(
         litellm_model = f"openai/{model}"
         kwargs["api_base"] = base_url
 
+    is_gemini_family = (
+        provider in ("gemini", "vertex_ai", "google")
+        or litellm_model.startswith(("gemini/", "vertex_ai/"))
+    )
+    gemini_thinking_level: Any = body_json.get("thinking_level") if is_gemini_family else None
+
     for param in LITELLM_NATIVE_PARAMS:
         if param in body_json:
             kwargs[param] = body_json[param]
@@ -507,10 +513,25 @@ async def _do_forward_litellm(
     for name, value in (configured or {}).items():
         if name in RESERVED_NAMES or name.startswith("_gitv"):
             continue
+        if is_gemini_family and name == "thinking_level":
+            gemini_thinking_level = value
+            continue
         if name in LITELLM_NATIVE_PARAMS:
             kwargs[name] = value
         else:
             kwargs.setdefault("extra_body", {})[name] = value
+
+    # LiteLLM 1.110.2 natively maps `reasoning_effort` to Gemini 3/4
+    # `thinkingConfig.thinkingLevel`. Translate `thinking_level` on Gemini/Vertex
+    # endpoints instead of forwarding it in `extra_body`, which Google rejects.
+    if (
+        is_gemini_family
+        and gemini_thinking_level is not None
+        and "reasoning_effort" not in kwargs
+    ):
+        level_str = str(gemini_thinking_level).strip().lower()
+        if level_str:
+            kwargs["reasoning_effort"] = level_str
 
     if stream:
         kwargs["stream"] = True

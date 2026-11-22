@@ -165,6 +165,7 @@ export interface DebugRunTotals {
   prompt_tokens: number;
   completion_tokens: number;
   reasoning_tokens: number;
+  cached_tokens?: number | null;
   total_tokens: number;
   injected_tokens: number;
   /** 'upstream' | 'estimated' | 'mixed'. Never present an estimate as measured. */
@@ -236,6 +237,7 @@ export interface LlmCallAggregate {
   prompt_tokens: number;
   completion_tokens: number;
   reasoning_tokens: number;
+  cached_tokens?: number | null;
   tokens_source_counts: { usage: number; estimate: number };
 }
 
@@ -279,6 +281,7 @@ export interface LlmCallMetricRow {
   prompt_tokens: number | null;
   completion_tokens: number | null;
   reasoning_tokens: number | null;
+  cached_tokens?: number | null;
   tokens_source: string;
   rule_id: string;
 }
@@ -317,6 +320,7 @@ export interface DebugLlmCall {
   prompt_tokens: number;
   completion_tokens: number;
   reasoning_tokens: number;
+  cached_tokens?: number | null;
   total_tokens: number;
   tokens_source: string;
 }
@@ -432,6 +436,29 @@ export interface VerificationRule {
 export type VerificationRuleCreate = Partial<VerificationRule> & { name: string; prompt: string }
 export type VerificationRuleUpdate = Partial<VerificationRule>
 
+export interface MapStage {
+  name?: string
+  description?: string
+  system_instructions?: string
+  endpoint_id?: string | null
+  endpoint_tag?: string
+  model_override?: string
+  driver_callable_turns?: number
+  verification_enabled?: boolean
+  verification_endpoint_id?: string | null
+  verification_model?: string
+  verification_max_retries?: number
+  verification_instructions?: string
+  output_mode?: string
+  base_prompt_mode?: string
+  history_window?: number
+  condition_json?: string
+  parameters?: LlmParameter[]
+  verification_parameters?: LlmParameter[]
+  resources?: any[]
+  [key: string]: any
+}
+
 export interface MapResponse {
   id: string
   name: string
@@ -442,11 +469,11 @@ export interface MapResponse {
   author?: string
   global_llm_instructions?: string
   final_verification_enabled?: boolean
-  stages: any[]
+  stages: MapStage[]
   [key: string]: any
 }
 
-export type MapCreate = Partial<MapResponse> & { name: string; stages: any[] }
+export type MapCreate = Partial<MapResponse> & { name: string; stages: MapStage[] }
 export type MapUpdate = Partial<MapResponse>
 
 // Assistant Pane (Phase 26). The backend router (app/routers/assistant.py) is
@@ -616,6 +643,29 @@ export interface Skill {
 export type SkillCreate = Partial<Skill> & { name: string; type: string }
 export type SkillUpdate = Partial<Skill>
 
+export interface UserSettings {
+  default_endpoint_id: string | null;
+  default_model: string;
+  preserve_thinking: boolean;
+  gitv_status: boolean;
+  simulated_streaming_speed: number;
+  streaming_post_processing_enabled: boolean;
+  lexicon_enabled: boolean;
+  lexicon_endpoint_id: string | null;
+  cantrip_auto_install_enabled: boolean;
+  passenger_calling_enabled: boolean;
+  passenger_call_budget: number;
+  passenger_effective_cap: number;
+  response_strip_patterns: string[];
+  parameters: LlmParameter[];
+  verification_parameters: LlmParameter[];
+  summarization_parameters: LlmParameter[];
+  lexicon_parameters: LlmParameter[];
+  passenger_parameters: LlmParameter[];
+  summarization_block_size?: number;
+  [key: string]: any;
+}
+
 export const api = {
   // Auth
   setup: (username: string, password: string) =>
@@ -670,7 +720,7 @@ export const api = {
     request<{ models: string[] }>(`/api/endpoints/${id}/models`),
 
   // Settings
-  getSettings: () => request<{ default_endpoint_id: string | null; default_model: string; preserve_thinking: boolean; gitv_status: boolean; simulated_streaming_speed: number; streaming_post_processing_enabled: boolean; lexicon_enabled: boolean; lexicon_endpoint_id: string | null; cantrip_auto_install_enabled: boolean; passenger_calling_enabled: boolean; passenger_call_budget: number; passenger_effective_cap: number; response_strip_patterns: string[]; parameters: LlmParameter[]; verification_parameters: LlmParameter[]; summarization_parameters: LlmParameter[]; lexicon_parameters: LlmParameter[]; passenger_parameters: LlmParameter[] }>('/api/settings'),
+  getSettings: () => request<UserSettings>('/api/settings'),
   updateSettings: (data: any) =>
     request<any>('/api/settings', { method: 'PUT', body: JSON.stringify(data) }),
 
@@ -943,6 +993,7 @@ export const api = {
       summarization_model: string;
       summarization_token_threshold: number;
       summarization_keep_recent: number;
+      summarization_block_size?: number;
       summarization_prompt: string;
     }>('/api/summarization/settings'),
   updateSummarizationSettings: (data: any) =>

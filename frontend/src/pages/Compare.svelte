@@ -243,6 +243,9 @@
             {new Date(item.created_at).toLocaleString()}
             · {item.stage_count} stages
             {#if item.totals?.total_tokens}· {item.totals.total_tokens.toLocaleString()} tok{/if}
+            {#if (item.totals?.cached_tokens ?? 0) > 0}
+              · {(item.totals.cached_tokens ?? 0).toLocaleString()} cached{#if (item.totals?.prompt_tokens ?? 0) > 0} ({Math.round(((item.totals.cached_tokens ?? 0) / item.totals.prompt_tokens) * 100)}%){/if}
+            {/if}
           </span>
           {#if nearEviction(item)}
             <span class="evict-warn" title="Older unsaved runs are pruned as new ones arrive">

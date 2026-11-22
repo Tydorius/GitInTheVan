@@ -53,6 +53,7 @@ class LlmCallAggregate(BaseModel):
     prompt_tokens: int
     completion_tokens: int
     reasoning_tokens: int
+    cached_tokens: int = 0
     tokens_source_counts: dict[str, int]
 
 
@@ -101,6 +102,7 @@ class LlmCallRow(BaseModel):
     prompt_tokens: int | None
     completion_tokens: int | None
     reasoning_tokens: int | None
+    cached_tokens: int | None = None
     tokens_source: str
     rule_id: str
 

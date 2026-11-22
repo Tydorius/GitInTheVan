@@ -2,6 +2,29 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.46.0] - 2026-11-22
+
+Token-efficiency and local-model offload release: adds cache-friendly `user_tail` prompt injection, surfaces provider `cached_tokens` across Debug/Compare/Metrics, upgrades LiteLLM to `1.110.2` with Gemini 4 `thinking_level` support, adds cantrip message-level history control (`context.history`), adds per-stage `history_window` and stage-cantrip strip/history support on Maps, and upgrades conversation summarization to incremental, block-aligned compaction.
+
+### Added
+
+- **Cache-friendly `user_tail` injection position (G1).** Lorebook entries, dynamic lorebook entries, and cantrip `context.inject(text, "user_tail")` now support `"user_tail"`, appending dynamic per-turn content onto the newest `role == "user"` message instead of inserting an extra `role: "system"` message (multimodal-safe; falls back to appending a `user` message if none exists). Keeping dynamic injections at the tail leaves the static prompt prefix intact for Gemini, Claude, and OpenAI prompt caching.
+- **Provider `cached_tokens` visibility across Debug, Compare, and Metrics (G2).** Usage extraction now records `cached_tokens` from `usage.prompt_tokens_details.cached_tokens` (OpenAI / Gemini / LiteLLM) with fallback to `usage.cache_read_input_tokens` (Anthropic) and flat `usage.cached_tokens`. Persisted on `llm_call_metrics`, aggregated in `DebugRunTotals` and Metrics summaries, and displayed alongside `prompt_tokens` with cache hit percentages in `MetricsBar`, `RunColumn`, `Debug`, `Compare`, and `Metrics`.
+- **Gemini 4 `thinking_level` support & LiteLLM `1.110.2` (G3).** Upgraded pinned `litellm` from `1.100.4` to `1.110.2` (and `pydantic` to `2.14.4`, with all three hash-locked `requirements/*.txt` files regenerated and `pip-audit` clean). On Gemini/Vertex LiteLLM endpoints, configured or client-supplied `thinking_level` (`minimal`, `low`, `medium`, `high`, `xhigh`) is translated to LiteLLM's `reasoning_effort` (which LiteLLM `1.110.2` maps to Gemini 3/4 `thinkingConfig.thinkingLevel`) when `reasoning_effort` is not explicitly set, without leaking `thinking_level` into `extra_body`.
+- **Cantrip message-level history control (`context.history`) (G4).** Pre-driver cantrips can now call `context.history.keep_recent(n)` and `context.history.drop(indices)` to trim or prune messages forwarded to the upstream model without ever mutating `_gitv_messages_for_hash` (preserving chat identity). All `system` messages are preserved by `keep_recent(n)`, and the newest `role == "user"` message is always protected from being dropped. History mutations emit a `history_control` Debug timeline entry and work in both default and manual pipeline ordering.
+- **Per-stage `history_window` and stage-cantrip prompt strips/history ops on Maps (N8).** `MapStage` now supports `history_window` (`0` = full history, `N > 0` = keep newest `N` non-system messages while preserving system messages and the newest user message), exposed in the Maps API, Maps UI, and Map export/import packs. Stage pre-driver cantrip `_gitv_prompt_strips` and `_gitv_history_ops` now also apply inside `run_map_pipeline`.
+- **Incremental, block-aligned conversation summarization (N9).** `UserSettings` now exposes `summarization_block_size` (`0` = legacy per-turn compaction, `N > 1` = align compression boundary down to multiples of `N` messages so the prompt prefix stays cache-stable between compactions), configurable via Settings UI and `/api/summarization/settings` / `/api/settings`. When an existing summary's prefix hash still matches `to_compress[:existing.message_count]`, summarization now sends only the newly-aged delta `to_compress[existing.message_count:]` plus `existing.summary` instead of re-sending all older messages every compaction (falling back cleanly to full compaction if earlier history diverged).
+
+### Schema
+
+- `068_llm_call_metrics_cached_tokens`: adds nullable `cached_tokens INTEGER` to `llm_call_metrics`.
+- `069_map_stage_history_window`: adds `history_window INTEGER NOT NULL DEFAULT 0` to `map_stages`.
+- `070_user_settings_summarization_block_size`: adds `summarization_block_size INTEGER NOT NULL DEFAULT 0` to `user_settings`.
+
+### Dependencies
+
+- Bumped `litellm==1.100.4` → `litellm==1.110.2` and `pydantic==2.13.4` → `pydantic==2.14.4`; regenerated `requirements/main.txt`, `requirements/dev.txt`, and `requirements/docker.txt` with `--universal --generate-hashes --python-version 3.12 --upgrade`. `pip-audit` reports 0 known vulnerabilities.
+
 ## [0.45.2] - 2026-11-21
 
 Fixes provider model listing ("Fetch from provider") for Gemini and other LiteLLM endpoints, updates context-window recognition for Gemini 3/4, and hardens response-tag stripping against truncated replies.

@@ -3,7 +3,7 @@ import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -17,6 +17,7 @@ from app.routers._helpers import check_tag_unique, get_owned_or_404
 from app.services import snapshots
 from app.services.admin import get_admin_settings
 from app.services.content_guard import gate_scan_findings, log_scan_findings, sanitize_and_log
+from app.services.lorebook import INJECTION_POSITIONS
 from app.services.lorebook_writes import (
     enforce_lorebook_size,
     sanitize_entry_content,
@@ -45,6 +46,14 @@ class EntryInput(BaseModel):
     # Set by a client that has already shown the scanner findings to the user
     # and been told to proceed anyway. Not a model column.
     override_scan: bool = False
+
+    @field_validator("position")
+    @classmethod
+    def _validate_position(cls, value: str) -> str:
+        if value not in INJECTION_POSITIONS:
+            allowed = ", ".join(INJECTION_POSITIONS)
+            raise ValueError(f"position must be one of: {allowed}")
+        return value
 
 
 class EntryResponse(BaseModel):
@@ -573,6 +582,8 @@ def _normalize_entry(raw: Any) -> dict:
         position = "before_last_message"
     elif position == 0 or position == "0":
         position = "system_start"
+    elif position not in INJECTION_POSITIONS:
+        position = "before_last_message"
 
     return {
         "name": str(raw.get("name") or raw.get("comment") or ""),

@@ -96,6 +96,10 @@ class MapStage(Base):
     condition_json: Mapped[str] = mapped_column(
         Text, nullable=False, default="", server_default=""
     )
+    # 0.46.0 (N8): 0 = full history; >0 = keep newest N non-system messages.
+    history_window: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False

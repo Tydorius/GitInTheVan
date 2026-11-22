@@ -45,6 +45,7 @@ class SettingsResponse(BaseModel):
     streaming_post_processing_enabled: bool
     context_budget_percent: float
     context_window_override: int
+    summarization_block_size: int = 0
     debug_mode: bool
     default_map_id: str | None
     # Phase 29: lexicon compiler settings and the user half of the
@@ -88,6 +89,7 @@ class SettingsUpdate(BaseModel):
     streaming_post_processing_enabled: bool | None = None
     context_budget_percent: float | None = None
     context_window_override: int | None = None
+    summarization_block_size: int | None = Field(default=None, ge=0)
     debug_mode: bool | None = None
     default_map_id: str | None = None
     lexicon_enabled: bool | None = None
@@ -129,6 +131,7 @@ async def get_settings(
         streaming_post_processing_enabled=user_settings.streaming_post_processing_enabled,
         context_budget_percent=user_settings.context_budget_percent,
         context_window_override=user_settings.context_window_override,
+        summarization_block_size=user_settings.summarization_block_size,
         debug_mode=user_settings.debug_mode,
         default_map_id=user_settings.default_map_id,
         lexicon_enabled=user_settings.lexicon_enabled,
@@ -195,6 +198,8 @@ async def update_settings(
         user_settings.context_budget_percent = max(0.0, min(100.0, req.context_budget_percent))
     if req.context_window_override is not None:
         user_settings.context_window_override = max(0, req.context_window_override)
+    if req.summarization_block_size is not None:
+        user_settings.summarization_block_size = req.summarization_block_size
     if req.debug_mode is not None:
         user_settings.debug_mode = req.debug_mode
     if "default_map_id" in req.model_fields_set:
@@ -292,6 +297,7 @@ async def update_settings(
         streaming_post_processing_enabled=user_settings.streaming_post_processing_enabled,
         context_budget_percent=user_settings.context_budget_percent,
         context_window_override=user_settings.context_window_override,
+        summarization_block_size=user_settings.summarization_block_size,
         debug_mode=user_settings.debug_mode,
         default_map_id=user_settings.default_map_id,
         lexicon_enabled=user_settings.lexicon_enabled,

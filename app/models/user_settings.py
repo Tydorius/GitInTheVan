@@ -40,6 +40,11 @@ class UserSettings(Base):
     summarization_model: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     summarization_token_threshold: Mapped[int] = mapped_column(Integer, default=8000, nullable=False)
     summarization_keep_recent: Mapped[int] = mapped_column(Integer, default=6, nullable=False)
+    # 0.46.0 (N9): 0 = legacy per-turn compaction; >1 = compact in blocks of N
+    # messages so the prompt prefix stays cache-stable between compactions.
+    summarization_block_size: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
     summarization_prompt: Mapped[str] = mapped_column(
         Text, nullable=False,
         default="Summarize the following roleplay conversation excerpt. Preserve key facts, "

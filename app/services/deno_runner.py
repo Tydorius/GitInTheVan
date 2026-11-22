@@ -85,6 +85,9 @@ class CantripResult:
     # later slots match against it. Collection only -- the sandbox never
     # compiles or executes the pattern.
     prompt_strips: list[dict] = field(default_factory=list)
+    # Message-level history control (0.46.0): ops collected via
+    # context.history.keep_recent(n) / context.history.drop(indices).
+    history_ops: list[dict[str, Any]] = field(default_factory=list)
     debug_logs: list[str] = field(default_factory=list)
     error: str | None = None
 
@@ -103,6 +106,31 @@ class CantripTimeoutError(Exception):
 
 class CantripExecutionError(Exception):
     pass
+
+
+def _parse_history_ops(raw: Any) -> list[dict[str, Any]]:
+    """Validate and normalize history_ops emitted by the Deno runner."""
+    if not isinstance(raw, list):
+        return []
+    ops: list[dict[str, Any]] = []
+    for item in raw[:20]:
+        if not isinstance(item, dict):
+            continue
+        op = item.get("op")
+        if op == "keep_recent":
+            count = item.get("count")
+            if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+                ops.append({"op": "keep_recent", "count": count})
+        elif op == "drop":
+            raw_indices = item.get("indices")
+            if isinstance(raw_indices, list):
+                indices = [
+                    idx for idx in raw_indices
+                    if isinstance(idx, int) and not isinstance(idx, bool)
+                ]
+                if indices:
+                    ops.append({"op": "drop", "indices": indices})
+    return ops
 
 
 def _build_runner_script(
@@ -218,6 +246,7 @@ async def run_cantrip(
             book_activations=result_data.get("book_activations", []),
             injections=result_data.get("injections", []),
             prompt_strips=result_data.get("prompt_strips", []),
+            history_ops=_parse_history_ops(result_data.get("history_ops")),
             debug_logs=result_data.get("debug_logs", []),
             error=result_data.get("error"),
         )

@@ -97,6 +97,7 @@ class LlmCallMetric(Base):
     prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reasoning_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cached_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tokens_source: Mapped[str] = mapped_column(String(16), nullable=False, default="", server_default="")
 
     rule_id: Mapped[str] = mapped_column(String(36), nullable=False, default="", server_default="")

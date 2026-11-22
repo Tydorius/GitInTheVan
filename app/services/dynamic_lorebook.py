@@ -58,7 +58,7 @@ MAX_OPS_PER_REQUEST = 50
 DELTA_KEY = "_gitv_dynamic_lorebook_delta"
 OPS_USED_KEY = "_gitv_lorebook_ops_used"
 
-_VALID_POSITIONS = ("system_start", "before_last_message")
+_VALID_POSITIONS = ("system_start", "before_last_message", "in_chat_system", "user_tail")
 
 
 def parse_reads(raw: str | None) -> list[str]:

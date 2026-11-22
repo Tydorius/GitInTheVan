@@ -89,7 +89,7 @@ context.inject = (text, position) => {
         __debugLogs.push('inject: refused, per-request cap (20) reached');
         return;
     }
-    const pos = ['system_start', 'before_last_message', 'in_chat_system'].indexOf(position) !== -1
+    const pos = ['system_start', 'before_last_message', 'in_chat_system', 'user_tail'].indexOf(position) !== -1
         ? position : 'before_last_message';
     __injections.push({ text: text, position: pos });
 };
@@ -110,6 +110,40 @@ context.strip = (pattern, scope) => {
     }
     const sc = ['all', 'system', 'messages'].indexOf(scope) !== -1 ? scope : 'all';
     __promptStrips.push({ pattern: pattern.slice(0, 256), scope: sc });
+};
+
+// Message-level history control (0.46.0): keep_recent(n) and drop(indices)
+// collect ops for the host to apply against body_json["messages"] without
+// touching the conversation-hash anchor. The newest user message is always
+// preserved host-side.
+const __historyOps = [];
+context.history = {
+    keep_recent: (n) => {
+        if (n === null || n === undefined || typeof n === 'boolean') return;
+        const num = Number(n);
+        if (!Number.isFinite(num)) return;
+        if (__historyOps.length >= 20) {
+            __debugLogs.push('history: refused, per-request cap (20) reached');
+            return;
+        }
+        const count = Math.max(0, Math.floor(num));
+        __historyOps.push({ op: 'keep_recent', count });
+    },
+    drop: (indices) => {
+        if (__historyOps.length >= 20) {
+            __debugLogs.push('history: refused, per-request cap (20) reached');
+            return;
+        }
+        const arr = Array.isArray(indices) ? indices : [indices];
+        const valid = [];
+        for (const item of arr) {
+            if (typeof item === 'number' && Number.isInteger(item)) {
+                valid.push(item);
+            }
+        }
+        if (valid.length === 0) return;
+        __historyOps.push({ op: 'drop', indices: valid });
+    }
 };
 
 // Dynamic lorebooks (Phase 20): reads are served from a host-seeded copy
@@ -441,6 +475,7 @@ const __result = {
     book_activations: __bookActivations,
     injections: __injections,
     prompt_strips: __promptStrips,
+    history_ops: __historyOps,
     debug_logs: __debugLogs,
     error: __error
 };

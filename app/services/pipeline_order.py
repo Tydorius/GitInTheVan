@@ -203,6 +203,7 @@ async def run_pre_forward_ordered(
         _save_user_data,
         _store_writes_isolated,
         apply_cantrip_result_to_messages,
+        apply_history_ops,
         apply_prompt_strips,
     )
     from app.services.cantrip_context import build_context, extract_context_params
@@ -332,11 +333,15 @@ async def run_pre_forward_ordered(
 
             # Slot-local outputs: everything this cantrip asked for lands
             # NOW, before the next step runs -- strips rewrites the message
-            # list, request rows (activate()/inject()) inject immediately.
+            # list, history ops trim/drop messages, request rows
+            # (activate()/inject()) inject immediately.
             if result.prompt_strips:
                 apply_prompt_strips(
                     body_json, result.prompt_strips, obj.id, obj.name
                 )
+            history_ops = getattr(result, "history_ops", None)
+            if history_ops:
+                apply_history_ops(body_json, history_ops)
             if request_rows:
                 body_json["messages"] = _inject_entries(
                     body_json["messages"], request_rows

@@ -20,18 +20,28 @@
     key: keyof DebugRunTotals
     label: string
     format: (v: number) => string
+    formatValue?: (v: number, totals: Partial<DebugRunTotals>) => string
     lowerIsBetter: boolean
     hint: string
   }
 
   const ms = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(2)}s` : `${Math.round(v)}ms`)
   const num = (v: number) => v.toLocaleString()
+  const cachedFmt = (v: number, totals: Partial<DebugRunTotals>) => {
+    const prompt = totals.prompt_tokens
+    if (typeof prompt === 'number' && prompt > 0) {
+      return `${v.toLocaleString()} (${Math.round((v / prompt) * 100)}%)`
+    }
+    return v.toLocaleString()
+  }
 
   const TILES: Tile[] = [
     { key: 'total_tokens', label: 'Tokens', format: num, lowerIsBetter: true,
       hint: 'Prompt plus completion across every upstream call in this run.' },
     { key: 'prompt_tokens', label: 'Prompt', format: num, lowerIsBetter: true,
       hint: 'Tokens sent upstream.' },
+    { key: 'cached_tokens', label: 'Cached', format: num, formatValue: cachedFmt, lowerIsBetter: false,
+      hint: 'Prompt tokens served from provider prompt cache.' },
     { key: 'completion_tokens', label: 'Completion', format: num, lowerIsBetter: false,
       hint: 'Tokens generated.' },
     { key: 'injected_tokens', label: 'Injected', format: num, lowerIsBetter: true,
@@ -53,7 +63,9 @@
     !baseline || !baseline.tokens_source || !source || baseline.tokens_source === source
   $: visible = TILES.filter((tile) => {
     const v = t[tile.key]
-    return typeof v === 'number' && !(compact && ['prompt_tokens', 'completion_tokens', 'llm_call_count'].includes(tile.key))
+    if (typeof v !== 'number') return false
+    if (tile.key === 'cached_tokens' && v <= 0) return false
+    return !(compact && ['prompt_tokens', 'completion_tokens', 'llm_call_count'].includes(tile.key))
   })
 
   function delta(tile: Tile): { text: string; good: boolean | null } | null {
@@ -81,7 +93,7 @@
       {@const d = delta(tile)}
       <div class="tile" title={tile.hint}>
         <div class="label">{tile.label}</div>
-        <div class="value">{tile.format(t[tile.key] as number)}</div>
+        <div class="value">{tile.formatValue ? tile.formatValue(t[tile.key] as number, t) : tile.format(t[tile.key] as number)}</div>
         {#if d}
           <div class="delta" class:good={d.good === true} class:bad={d.good === false}>
             {d.text}

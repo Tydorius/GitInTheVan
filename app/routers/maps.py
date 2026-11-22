@@ -2,7 +2,7 @@ import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -59,6 +59,7 @@ class StageInput(BaseModel):
     output_mode: str = "persist"
     base_prompt_mode: str = "full"
     condition_json: str = ""
+    history_window: int = Field(default=0, ge=0)
     parameters: list[ParameterDef] = []
     verification_parameters: list[ParameterDef] = []
     resources: list[ResourceInput] = []
@@ -163,6 +164,7 @@ class StageResponse(BaseModel):
     output_mode: str
     base_prompt_mode: str
     condition_json: str
+    history_window: int = 0
     parameters: list[ParameterDef]
     verification_parameters: list[ParameterDef]
     resources: list[ResourceResponse]
@@ -221,6 +223,7 @@ def _stage_to_response(s: MapStage) -> StageResponse:
         output_mode=s.output_mode,
         base_prompt_mode=s.base_prompt_mode,
         condition_json=s.condition_json,
+        history_window=s.history_window,
         parameters=params_to_api(s.parameters_json),
         verification_parameters=params_to_api(s.verification_parameters_json),
         resources=[_resource_to_response(r) for r in s.resources],
@@ -311,6 +314,7 @@ def _build_stage(stage_input: StageInput, stage_order: int, map_id: str) -> MapS
         output_mode=stage_input.output_mode,
         base_prompt_mode=stage_input.base_prompt_mode,
         condition_json=stage_input.condition_json,
+        history_window=stage_input.history_window,
         parameters_json=params_from_api(
             stage_input.parameters, f"stage '{stage_input.name}' parameters"
         ),

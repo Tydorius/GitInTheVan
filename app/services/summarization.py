@@ -418,9 +418,18 @@ async def maybe_summarize(
             return body_json
 
         keep = keep_recent
-        compress_indices_set = set(dialogue_indices[:-keep]) if keep > 0 else set(dialogue_indices)
+        block_size = int(getattr(user_settings, "summarization_block_size", 0) or 0)
+        eligible_indices = dialogue_indices[:-keep] if keep > 0 else list(dialogue_indices)
+        if block_size > 1:
+            aligned_count = (len(eligible_indices) // block_size) * block_size
+            if aligned_count == 0:
+                return body_json
+            compress_indices = eligible_indices[:aligned_count]
+        else:
+            compress_indices = eligible_indices
 
-        to_compress = [messages[i] for i in sorted(compress_indices_set)]
+        compress_indices_set = set(compress_indices)
+        to_compress = [messages[i] for i in compress_indices]
         boundary = compute_boundary_hash(to_compress)
 
         async with async_session() as db:
@@ -436,12 +445,37 @@ async def maybe_summarize(
             )
         else:
             body_json.pop("_gitv_summarizer_degraded", None)
+            messages_for_llm = to_compress
+            prior_summary = ""
+            if (
+                existing
+                and existing.summary
+                and 0 < existing.message_count < len(to_compress)
+            ):
+                prefix_hash = compute_boundary_hash(to_compress[: existing.message_count])
+                if prefix_hash == existing.boundary_hash:
+                    messages_for_llm = to_compress[existing.message_count :]
+                    prior_summary = existing.summary
+                    logger.info(
+                        "Summarization: incremental delta for chat %s (%d -> %d msgs, delta=%d)",
+                        internal_chat_id[:12],
+                        existing.message_count,
+                        len(to_compress),
+                        len(messages_for_llm),
+                    )
+                else:
+                    logger.info(
+                        "Summarization: prefix diverged for chat %s; rebuilding full summary (%d msgs)",
+                        internal_chat_id[:12],
+                        len(to_compress),
+                    )
+
             summary_text = await summarize_messages(
-                to_compress,
+                messages_for_llm,
                 endpoint,
                 user_settings.summarization_model,
                 prompt,
-                existing_summary=existing.summary if existing else "",
+                existing_summary=prior_summary,
                 configured=summarizer_parameters(
                     user_settings, endpoint, user_settings.summarization_model
                 ),

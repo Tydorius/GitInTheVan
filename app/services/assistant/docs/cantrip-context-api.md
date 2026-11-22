@@ -105,10 +105,19 @@ Set **LLM Instructions** to something like: `Roll dice. Args: count (default 1),
 
 - `context.response_tags` — object of `{tagName: [payload, ...]}` seeded into post-Navigator scripts the same turn the model wrote them. The cantrip registers tag names (Response Tags field); GitV extracts them from the final reply, strips them before the client, and delivers here. Unregistered tags pass through untouched.
 - `context.activate(name)` — turn one of the user's existing lorebooks on for this request only (union source; see `#activation-hierarchy`).
-- `context.inject(text, position)` — place prompt text at `system_start`, `before_last_message`, or `in_chat_system` (a system message at the very end). Max 20 per request.
+- `context.inject(text, position)` — place prompt text at `system_start`, `before_last_message`, `in_chat_system` (a system message at the very end), or `user_tail` (appended to the newest user message; multimodal-safe; falls back to appending a new user message if none exists). Max 20 per request.
 - `context.request.id` — stable id for the current request.
 - `context.request.is_regenerate` — true when this request repeats the previous one's shape (same message count, same trailing user message): a swipe regeneration.
 - `context.chat.last_messages` entries now carry `role` alongside `message`.
+
+## History control (`context.history`, 0.46.0)
+
+Pre-Driver cantrips can trim or drop messages from the forwarded prompt without affecting conversation identity hashing:
+
+- `context.history.keep_recent(n)` — preserves all `system` messages in their original relative order and keeps the newest `n` non-system messages. The newest `user` message is always preserved even when `n = 0`.
+- `context.history.drop(indices)` — drops messages at the specified integer indices (accepts a single integer or an array; supports negative Python-style indices such as `-2`). The newest `user` message is always protected and silently skipped if listed.
+
+Operations are collected in order (max 20 per request) and applied host-side only to the forwarded `messages` list; the conversation-hash anchor is never mutated.
 
 ## See also
 

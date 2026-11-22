@@ -74,6 +74,7 @@
       verification_instructions: '',
       output_mode: 'persist',
       base_prompt_mode: 'full',
+      history_window: 0,
       condition_json: '',
       parameters: [],
       verification_parameters: [],
@@ -133,6 +134,7 @@
         final_verification_enabled: !!data.final_verification_enabled,
         stages: data.stages.map((s: any) => ({
           ...s,
+          history_window: Number(s.history_window) || 0,
           resources: s.resources || [],
         })),
       }
@@ -149,6 +151,7 @@
         stages: editForm.stages.map(({ _cond, ...s }: any) => {
           if (!s.base_prompt_mode) s.base_prompt_mode = 'full'
           if (s.condition_json === undefined) s.condition_json = ''
+          s.history_window = Number(s.history_window) || 0
           return s
         }),
       }
@@ -371,6 +374,16 @@
             <option value="full">Full (client prompt + injections)</option>
             <option value="blank">Blank (stage instructions only)</option>
           </select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="stage-history-{idx}">History Window</label>
+          <input id="stage-history-{idx}" type="number" min="0" bind:value={stage.history_window} />
+          <div style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+            0 = full history; N &gt; 0 keeps newest N non-system messages (newest user message always kept)
+          </div>
         </div>
       </div>
 

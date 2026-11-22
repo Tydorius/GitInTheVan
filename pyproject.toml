@@ -1,6 +1,6 @@
 [project]
 name = "gitinthevan"
-version = "0.45.2"
+version = "0.46.0"
 description = "Self-hostable MITM LLM router/proxy for roleplay services"
 readme = "README.md"
 license = "MPL-2.0"
@@ -11,7 +11,7 @@ dependencies = [
     "httpx==0.28.1",
     "sqlalchemy[asyncio]==2.0.50",
     "aiosqlite==0.22.1",
-    "pydantic==2.13.4",
+    "pydantic==2.14.4",
     "pydantic-settings==2.14.2",
     "pyjwt==2.15.1",
     # Declared directly: ssl_manager.py imports it for certificate work. It
@@ -20,7 +20,7 @@ dependencies = [
     "cryptography==50.0.2",
     "bcrypt==5.0.0",
     "dulwich==1.2.9",
-    "litellm==1.100.4",
+    "litellm==1.110.2",
     # Transitive deps pinned explicitly to patched versions per pip-audit findings
     # (2026-07-11, re-audited 2026-08-17 and 2026-11-18 — see
     # Planning/security-control-document.md). Remove an explicit pin once the

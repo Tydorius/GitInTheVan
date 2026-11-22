@@ -78,6 +78,13 @@
   $: promptObjects = summary?.prompt_objects ?? []
   $: typeTotals = summary?.prompt_type_totals ?? []
   $: llmCalls = summary?.llm_calls ?? []
+  $: totalCalls = llmCalls.reduce((acc, g) => acc + g.calls, 0)
+  $: totalPromptTokens = llmCalls.reduce((acc, g) => acc + (g.prompt_tokens || 0), 0)
+  $: totalCompletionTokens = llmCalls.reduce((acc, g) => acc + (g.completion_tokens || 0), 0)
+  $: totalCachedTokens = llmCalls.reduce((acc, g) => acc + (g.cached_tokens || 0), 0)
+  $: cacheHitPct = totalPromptTokens > 0 && totalCachedTokens > 0
+    ? Math.round((totalCachedTokens / totalPromptTokens) * 100)
+    : null
 
   onMount(load)
 </script>
@@ -113,6 +120,31 @@
 {#if loading && !summary}
   <div class="loading">Loading...</div>
 {:else}
+  {#if llmCalls.length > 0}
+    <div class="kpi-strip">
+      <div class="kpi-card">
+        <div class="kpi-label">LLM Calls</div>
+        <div class="kpi-value">{totalCalls.toLocaleString()}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Prompt Tokens</div>
+        <div class="kpi-value">{totalPromptTokens.toLocaleString()}</div>
+      </div>
+      <div class="kpi-card" title="Prompt tokens served from provider prompt cache">
+        <div class="kpi-label">Cached Tokens</div>
+        <div class="kpi-value">
+          {#if totalCachedTokens > 0}
+            {totalCachedTokens.toLocaleString()}{#if cacheHitPct !== null} <span class="kpi-sub">({cacheHitPct}%)</span>{/if}
+          {:else}—{/if}
+        </div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Completion Tokens</div>
+        <div class="kpi-value">{totalCompletionTokens.toLocaleString()}</div>
+      </div>
+    </div>
+  {/if}
+
   <CollapsibleCard title="Prompt Objects" cardKey="prompt-objects" {collapse}>
     <p class="hint">
       What each pipeline stage added to (or removed from) the prompt, per fire.
@@ -181,6 +213,7 @@
             <th>Failovers</th>
             <th>Latency (med)</th>
             <th>Prompt tok</th>
+            <th>Cached tok</th>
             <th>Completion tok</th>
           </tr>
         </thead>
@@ -205,6 +238,14 @@
                   <span class="hint"> est</span>
                 {/if}
               </td>
+              <td>
+                {#if (g.cached_tokens ?? 0) > 0}
+                  {(g.cached_tokens ?? 0).toLocaleString()}
+                  {#if g.prompt_tokens > 0}
+                    <span class="hint"> ({Math.round(((g.cached_tokens ?? 0) / g.prompt_tokens) * 100)}%)</span>
+                  {/if}
+                {:else}—{/if}
+              </td>
               <td>{g.completion_tokens.toLocaleString()}</td>
             </tr>
           {/each}
@@ -219,7 +260,7 @@
       <h4>LLM calls</h4>
       <table>
         <thead>
-          <tr><th>When</th><th>Role</th><th>Model</th><th>Status</th><th>Latency</th><th>Tokens</th><th>Chat</th></tr>
+          <tr><th>When</th><th>Role</th><th>Model</th><th>Status</th><th>Latency</th><th>Tokens</th><th>Cached</th><th>Chat</th></tr>
         </thead>
         <tbody>
           {#each llmRows as r (r.id)}
@@ -233,6 +274,14 @@
                 {#if r.tokens_source}
                   {(r.prompt_tokens ?? 0).toLocaleString()} / {(r.completion_tokens ?? 0).toLocaleString()}
                   <span class="hint">{r.tokens_source === 'usage' ? '' : 'est'}</span>
+                {:else}—{/if}
+              </td>
+              <td>
+                {#if (r.cached_tokens ?? 0) > 0}
+                  {(r.cached_tokens ?? 0).toLocaleString()}
+                  {#if (r.prompt_tokens ?? 0) > 0}
+                    <span class="hint"> ({Math.round(((r.cached_tokens ?? 0) / (r.prompt_tokens ?? 1)) * 100)}%)</span>
+                  {/if}
                 {:else}—{/if}
               </td>
               <td title={r.chat_id}>{r.context !== 'live' ? `${r.context}:` : ''}{shortChat(r.chat_id)}</td>
@@ -289,6 +338,34 @@
     flex-wrap: wrap;
     gap: 6px;
     margin: 8px 0;
+  }
+  .kpi-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .kpi-card {
+    flex: 1 1 140px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+  }
+  .kpi-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .kpi-value {
+    font-size: 18px;
+    font-family: var(--mono);
+    margin-top: 2px;
+  }
+  .kpi-sub {
+    font-size: 13px;
+    color: var(--success);
   }
   .positive { color: #d97706; }
   .negative { color: #16a34a; }

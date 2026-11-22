@@ -49,6 +49,17 @@ def _coerce_reserved_tokens(value: Any) -> int:
         return 0
 
 
+def _coerce_history_window(value: Any) -> int:
+    """Hand-edited map JSON may carry a missing/non-numeric/bool history_window;
+    a coerced 0 beats a 500 on import."""
+    if isinstance(value, bool):
+        return 0
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 VALID_RESOURCE_MODES = ("smart", "keep_both", "reuse", "overwrite")
 DEFAULT_RESOURCE_MODE = "smart"
 
@@ -230,6 +241,7 @@ async def build_map_from_export(
             output_mode=stage_data.get("output_mode", "persist"),
             base_prompt_mode=stage_data.get("base_prompt_mode", "full"),
             condition_json=stage_data.get("condition_json", ""),
+            history_window=_coerce_history_window(stage_data.get("history_window")),
             # A pack is untrusted input, so its parameters are re-validated
             # rather than stored as given -- this is where a `stream` or
             # `_gitv` key would otherwise enter. Absent on pre-0.24 packs.
@@ -901,6 +913,7 @@ async def serialize_map_to_export(
             "output_mode": stage.output_mode,
             "base_prompt_mode": stage.base_prompt_mode,
             "condition_json": stage.condition_json,
+            "history_window": getattr(stage, "history_window", 0) or 0,
             "parameters": _export_parameters(stage.parameters_json),
             "verification_parameters": _export_parameters(stage.verification_parameters_json),
             "resources": [],

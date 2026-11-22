@@ -120,7 +120,7 @@
       <div class="form-row">
         <div style="flex: 2;">
           <label for="p-name-{idx}">Name</label>
-          <input id="p-name-{idx}" bind:value={p.name} placeholder="reasoning_effort" />
+          <input id="p-name-{idx}" bind:value={p.name} placeholder="reasoning_effort / thinking_level" />
         </div>
         <div style="flex: 1.4;">
           <label for="p-type-{idx}">Type</label>
@@ -148,7 +148,7 @@
               placeholder="END, ###"
             />
           {:else}
-            <input id="p-value-{idx}" bind:value={p.value} placeholder="max" />
+            <input id="p-value-{idx}" bind:value={p.value} placeholder="medium" />
           {/if}
         </div>
         <div style="flex: 0 0 90px; align-self: flex-end; padding-bottom: 8px;">
@@ -169,7 +169,7 @@
             id="p-opts-{idx}"
             value={optionsText(p)}
             oninput={(e) => setOptions(idx, e.currentTarget.value)}
-            placeholder="low, high, max"
+            placeholder="low, medium, high, xhigh"
           />
         </div>
         <div style="flex: 3;">

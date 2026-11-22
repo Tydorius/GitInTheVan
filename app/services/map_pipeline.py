@@ -941,6 +941,37 @@ async def _run_final_map_verification(
     }
 
 
+def _apply_history_window(
+    messages: list[dict[str, Any]], history_window: int
+) -> list[dict[str, Any]]:
+    """Trim non-system messages to the newest ``history_window`` entries.
+
+    Preserves all ``role == "system"`` messages (at their original positions)
+    and guarantees the newest ``role == "user"`` message is never dropped.
+    Returns a new list; never mutates the input list or message dicts.
+    """
+    if history_window <= 0:
+        return messages
+
+    non_sys_indices = [i for i, m in enumerate(messages) if m.get("role") != "system"]
+    if len(non_sys_indices) <= history_window:
+        return messages
+
+    kept_non_sys = set(non_sys_indices[-history_window:])
+    last_user_idx = next(
+        (i for i in reversed(non_sys_indices) if messages[i].get("role") == "user"),
+        None,
+    )
+    if last_user_idx is not None and last_user_idx not in kept_non_sys:
+        kept_non_sys.remove(min(kept_non_sys))
+        kept_non_sys.add(last_user_idx)
+
+    return [
+        m for i, m in enumerate(messages)
+        if m.get("role") == "system" or i in kept_non_sys
+    ]
+
+
 async def run_map_pipeline(
     body_json: dict[str, Any],
     user_id: str,
@@ -1046,6 +1077,37 @@ async def run_map_pipeline(
                 m for m in body_json["messages"] if m.get("role") != "system"
             ]
 
+        history_window = int(getattr(stage, "history_window", 0) or 0)
+        if history_window > 0:
+            before_count = len(body_json["messages"])
+            before_non_sys = sum(
+                1 for m in body_json["messages"] if m.get("role") != "system"
+            )
+            body_json["messages"] = _apply_history_window(
+                body_json["messages"], history_window
+            )
+            after_count = len(body_json["messages"])
+            after_non_sys = sum(
+                1 for m in body_json["messages"] if m.get("role") != "system"
+            )
+            if debug_on:
+                debug_capture(
+                    body_json, "map_stage_history_window",
+                    f"Stage {stage_idx + 1} History Window: {stage.name}",
+                    item_id=stage.id, item_name=stage.name,
+                    detail=(
+                        f"Kept {after_non_sys} of {before_non_sys} non-system message(s) "
+                        f"(window={history_window})"
+                    ),
+                    metadata={
+                        "stage_index": stage_idx,
+                        "history_window": history_window,
+                        "before_messages": before_count,
+                        "after_messages": after_count,
+                        "dropped_messages": before_count - after_count,
+                    },
+                )
+
         async with async_session() as db:
             endpoints, model = await _resolve_stage_endpoint(db, stage, user_id)
             # Resolved per stage against the endpoint this stage actually
@@ -1111,6 +1173,17 @@ async def run_map_pipeline(
                 only_ids=stage_cantrip_ids,
                 stage_index=stage_idx,
             )
+            pending_strips = body_json.pop("_gitv_prompt_strips", None)
+            if pending_strips:
+                from app.services.cantrip import apply_prompt_strips
+
+                apply_prompt_strips(body_json, pending_strips)
+            if body_json.get("_gitv_history_ops"):
+                from app.services.cantrip import apply_history_ops
+
+                apply_history_ops(body_json)
+            else:
+                body_json.pop("_gitv_history_ops", None)
             if debug_on:
                 ran = [
                     c for c in body_json.get("_gitv_debug", {}).get("run", {}).get("cantrips", [])
@@ -1233,6 +1306,7 @@ async def run_map_pipeline(
                     "model_override": model or "",
                     "output_mode": stage.output_mode,
                     "base_prompt_mode": stage.base_prompt_mode,
+                    "history_window": history_window,
                     "condition": stage.condition_json or None,
                     "verification_enabled": stage.verification_enabled,
                     "driver_callable_turns": stage.driver_callable_turns,

@@ -37,6 +37,7 @@ class DebugRunTotals(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     reasoning_tokens: int = 0
+    cached_tokens: int = 0
     total_tokens: int = 0
     injected_tokens: int = 0
     tokens_source: str = ""

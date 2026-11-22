@@ -2,7 +2,7 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +25,7 @@ class SummarizationSettingsResponse(BaseModel):
     summarization_model: str
     summarization_token_threshold: int
     summarization_keep_recent: int
+    summarization_block_size: int = 0
     summarization_prompt: str
 
 
@@ -34,6 +35,7 @@ class SummarizationSettingsUpdate(BaseModel):
     summarization_model: str | None = None
     summarization_token_threshold: int | None = None
     summarization_keep_recent: int | None = None
+    summarization_block_size: int | None = Field(default=None, ge=0)
     summarization_prompt: str | None = None
 
 
@@ -60,6 +62,7 @@ def _settings_to_response(s: UserSettings) -> SummarizationSettingsResponse:
         summarization_model=s.summarization_model,
         summarization_token_threshold=s.summarization_token_threshold,
         summarization_keep_recent=s.summarization_keep_recent,
+        summarization_block_size=s.summarization_block_size,
         summarization_prompt=s.summarization_prompt,
     )
 
@@ -102,6 +105,8 @@ async def update_summarization_settings(
         user_settings.summarization_token_threshold = max(1, req.summarization_token_threshold)
     if req.summarization_keep_recent is not None:
         user_settings.summarization_keep_recent = max(MIN_KEEP_RECENT, req.summarization_keep_recent)
+    if req.summarization_block_size is not None:
+        user_settings.summarization_block_size = req.summarization_block_size
     if req.summarization_prompt is not None:
         user_settings.summarization_prompt = req.summarization_prompt
 

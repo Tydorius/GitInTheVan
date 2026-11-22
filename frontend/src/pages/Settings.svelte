@@ -30,6 +30,7 @@
     summarization_model: '',
     summarization_token_threshold: 8000,
     summarization_keep_recent: 6,
+    summarization_block_size: 0,
     summarization_prompt: '',
   }
   // Assistant Pane (Phase 26): the user's own endpoint acting as an in-app
@@ -194,6 +195,7 @@
       summarization.summarization_model = sum.summarization_model || ''
       summarization.summarization_token_threshold = sum.summarization_token_threshold || 8000
       summarization.summarization_keep_recent = sum.summarization_keep_recent ?? 6
+      summarization.summarization_block_size = Number(sum.summarization_block_size) || 0
       summarization.summarization_prompt = sum.summarization_prompt || ''
 
       driverCallableTurns = (s as any).driver_callable_turns ?? 1
@@ -231,6 +233,7 @@
       await api.updateSummarizationSettings({
         ...summarization,
         summarization_endpoint_id: summarization.summarization_endpoint_id || '',
+        summarization_block_size: Number(summarization.summarization_block_size) || 0,
       })
       // Parameters live on user_settings rather than the summarization
       // settings row, so they save through the general settings endpoint --
@@ -444,6 +447,13 @@
     <input id="sum-keep" type="number" min="3" bind:value={summarization.summarization_keep_recent} placeholder="6" />
     <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
       Number of recent messages always sent verbatim (never summarized). Minimum 3 to ensure a clean separation between the summary and current context. The rest are compressed into a summary.
+    </p>
+  </div>
+  <div class="form-group">
+    <label for="sum-block-size">Block Size</label>
+    <input id="sum-block-size" type="number" min="0" bind:value={summarization.summarization_block_size} placeholder="0" />
+    <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+      0 = compact every turn; N &gt; 1 compacts in fixed blocks of N messages to keep prompt caches warm.
     </p>
   </div>
   <div class="form-group">

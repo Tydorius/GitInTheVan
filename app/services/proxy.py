@@ -664,6 +664,10 @@ async def _forward_request_impl(
                 from app.services.cantrip import apply_prompt_strips
 
                 apply_prompt_strips(body_json, pending_strips)
+            if body_json.get("_gitv_history_ops"):
+                from app.services.cantrip import apply_history_ops
+
+                apply_history_ops(body_json)
 
         map_active = map_candidate
         nominations = body_json.pop("_gitv_map_nominations", [])

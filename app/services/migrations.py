@@ -1587,6 +1587,27 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
             """,
         },
     ),
+    (
+        "068_llm_call_metrics_cached_tokens",
+        # 0.46.0 (G2): nullable prompt-cache hit token count on llm_call_metrics.
+        """
+        ALTER TABLE llm_call_metrics ADD COLUMN cached_tokens INTEGER;
+        """,
+    ),
+    (
+        "069_map_stage_history_window",
+        # 0.46.0 (N8): per-stage history window (0 = full history, >0 = newest N non-system messages).
+        """
+        ALTER TABLE map_stages ADD COLUMN history_window INTEGER NOT NULL DEFAULT 0;
+        """,
+    ),
+    (
+        "070_user_settings_summarization_block_size",
+        # 0.46.0 (N9): block-aligned summarization size (0 = legacy per-turn compaction).
+        """
+        ALTER TABLE user_settings ADD COLUMN summarization_block_size INTEGER NOT NULL DEFAULT 0;
+        """,
+    ),
 ]
 
 

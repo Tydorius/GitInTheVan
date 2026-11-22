@@ -123,6 +123,11 @@
         <span class="timing">{ms(call.latency_ms)}</span>
         <span class="tokens">
           {call.prompt_tokens}+{call.completion_tokens}{call.tokens_source === 'estimated' ? ' est' : ''}
+          {#if (call.cached_tokens ?? 0) > 0}
+            <span class="cached" title="Prompt tokens served from provider cache">
+              · {(call.cached_tokens ?? 0).toLocaleString()} cached{#if call.prompt_tokens > 0} ({Math.round(((call.cached_tokens ?? 0) / call.prompt_tokens) * 100)}%){/if}
+            </span>
+          {/if}
         </span>
         {#if call.error}<span class="err">{call.error}</span>{/if}
       </div>
@@ -376,6 +381,7 @@
   .endpoint { color: var(--text-dim); }
   .timing, .tokens { font-family: var(--mono); color: var(--text-dim); margin-left: auto; }
   .tokens { margin-left: 0; }
+  .cached { color: var(--success); }
   .err { color: var(--danger); font-size: 12px; }
 
   .cantrips { display: flex; flex-direction: column; gap: 4px; }

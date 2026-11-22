@@ -614,6 +614,9 @@ async def process_cantrips(
                     {**s, "source": cantrip.name} for s in result.prompt_strips
                 )
 
+            if result.history_ops and position == "pre_driver":
+                body_json.setdefault("_gitv_history_ops", []).extend(result.history_ops)
+
         chat_data = state["chat_data"]
         user_data = state["user_data"]
 
@@ -1012,6 +1015,111 @@ def apply_prompt_strips(
     return applied
 
 
+def _newest_user_index(messages: list[dict[str, Any]]) -> int | None:
+    for i in range(len(messages) - 1, -1, -1):
+        if isinstance(messages[i], dict) and messages[i].get("role") == "user":
+            return i
+    return None
+
+
+def apply_history_ops(
+    body_json: dict[str, Any],
+    ops: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Apply context.history.keep_recent() / drop() ops (0.46.0, G4).
+
+    Operates ONLY on ``body_json["messages"]`` and never touches
+    ``body_json["_gitv_messages_for_hash"]`` so conversation identity hashing
+    stays invariant. The newest ``role == "user"`` message is always preserved.
+    """
+    from app.services.debug import debug_capture
+
+    pending_ops = ops if ops is not None else body_json.pop("_gitv_history_ops", [])
+    messages = body_json.get("messages")
+    if not isinstance(messages, list):
+        return {"ops_applied": 0, "before_count": 0, "after_count": 0, "dropped_count": 0}
+
+    before_count = len(messages)
+    if not pending_ops or before_count == 0:
+        return {
+            "ops_applied": 0,
+            "before_count": before_count,
+            "after_count": before_count,
+            "dropped_count": 0,
+        }
+
+    current: list[dict[str, Any]] = list(messages)
+    ops_applied = 0
+
+    for raw_op in pending_ops:
+        if not isinstance(raw_op, dict):
+            continue
+        op_kind = raw_op.get("op")
+        last_user_idx = _newest_user_index(current)
+
+        if op_kind == "keep_recent":
+            count = raw_op.get("count")
+            if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+                continue
+            non_system_indices = [
+                i for i, msg in enumerate(current)
+                if not (isinstance(msg, dict) and msg.get("role") == "system")
+            ]
+            kept_non_system = set(non_system_indices[-count:]) if count > 0 else set()
+            if last_user_idx is not None:
+                kept_non_system.add(last_user_idx)
+            current = [
+                msg for i, msg in enumerate(current)
+                if (isinstance(msg, dict) and msg.get("role") == "system")
+                or i in kept_non_system
+            ]
+            ops_applied += 1
+
+        elif op_kind == "drop":
+            raw_indices = raw_op.get("indices")
+            if not isinstance(raw_indices, list):
+                continue
+            n_msgs = len(current)
+            to_drop: set[int] = set()
+            for idx in raw_indices:
+                if not isinstance(idx, int) or isinstance(idx, bool):
+                    continue
+                resolved = idx if idx >= 0 else n_msgs + idx
+                if 0 <= resolved < n_msgs and resolved != last_user_idx:
+                    to_drop.add(resolved)
+            if to_drop:
+                current = [msg for i, msg in enumerate(current) if i not in to_drop]
+            ops_applied += 1
+
+    after_count = len(current)
+    dropped_count = before_count - after_count
+
+    if ops_applied > 0:
+        body_json["messages"] = current
+        debug_capture(
+            body_json,
+            "history_control",
+            "History Control",
+            detail=(
+                f"{ops_applied} op(s) applied: "
+                f"{before_count} -> {after_count} messages ({dropped_count} dropped)"
+            ),
+            metadata={
+                "ops_applied": ops_applied,
+                "before_count": before_count,
+                "after_count": after_count,
+                "dropped_count": dropped_count,
+            },
+        )
+
+    return {
+        "ops_applied": ops_applied,
+        "before_count": before_count,
+        "after_count": after_count,
+        "dropped_count": dropped_count,
+    }
+
+
 async def test_cantrip(
     code: str,
     context: dict,
@@ -1057,7 +1165,12 @@ async def _apply_prompt_requests(
     """
     from app.services.budget import estimate_tokens as _est_tokens
     from app.services.debug import debug_capture
-    from app.services.lorebook import MatchedEntry, book_entries_to_dicts, match_book_entries
+    from app.services.lorebook import (
+        INJECTION_POSITIONS,
+        MatchedEntry,
+        book_entries_to_dicts,
+        match_book_entries,
+    )
     from app.services.metrics import record_prompt_object
 
     rows: list = []
@@ -1097,7 +1210,7 @@ async def _apply_prompt_requests(
         for i, req in enumerate(injections[:20]):
             text = str(req.get("text") or "")
             position = str(req.get("position") or "before_last_message")
-            if position not in ("system_start", "before_last_message", "in_chat_system"):
+            if position not in INJECTION_POSITIONS:
                 position = "before_last_message"
             if not text.strip():
                 notes.append({"kind": "inject", "index": i, "outcome": "refused",

@@ -293,6 +293,9 @@
               {#if e.totals?.total_tokens}
                 · {e.totals.total_tokens.toLocaleString()} tok{e.totals.tokens_source === 'estimated' ? ' est' : ''}
               {/if}
+              {#if (e.totals?.cached_tokens ?? 0) > 0}
+                · {(e.totals.cached_tokens ?? 0).toLocaleString()} cached{#if (e.totals?.prompt_tokens ?? 0) > 0} ({Math.round(((e.totals.cached_tokens ?? 0) / e.totals.prompt_tokens) * 100)}%){/if}
+              {/if}
               {#if e.totals?.total_latency_ms}
                 · {(e.totals.total_latency_ms / 1000).toFixed(1)}s
               {/if}

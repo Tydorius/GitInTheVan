@@ -160,6 +160,7 @@ def record_llm_metric(
         "prompt_tokens": usage.get("prompt_tokens"),
         "completion_tokens": usage.get("completion_tokens"),
         "reasoning_tokens": usage.get("reasoning_tokens"),
+        "cached_tokens": usage.get("cached_tokens"),
         "tokens_source": _TOKENS_SOURCE_MAP.get(usage.get("tokens_source", ""), ""),
         "rule_id": rule_id or "",
         "context": run_source(body_json),
@@ -375,6 +376,7 @@ async def metrics_summary(
             "model": r.model, "rule_id": r.rule_id,
             "calls": 0, "ok": 0, "errors": 0, "retries": 0, "failovers": 0,
             "latencies": [], "prompt_tokens": 0, "completion_tokens": 0, "reasoning_tokens": 0,
+            "cached_tokens": 0,
             "tokens_source_counts": {"usage": 0, "estimate": 0},
         })
         g["calls"] += 1
@@ -392,6 +394,7 @@ async def metrics_summary(
             g["prompt_tokens"] += r.prompt_tokens or 0
             g["completion_tokens"] += r.completion_tokens or 0
             g["reasoning_tokens"] += r.reasoning_tokens or 0
+            g["cached_tokens"] += r.cached_tokens or 0
             g["tokens_source_counts"][r.tokens_source] += 1
 
     rule_names = await _rule_names(llm_rows)
@@ -474,6 +477,7 @@ async def list_llm_call_metrics(
          "model": r.model, "status_code": r.status_code, "latency_ms": r.latency_ms,
          "failover_attempt": r.failover_attempt, "prompt_tokens": r.prompt_tokens,
          "completion_tokens": r.completion_tokens, "reasoning_tokens": r.reasoning_tokens,
+         "cached_tokens": r.cached_tokens,
          "tokens_source": r.tokens_source, "rule_id": r.rule_id}
         for r in rows
     ], int(total)

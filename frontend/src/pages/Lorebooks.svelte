@@ -53,6 +53,16 @@
     importJsonValid = result.valid
     importJsonError = result.valid ? '' : result.error || ''
   }
+  const POSITION_OPTIONS = [
+    { value: 'before_last_message', label: 'Before Last Message' },
+    { value: 'system_start', label: 'System Start' },
+    { value: 'user_tail', label: 'Append to newest user message (cache-friendly)' },
+  ]
+
+  function positionLabel(value: string): string {
+    return POSITION_OPTIONS.find((o) => o.value === value)?.label || value
+  }
+
   let entryForm = {
     name: '', keys: '', secondary_keys: '', content: '',
     position: 'before_last_message', insertion_order: 10,
@@ -456,7 +466,7 @@
               <tr data-entry-id={e.id}>
                 <td>{e.name || '(unnamed)'}</td>
                 <td style="font-size: 11px; color: var(--text-dim);">{Array.isArray(e.keys) ? e.keys.join(', ') : ''}</td>
-                <td style="font-size: 11px;">{e.position}</td>
+                <td style="font-size: 11px;" title={positionLabel(e.position)}>{e.position}</td>
                 <td>
                   {#if e.is_disabled}<span class="badge inactive">Disabled</span>
                   {:else if e.is_constant}<span class="badge active">Constant</span>
@@ -543,8 +553,9 @@
         <div class="form-row">
           <div class="form-group"><label for="entry-pos">Position</label>
             <select id="entry-pos" bind:value={entryForm.position}>
-              <option value="before_last_message">Before Last Message</option>
-              <option value="system_start">System Start</option>
+              {#each POSITION_OPTIONS as opt}
+                <option value={opt.value}>{opt.label}</option>
+              {/each}
             </select>
           </div>
           <div class="form-group"><label for="entry-order">Insertion Order</label><input id="entry-order" type="number" bind:value={entryForm.insertion_order} /></div>

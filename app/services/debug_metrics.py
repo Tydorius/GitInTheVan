@@ -123,8 +123,28 @@ def record_llm_call(
     })
 
 
+def _coerce_non_negative_int(value: Any) -> int | None:
+    """Parse a non-negative integer token count, rejecting bools and invalid types."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float):
+        if value != value or value == float("inf") or value == float("-inf"):
+            return None
+        iv = int(value)
+        return iv if iv >= 0 else None
+    if isinstance(value, str):
+        try:
+            iv = int(value.strip())
+        except ValueError:
+            return None
+        return iv if iv >= 0 else None
+    return None
+
+
 def extract_usage(response_data: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Read prompt/completion/reasoning tokens from an upstream response.
+    """Read prompt/completion/reasoning/cached tokens from an upstream response.
 
     Returns None when the response carries no usable ``usage`` object, so the
     caller can fall back to estimation and label it. A ``usage`` block present
@@ -147,12 +167,22 @@ def extract_usage(response_data: dict[str, Any] | None) -> dict[str, Any] | None
     if isinstance(details, dict):
         reasoning = int(details.get("reasoning_tokens") or 0)
 
+    cached: int | None = None
+    prompt_details = usage.get("prompt_tokens_details")
+    if isinstance(prompt_details, dict):
+        cached = _coerce_non_negative_int(prompt_details.get("cached_tokens"))
+    if cached is None:
+        cached = _coerce_non_negative_int(usage.get("cache_read_input_tokens"))
+    if cached is None:
+        cached = _coerce_non_negative_int(usage.get("cached_tokens"))
+
     prompt = int(prompt or 0)
     completion = int(completion or 0)
     return {
         "prompt_tokens": prompt,
         "completion_tokens": completion,
         "reasoning_tokens": reasoning,
+        "cached_tokens": cached,
         "total_tokens": int(usage.get("total_tokens") or (prompt + completion)),
         "tokens_source": TOKENS_UPSTREAM,
     }
@@ -183,6 +213,7 @@ def _estimate_usage(
         "prompt_tokens": prompt,
         "completion_tokens": completion,
         "reasoning_tokens": reasoning,
+        "cached_tokens": None,
         "total_tokens": prompt + completion,
         "tokens_source": TOKENS_ESTIMATED,
     }
@@ -292,6 +323,7 @@ def summarize_run(
     prompt = sum(int(c.get("prompt_tokens") or 0) for c in calls)
     completion = sum(int(c.get("completion_tokens") or 0) for c in calls)
     reasoning = sum(int(c.get("reasoning_tokens") or 0) for c in calls)
+    cached = sum(int(c.get("cached_tokens") or 0) for c in calls)
     llm_latency = sum(float(c.get("latency_ms") or 0.0) for c in calls)
 
     sources = {c.get("tokens_source") for c in calls if c.get("tokens_source")}
@@ -307,6 +339,7 @@ def summarize_run(
         "prompt_tokens": prompt,
         "completion_tokens": completion,
         "reasoning_tokens": reasoning,
+        "cached_tokens": cached,
         "total_tokens": prompt + completion,
         "tokens_source": tokens_source,
         "llm_latency_ms": round(llm_latency, 1),
