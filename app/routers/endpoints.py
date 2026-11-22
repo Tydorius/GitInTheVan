@@ -354,16 +354,7 @@ async def list_endpoint_models(
 
     if endpoint.provider:
         try:
-            import httpx
-
-            from app.services.proxy import _do_forward_litellm
-            test_body = b'{"model": "test", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}'
-            timeout = httpx.Timeout(15.0, connect=10.0)
-            _, status_code = await _do_forward_litellm(
-                test_body, endpoint.provider, endpoint.base_url, endpoint.api_key, timeout,
-            )
-            if status_code in (200, 400, 404):
-                models = await _list_models_litellm(endpoint.provider, endpoint.api_key, endpoint.base_url)
+            models = await _list_models_litellm(endpoint.provider, endpoint.api_key, endpoint.base_url)
         except Exception as exc:
             logger.warning("Model list via litellm failed: %s", exc)
     else:
@@ -411,25 +402,44 @@ async def list_endpoint_models(
     return ModelListResponse(models=sorted(set(models)))
 
 
+def _strip_provider_prefix(model_id: str, provider: str) -> str:
+    """Normalize a LiteLLM/provider model ID into the bare ID GitV stores."""
+    cleaned = str(model_id).strip()
+    prefix = f"{provider}/"
+    if cleaned.lower().startswith(prefix.lower()):
+        cleaned = cleaned[len(prefix):]
+    if cleaned.startswith("models/"):
+        cleaned = cleaned[len("models/"):]
+    return cleaned
+
+
 async def _list_models_litellm(provider: str, api_key: str, base_url: str) -> list[str]:
     """Fetch available models using litellm for provider-based endpoints."""
+    import asyncio
+
     try:
         import litellm
     except ImportError:
         return []
 
+    raw_models: list[str] = []
+    api_base = base_url or None
     try:
-        api_base = base_url or None
-        response = await litellm.alist_models(
-            model=f"{provider}/",
-            api_key=api_key,
+        fetched = await asyncio.to_thread(
+            litellm.get_valid_models,
+            check_provider_endpoint=True,
+            custom_llm_provider=provider,
+            api_key=api_key or None,
             api_base=api_base,
         )
-        if isinstance(response, list):
-            return [str(m) for m in response]
-        if hasattr(response, "data"):
-            return [str(m.id) if hasattr(m, "id") else str(m) for m in response.data]
+        if isinstance(fetched, list):
+            raw_models = [str(m) for m in fetched if m]
     except Exception as exc:
-        logger.debug("litellm alist_models failed: %s", exc)
+        logger.warning("litellm get_valid_models failed for %s: %s", provider, exc)
 
-    return []
+    if not raw_models:
+        known = getattr(litellm, "models_by_provider", {}).get(provider)
+        if known:
+            raw_models = [str(m) for m in known if m]
+
+    return [_strip_provider_prefix(m, provider) for m in raw_models if _strip_provider_prefix(m, provider)]

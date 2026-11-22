@@ -2,6 +2,16 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.45.2] - 2026-11-21
+
+Fixes provider model listing ("Fetch from provider") for Gemini and other LiteLLM endpoints, updates context-window recognition for Gemini 3/4, and hardens response-tag stripping against truncated replies.
+
+### Fixed
+
+- **"Fetch from provider" now works for Gemini and other LiteLLM provider endpoints.** `_list_models_litellm` in `app/routers/endpoints.py` previously called a nonexistent `litellm.alist_models` method (and sent a dummy `"model": "test"` completion probe beforehand), silently failing and falling back to `default_model`. It now calls `litellm.get_valid_models(check_provider_endpoint=True, ...)` in a worker thread (with fallback to `litellm.models_by_provider`) and strips provider/`models/` prefixes so newly released models appear directly in the picker.
+- **Truncated tail response tags no longer leak on `max_tokens` cutoffs.** `strip_tags()` in `app/services/response_tags.py` now also strips unclosed registered tags cut off at the end of a reply (e.g. `<mud_move>E</m` or `<deed>partial...`), preventing partial hidden tag markup from reaching the client.
+- **Gemini 3 and Gemini 4 context-window estimation.** `estimate_context_window()` in `app/services/budget.py` now recognizes `gemini-3*` and `gemini-4*` models as 1M-token windows instead of falling back to the 8,192-token default.
+
 ## [0.45.1] - 2026-11-21
 
 Targeted fixes for map-turn hidden reply tags and macro name resolution, plus a reusable live end-to-end playtest harness.

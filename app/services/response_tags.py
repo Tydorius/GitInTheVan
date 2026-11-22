@@ -114,14 +114,23 @@ def extract_tags(content: str, names: list[str]) -> dict[str, list[str]]:
     return found
 
 
+def _truncated_tail_re(name: str) -> re.Pattern[str]:
+    """Match an unclosed registered tag cut off at the end of a reply
+    (e.g. ``<mud_move>E</m`` or ``<deed>partial`` from a max_tokens cutoff)."""
+    escaped = re.escape(name)
+    return re.compile(rf"<{escaped}\b[\s\S]*\Z", re.IGNORECASE)
+
+
 def strip_tags(content: str, names: list[str]) -> str:
-    """Remove registered tags and tidy the blank space they leave behind."""
+    """Remove registered tags (including unclosed truncated tail tags) and tidy
+    the blank space they leave behind."""
     if not isinstance(content, str) or not content:
         return content
     stripped = content
     for name in names:
         stripped = _paired_re(name).sub("", stripped)
         stripped = _selfclosing_re(name).sub("", stripped)
+        stripped = _truncated_tail_re(name).sub("", stripped)
     return re.sub(r"\n{3,}", "\n\n", stripped).strip()
 
 

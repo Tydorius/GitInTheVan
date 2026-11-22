@@ -71,7 +71,7 @@ def estimate_context_window(
         return 200000
     if "claude-3" in model_lower or "claude-opus" in model_lower or "claude-haiku" in model_lower:
         return 200000
-    if "gemini-2" in model_lower:
+    if "gemini-4" in model_lower or "gemini-3" in model_lower or "gemini-2" in model_lower:
         return 1000000
     if "gemini-1.5" in model_lower:
         return 1000000
