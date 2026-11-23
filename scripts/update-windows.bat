@@ -29,8 +29,23 @@ REM Arguments are optional and order-independent so that a NEW app version can
 REM drive an OLD copy of this script (which happens on the first hop of every
 REM upgrade) without the extra arguments breaking anything.
 REM   --auto        unattended; never wait for a keypress
-REM   <port>        port the server listens on (default 8000)
+REM   <port>        port the server listens on (overrides .env GITV_PORT / default 8000)
 set "GITV_PORT=8000"
+REM Read GITV_PORT from .env before parsing CLI arguments so manual runs on
+REM non-default-port installs target their own port instead of killing 8000.
+REM An explicit <port> CLI argument still overrides .env.
+if exist "%GITV_ROOT%\.env" (
+    for /f "usebackq tokens=1,* delims==" %%k in ("%GITV_ROOT%\.env") do (
+        set "_ENV_KEY=%%k"
+        set "_ENV_KEY=!_ENV_KEY: =!"
+        if /I "!_ENV_KEY!"=="GITV_PORT" (
+            set "_ENV_PORT=%%l"
+            set "_ENV_PORT=!_ENV_PORT: =!"
+            set "_ENV_PORT=!_ENV_PORT:"=!"
+            echo !_ENV_PORT!| findstr /R "^[0-9][0-9]*$" >nul && set "GITV_PORT=!_ENV_PORT!"
+        )
+    )
+)
 set "GITV_AUTO=0"
 for %%a in (%*) do (
     if /I "%%a"=="--auto" (
@@ -57,6 +72,7 @@ echo ============================================ > "%LOG_FILE%"
 echo   GitInTheVan Auto-Update Log >> "%LOG_FILE%"
 echo   Date: %DATE% %TIME% >> "%LOG_FILE%"
 echo   Script: %~dp0 >> "%LOG_FILE%"
+echo   Port: !GITV_PORT! >> "%LOG_FILE%"
 echo ============================================ >> "%LOG_FILE%"
 
 echo ============================================

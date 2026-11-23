@@ -452,3 +452,48 @@ class TestPortResolution:
 
     def test_default_when_nothing_is_configured(self):
         assert harness.resolve_port({}, "macos") == 8100
+
+
+class TestUpgradeSubcommand:
+    def test_resolves_updater_script_per_target(self):
+        win = harness.TargetSpec(name="windows", dest="localhost", folder="E:\\t", kind="windows")
+        mac = harness.TargetSpec(name="macos", dest="m", folder="~/t", kind="posix")
+        lin = harness.TargetSpec(name="linux", dest="l", folder="~/t", kind="posix")
+        assert harness._resolve_updater_script(win) == "scripts\\update-windows.bat"
+        assert harness._resolve_updater_script(mac) == "scripts/update-macos.sh"
+        assert harness._resolve_updater_script(lin) == "scripts/update-linux.sh"
+
+    def test_rejects_docker_target(self):
+        docker = harness.TargetSpec(name="docker", dest="d", folder="~/t", kind="docker")
+        state = harness.RunState(
+            run_id="r1", target="docker", kind="docker", dest="d",
+            run_dir="/tmp/_gitv-testruns/r1", branch="v0.45.2", port=8200, mock_port=8299,
+        )
+        with pytest.raises(harness.HarnessError, match="native targets"):
+            harness.cmd_upgrade({}, docker, None, state, type("A", (), {"upgrade_to": "main"})())
+
+    def test_windows_upgrade_passes_isolated_port_explicitly(self, monkeypatch, tmp_path):
+        win = harness.TargetSpec(name="windows", dest="localhost", folder=str(tmp_path), kind="windows")
+        state = harness.RunState(
+            run_id="r-win-upg", target="windows", kind="windows", dest="localhost",
+            run_dir=str(tmp_path / "_gitv-testruns" / "r-win-upg"),
+            branch="v0.45.2", port=8142, mock_port=8199,
+        )
+        monkeypatch.setattr(harness, "RUNS_DIR", tmp_path / "runs")
+        monkeypatch.setattr(harness, "wait_healthy", lambda base, timeout=300: True)
+
+        commands: list[str] = []
+
+        class FakeTransport:
+            def run(self, cmd, check=False, timeout=60):
+                commands.append(cmd)
+                out = "UPGRADE_SHA=deadbeef1234\n" if "git archive" in cmd else ""
+                return type("P", (), {"returncode": 0, "stdout": out, "stderr": ""})()
+
+        args = type("A", (), {"upgrade_to": "v0.46.1"})()
+        harness.cmd_upgrade({"BRANCH": "main"}, win, FakeTransport(), state, args)
+
+        assert any("git archive" in c and "data\\gitinthevan.zip" in c for c in commands)
+        assert any("update-windows.bat\" --auto 8142" in c for c in commands)
+        assert state.commit == "deadbeef1234"
+        assert "upgraded to v0.46.1" in state.notes

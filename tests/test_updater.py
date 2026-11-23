@@ -1099,3 +1099,70 @@ class TestUpdateScriptGuardRails:
                 f"{name}:{first_use + 1} uses a System32 tool before PATH is hardened at "
                 f"line {hardened + 1}: {lines[first_use]!r}"
             )
+
+
+class TestUpdaterPortFromEnv:
+    """0.46.1: manual updater runs must read GITV_PORT from .env before defaulting to 8000."""
+
+    SCRIPTS = ("update-windows.bat", "update-linux.sh", "update-macos.sh")
+
+    @pytest.mark.parametrize("name", SCRIPTS)
+    def test_updater_reads_gitv_port_from_dotenv_before_cli_override(self, name):
+        text = (ROOT / "scripts" / name).read_text(encoding="utf-8")
+        assert ".env" in text, f"{name} does not read .env for GITV_PORT"
+        assert "GITV_PORT=" in text, f"{name} does not parse GITV_PORT from .env"
+        # .env lookup must precede the CLI argument loop so explicit <port> still wins.
+        env_idx = text.index(".env")
+        cli_marker = "for %%a in (%*)" if name.endswith(".bat") else 'for arg in "$@"'
+        cli_idx = text.index(cli_marker)
+        assert env_idx < cli_idx, f"{name}: .env port read must run before CLI arg parsing"
+
+    def test_windows_updater_port_precedence_simulated(self, tmp_path):
+        """Mechanically execute the exact port-resolution block from update-windows.bat."""
+        if subprocess.os.name != "nt":
+            pytest.skip("cmd.exe simulation only runs on Windows")
+
+        bat_text = (ROOT / "scripts" / "update-windows.bat").read_text(encoding="utf-8")
+        # Extract from `set "GITV_PORT=8000"` through the end of the CLI arg loop.
+        start = bat_text.index('set "GITV_PORT=8000"')
+        end = bat_text.index("REM Rotate the previous run's log")
+        snippet = bat_text[start:end]
+
+        probe = tmp_path / "probe.bat"
+        probe.write_text(
+            "@echo off\r\n"
+            "setlocal enabledelayedexpansion\r\n"
+            f'set "GITV_ROOT={tmp_path}"\r\n'
+            + snippet.replace("\r\n", "\n").replace("\n", "\r\n")
+            + "\r\necho RESOLVED=!GITV_PORT!\r\n",
+            encoding="utf-8",
+        )
+
+        def _run(*args: str) -> str:
+            proc = subprocess.run(
+                ["cmd.exe", "/c", str(probe), *args],
+                capture_output=True, text=True, check=True, timeout=15,
+            )
+            for line in proc.stdout.splitlines():
+                if line.startswith("RESOLVED="):
+                    return line.split("=", 1)[1].strip()
+            raise AssertionError(f"No RESOLVED line in output: {proc.stdout!r}")
+
+        # 1. No .env, no CLI arg -> 8000
+        assert _run("--auto") == "8000"
+
+        # 2. .env sets GITV_PORT=8123 -> 8123
+        (tmp_path / ".env").write_text("# comment\nGITV_PORT=8123\n", encoding="utf-8")
+        assert _run("--auto") == "8123"
+
+        # 3. Quoted / spaced .env value -> 8456
+        (tmp_path / ".env").write_text('GITV_PORT = "8456"\n', encoding="utf-8")
+        assert _run("--auto") == "8456"
+
+        # 4. Non-numeric .env value falls back to 8000
+        (tmp_path / ".env").write_text("GITV_PORT=notaport\n", encoding="utf-8")
+        assert _run("--auto") == "8000"
+
+        # 5. Explicit CLI port overrides .env
+        (tmp_path / ".env").write_text("GITV_PORT=8123\n", encoding="utf-8")
+        assert _run("--auto", "9090") == "9090"

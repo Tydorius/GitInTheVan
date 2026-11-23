@@ -1001,6 +1001,125 @@ def cmd_down(cfg: dict, target: TargetSpec, tr: Transport, state: RunState) -> N
     state.save()
 
 
+def _resolve_updater_script(target: TargetSpec) -> str:
+    if target.kind == "windows":
+        return "scripts\\update-windows.bat"
+    if target.name == "macos":
+        return "scripts/update-macos.sh"
+    return "scripts/update-linux.sh"
+
+
+def cmd_upgrade(cfg: dict, target: TargetSpec, tr: Transport, state: RunState, args) -> None:
+    """Test an in-place upgrade of a running throwaway install using the real updater.
+
+    Archives `args.upgrade_to` (branch, tag, or commit) into `data/gitinthevan.zip`
+    using the same single-root-folder layout as a GitHub zipball, then invokes the
+    target's update script with `--auto <state.port>` (always passing the isolated
+    run port explicitly so port 8000 is never touched).
+    """
+    if target.kind == "docker":
+        raise HarnessError(
+            "in-place `upgrade` is only supported on native targets (windows/linux/macos); "
+            "docker upgrades by rebuilding the image"
+        )
+
+    target_ref = (getattr(args, "upgrade_to", "") or cfg.get("BRANCH", "main")).strip()
+    section(f"UPGRADE  run={state.run_id}  {state.branch} -> {target_ref}  port={state.port}")
+
+    src = f"{state.run_dir}/GitInTheVan"
+    updater = _resolve_updater_script(target)
+
+    say(f"archiving {target_ref} into data/gitinthevan.zip")
+    if target.kind == "windows":
+        win_src = src.replace("/", "\\")
+        archive_cmd = (
+            f"Set-Location '{win_src}'; "
+            f"git fetch --tags origin '{target_ref}'; "
+            f"if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}; "
+            f"$sha = (git rev-parse FETCH_HEAD).Trim(); "
+            f"git archive --format=zip --prefix=GitInTheVan-upgrade/ FETCH_HEAD -o data\\gitinthevan.zip; "
+            f"if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}; "
+            f"Write-Output \"UPGRADE_SHA=$sha\""
+        )
+    else:
+        archive_cmd = (
+            f"cd {shlex.quote(src)} && "
+            f"git fetch --tags origin {shlex.quote(target_ref)} && "
+            f"sha=$(git rev-parse FETCH_HEAD) && "
+            f"git archive --format=zip --prefix=GitInTheVan-upgrade/ FETCH_HEAD -o data/gitinthevan.zip && "
+            f"echo \"UPGRADE_SHA=$sha\""
+        )
+
+    proc = tr.run(archive_cmd, check=False, timeout=300)
+    if proc.returncode != 0:
+        raise HarnessError(
+            f"failed to archive upgrade ref {target_ref!r} (exit {proc.returncode}):\n"
+            f"{(proc.stderr or proc.stdout or '').strip()}"
+        )
+
+    new_sha = ""
+    for line in (proc.stdout or "").splitlines():
+        if line.startswith("UPGRADE_SHA="):
+            new_sha = line.split("=", 1)[1].strip()
+
+    say(f"running {updater} --auto {state.port}")
+    if target.kind == "windows":
+        win_src = src.replace("/", "\\")
+        # Detached via Start-Process with no redirected pipes: the updater's
+        # maintenance page inherits open handles and would block piped stdout.
+        run_cmd = (
+            f"$p = Start-Process -FilePath 'cmd.exe' "
+            f"-ArgumentList '/c','\"{win_src}\\{updater}\" --auto {state.port}' "
+            f"-WorkingDirectory '{win_src}' -WindowStyle Hidden -PassThru; "
+            f"$p.WaitForExit(1800000) | Out-Null; "
+            f"if (-not $p.HasExited) {{ $p.Kill(); exit 124 }}; "
+            f"exit $p.ExitCode"
+        )
+    else:
+        run_cmd = (
+            f"cd {shlex.quote(src)} && "
+            f"bash {shlex.quote(updater)} --auto {state.port}"
+        )
+
+    uproc = tr.run(run_cmd, check=False, timeout=1900)
+    if uproc.returncode != 0:
+        raise HarnessError(
+            f"updater script exited {uproc.returncode} on {target.name}:\n"
+            f"{(uproc.stderr or uproc.stdout or '').strip()[-2000:]}"
+        )
+
+    base = instance_url(state, cfg)
+    say(f"waiting for upgraded server at {base}/health")
+    if not wait_healthy(base, timeout=300):
+        raise HarnessError(
+            f"upgraded instance did not become healthy at {base}/health within 300s"
+        )
+
+    # Refresh .server.pid from data/gitv.pid so `down` stops the restarted server.
+    if target.kind == "windows":
+        win_src = src.replace("/", "\\")
+        win_run = state.run_dir.replace("/", "\\")
+        tr.run(
+            f"if (Test-Path '{win_src}\\data\\gitv.pid') {{ "
+            f"Copy-Item -Force '{win_src}\\data\\gitv.pid' '{win_run}\\.server.pid' }}",
+            check=False,
+            timeout=60,
+        )
+    else:
+        tr.run(
+            f"[ -f {shlex.quote(src)}/data/gitv.pid ] && "
+            f"cp -f {shlex.quote(src)}/data/gitv.pid {shlex.quote(state.run_dir)}/.server.pid || true",
+            check=False,
+            timeout=60,
+        )
+
+    if new_sha:
+        state.commit = new_sha
+    state.notes.append(f"upgraded to {target_ref}")
+    state.save()
+    section("UPGRADE COMPLETE")
+
+
 # ------------------------------------------------------------------ cli -----
 
 def main() -> int:
@@ -1010,22 +1129,26 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Subcommands run in the order given:\n"
-            "  up     clone at -branch, run the real deploy script, create admin, seed endpoint\n"
-            "  test   flow_test.py on the target, then cross-network checks from here\n"
-            "  hold   print credentials and wait, so you can test by hand\n"
-            "  logs   pull and scan logs into the archive\n"
-            "  down   stop the instance and delete the run directory\n"
-            "  all    up test logs down\n"
+            "  up       clone at -branch, run the real deploy script, create admin, seed endpoint\n"
+            "  upgrade  archive -upgrade-to into data/gitinthevan.zip and run the real updater\n"
+            "  test     flow_test.py on the target, then cross-network checks from here\n"
+            "  hold     print credentials and wait, so you can test by hand\n"
+            "  logs     pull and scan logs into the archive\n"
+            "  down     stop the instance and delete the run directory\n"
+            "  all      up test logs down\n"
         ),
     )
     parser.add_argument("commands", nargs="+",
-                        choices=["up", "test", "hold", "logs", "down", "all"])
+                        choices=["up", "upgrade", "test", "hold", "logs", "down", "all"])
     parser.add_argument("-env", dest="env", default="testing/harness.env",
                         help="config file (default: testing/harness.env)")
     parser.add_argument("-target", dest="target", required=True,
                         choices=["macos", "linux", "docker", "windows"])
     parser.add_argument("-branch", dest="branch", default="",
                         help="branch to clone (default: BRANCH from config)")
+    parser.add_argument("-upgrade-to", dest="upgrade_to", default="",
+                        help="branch, tag, or commit to upgrade to when running `upgrade` "
+                             "(default: BRANCH from config)")
     parser.add_argument("-run", dest="run_id", default="",
                         help="operate on a specific run id instead of the latest")
     parser.add_argument("-jump", dest="jump", default=None,
@@ -1058,7 +1181,9 @@ def main() -> int:
             if state is None:
                 state = RunState.load(args.run_id) if args.run_id else RunState.latest(args.target)
 
-            if command == "test":
+            if command == "upgrade":
+                cmd_upgrade(cfg, target, tr, state, args)
+            elif command == "test":
                 ok &= cmd_test(cfg, target, tr, state)
             elif command == "hold":
                 cmd_hold(cfg, state)

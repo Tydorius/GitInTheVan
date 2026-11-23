@@ -10,8 +10,18 @@ CHAIN_LOG="$GITV_ROOT/data/update-chain.log"
 # drive an OLD copy of this script (which happens on the first hop of every
 # upgrade) without the extra arguments breaking anything.
 #   --auto        unattended; never wait for a keypress
-#   <port>        port the server listens on (default 8000)
+#   <port>        port the server listens on (overrides .env GITV_PORT / default 8000)
 GITV_PORT=8000
+# Read GITV_PORT from .env before parsing CLI arguments so manual runs on
+# non-default-port installs target their own port instead of killing 8000.
+# An explicit <port> CLI argument still overrides .env.
+if [ -f "$GITV_ROOT/.env" ]; then
+    _env_port=$(grep -E '^[[:space:]]*GITV_PORT=' "$GITV_ROOT/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"'\''\r')
+    case "$_env_port" in
+        ''|*[!0-9]*) ;;
+        *) GITV_PORT="$_env_port" ;;
+    esac
+fi
 GITV_AUTO=0
 GITV_INSTALL_DEV=0
 for arg in "$@"; do

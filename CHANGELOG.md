@@ -2,6 +2,18 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.46.1] - 2026-11-23
+
+Fixes manual runs of the update scripts on non-default-port installs by reading `GITV_PORT` from `.env`, and adds a repeatable `upgrade` subcommand to the cross-platform test harness.
+
+### Fixed
+
+- **Update scripts now read `GITV_PORT` from `.env` before falling back to `8000`.** `scripts/update-windows.bat`, `scripts/update-macos.sh`, and `scripts/update-linux.sh` previously ignored `.env` and defaulted straight to port `8000` unless a port was passed on the command line, causing manual runs on non-default-port installs to target whatever was running on `8000`. Port precedence is now: explicit CLI `<port>` argument → numeric `GITV_PORT` from `.env` → `8000`. `update-windows.bat` also now logs the resolved `Port:` in `data/updater.log`.
+
+### Added
+
+- **In-place upgrade testing in `testing/harness.py`.** Added an `upgrade` subcommand and `-upgrade-to <ref>` flag (e.g. `up upgrade test logs down`) that archives the target ref into `data/gitinthevan.zip`, invokes the target's real update script with `--auto <isolated_port>`, waits for `/health`, and refreshes `.server.pid` so dependency jumps and migrations can be verified repeatably on isolated ports.
+
 ## [0.46.0] - 2026-11-22
 
 Token-efficiency and local-model offload release: adds cache-friendly `user_tail` prompt injection, surfaces provider `cached_tokens` across Debug/Compare/Metrics, upgrades LiteLLM to `1.110.2` with Gemini 4 `thinking_level` support, adds cantrip message-level history control (`context.history`), adds per-stage `history_window` and stage-cantrip strip/history support on Maps, and upgrades conversation summarization to incremental, block-aligned compaction.
