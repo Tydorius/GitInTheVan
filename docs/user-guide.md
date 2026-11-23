@@ -2358,6 +2358,30 @@ Prevents users from causing internal denial-of-service by setting absurdly high 
 - **Max Passenger Calls Per Request**: Ceiling shared by every cantrip and map stage in one request (default 3). A user's own budget in Settings can lower it, never raise it
 - **Passenger Call Timeout**: Per-call upstream timeout in seconds (default 60)
 
+### Cantrip Sandbox Pool
+
+The same card also holds the **Cantrip Sandbox Pool** controls. Every cantrip runs in its own
+fresh Deno process that exits the moment it finishes — the pool just keeps a few processes
+pre-warmed (already booted, waiting for a job) so a request doesn't pay the ~50 ms process
+start-up cost per cantrip. A warmed worker is never reused: each cantrip still gets
+single-use OS-process isolation exactly as before.
+
+![Cantrip Sandbox Pool](media/gitv-admin-deno-pool.png)
+
+*The Cantrip Sandbox Pool block with its live status line, captured 2026-11-23.*
+
+- **Min Warm Processes** (default 1, 0–16): how many workers to keep warm at all times
+- **Max Warm Processes** (default 4, 0–32): ceiling for burst warm-up — when a request is about
+  to run N cantrips, the pool pre-warms up to this many ahead of it; surplus workers idle out
+  after the burst timeout
+- **Burst Idle Timeout** (default 60 s, 10–600): how long a burst-warmed worker stays warm
+  before being trimmed back down to the minimum
+- The status line under the fields shows live counters: how many workers are warm right now,
+  how many cantrips have run on a warm worker, and how many had to start cold
+- Setting both min and max to **0** disables pre-warming entirely (every cantrip spawns cold,
+  as before 0.47.0)
+- Changes take effect immediately on save — no restart
+
 ### Runtime Log Level
 
 The Global Caps tab also includes a Runtime Log Level override. Temporarily change the server log level without restarting — changes take effect immediately.
