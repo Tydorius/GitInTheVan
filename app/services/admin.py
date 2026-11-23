@@ -85,11 +85,20 @@ def apply_admin_runtime_overrides(s: AdminSettings) -> None:
     stays the seed.
     """
     from app.config import settings as runtime_settings
+    from app.services import deno_runner
 
     runtime_settings.rate_limit_proxy_per_min = s.rate_limit_proxy_per_min
     runtime_settings.rate_limit_api_per_min = s.rate_limit_api_per_min
     if s.runtime_log_level:
         apply_runtime_log_level(s.runtime_log_level)
+
+    pool = getattr(deno_runner, "deno_pool", None)
+    if pool is not None:
+        pool.configure(
+            min_idle=s.deno_pool_min_idle,
+            max_idle=s.deno_pool_max_idle,
+            idle_ttl_seconds=s.deno_pool_idle_ttl_seconds,
+        )
 
 
 async def apply_admin_overrides_at_startup() -> None:

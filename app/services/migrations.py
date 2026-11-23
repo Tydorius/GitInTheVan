@@ -1608,6 +1608,15 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
         ALTER TABLE user_settings ADD COLUMN summarization_block_size INTEGER NOT NULL DEFAULT 0;
         """,
     ),
+    (
+        "071_admin_deno_pool_settings",
+        # 0.47.0: Deno warm process pool sizing and burst idle TTL on admin_settings.
+        """
+        ALTER TABLE admin_settings ADD COLUMN deno_pool_min_idle INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE admin_settings ADD COLUMN deno_pool_max_idle INTEGER NOT NULL DEFAULT 4;
+        ALTER TABLE admin_settings ADD COLUMN deno_pool_idle_ttl_seconds INTEGER NOT NULL DEFAULT 60;
+        """,
+    ),
 ]
 
 

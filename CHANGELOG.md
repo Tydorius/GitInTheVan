@@ -2,6 +2,20 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.47.0] - 2026-11-23
+
+Adds a warm single-use Deno worker pool with dynamic burst scaling (configurable live from the Admin panel) plus cantrip hot-path DB and context batching, cutting chained cantrip latency dramatically while preserving full per-cantrip process isolation.
+
+### Added
+
+- **Warm single-use Deno worker pool (`app/services/deno_worker.mjs`, `app/services/deno_runner.py`).** Replaces per-cantrip `deno_template.mjs` base64 substitution and temp `.mjs` file writes with a static single-use worker booted ahead of time under the exact same 8 `--deny-*` sandbox flags. Each warm worker blocks on `stdin` for one newline-delimited JSON job frame, executes the cantrip (supporting both plain and Passenger interactive modes), writes JSON to `stdout`, and exits immediately — zero cross-cantrip state, zero temp files, zero base64 overhead, and zero per-cantrip antivirus scans.
+- **Dynamic burst scaling & Admin UI controls.** Admins can configure `deno_pool_min_idle` (default `1`, range `0–16`), `deno_pool_max_idle` (default `4`, range `0–32`), and `deno_pool_idle_ttl_seconds` (default `60`, range `10–600`) live in **Admin → Caps & Limits → Cantrip Sandbox Pool** (or `PUT /api/admin/settings`) without restarting, and inspect live `deno_pool_status` (`idle_count`, `total_warm_hits`, `total_cold_spawns`). Setting both min and max to `0` disables pre-warming. `app/main.py` lifespan starts baseline warm-up on boot and cleanly terminates/reaps all idle workers on shutdown.
+- **Pre-emptive warm-up and cantrip hot-path batching.** `process_cantrips`, `process_cantrips_post_driver`, and `run_pre_forward_ordered` now trigger `deno_pool.ensure_warm(len(cantrips))` as soon as active cantrips are resolved (overlapping warm-up with DB store loads), batch-load and batch-save `CantripData` in one query/commit per pass, pass `before=` diffs in `pipeline_order.py` to skip no-op `chat_data`/`user_data` writes, and skip redundant `build_context()` rebuilds when intervening steps did not mutate `messages`.
+
+### Schema
+
+- `071_admin_deno_pool_settings`: adds `deno_pool_min_idle INTEGER NOT NULL DEFAULT 1`, `deno_pool_max_idle INTEGER NOT NULL DEFAULT 4`, and `deno_pool_idle_ttl_seconds INTEGER NOT NULL DEFAULT 60` to `admin_settings`.
+
 ## [0.46.0] - 2026-11-22
 
 Token-efficiency and local-model offload release: adds cache-friendly `user_tail` prompt injection, surfaces provider `cached_tokens` across Debug/Compare/Metrics, upgrades LiteLLM to `1.110.2` with Gemini 4 `thinking_level` support, adds cantrip message-level history control (`context.history`), adds per-stage `history_window` and stage-cantrip strip/history support on Maps, and upgrades conversation summarization to incremental, block-aligned compaction.

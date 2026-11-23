@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import atexit
 import base64
 import json
 import logging
@@ -8,6 +9,8 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
+from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,6 +19,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _TEMPLATE_PATH = Path(__file__).parent / "deno_template.mjs"
+_WORKER_PATH = Path(__file__).parent / "deno_worker.mjs"
 
 
 def _find_deno() -> str | None:
@@ -166,6 +170,396 @@ def _build_runner_script(
     )
 
 
+# Cantrips get no permissions. Deno denies everything by default when no --allow-*
+# flags are passed, so this list is behaviorally a no-op — it exists so the sandbox's
+# posture is explicit and auditable in code rather than implied by the absence of flags.
+# See Planning/security-control-document.md for rationale.
+_DENO_DENY_FLAGS = [
+    "--deny-net",
+    "--deny-read",
+    "--deny-write",
+    "--deny-run",
+    "--deny-env",
+    "--deny-ffi",
+    "--deny-sys",
+    "--deny-import",
+]
+
+
+class DenoWorkerPool:
+    """Dynamic pool of pre-warmed, single-use Deno workers.
+
+    Each idle worker has already booted the V8 isolate with ``deno_worker.mjs``
+    and is blocked on stdin waiting for one newline-delimited JSON job frame.
+    Once checked out and fed a job, the worker runs the script, writes the
+    result JSON to stdout, and exits -- never reused for a second job.
+    """
+
+    def __init__(
+        self,
+        min_idle: int = 1,
+        max_idle: int = 4,
+        idle_ttl_seconds: int = 60,
+    ) -> None:
+        self.min_idle: int = min_idle
+        self.max_idle: int = max_idle
+        self.idle_ttl_seconds: int | float = idle_ttl_seconds
+        self._idle: deque[tuple[asyncio.subprocess.Process, float, asyncio.AbstractEventLoop]] = deque()
+        self._spawn_tasks: set[asyncio.Task[None]] = set()
+        self._trim_task: asyncio.Task[None] | None = None
+        self.last_burst_at: float = 0.0
+        self.total_warm_hits: int = 0
+        self.total_cold_spawns: int = 0
+        self._shutting_down: bool = False
+
+    @staticmethod
+    def _get_running_loop() -> asyncio.AbstractEventLoop | None:
+        try:
+            return asyncio.get_running_loop()
+        except RuntimeError:
+            return None
+
+    @staticmethod
+    def _kill_proc_sync(proc: asyncio.subprocess.Process) -> None:
+        if proc.stdin is not None:
+            with suppress(Exception):
+                proc.stdin.close()
+        if proc.returncode is None:
+            with suppress(ProcessLookupError, OSError):
+                proc.kill()
+
+    def _discard_proc(
+        self,
+        proc: asyncio.subprocess.Process,
+        proc_loop: asyncio.AbstractEventLoop,
+        current_loop: asyncio.AbstractEventLoop | None,
+    ) -> None:
+        self._kill_proc_sync(proc)
+        if current_loop is not None and proc_loop is current_loop and not current_loop.is_closed():
+            task = current_loop.create_task(self._reap_proc(proc))
+            task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+
+    @staticmethod
+    def _close_transport(proc: asyncio.subprocess.Process) -> None:
+        transport = getattr(proc, "_transport", None)
+        if transport is not None:
+            with suppress(Exception):
+                transport.close()
+
+    @staticmethod
+    async def _reap_proc(proc: asyncio.subprocess.Process) -> None:
+        with suppress(Exception):
+            await proc.wait()
+        DenoWorkerPool._close_transport(proc)
+
+    def _prune_stale(self, current_loop: asyncio.AbstractEventLoop | None) -> None:
+        kept: deque[tuple[asyncio.subprocess.Process, float, asyncio.AbstractEventLoop]] = deque()
+        while self._idle:
+            entry = self._idle.popleft()
+            proc, _, proc_loop = entry
+            if (
+                proc.returncode is not None
+                or proc_loop.is_closed()
+                or (current_loop is not None and proc_loop is not current_loop)
+            ):
+                self._discard_proc(proc, proc_loop, current_loop)
+            else:
+                kept.append(entry)
+        self._idle = kept
+
+        stale_tasks = [
+            t for t in self._spawn_tasks
+            if t.done() or t.get_loop().is_closed() or (current_loop is not None and t.get_loop() is not current_loop)
+        ]
+        for t in stale_tasks:
+            self._spawn_tasks.discard(t)
+
+        if self._trim_task is not None and (
+            self._trim_task.done()
+            or self._trim_task.get_loop().is_closed()
+            or (current_loop is not None and self._trim_task.get_loop() is not current_loop)
+        ):
+            self._trim_task = None
+
+    def _trim_expired_burst(self, current_loop: asyncio.AbstractEventLoop | None) -> None:
+        now = time.monotonic()
+        while len(self._idle) > self.min_idle:
+            proc, spawned_at, proc_loop = self._idle[0]
+            if now - spawned_at >= self.idle_ttl_seconds:
+                self._idle.popleft()
+                self._discard_proc(proc, proc_loop, current_loop)
+            else:
+                break
+
+    async def _spawn_worker(self) -> asyncio.subprocess.Process:
+        return await asyncio.create_subprocess_exec(
+            DENO_PATH,
+            "run",
+            "--quiet",
+            *_DENO_DENY_FLAGS,
+            str(_WORKER_PATH),
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+    async def _spawn_into_pool(self, loop: asyncio.AbstractEventLoop) -> None:
+        try:
+            proc = await self._spawn_worker()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.debug("Failed to pre-warm Deno worker", exc_info=True)
+            return
+
+        if (
+            self._shutting_down
+            or proc.returncode is not None
+            or len(self._idle) >= self.max_idle
+            or self._get_running_loop() is not loop
+        ):
+            self._kill_proc_sync(proc)
+            with suppress(Exception):
+                await proc.wait()
+            self._close_transport(proc)
+            return
+
+        self._idle.append((proc, time.monotonic(), loop))
+        if len(self._idle) > self.min_idle:
+            self._ensure_trim_timer(loop)
+
+    def _schedule_spawns(self, target: int, loop: asyncio.AbstractEventLoop) -> None:
+        target = min(max(0, target), self.max_idle)
+        if target <= 0 or not DENO_PATH or self._shutting_down:
+            return
+        deficit = target - (len(self._idle) + len(self._spawn_tasks))
+        for _ in range(max(0, deficit)):
+            task = loop.create_task(self._spawn_into_pool(loop))
+            self._spawn_tasks.add(task)
+            task.add_done_callback(self._spawn_tasks.discard)
+
+    def _ensure_trim_timer(self, loop: asyncio.AbstractEventLoop) -> None:
+        if self._trim_task is None or self._trim_task.done():
+            self._trim_task = loop.create_task(self._trim_loop(loop))
+
+    async def _trim_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        try:
+            while not self._shutting_down:
+                self._prune_stale(loop)
+                self._trim_expired_burst(loop)
+                if len(self._idle) <= self.min_idle:
+                    return
+                oldest_spawned_at = self._idle[0][1]
+                remaining = self.idle_ttl_seconds - (time.monotonic() - oldest_spawned_at)
+                sleep_for = max(0.05, min(remaining, 1.0))
+                await asyncio.sleep(sleep_for)
+        except asyncio.CancelledError:
+            return
+        finally:
+            if self._trim_task is asyncio.current_task():
+                self._trim_task = None
+
+    def configure(self, min_idle: int, max_idle: int, idle_ttl_seconds: int = 60) -> None:
+        self.min_idle = max(0, min(16, int(min_idle)))
+        self.max_idle = max(self.min_idle, min(32, int(max_idle)))
+        self.idle_ttl_seconds = max(10, min(600, int(idle_ttl_seconds)))
+
+        loop = self._get_running_loop()
+        if loop is None:
+            return
+
+        self._prune_stale(loop)
+        while len(self._idle) > self.max_idle:
+            proc, _, proc_loop = self._idle.pop()
+            self._discard_proc(proc, proc_loop, loop)
+
+        if DENO_PATH and len(self._idle) + len(self._spawn_tasks) < self.min_idle:
+            self._schedule_spawns(self.min_idle, loop)
+        elif len(self._idle) > self.min_idle:
+            self._ensure_trim_timer(loop)
+
+    def ensure_warm(self, needed: int) -> None:
+        if self.max_idle <= 0 or not DENO_PATH or self._shutting_down:
+            return
+        loop = self._get_running_loop()
+        if loop is None:
+            return
+
+        self._prune_stale(loop)
+        self._trim_expired_burst(loop)
+
+        burst_target = min(max(self.min_idle, int(needed)), self.max_idle)
+        self.last_burst_at = time.monotonic()
+        if len(self._idle) + len(self._spawn_tasks) < burst_target:
+            self._schedule_spawns(burst_target, loop)
+        if burst_target > self.min_idle:
+            self._ensure_trim_timer(loop)
+
+    async def checkout(self) -> tuple[asyncio.subprocess.Process, bool]:
+        loop = asyncio.get_running_loop()
+        self._prune_stale(loop)
+        self._trim_expired_burst(loop)
+
+        while self._idle:
+            proc, _, proc_loop = self._idle.popleft()
+            if proc_loop is not loop or proc_loop.is_closed() or proc.returncode is not None:
+                self._discard_proc(proc, proc_loop, loop)
+                continue
+            self.total_warm_hits += 1
+            if self.max_idle > 0 and self.min_idle > 0:
+                self._schedule_spawns(self.min_idle, loop)
+            return proc, True
+
+        proc = await self._spawn_worker()
+        self.total_cold_spawns += 1
+        if self.max_idle > 0 and self.min_idle > 0:
+            self._schedule_spawns(self.min_idle, loop)
+        return proc, False
+
+    async def shutdown(self) -> None:
+        self._shutting_down = True
+        try:
+            current_loop = self._get_running_loop()
+            if self._trim_task is not None:
+                if not self._trim_task.done() and (
+                    current_loop is None or self._trim_task.get_loop() is current_loop
+                ):
+                    self._trim_task.cancel()
+                    with suppress(asyncio.CancelledError, Exception):
+                        await self._trim_task
+                self._trim_task = None
+
+            tasks = list(self._spawn_tasks)
+            self._spawn_tasks.clear()
+            for task in tasks:
+                if not task.done() and (current_loop is None or task.get_loop() is current_loop):
+                    task.cancel()
+                    with suppress(asyncio.CancelledError, Exception):
+                        await task
+
+            while self._idle:
+                proc, _, proc_loop = self._idle.popleft()
+                self._kill_proc_sync(proc)
+                if current_loop is not None and proc_loop is current_loop and not current_loop.is_closed():
+                    with suppress(Exception):
+                        await proc.wait()
+                    self._close_transport(proc)
+            if current_loop is not None and not current_loop.is_closed():
+                await asyncio.sleep(0)
+        finally:
+            self._shutting_down = False
+
+    def status(self) -> dict[str, Any]:
+        current_loop = self._get_running_loop()
+        self._prune_stale(current_loop)
+        return {
+            "idle_count": len(self._idle),
+            "min_idle": self.min_idle,
+            "max_idle": self.max_idle,
+            "idle_ttl_seconds": self.idle_ttl_seconds,
+            "total_warm_hits": self.total_warm_hits,
+            "total_cold_spawns": self.total_cold_spawns,
+        }
+
+    def _kill_all_sync(self) -> None:
+        while self._idle:
+            proc, _, _ = self._idle.popleft()
+            self._kill_proc_sync(proc)
+
+
+deno_pool = DenoWorkerPool()
+atexit.register(deno_pool._kill_all_sync)
+
+
+async def _communicate_worker(
+    proc: asyncio.subprocess.Process,
+    job_bytes: bytes,
+    passenger_handler: Any | None = None,
+) -> tuple[bytes, int]:
+    """Feed one job frame to a single-use Deno worker and collect its result."""
+    assert proc.stdin is not None
+    assert proc.stdout is not None
+    assert proc.stderr is not None
+
+    if passenger_handler is None:
+        try:
+            proc.stdin.write(job_bytes)
+            await proc.stdin.drain()
+            if proc.stdin.can_write_eof():
+                with suppress(Exception):
+                    proc.stdin.write_eof()
+            else:
+                with suppress(Exception):
+                    proc.stdin.close()
+
+            stdout_bytes, stderr_bytes = await asyncio.gather(
+                proc.stdout.read(),
+                proc.stderr.read(),
+            )
+            await proc.wait()
+
+            if proc.returncode != 0 and stderr_bytes:
+                stderr_text = stderr_bytes.decode("utf-8", errors="replace").strip()
+                if stderr_text:
+                    logger.warning("Deno stderr: %s", stderr_text[:500])
+
+            return stdout_bytes, proc.returncode or 0
+        except asyncio.CancelledError:
+            with suppress(ProcessLookupError, OSError):
+                proc.kill()
+            with suppress(Exception):
+                await proc.wait()
+            raise
+        finally:
+            with suppress(Exception):
+                proc.stdin.close()
+            DenoWorkerPool._close_transport(proc)
+
+    # Interactive Passenger mode: keep stdin open for passenger_result replies.
+    stdout_task = asyncio.create_task(proc.stdout.read())
+    answers: set[asyncio.Task[None]] = set()
+    try:
+        proc.stdin.write(job_bytes)
+        await proc.stdin.drain()
+
+        while True:
+            raw = await proc.stderr.readline()
+            if not raw:
+                break  # stderr closed: the process is exiting
+            line = raw.decode("utf-8", errors="replace").rstrip("\n")
+            if not line.startswith(_MSG_PREFIX):
+                if line.strip():
+                    logger.debug("Deno stderr: %s", line[:300])
+                continue
+            try:
+                msg = json.loads(line[len(_MSG_PREFIX):])
+            except json.JSONDecodeError:
+                logger.debug("Passenger: unparseable protocol line: %s", line[:200])
+                continue
+            if not isinstance(msg, dict) or msg.get("type") != "passenger_call":
+                continue
+            task = asyncio.create_task(_answer_passenger_call(proc, passenger_handler, msg))
+            answers.add(task)
+            task.add_done_callback(answers.discard)
+
+        stdout_bytes = await stdout_task
+        await proc.wait()
+        return stdout_bytes, proc.returncode or 0
+    except asyncio.CancelledError:
+        stdout_task.cancel()
+        for task in answers:
+            task.cancel()
+        with suppress(ProcessLookupError, OSError):
+            proc.kill()
+        with suppress(Exception):
+            await proc.wait()
+        raise
+    finally:
+        with suppress(Exception):
+            proc.stdin.close()
+        DenoWorkerPool._close_transport(proc)
+
+
 async def run_cantrip(
     code: str,
     context: dict,
@@ -185,7 +579,7 @@ async def run_cantrip(
     cantrip_data = cantrip_data or {}
 
     # Passenger rides only when a handler exists AND its gates are on; a
-    # disabled handler produces the same template as no handler at all
+    # disabled handler produces the same payload as no handler at all
     # (enabled=false, call() -> null, zero protocol traffic).
     passenger_cfg: dict | None = None
     watchdog_ms = timeout_ms
@@ -199,85 +593,73 @@ async def run_cantrip(
         # Passenger run before the first call completes.
         watchdog_ms = passenger_handler.watchdog_ms(timeout_ms)
 
-    runner_script = _build_runner_script(
-        context, chat_data, user_data, cantrip_data, code, passenger_cfg
-    )
+    job_payload = {
+        "context": context,
+        "chat_data": chat_data,
+        "user_data": user_data,
+        "cantrip_data": cantrip_data,
+        "user_code": code,
+        "passenger_cfg": passenger_cfg,
+    }
+    job_bytes = json.dumps(job_payload, separators=(",", ":")).encode("utf-8") + b"\n"
 
-    fd, temp_path = tempfile.mkstemp(suffix=".mjs", prefix="gitv_cantrip_")
+    proc, _was_warm = await deno_pool.checkout()
+
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(runner_script)
-
-        try:
-            if passenger_cfg is not None:
-                stdout_bytes, return_code = await _execute_deno_interactive(
-                    temp_path, watchdog_ms, passenger_handler
-                )
-            else:
-                stdout_bytes, return_code = await _execute_deno(temp_path, timeout_ms)
-        except TimeoutError:
-            raise CantripTimeoutError(
-                f"Script timed out after {watchdog_ms if passenger_cfg else timeout_ms}ms"
-            )
-
-        stdout = stdout_bytes.decode("utf-8", errors="replace").strip()
-
-        if return_code != 0 and not stdout:
-            raise CantripExecutionError(
-                f"Deno process exited with code {return_code}"
-            )
-
-        try:
-            result_data = json.loads(stdout)
-        except json.JSONDecodeError:
-            raise CantripExecutionError(
-                f"Deno produced invalid output: {stdout[:500]}"
-            )
-
-        return CantripResult(
-            personality=result_data.get("personality", ""),
-            scenario=result_data.get("scenario", ""),
-            example_dialogs=result_data.get("example_dialogs", ""),
-            response_content=result_data.get("response_content"),
-            tool_result=result_data.get("tool_result", ""),
-            chat_data=result_data.get("chat_data", {}),
-            user_data=result_data.get("user_data", {}),
-            cantrip_data=result_data.get("cantrip_data", {}),
-            chat_data_deletes=result_data.get("chat_data_deletes", []),
-            user_data_deletes=result_data.get("user_data_deletes", []),
-            cantrip_data_deletes=result_data.get("cantrip_data_deletes", []),
-            memories=result_data.get("memories", {}),
-            memory_deletes=result_data.get("memory_deletes", []),
-            maps_nominated=result_data.get("maps_nominated", []),
-            lorebook_ops=result_data.get("lorebook_ops", []),
-            book_activations=result_data.get("book_activations", []),
-            injections=result_data.get("injections", []),
-            prompt_strips=result_data.get("prompt_strips", []),
-            history_ops=_parse_history_ops(result_data.get("history_ops")),
-            debug_logs=result_data.get("debug_logs", []),
-            error=result_data.get("error"),
+        stdout_bytes, return_code = await asyncio.wait_for(
+            _communicate_worker(
+                proc,
+                job_bytes,
+                passenger_handler if passenger_cfg is not None else None,
+            ),
+            timeout=watchdog_ms / 1000,
         )
-    finally:
-        try:
-            os.unlink(temp_path)
-        except OSError:
-            pass
+    except TimeoutError:
+        with suppress(ProcessLookupError, OSError):
+            proc.kill()
+        with suppress(Exception):
+            await proc.wait()
+        raise CantripTimeoutError(
+            f"Script timed out after {watchdog_ms if passenger_cfg else timeout_ms}ms"
+        ) from None
 
+    stdout = stdout_bytes.decode("utf-8", errors="replace").strip()
 
-# Cantrips get no permissions. Deno denies everything by default when no --allow-*
-# flags are passed, so this list is behaviorally a no-op — it exists so the sandbox's
-# posture is explicit and auditable in code rather than implied by the absence of flags.
-# See Planning/security-control-document.md for rationale.
-_DENO_DENY_FLAGS = [
-    "--deny-net",
-    "--deny-read",
-    "--deny-write",
-    "--deny-run",
-    "--deny-env",
-    "--deny-ffi",
-    "--deny-sys",
-    "--deny-import",
-]
+    if return_code != 0 and not stdout:
+        raise CantripExecutionError(
+            f"Deno process exited with code {return_code}"
+        )
+
+    try:
+        result_data = json.loads(stdout)
+    except json.JSONDecodeError:
+        raise CantripExecutionError(
+            f"Deno produced invalid output: {stdout[:500]}"
+        ) from None
+
+    return CantripResult(
+        personality=result_data.get("personality", ""),
+        scenario=result_data.get("scenario", ""),
+        example_dialogs=result_data.get("example_dialogs", ""),
+        response_content=result_data.get("response_content"),
+        tool_result=result_data.get("tool_result", ""),
+        chat_data=result_data.get("chat_data", {}),
+        user_data=result_data.get("user_data", {}),
+        cantrip_data=result_data.get("cantrip_data", {}),
+        chat_data_deletes=result_data.get("chat_data_deletes", []),
+        user_data_deletes=result_data.get("user_data_deletes", []),
+        cantrip_data_deletes=result_data.get("cantrip_data_deletes", []),
+        memories=result_data.get("memories", {}),
+        memory_deletes=result_data.get("memory_deletes", []),
+        maps_nominated=result_data.get("maps_nominated", []),
+        lorebook_ops=result_data.get("lorebook_ops", []),
+        book_activations=result_data.get("book_activations", []),
+        injections=result_data.get("injections", []),
+        prompt_strips=result_data.get("prompt_strips", []),
+        history_ops=_parse_history_ops(result_data.get("history_ops")),
+        debug_logs=result_data.get("debug_logs", []),
+        error=result_data.get("error"),
+    )
 
 
 def _run_deno_sync(script_path: str, timeout_ms: int) -> tuple[bytes, int, bytes]:

@@ -666,6 +666,56 @@ export interface UserSettings {
   [key: string]: any;
 }
 
+export interface DenoPoolStatus {
+  idle_count: number;
+  min_idle: number;
+  max_idle: number;
+  idle_ttl_seconds: number;
+  total_warm_hits: number;
+  total_cold_spawns: number;
+}
+
+export interface AdminSettings {
+  max_driver_callable_turns: number;
+  max_verification_retries: number;
+  max_map_stages: number;
+  rate_limit_proxy_per_min: number;
+  rate_limit_api_per_min: number;
+  max_memory_size_mb: number;
+  max_script_size_kb: number;
+  max_rule_size_kb: number;
+  max_lorebook_size_kb: number;
+  max_saved_debug_runs: number;
+  max_debug_exchange_kb: number;
+  url_blocklist: string;
+  runtime_log_level: string;
+  effective_log_level: string;
+  site_banner: string;
+  site_banner_level: string;
+  backup_schedule_enabled: boolean;
+  backup_schedule_days: string;
+  backup_schedule_time: string;
+  backup_retention_count: number;
+  backup_dir: string;
+  assistant_enabled: boolean;
+  assistant_admin_reads_enabled: boolean;
+  assistant_packs_enabled: boolean;
+  max_assistant_tool_calls_per_turn: number;
+  max_assistant_conversations: number;
+  max_assistant_tool_result_kb: number;
+  max_snapshots_per_object: number;
+  metrics_retention_days: number;
+  assistant_cantrip_auto_install_allowed?: boolean;
+  passenger_calling_enabled?: boolean;
+  max_passenger_calls_per_request?: number;
+  passenger_timeout_seconds?: number;
+  deno_pool_min_idle?: number;
+  deno_pool_max_idle?: number;
+  deno_pool_idle_ttl_seconds?: number;
+  deno_pool_status?: DenoPoolStatus | null;
+  [key: string]: any;
+}
+
 export const api = {
   // Auth
   setup: (username: string, password: string) =>
@@ -891,9 +941,9 @@ export const api = {
 
   // Admin (admin only)
   getAdminSettings: () =>
-    request<any>('/api/admin/settings'),
-  updateAdminSettings: (data: any) =>
-    request<any>('/api/admin/settings', { method: 'PUT', body: JSON.stringify(data) }),
+    request<AdminSettings>('/api/admin/settings'),
+  updateAdminSettings: (data: Partial<AdminSettings>) =>
+    request<AdminSettings>('/api/admin/settings', { method: 'PUT', body: JSON.stringify(data) }),
   getAdminAuditLogs: (limit = 100, offset = 0) =>
     request<{ logs: any[]; total: number }>(`/api/admin/audit?limit=${limit}&offset=${offset}`),
   getSiteBanner: () =>

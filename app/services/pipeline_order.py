@@ -196,9 +196,11 @@ async def run_pre_forward_ordered(
     from app.services.cantrip import (
         _execute_cantrip_step,
         _load_active_cantrips,
+        _load_cantrip_data_batch,
         _load_chat_data,
         _load_user_data,
         _prepare_lorebook_seeding,
+        _save_cantrip_data_batch,
         _save_chat_data,
         _save_user_data,
         _store_writes_isolated,
@@ -246,6 +248,13 @@ async def run_pre_forward_ordered(
                         if c.tag else "not active and no tag activates it"
                     ),
                 )
+        if cantrips:
+            from app.services import deno_runner
+
+            _pool = getattr(deno_runner, "deno_pool", None)
+            if _pool is not None:
+                _pool.ensure_warm(len(cantrips))
+
         activating_lorebooks = await load_active_lorebooks(
             db, user_id, tags, request_headers, internal_chat_id,
             direct_member_ids=direct_ids,
@@ -273,6 +282,18 @@ async def run_pre_forward_ordered(
             await _load_chat_data(db, user_id, conversation_id) if conversation_id else {}
         )
         user_data = await _load_user_data(db, user_id)
+        before_chat_data = dict(chat_data)
+        before_user_data = dict(user_data)
+        cantrip_data_map = await _load_cantrip_data_batch(
+            db,
+            user_id,
+            [
+                c.id
+                for c in cantrips
+                if not getattr(c, "ephemeral", False)
+                and not getattr(c, "is_embedded", False)
+            ],
+        )
         lorebook_seed, lorebook_always, binding_conv_id = await _prepare_lorebook_seeding(
             db, body_json, user_id, request_headers, internal_chat_id, cantrips
         )
@@ -293,23 +314,29 @@ async def run_pre_forward_ordered(
             "accumulated_memories": {},
             "lorebook_seed": lorebook_seed,
             "lorebook_always": lorebook_always,
+            "cantrip_data_map": cantrip_data_map,
+            "cantrip_data_dirty": {},
         }
         passenger_handler = await get_passenger_handler(body_json, user_id)
         passenger_handler.stage_index = None
 
+        messages_dirty = False
         for kind, obj in steps:
             if kind == "lorebook":
-                await _inject_book_now(body_json, user_id, obj)
+                injected = await _inject_book_now(body_json, user_id, obj)
+                if injected:
+                    messages_dirty = True
                 continue
 
-            # Refresh the chat view: earlier slots may have injected lorebook
-            # entries or stripped text into body_json["messages"], and this
-            # cantrip's context.chat.last_messages must see the prompt AS IT
-            # STANDS at its slot. Character fields and request facts stay on
-            # the shared context (they chain across cantrips exactly as the
-            # default pass chains them).
-            fresh = build_context(body_json.get("messages", []), **params)
-            context["chat"] = fresh["chat"]
+            # Refresh the chat view only when an earlier slot actually mutated
+            # body_json["messages"] (lorebook injection, strips, history ops,
+            # or request rows). Character fields and request facts stay on the
+            # shared context (they chain across cantrips exactly as the default
+            # pass chains them).
+            if messages_dirty:
+                fresh = build_context(body_json.get("messages", []), **params)
+                context["chat"] = fresh["chat"]
+                messages_dirty = False
 
             result, request_rows = await _execute_cantrip_step(
                 obj,
@@ -339,13 +366,16 @@ async def run_pre_forward_ordered(
                 apply_prompt_strips(
                     body_json, result.prompt_strips, obj.id, obj.name
                 )
+                messages_dirty = True
             history_ops = getattr(result, "history_ops", None)
             if history_ops:
                 apply_history_ops(body_json, history_ops)
+                messages_dirty = True
             if request_rows:
                 body_json["messages"] = _inject_entries(
                     body_json["messages"], request_rows
                 )
+                messages_dirty = True
                 debug_capture(
                     body_json, f"pipeline_order_slot_{obj.id[:8]}", "Pipeline Order: Slot Outputs",
                     detail=f"'{obj.name}' injected {len(request_rows)} request row(s) at its slot",
@@ -360,12 +390,18 @@ async def run_pre_forward_ordered(
             await _save_chat_data(
                 db, user_id, conversation_id, state["chat_data"],
                 deletes=state.get("chat_data_deletes"),
+                before=before_chat_data,
             )
         if not isolated:
             await _save_user_data(
                 db, user_id, state["user_data"],
                 deletes=state.get("user_data_deletes"),
+                before=before_user_data,
             )
+            if state["cantrip_data_dirty"]:
+                await _save_cantrip_data_batch(
+                    db, user_id, state["cantrip_data_dirty"]
+                )
 
     if internal_chat_id and state["accumulated_memories"] and not body_json.get("_gitv_replay"):
         from app.services.conversation import save_memories_for_chat

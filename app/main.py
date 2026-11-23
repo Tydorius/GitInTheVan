@@ -114,6 +114,10 @@ async def lifespan(app: FastAPI):
     from app.services.admin import apply_admin_overrides_at_startup
     await apply_admin_overrides_at_startup()
 
+    from app.services.deno_runner import DENO_PATH, deno_pool
+    if DENO_PATH:
+        deno_pool.ensure_warm(deno_pool.min_idle)
+
     from app.services.backup import backup_scheduler_loop
     backup_task = asyncio.create_task(backup_scheduler_loop())
 
@@ -145,6 +149,7 @@ async def lifespan(app: FastAPI):
         await backup_task
     except asyncio.CancelledError:
         pass
+    await deno_pool.shutdown()
     logger.info("GitInTheVan shutting down")
 
 
