@@ -202,6 +202,14 @@ async def run_sequence(
             pending_strips = body_json.pop("_gitv_prompt_strips", None)
             if pending_strips:
                 apply_prompt_strips(body_json, pending_strips)
+            # Same order as the proxy (strips, then history ops): a
+            # context.history cantrip must trim here too, or the tester
+            # silently diverges from the live pipeline and misreports
+            # token deltas.
+            if body_json.get("_gitv_history_ops"):
+                from app.services.cantrip import apply_history_ops
+
+                apply_history_ops(body_json)
             tokens_after = estimate_messages_tokens(body_json.get("messages", []))
             token_delta = tokens_after - tokens_before
             pre_driver = [_slim_record(r) for r in _cantrip_records(body_json)[mark:]]
@@ -244,6 +252,7 @@ async def run_sequence(
             body_json.pop("_gitv_map_nominations", None)
             body_json.pop("_gitv_dynamic_lorebook_delta", None)
             body_json.pop("_gitv_prompt_strips", None)
+            body_json.pop("_gitv_history_ops", None)
             body_json.pop("_gitv_group_member_ids", None)
 
             turn_records.append({

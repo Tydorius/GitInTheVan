@@ -524,6 +524,8 @@ async def _do_forward_litellm(
     # LiteLLM 1.110.2 natively maps `reasoning_effort` to Gemini 3/4
     # `thinkingConfig.thinkingLevel`. Translate `thinking_level` on Gemini/Vertex
     # endpoints instead of forwarding it in `extra_body`, which Google rejects.
+    # An explicit `reasoning_effort` (client or configured) outranks the
+    # `thinking_level` alias.
     if (
         is_gemini_family
         and gemini_thinking_level is not None

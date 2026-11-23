@@ -164,7 +164,7 @@ async def run_audit(
             check="LiteLLM",
             passed=False,
             message="LiteLLM not installed",
-            detail="Provider-based endpoints (Gemini, OpenRouter, etc.) require LiteLLM. Run: pip install litellm==1.89.4",
+            detail="Provider-based endpoints (Gemini, OpenRouter, etc.) require LiteLLM. Run: pip install litellm==1.110.2",
         ))
 
     target_ep = None
@@ -193,7 +193,7 @@ async def run_audit(
                         check="Endpoint Connectivity (LiteLLM)",
                         passed=False,
                         message=f"LiteLLM not installed (provider: {provider})",
-                        detail=f"'{target_ep.name}' uses provider '{provider}' which requires LiteLLM. Run: pip install litellm==1.89.4",
+                        detail=f"'{target_ep.name}' uses provider '{provider}' which requires LiteLLM. Run: pip install litellm==1.110.2",
                     ))
                     all_passed = all(r.passed for r in results)
                     return AuditResponse(results=results, all_passed=all_passed)

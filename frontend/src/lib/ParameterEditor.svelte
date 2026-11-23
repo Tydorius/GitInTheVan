@@ -169,7 +169,7 @@
             id="p-opts-{idx}"
             value={optionsText(p)}
             oninput={(e) => setOptions(idx, e.currentTarget.value)}
-            placeholder="low, medium, high, xhigh"
+            placeholder="minimal, low, medium, high, xhigh"
           />
         </div>
         <div style="flex: 3;">

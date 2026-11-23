@@ -108,6 +108,10 @@ class CantripExecutionError(Exception):
     pass
 
 
+# Upper bound on the index list of one `context.history.drop(indices)` op.
+MAX_HISTORY_DROP_INDICES = 200
+
+
 def _parse_history_ops(raw: Any) -> list[dict[str, Any]]:
     """Validate and normalize history_ops emitted by the Deno runner."""
     if not isinstance(raw, list):
@@ -124,8 +128,11 @@ def _parse_history_ops(raw: Any) -> list[dict[str, Any]]:
         elif op == "drop":
             raw_indices = item.get("indices")
             if isinstance(raw_indices, list):
+                # Bounded like every other collected output (20 ops/request,
+                # strips 256 chars): a drop cannot carry an unbounded index
+                # list through runner stdout.
                 indices = [
-                    idx for idx in raw_indices
+                    idx for idx in raw_indices[:MAX_HISTORY_DROP_INDICES]
                     if isinstance(idx, int) and not isinstance(idx, bool)
                 ]
                 if indices:

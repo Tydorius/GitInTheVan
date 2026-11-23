@@ -361,14 +361,25 @@ class TestPhase46MigrationsUpgradePath:
             await conn.execute(text("ALTER TABLE map_stages DROP COLUMN history_window;"))
             await conn.execute(text("ALTER TABLE user_settings DROP COLUMN summarization_block_size;"))
 
+        # Vacuity check: the fixture must really reproduce the pre-068/069/070
+        # schema. _apply_migration tolerates "duplicate column name" errors,
+        # so a fixture that silently stopped dropping a column would still
+        # pass -- this assert is what makes the test mean something.
+        targets = (
+            ("llm_call_metrics", "cached_tokens"),
+            ("map_stages", "history_window"),
+            ("user_settings", "summarization_block_size"),
+        )
+        async with engine.connect() as conn:
+            for table, col in targets:
+                result = await conn.execute(text(f"PRAGMA table_info({table});"))
+                cols = {row[1] for row in result.fetchall()}
+                assert col not in cols, f"vacuity: {table}.{col} present before migration"
+
         await run_migrations(engine)
 
         async with engine.begin() as conn:
-            for table, col in (
-                ("llm_call_metrics", "cached_tokens"),
-                ("map_stages", "history_window"),
-                ("user_settings", "summarization_block_size"),
-            ):
+            for table, col in targets:
                 result = await conn.execute(text(f"PRAGMA table_info({table});"))
                 cols = {row[1] for row in result.fetchall()}
                 assert col in cols, f"{table}.{col} missing after migration"

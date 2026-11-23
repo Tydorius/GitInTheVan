@@ -341,6 +341,47 @@ class TestIncrementalAndBlockAlignedSummarization:
         assert any("Updated summary of turns 0..5." in m["content"] for m in out["messages"])
 
     @pytest.mark.asyncio
+    async def test_degraded_delta_call_does_not_write_the_new_boundary(self):
+        """The 0.42.1 cache invariant on the new path: a failed incremental
+        call returns the prior summary and must NOT promote the stored
+        boundary over messages the LLM never summarized."""
+        ep = _make_endpoint(ep_id="ep-sum", name="Summarizer")
+        us = _make_user_settings(threshold=10, keep_recent=2, block_size=0)
+        messages = _make_dialogue(8, content_len=40)
+        existing = ConversationSummary(
+            user_id="user-1",
+            internal_chat_id="chat-deg",
+            summary="Old summary of turns 0..3.",
+            boundary_hash=compute_boundary_hash(messages[1:5]),
+            message_count=4,
+            token_estimate=100,
+        )
+
+        async def degraded_summarize(msgs, endpoint, model, prompt, existing_summary="", **kwargs):
+            # Mirrors summarize_messages' failure contract: flag + prior text.
+            kwargs["body_json"]["_gitv_summarizer_degraded"] = True
+            return existing_summary
+
+        saved: list[str] = []
+
+        async def fake_save(db, uid, cid, summary, boundary_hash, msg_count, tok_est):
+            saved.append(boundary_hash)
+
+        body_json = {"messages": copy.deepcopy(messages)}
+        with (
+            patch.object(summ_mod, "load_summarization_config", new=AsyncMock(return_value=(us, ep))),
+            patch.object(summ_mod, "resolve_memory_rule", new=AsyncMock(return_value=None)),
+            patch.object(summ_mod, "load_summary", new=AsyncMock(return_value=existing)),
+            patch.object(summ_mod, "summarize_messages", side_effect=degraded_summarize),
+            patch.object(summ_mod, "save_summary", side_effect=fake_save),
+        ):
+            out = await maybe_summarize(body_json, "user-1", "chat-deg")
+
+        # The new boundary was never stored; the prior summary still serves.
+        assert saved == []
+        assert any("Old summary of turns 0..3." in m["content"] for m in out["messages"])
+
+    @pytest.mark.asyncio
     async def test_prefix_diverged_falls_back_to_full_with_empty_existing_summary(self):
         ep = _make_endpoint(ep_id="ep-sum", name="Summarizer")
         us = _make_user_settings(threshold=10, keep_recent=2, block_size=0)

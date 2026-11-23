@@ -59,7 +59,7 @@ async def lifespan(app: FastAPI):
     except ImportError:
         logger.warning(
             "LiteLLM not installed. Provider-based endpoints (Gemini, OpenRouter, etc.) will fail. "
-            "Run: pip install litellm==1.89.4"
+            "Run: pip install litellm==1.110.2"
         )
 
     if settings.cors_origins == "*" and (settings.behind_proxy or not settings.generate_certs):

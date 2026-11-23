@@ -331,3 +331,84 @@ class TestDenoEndToEndPhase46:
         ]
         body["messages"] = inject_entries(body["messages"], entries)
         assert body["messages"] == [{"role": "user", "content": "u3\n\nRemember the lantern."}]
+
+
+class TestSequenceTesterHistoryOps:
+    """The Sequence Tester's contract is "per-turn pipeline order matches the
+    proxy" -- a context.history cantrip must trim there too, or the tester
+    silently diverges and the 0.45.0 token counters misreport."""
+
+    @pytest.mark.asyncio
+    async def test_run_sequence_applies_history_ops_each_turn(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from app.services.sequence_tester import run_sequence
+
+        class FakeSession:
+            async def __aenter__(self):
+                return MagicMock()
+
+            async def __aexit__(self, *args):
+                return False
+
+        entry_lengths: list[int] = []
+        stale_ops_at_entry: list[bool] = []
+
+        async def fake_resolve_group_tags(db, user_id, tags):
+            return tags, [], {}
+
+        async def fake_process_cantrips(body_json, user_id, req_headers, **kwargs):
+            entry_lengths.append(len(body_json["messages"]))
+            stale_ops_at_entry.append("_gitv_history_ops" in body_json)
+            # A pre-driver cantrip asking to keep only the newest message.
+            body_json["_gitv_history_ops"] = [{"op": "keep_recent", "count": 1}]
+
+        async def fake_post_driver(content, body_json, user_id, req_headers, **kwargs):
+            return content
+
+        async def fake_capture(response_data, user_id, body_json):
+            return None
+
+        with (
+            patch("app.services.cantrip.async_session", side_effect=lambda: FakeSession()),
+            patch("app.services.group_resolver.resolve_group_tags", side_effect=fake_resolve_group_tags),
+            patch("app.services.sequence_tester.process_cantrips", side_effect=fake_process_cantrips),
+            patch("app.services.sequence_tester.process_cantrips_post_driver", side_effect=fake_post_driver),
+            patch("app.services.response_tags.process_response_capture", side_effect=fake_capture),
+            patch("app.services.sequence_tester.flush_metrics", new=AsyncMock()),
+        ):
+            res = await run_sequence(
+                "u1",
+                turns=[
+                    {"user_message": "one", "reply": "r1"},
+                    {"user_message": "two", "reply": "r2"},
+                    {"user_message": "three", "reply": "r3"},
+                ],
+            )
+
+        assert len(res["turns"]) == 3
+        # Each turn STARTS from the client's view (the tester's own history is
+        # untrimmed, like a real client resending full history)...
+        assert entry_lengths == [1, 3, 5]
+        # ...but the list forwarded after the pre-driver window is trimmed:
+        # tokens_after counts only the message the cantrip kept. Without the
+        # tester applying history ops, tokens_after == tokens_before and the
+        # delta ignores the trim entirely.
+        from app.services.budget import estimate_messages_tokens
+
+        for turn, text in zip(res["turns"], ["one", "two", "three"]):
+            assert turn["tokens_after"] == estimate_messages_tokens(
+                [{"role": "user", "content": text}]
+            )
+        assert res["turns"][1]["token_delta"] < 0
+        assert res["turns"][2]["token_delta"] < 0
+        # The ops key is consumed each turn, never carried stale into the next.
+        assert stale_ops_at_entry == [False, False, False]
+
+
+def test_history_drop_indices_are_capped():
+    from app.services.deno_runner import MAX_HISTORY_DROP_INDICES
+
+    ops = _parse_history_ops([{"op": "drop", "indices": list(range(500))}])
+    assert len(ops) == 1
+    assert len(ops[0]["indices"]) == MAX_HISTORY_DROP_INDICES

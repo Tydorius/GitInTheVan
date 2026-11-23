@@ -117,7 +117,9 @@ Pre-Driver cantrips can trim or drop messages from the forwarded prompt without 
 - `context.history.keep_recent(n)` — preserves all `system` messages in their original relative order and keeps the newest `n` non-system messages. The newest `user` message is always preserved even when `n = 0`.
 - `context.history.drop(indices)` — drops messages at the specified integer indices (accepts a single integer or an array; supports negative Python-style indices such as `-2`). The newest `user` message is always protected and silently skipped if listed.
 
-Operations are collected in order (max 20 per request) and applied host-side only to the forwarded `messages` list; the conversation-hash anchor is never mutated.
+Operations are collected in order (max 20 per request; a single `drop` carries at most 200 indices) and applied host-side only to the forwarded `messages` list; the conversation-hash anchor is never mutated.
+
+Indices resolve against the list **as mutated by earlier operations** — a `keep_recent` earlier in the same request (from this cantrip or a previous one) shifts every index after it. Compute `drop` indices from the trimmed view, or drop first and trim second.
 
 ## See also
 

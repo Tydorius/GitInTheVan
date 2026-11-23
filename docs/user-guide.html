@@ -585,10 +585,12 @@ name. Its entries are keyword-matched against the current conversation and
 injected this turn. Nothing persists; the next request is back to normal.
 A union source: it only ever adds.</p>
 <p><strong><code>context.inject(text, position)</code></strong> places text in the prompt at one of
-three positions: <code>system_start</code> (appended to the system message),
-<code>before_last_message</code> (a system message before your last message), or
+four positions: <code>system_start</code> (appended to the system message),
+<code>before_last_message</code> (a system message before your last message),
 <code>in_chat_system</code> — a system message at the very end of the prompt, the
-classic end-of-prompt directive slot. Bounded at 20 injections per request
+classic end-of-prompt directive slot — or <code>user_tail</code> (the end of your newest
+message, the cache-friendly slot described under
+<a href="#lorebooks">Lorebooks</a>). Bounded at 20 injections per request
 and 64k characters total; refusals degrade, never fail the request.</p>
 <pre><code class="language-javascript">if (context.request.is_regenerate) {
     context.inject(&quot;The player regenerated: keep continuity with the prior attempt.&quot;, &quot;in_chat_system&quot;);
@@ -608,6 +610,28 @@ template is the worked example, with its pattern list editable at runtime
 from the Storage page.</p>
 <pre><code class="language-javascript">context.strip(&quot;\[system note\][\s\S]*?\[/system note\]&quot;, &quot;messages&quot;);
 </code></pre>
+<p><strong><code>context.history.keep_recent(n)</code></strong> and <strong><code>context.history.drop(indices)</code></strong>
+let a pre-Driver cantrip trim the messages sent to the model without touching
+conversation identity:</p>
+<ul>
+<li><code>keep_recent(n)</code> keeps every <code>system</code> message plus the newest <code>n</code> other
+  messages. Your newest message is always kept, even when <code>n</code> is 0 — so you may
+  end up with one more message than you asked for.</li>
+<li><code>drop(indices)</code> removes messages at the given positions — a single number or
+  a list, negative counts from the end — and silently skips your newest
+  message.</li>
+</ul>
+<pre><code class="language-javascript">// Long-winded clients: keep the prompt small without losing the scene.
+context.history.drop([0, 1]);       // counted on the list before any trimming
+context.history.keep_recent(12);
+</code></pre>
+<p>Operations apply in the order the cantrips produced them, and a <code>drop</code> position
+refers to the list as the earlier operations left it — so drop first and trim
+second, or count from the trimmed list. Limits: 20 operations per request and
+200 positions per <code>drop</code>; anything invalid is ignored, never fails the request.
+The trim lasts for this request only — your client's history is untouched, so a
+cantrip has to ask again each turn. Each change shows in the Debug timeline as
+<em>History Control</em>.</p>
 <p><strong>New request facts:</strong> <code>context.request.id</code> (a stable id for this request)
 and <code>context.request.is_regenerate</code> — true when this request has the same
 message count and trailing user message as the previous one in the chat,
@@ -762,11 +786,20 @@ and cantrip API second, so they are documented with the rest of it in the
 - <strong>Keywords</strong>: Comma-separated trigger words (e.g., <code>castle, throne, keep</code>)
 - <strong>Secondary Keywords</strong>: Additional keywords for selective matching
 - <strong>Content</strong>: The text to inject when keywords match
-- <strong>Position</strong>: Where in the message array to inject (<code>before_last_message</code> or <code>system_start</code>)
+- <strong>Position</strong>: Where in the prompt to inject. <code>before_last_message</code> (default) adds a system message before your last message; <code>system_start</code> appends to the system message; <code>user_tail</code> appends to the end of your newest message. Any other value is rejected when you save, and on import an unrecognized value becomes <code>before_last_message</code>
 - <strong>Insertion Order</strong>: Sort order when multiple entries match (lower = first)
 - <strong>Always Include (Constant)</strong>: Entry always fires regardless of keywords
 - <strong>Selective</strong>: Requires both a primary AND secondary keyword to match
 - <strong>Disabled</strong>: Temporarily disable this entry without deleting it</p>
+<p><img alt="Lorebook entry editor" src="media/gitv-lorebooks-entry-user-tail.png"></p>
+<p><em>The entry editor with the <code>user_tail</code> position selected, captured 2026-11-22.</em></p>
+<p><strong><code>user_tail</code> is the cache-friendly position.</strong> Everything before your last
+message stays byte-identical from turn to turn, which is what lets Gemini,
+Claude and OpenAI prompt caches keep serving the earlier part of the prompt at
+the cached price. It works with image-and-text messages (the text is added as a
+new text part), and if the request has no user message it is added as one
+instead. The <a href="#metrics">Metrics</a> page's <strong>Cached Tokens</strong> figure shows whether
+it is paying off.</p>
 <h3 id="lorebook-pipeline-positions">Lorebook Pipeline Positions</h3>
 <p>Lorebooks inject at one point in the pipeline: <strong>Pre-Driver</strong>, before the request is forwarded.
 Older installs showed four position toggles here (Pre-Driver, Driver-Callable, Pre-Navigator,
@@ -1322,6 +1355,7 @@ another user's rows are invisible.</p>
 <p><em>The map settings card with the Final-Output Navigator Pass toggle, captured 2026-11-20.</em></p>
 <p>Each subsequent card is a <strong>stage</strong>:</p>
 <p><img alt="Map Editor - Stage" src="media/gitv-maps-edit-2.png"></p>
+<p><em>The stage editor with History Window, captured 2026-11-22.</em></p>
 <ul>
 <li><strong>Stage Name</strong>: A label for the stage</li>
 <li><strong>System Instructions</strong>: Instructions specific to this stage's LLM (prepended to its call)</li>
@@ -1330,6 +1364,7 @@ another user's rows are invisible.</p>
 <li><strong>Driver-Callable Turns</strong>: Maximum tool-call rounds for this stage (0 = disabled). The stage offers <strong>its own</strong> attached cantrips as tools: the model is told they exist, a <code>&lt;call:tool_name&gt;</code> tag executes the tool, and the loop re-forwards through the stage's endpoint until the model answers without calling.</li>
 <li><strong>Output Mode</strong>: How this stage's output feeds the next stage (see below)</li>
 <li><strong>Base Prompt</strong>: <strong>Full</strong> (default) rebuilds the stage from the client's prompt and all pre-map injections. <strong>Blank</strong> drops every system message from the stage's copy — the stage instructions become the system message — so lightweight utility stages (summarize, extract, judge) run without persona/scenario noise.</li>
+<li><strong>History Window</strong>: <code>0</code> (default) sends the stage the full conversation. A number <code>N</code> sends only the newest <code>N</code> non-system messages; every system message and your newest message are always kept, so a window that would cut your newest message off keeps exactly <code>N</code> messages by dropping its oldest instead. It applies to this stage's copy only — later stages and the final reply still see the full history. (A cantrip's <code>context.history.keep_recent(n)</code> is the per-request version, and keeps one more message in that case.) A stage's attached pre-Driver cantrips can trim further with <code>context.strip</code> and <code>context.history</code>.</li>
 <li><strong>Run Condition</strong>: Optional. The stage runs only when the chat's stored data (<code>context.chat_data</code>) satisfies a small condition: a dot-path (<code>world.day</code>), an operator (<code>exists</code>, <code>is missing</code>, <code>==</code>, <code>!=</code>, <code>&gt;=</code>, <code>&gt;</code>, <code>&lt;=</code>, <code>&lt;</code>) and a value. Checked before anything the stage would spend — a skipped stage costs nothing and shows as <em>Map Stage Skipped</em> in the Debug timeline. Blank runs always.</li>
 <li><strong>Attached Lorebooks</strong>: Lorebooks injected before this stage's LLM call</li>
 <li><strong>Attached Cantrips</strong>: Cantrips run before this stage's LLM call (with a <strong>Sticky</strong> option)</li>
@@ -1510,9 +1545,10 @@ message through the proxy.</em></p>
 passive tap: it records what the pipeline did, and changes nothing about what it
 does. Streaming and non-streaming requests are both captured.</p>
 <p><img alt="Debug run detail" src="media/gitv-debug-run.png"></p>
+<p><em>The run detail with the metrics bar, including Cached, captured 2026-11-22.</em></p>
 <h3 id="recent-runs">Recent Runs</h3>
 <p>Newest first, each showing the model, timestamp, stage count, token total and
-wall-clock time. Runs are pruned to a limit set by your administrator, so a run
+wall-clock time — plus cached tokens when the provider reported them. Runs are pruned to a limit set by your administrator, so a run
 you want to keep needs <strong>Save</strong> — saved runs are exempt from pruning and are
 what the save-slot counter at the top refers to. <strong>Rename</strong> gives a run a label
 you will recognise later; <strong>Delete</strong> removes one; <strong>Clear All</strong> empties the list.</p>
@@ -1522,6 +1558,13 @@ you will recognise later; <strong>Delete</strong> removes one; <strong>Clear All
 pipeline injected, total time, pipeline overhead — the share of the wall clock
 not spent waiting on an LLM — tokens per second, and the number of upstream LLM
 calls.</p>
+<p><strong>Cached</strong> is the part of the prompt the provider served from its prompt cache
+(OpenAI and Gemini report it as <code>cached_tokens</code>, Anthropic as
+<code>cache_read_input_tokens</code>), shown as a count and as a share of the prompt. A
+high share means the start of your prompt is staying identical from turn to
+turn — the <code>user_tail</code> injection position and summarization <strong>Block Size</strong> are
+the two settings that most affect it. Providers that do not report caching
+count as zero, so a missing figure is not proof that nothing was cached.</p>
 <p>Token counts come from the provider's own <code>usage</code> object where one is returned,
 and from an estimate where it is not. The two are never mixed silently: a run
 whose calls disagree is badged so a comparison cannot quietly compare a
@@ -1539,6 +1582,7 @@ console output, tool calls, resolved LLM parameters and which layer supplied
 each), and the setting that controls it.</p>
 <h3 id="comparing-runs">Comparing runs</h3>
 <p><img alt="Comparing runs" src="media/gitv-debug-compare.png"></p>
+<p><em>Two saved runs compared, each column showing its Cached figure, captured 2026-11-22.</em></p>
 <p><strong>Compare runs</strong> puts up to four side by side. One is the <strong>baseline</strong> — set it
 with the radio button — and the others are expressed as differences from it:
 token and timing deltas with direction and percentage, and a word-level diff of
@@ -1574,7 +1618,7 @@ file. The JSON export is the full trace, which is what to attach to a bug report
 <p><a id="metrics"></a></p>
 <h2 id="17-metrics">17. Metrics</h2>
 <p><img alt="Metrics page" src="media/gitv-metrics.png"></p>
-<p><em>Screenshots from 2026-11-18, against 0.31.0.</em></p>
+<p><em>Captured 2026-11-22, against 0.46.0.</em></p>
 <p>The <strong>Metrics</strong> page shows what your pipeline costs over time: which lorebook entries, cantrips
 and other injected content bloat your prompt budget, and what each LLM role (driver, judge,
 summarizer, map stage) actually costs in tokens and latency. Where the <a href="#debug">Debug page</a>
@@ -1594,10 +1638,16 @@ back.</p>
   (a cantrip that trims content, a summarizer that compresses it) takes away. Sorted by impact.</li>
 <li><strong>LLM Calls</strong> groups upstream calls by role, endpoint and model: call count, success rate,
   retry and failover counts, median latency, and token totals. Judge rows carry the verification
-  rule that ran.</li>
+  rule that ran. The <strong>Cached Tok</strong> column is the part of each group's prompt that the provider
+  served from its prompt cache.</li>
 <li><strong>Recent Rows</strong> shows the raw last 20 rows of each table, including flagged ones, for
   checking exactly what one request recorded.</li>
 </ul>
+<p>The totals along the top — <strong>LLM Calls</strong>, <strong>Prompt Tokens</strong>, <strong>Cached Tokens</strong> and
+<strong>Completion Tokens</strong> — sum the window. <strong>Cached Tokens</strong> carries the share of prompt tokens
+it represents. Cached figures come only from providers that report caching (OpenAI, Gemini and
+Anthropic do); calls that do not report it count as zero, so a low share may mean your provider
+is silent rather than that nothing was cached.</p>
 <h3 id="about-the-numbers">About the numbers</h3>
 <p>Token counts come from the upstream <code>usage</code> object when your provider returns one, and from a
 chars-per-4 estimate when it does not. The two are never blended silently — the tables say which
@@ -1658,6 +1708,7 @@ editable at runtime from the Storage page.</p>
 </ul>
 <h3 id="conversation-summarization">Conversation Summarization</h3>
 <p><img alt="Summarization Settings" src="media/gitv-settings-2.png"></p>
+<p><em>The Summarization card with Block Size, captured 2026-11-22.</em></p>
 <p>Automatically compresses long conversations to reduce token usage while preserving narrative context:</p>
 <ul>
 <li><strong>Enable Summarization</strong>: Master toggle</li>
@@ -1665,9 +1716,11 @@ editable at runtime from the Storage page.</p>
 <li><strong>Model Override</strong>: Override the model name for summarization calls</li>
 <li><strong>Token Threshold</strong>: When estimated tokens exceed this, summarization triggers (default 8000)</li>
 <li><strong>Keep Recent Messages</strong>: Number of recent messages always sent verbatim (minimum 3)</li>
+<li><strong>Block Size</strong>: <code>0</code> (default) compacts as soon as the threshold is crossed. A number greater than <code>1</code> compacts only on multiples of that many messages, so the point where old dialogue folds into the summary moves less often and the start of your prompt stays identical between compactions — which keeps provider prompt caches warm. There is no upper limit, and a block larger than the messages available to compress never lines up, so summarization would stop triggering: keep it well below your typical conversation length</li>
 <li><strong>Summarization Prompt</strong>: System prompt for the summarization LLM</li>
 </ul>
 <p>When summarization triggers, older dialogue is removed from the request and replaced with a single <code>[CONVERSATION SUMMARY]</code> system block. The most recent messages are always forwarded verbatim. Summaries are cached per conversation — rerolls and forks reuse the cached summary without re-calling the LLM.</p>
+<p>Compaction is incremental: when the history covered by the existing summary has not changed, the summarizer is sent only the newly aged messages plus that summary, instead of the whole history again. If earlier history has diverged (an edited or trimmed turn), the summary is rebuilt in full. A summarizer call that fails keeps the previous summary and leaves the stored one untouched, so the next turn retries rather than trusting a half-built summary.</p>
 <h3 id="driver-callable-tools_1">Driver-Callable Tools</h3>
 <p>Controls whether the writing LLM (Driver) can invoke cantrips as tools during generation:</p>
 <ul>
@@ -1737,6 +1790,24 @@ sets <code>reasoning_effort: low</code>, the writing call gets <code>max</code> 
 gets <code>low</code>. A client that asked for <code>high</code> is overridden in both.</p>
 <p><strong>Anything you do not configure is passed through from your client untouched.</strong>
 Configuring a name is what makes GitInTheVan override it.</p>
+<h3 id="gemini-thinking_level">Gemini <code>thinking_level</code></h3>
+<p>On Gemini and Vertex endpoints served through LiteLLM, a parameter named
+<code>thinking_level</code> — <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code> or <code>xhigh</code> — is how you set
+Gemini 3 and 4 thinking. GitInTheVan translates it to <code>reasoning_effort</code>, which
+LiteLLM maps to the model's thinking level; <code>thinking_level</code> itself is never
+forwarded to Google, which rejects unknown fields. The value is not checked
+when you save it unless you give the parameter an <strong>Options</strong> list, so a
+misspelt level is otherwise rejected by the provider rather than by
+GitInTheVan.</p>
+<blockquote>
+<p><strong>Note: this behaves differently from every other parameter.</strong> An explicit
+<code>reasoning_effort</code> outranks <code>thinking_level</code> wherever each comes from. So a
+client that sends <code>reasoning_effort</code> overrides a <code>thinking_level</code> you configured
+on your endpoint — the opposite of the layering above, where your settings
+beat the client's. To pin the thinking level regardless of what the client
+sends, configure <code>reasoning_effort</code> instead of <code>thinking_level</code>; it follows the
+normal layering and also blocks any <code>thinking_level</code> from applying.</p>
+</blockquote>
 <h3 id="parameter-fields">Parameter Fields</h3>
 <table>
 <thead>
