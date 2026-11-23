@@ -2437,6 +2437,25 @@ When an update is available:
 - Step-by-step update instructions are displayed for local installs (stop server, backup database, extract zip, run platform-specific update script)
 - Docker/container update instructions are also provided
 
+#### Approving an update
+
+Pressing **Update Now** opens a confirmation dialog. **Approve all updates in this batch** is
+checked by default — the whole chain then runs unattended, restarting the server after each
+version, and only stops if a step actually fails (failed, stalled, version mismatch, or expired).
+Uncheck it to pause after each installed version: an **Approval Needed** card then offers
+*Approve Next Step*, *Approve All & Continue* (its own "approve all remaining updates" checkbox
+is also checked by default), and *Discard plan*.
+
+![Update confirmation](media/gitv-update-confirm.png)
+
+*The update confirmation dialog with batch approval pre-selected, captured 2026-11-23.*
+
+**GitV can only gate its own prompts.** The operating system may still show its own dialogs
+while the update scripts run — UAC, SmartScreen, or firewall prompts on Windows are the usual
+ones. Those belong to the OS, not to GitInTheVan, and nothing in the app can suppress them. If
+an update seems paused and no Approval Needed card is showing, look for an OS dialog behind the
+browser window.
+
 When you're up to date, a green confirmation banner is shown with the current version.
 
 The platform-specific update scripts (`scripts/update-windows.bat`, `scripts/update-macos.sh`, `scripts/update-linux.sh`) handle:
