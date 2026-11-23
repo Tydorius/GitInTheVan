@@ -57,6 +57,16 @@ class AdminSettings(Base):
     passenger_timeout_seconds: Mapped[int] = mapped_column(
         Integer, default=60, server_default="60", nullable=False
     )
+    # Phase 47: Deno warm process pool sizing and burst idle timeout.
+    deno_pool_min_idle: Mapped[int] = mapped_column(
+        Integer, default=1, server_default="1", nullable=False
+    )
+    deno_pool_max_idle: Mapped[int] = mapped_column(
+        Integer, default=4, server_default="4", nullable=False
+    )
+    deno_pool_idle_ttl_seconds: Mapped[int] = mapped_column(
+        Integer, default=60, server_default="60", nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=text("CURRENT_TIMESTAMP"), nullable=False,
         onupdate=lambda: datetime.now(UTC),

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { api } from '../../api'
+  import { api, type AdminSettings } from '../../api'
   import { loadSiteBanner } from '../../stores'
   import CollapsibleCard from '../../lib/CollapsibleCard.svelte'
   import type { CollapseController } from '../../lib/collapse'
@@ -10,7 +10,7 @@
   let loading = $state(true)
   let error = $state('')
   let saved = $state(false)
-  let adminSettings: any = $state(null)
+  let adminSettings: AdminSettings | null = $state(null)
   let logLevelInput = $state('')
   let bannerInput = $state('')
   let bannerLevelInput = $state('info')
@@ -33,6 +33,9 @@
     passenger_calling_enabled: true,
     max_passenger_calls_per_request: 3,
     passenger_timeout_seconds: 60,
+    deno_pool_min_idle: 1,
+    deno_pool_max_idle: 4,
+    deno_pool_idle_ttl_seconds: 60,
     url_blocklist: '',
     runtime_log_level: '',
     assistant_enabled: true,
@@ -62,9 +65,12 @@
         max_snapshots_per_object: adminSettings.max_snapshots_per_object,
         metrics_retention_days: adminSettings.metrics_retention_days,
         assistant_cantrip_auto_install_allowed: (adminSettings as any).assistant_cantrip_auto_install_allowed ?? false,
-        passenger_calling_enabled: (adminSettings as any).passenger_calling_enabled ?? true,
-        max_passenger_calls_per_request: (adminSettings as any).max_passenger_calls_per_request ?? 3,
-        passenger_timeout_seconds: (adminSettings as any).passenger_timeout_seconds ?? 60,
+        passenger_calling_enabled: adminSettings.passenger_calling_enabled ?? true,
+        max_passenger_calls_per_request: adminSettings.max_passenger_calls_per_request ?? 3,
+        passenger_timeout_seconds: adminSettings.passenger_timeout_seconds ?? 60,
+        deno_pool_min_idle: adminSettings.deno_pool_min_idle ?? 1,
+        deno_pool_max_idle: adminSettings.deno_pool_max_idle ?? 4,
+        deno_pool_idle_ttl_seconds: adminSettings.deno_pool_idle_ttl_seconds ?? 60,
         url_blocklist: adminSettings.url_blocklist || '',
         runtime_log_level: adminSettings.runtime_log_level || '',
         assistant_enabled: adminSettings.assistant_enabled,
@@ -180,6 +186,31 @@
         <label for="cap-psg-timeout">Passenger Call Timeout (seconds)</label>
         <input id="cap-psg-timeout" type="number" bind:value={capsForm.passenger_timeout_seconds} min="1" />
       </div>
+    </div>
+    <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border);">
+      <h4 style="margin: 0 0 6px 0; font-size: 13px;">Cantrip Sandbox Pool</h4>
+      <p style="color: var(--text-dim); font-size: 11px; margin: 0 0 12px 0;">
+        Pre-warmed single-use Deno processes (~23 MB RAM each). Each cantrip still runs in its own fresh process and exits immediately. Set both to 0 to disable pre-warming.
+      </p>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="cap-deno-min-idle">Min Warm Processes</label>
+          <input id="cap-deno-min-idle" type="number" bind:value={capsForm.deno_pool_min_idle} min="0" max="16" />
+        </div>
+        <div class="form-group">
+          <label for="cap-deno-max-idle">Max Warm Processes</label>
+          <input id="cap-deno-max-idle" type="number" bind:value={capsForm.deno_pool_max_idle} min="0" max="32" />
+        </div>
+        <div class="form-group">
+          <label for="cap-deno-idle-ttl">Burst Idle Timeout (s)</label>
+          <input id="cap-deno-idle-ttl" type="number" bind:value={capsForm.deno_pool_idle_ttl_seconds} min="10" max="600" />
+        </div>
+      </div>
+      {#if adminSettings?.deno_pool_status}
+        <p style="color: var(--text-dim); font-size: 11px; margin: 4px 0 12px 0;">
+          Pool status: {adminSettings.deno_pool_status.idle_count} idle · {adminSettings.deno_pool_status.total_warm_hits} warm hits · {adminSettings.deno_pool_status.total_cold_spawns} cold spawns
+        </p>
+      {/if}
     </div>
     <button class="primary" onclick={saveCaps}>Save</button>
   </CollapsibleCard>

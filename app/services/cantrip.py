@@ -292,6 +292,89 @@ async def _save_cantrip_data(
     )
 
 
+async def _load_cantrip_data_batch(
+    db: AsyncSession, user_id: str, cantrip_ids: list[str]
+) -> dict[str, dict[str, Any]]:
+    if not cantrip_ids:
+        return {}
+    unique_ids = list(dict.fromkeys(cantrip_ids))
+    result = await db.execute(
+        select(CantripData).where(
+            CantripData.user_id == user_id,
+            CantripData.cantrip_id.in_(unique_ids),
+        )
+    )
+    grouped: dict[str, dict[str, Any]] = {cid: {} for cid in unique_ids}
+    for row in result.scalars().all():
+        bucket = grouped.setdefault(row.cantrip_id, {})
+        try:
+            bucket[row.key] = json.loads(row.value_json) if row.value_json else None
+        except (json.JSONDecodeError, TypeError):
+            bucket[row.key] = row.value_json
+    return grouped
+
+
+async def _save_cantrip_data_batch(
+    db: AsyncSession,
+    user_id: str,
+    dirty: dict[str, tuple[dict[str, Any], dict[str, Any] | None, Any]],
+) -> None:
+    if not dirty:
+        return
+
+    pending: dict[str, tuple[dict[str, Any], list[str]]] = {}
+    for cantrip_id, (data, before, deletes) in dirty.items():
+        if before is not None:
+            to_write = {
+                k: v for k, v in data.items() if k not in before or before[k] != v
+            }
+            to_delete = [k for k in (deletes or ()) if k not in data]
+        else:
+            to_write = dict(data)
+            to_delete = [k for k in (deletes or ()) if k not in data]
+        if to_write or to_delete:
+            pending[cantrip_id] = (to_write, to_delete)
+
+    if not pending:
+        return
+
+    existing_result = await db.execute(
+        select(CantripData).where(
+            CantripData.user_id == user_id,
+            CantripData.cantrip_id.in_(list(pending.keys())),
+        )
+    )
+    existing: dict[tuple[str, str], CantripData] = {
+        (row.cantrip_id, row.key): row for row in existing_result.scalars().all()
+    }
+
+    for cantrip_id, (to_write, to_delete) in pending.items():
+        for key, value in to_write.items():
+            value_json = json.dumps(value)
+            row = existing.get((cantrip_id, key))
+            if row is not None:
+                if row.value_json != value_json:
+                    row.value_json = value_json
+            else:
+                db.add(
+                    CantripData(
+                        user_id=user_id,
+                        cantrip_id=cantrip_id,
+                        key=key,
+                        value_json=value_json,
+                    )
+                )
+
+        # 0.42.0: delete() persists. A key deleted then re-set in the same run
+        # keeps its new value (the final dict is the truth).
+        for key in to_delete:
+            row = existing.get((cantrip_id, key))
+            if row is not None:
+                await db.delete(row)
+
+    await db.commit()
+
+
 def _diff_store(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
     """What one cantrip changed in a persistent store.
 
@@ -515,6 +598,12 @@ async def process_cantrips(
         if not cantrips:
             return body_json
 
+        from app.services import deno_runner
+
+        _pool = getattr(deno_runner, "deno_pool", None)
+        if _pool is not None and cantrips:
+            _pool.ensure_warm(len(cantrips))
+
         conversation_id = params.get("conversation_id", "")
         isolated = _store_writes_isolated(body_json)
         if store_seeds is not None:
@@ -523,9 +612,20 @@ async def process_cantrips(
             store_seeds.setdefault("cantrip_data", {})
             chat_data = dict(store_seeds["chat_data"])
             user_data = dict(store_seeds["user_data"])
+            cantrip_data_map: dict[str, dict[str, Any]] = {}
         else:
             chat_data = await _load_chat_data(db, user_id, conversation_id)
             user_data = await _load_user_data(db, user_id)
+            cantrip_data_map = await _load_cantrip_data_batch(
+                db,
+                user_id,
+                [
+                    c.id
+                    for c in cantrips
+                    if not getattr(c, "ephemeral", False)
+                    and not getattr(c, "is_embedded", False)
+                ],
+            )
         before_chat_data = dict(chat_data)
         before_user_data = dict(user_data)
 
@@ -574,6 +674,8 @@ async def process_cantrips(
             "memory_deletes": set(),
             "lorebook_seed": lorebook_seed,
             "lorebook_always": lorebook_always,
+            "cantrip_data_map": cantrip_data_map,
+            "cantrip_data_dirty": {},
         }
 
         for cantrip in cantrips:
@@ -641,6 +743,10 @@ async def process_cantrips(
                     deletes=state.get("user_data_deletes"),
                     before=before_user_data,
                 )
+                if state["cantrip_data_dirty"]:
+                    await _save_cantrip_data_batch(
+                        db, user_id, state["cantrip_data_dirty"]
+                    )
 
     if (
         internal_chat_id
@@ -747,6 +853,8 @@ async def _execute_cantrip_step(
         cantrip_data = {}
     elif store_seeds is not None:
         cantrip_data = dict(store_seeds["cantrip_data"].get(cantrip.id, {}))
+    elif "cantrip_data_map" in state and cantrip.id in state["cantrip_data_map"]:
+        cantrip_data = dict(state["cantrip_data_map"][cantrip.id])
     else:
         cantrip_data = await _load_cantrip_data(db, user_id, cantrip.id)
     before_cantrip_data = dict(cantrip_data)
@@ -892,12 +1000,37 @@ async def _execute_cantrip_step(
     if store_seeds is not None:
         if not ephemeral:
             store_seeds["cantrip_data"][cantrip.id] = result.cantrip_data
-    elif result.cantrip_data != cantrip_data and not isolated and not ephemeral:
-        await _save_cantrip_data(
-            db, user_id, cantrip.id, result.cantrip_data,
-            deletes=set(result.cantrip_data_deletes),
-            before=before_cantrip_data,
-        )
+    elif (
+        (result.cantrip_data != cantrip_data or result.cantrip_data_deletes)
+        and not isolated
+        and not ephemeral
+    ):
+        dirty_map = state.get("cantrip_data_dirty")
+        if dirty_map is not None:
+            if cantrip.id in dirty_map:
+                _, orig_before, prev_deletes = dirty_map[cantrip.id]
+                merged_deletes = list(
+                    dict.fromkeys([*prev_deletes, *(result.cantrip_data_deletes or ())])
+                )
+                dirty_map[cantrip.id] = (
+                    dict(result.cantrip_data),
+                    orig_before,
+                    merged_deletes,
+                )
+            else:
+                dirty_map[cantrip.id] = (
+                    dict(result.cantrip_data),
+                    before_cantrip_data,
+                    list(result.cantrip_data_deletes or ()),
+                )
+            if "cantrip_data_map" in state:
+                state["cantrip_data_map"][cantrip.id] = dict(result.cantrip_data)
+        else:
+            await _save_cantrip_data(
+                db, user_id, cantrip.id, result.cantrip_data,
+                deletes=set(result.cantrip_data_deletes),
+                before=before_cantrip_data,
+            )
 
     # Phase 20: apply this cantrip's lorebook ops now, not after the
     # pass, so the next cantrip's seed reflects them (the shared
@@ -1317,6 +1450,12 @@ async def process_cantrips_post_driver(
         if not cantrips:
             return response_content
 
+        from app.services import deno_runner
+
+        _pool = getattr(deno_runner, "deno_pool", None)
+        if _pool is not None and cantrips:
+            _pool.ensure_warm(len(cantrips))
+
         conversation_id = params.get("conversation_id", "")
         isolated = _store_writes_isolated(body_json)
         if store_seeds is not None:
@@ -1325,9 +1464,21 @@ async def process_cantrips_post_driver(
             store_seeds.setdefault("cantrip_data", {})
             chat_data = dict(store_seeds["chat_data"])
             user_data = dict(store_seeds["user_data"])
+            cantrip_data_map: dict[str, dict[str, Any]] = {}
         else:
             chat_data = await _load_chat_data(db, user_id, conversation_id)
             user_data = await _load_user_data(db, user_id)
+            cantrip_data_map = await _load_cantrip_data_batch(
+                db,
+                user_id,
+                [
+                    c.id
+                    for c in cantrips
+                    if not getattr(c, "ephemeral", False)
+                    and not getattr(c, "is_embedded", False)
+                ],
+            )
+        cantrip_data_dirty: dict[str, tuple[dict[str, Any], dict[str, Any], list[str]]] = {}
         before_chat_data = dict(chat_data)
         before_user_data = dict(user_data)
         # 0.42.0: keys deleted by this pass's scripts (persisted at the
@@ -1383,6 +1534,8 @@ async def process_cantrips_post_driver(
                 cantrip_data = {}
             elif store_seeds is not None:
                 cantrip_data = dict(store_seeds["cantrip_data"].get(cantrip.id, {}))
+            elif cantrip.id in cantrip_data_map:
+                cantrip_data = dict(cantrip_data_map[cantrip.id])
             else:
                 cantrip_data = await _load_cantrip_data(db, user_id, cantrip.id)
             before_cantrip_data = dict(cantrip_data)
@@ -1506,12 +1659,28 @@ async def process_cantrips_post_driver(
             if store_seeds is not None:
                 if not ephemeral:
                     store_seeds["cantrip_data"][cantrip.id] = result.cantrip_data
-            elif result.cantrip_data != cantrip_data and not isolated and not ephemeral:
-                await _save_cantrip_data(
-                    db, user_id, cantrip.id, result.cantrip_data,
-                    deletes=set(result.cantrip_data_deletes),
-                    before=before_cantrip_data,
-                )
+            elif (
+                (result.cantrip_data != cantrip_data or result.cantrip_data_deletes)
+                and not isolated
+                and not ephemeral
+            ):
+                if cantrip.id in cantrip_data_dirty:
+                    _, orig_before, prev_deletes = cantrip_data_dirty[cantrip.id]
+                    merged_deletes = list(
+                        dict.fromkeys([*prev_deletes, *(result.cantrip_data_deletes or ())])
+                    )
+                    cantrip_data_dirty[cantrip.id] = (
+                        dict(result.cantrip_data),
+                        orig_before,
+                        merged_deletes,
+                    )
+                else:
+                    cantrip_data_dirty[cantrip.id] = (
+                        dict(result.cantrip_data),
+                        before_cantrip_data,
+                        list(result.cantrip_data_deletes or ()),
+                    )
+                cantrip_data_map[cantrip.id] = dict(result.cantrip_data)
 
             if result.lorebook_ops:
                 await apply_ops(
@@ -1545,6 +1714,8 @@ async def process_cantrips_post_driver(
                     deletes=user_data_deletes or None,
                     before=before_user_data,
                 )
+                if cantrip_data_dirty:
+                    await _save_cantrip_data_batch(db, user_id, cantrip_data_dirty)
 
         if (
             internal_chat_id

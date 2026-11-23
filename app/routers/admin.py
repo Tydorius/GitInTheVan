@@ -1,9 +1,9 @@
 import logging
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -56,6 +56,10 @@ class AdminSettingsResponse(BaseModel):
     passenger_calling_enabled: bool
     max_passenger_calls_per_request: int
     passenger_timeout_seconds: int
+    deno_pool_min_idle: int = 1
+    deno_pool_max_idle: int = 4
+    deno_pool_idle_ttl_seconds: int = 60
+    deno_pool_status: dict[str, Any] | None = None
 
 
 class AdminSettingsUpdate(BaseModel):
@@ -91,6 +95,9 @@ class AdminSettingsUpdate(BaseModel):
     passenger_calling_enabled: bool | None = None
     max_passenger_calls_per_request: int | None = None
     passenger_timeout_seconds: int | None = None
+    deno_pool_min_idle: int | None = Field(default=None, ge=0, le=16)
+    deno_pool_max_idle: int | None = Field(default=None, ge=0, le=32)
+    deno_pool_idle_ttl_seconds: int | None = Field(default=None, ge=10, le=600)
 
 
 def _settings_response(s: AdminSettings, effective: str) -> AdminSettingsResponse:
@@ -100,6 +107,11 @@ def _settings_response(s: AdminSettings, effective: str) -> AdminSettingsRespons
     identical 18-line constructions; a field added to one and not the other
     silently disappeared from that endpoint.
     """
+    from app.services import deno_runner
+
+    pool = getattr(deno_runner, "deno_pool", None)
+    pool_status = pool.status() if pool is not None else None
+
     return AdminSettingsResponse(
         max_driver_callable_turns=s.max_driver_callable_turns,
         max_verification_retries=s.max_verification_retries,
@@ -134,6 +146,10 @@ def _settings_response(s: AdminSettings, effective: str) -> AdminSettingsRespons
         passenger_calling_enabled=s.passenger_calling_enabled,
         max_passenger_calls_per_request=s.max_passenger_calls_per_request,
         passenger_timeout_seconds=s.passenger_timeout_seconds,
+        deno_pool_min_idle=s.deno_pool_min_idle,
+        deno_pool_max_idle=s.deno_pool_max_idle,
+        deno_pool_idle_ttl_seconds=s.deno_pool_idle_ttl_seconds,
+        deno_pool_status=pool_status,
     )
 
 
@@ -252,6 +268,14 @@ async def update_settings(
         updates["max_passenger_calls_per_request"] = max(0, req.max_passenger_calls_per_request)
     if req.passenger_timeout_seconds is not None:
         updates["passenger_timeout_seconds"] = max(1, req.passenger_timeout_seconds)
+    if req.deno_pool_min_idle is not None or req.deno_pool_max_idle is not None:
+        current = await get_admin_settings()
+        new_min = req.deno_pool_min_idle if req.deno_pool_min_idle is not None else current.deno_pool_min_idle
+        new_max = req.deno_pool_max_idle if req.deno_pool_max_idle is not None else current.deno_pool_max_idle
+        updates["deno_pool_min_idle"] = new_min
+        updates["deno_pool_max_idle"] = max(new_max, new_min)
+    if req.deno_pool_idle_ttl_seconds is not None:
+        updates["deno_pool_idle_ttl_seconds"] = req.deno_pool_idle_ttl_seconds
 
     s = await update_admin_settings(updates)
     from app.services.admin import get_effective_log_level
