@@ -513,6 +513,10 @@ async def get_update_download_info(
     )
 
 
+class UpdateExecuteRequest(BaseModel):
+    auto_approve: bool | None = None
+
+
 class UpdateExecuteResponse(BaseModel):
     success: bool
     message: str = ""
@@ -522,9 +526,11 @@ class UpdateExecuteResponse(BaseModel):
 @router.post("/update/execute", response_model=UpdateExecuteResponse)
 async def execute_update(
     admin: Annotated[User, Depends(require_admin)],
+    req: UpdateExecuteRequest | None = None,
 ):
     from app.services.updater import execute_update
-    result = await execute_update()
+    auto_approve = True if (req is None or req.auto_approve is None) else req.auto_approve
+    result = await execute_update(auto_approve=auto_approve)
     return UpdateExecuteResponse(**result)
 
 
@@ -540,6 +546,7 @@ class UpdateChainStep(BaseModel):
 class UpdateChainResponse(BaseModel):
     active: bool
     status: str = ""
+    auto_approve: bool = True
     from_version: str = ""
     target_version: str = ""
     current_step: int = 0
@@ -570,13 +577,15 @@ async def abort_update_chain(
 @router.post("/update/chain/resume", response_model=UpdateExecuteResponse)
 async def resume_update_chain(
     admin: Annotated[User, Depends(require_admin)],
+    req: UpdateExecuteRequest | None = None,
 ):
-    """Retry the outstanding step of a failed, stalled or expired chain.
+    """Approve or retry the outstanding step of a paused, failed, stalled or expired chain.
 
     Reuses the frozen plan, so a retry still lands on the approved version.
     """
     from app.services.updater import resume_chain_now
-    return UpdateExecuteResponse(**await resume_chain_now())
+    auto_approve = None if req is None else req.auto_approve
+    return UpdateExecuteResponse(**await resume_chain_now(auto_approve=auto_approve))
 
 
 class SchemaRepairResponse(BaseModel):

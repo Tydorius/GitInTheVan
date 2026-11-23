@@ -973,17 +973,23 @@ export const api = {
   checkUpdate: () =>
     request<{ current_version: string; latest_version: string; update_available: boolean; release_url: string; release_notes: string;
     zip_url: string; step_count: number; error: string }>('/api/admin/update/check'),
-  executeUpdate: () =>
-    request<{ success: boolean; message: string; error: string }>('/api/admin/update/execute', { method: 'POST' }),
+  executeUpdate: (options?: { auto_approve?: boolean }) =>
+    request<{ success: boolean; message: string; error: string }>('/api/admin/update/execute', {
+      method: 'POST',
+      body: JSON.stringify(options ?? { auto_approve: true }),
+    }),
   getUpdateChain: () =>
-    request<{ active: boolean; status: string; from_version: string; target_version: string; current_step: number;
+    request<{ active: boolean; status: string; auto_approve?: boolean; from_version: string; target_version: string; current_step: number;
     total_steps: number; error: string;
     steps: { version: string; tag: string; status: string; attempts: number; error: string; release_url: string }[];
     log_tail: string[] }>('/api/admin/update/chain'),
   abortUpdateChain: () =>
     request<{ success: boolean; message: string; error: string }>('/api/admin/update/chain', { method: 'DELETE' }),
-  resumeUpdateChain: () =>
-    request<{ success: boolean; message: string; error: string }>('/api/admin/update/chain/resume', { method: 'POST' }),
+  resumeUpdateChain: (options?: { auto_approve?: boolean }) =>
+    request<{ success: boolean; message: string; error: string }>('/api/admin/update/chain/resume', {
+      method: 'POST',
+      body: JSON.stringify(options ?? {}),
+    }),
 
   // Debug
   listDebugExchanges: (savedOnly = false) =>

@@ -12,6 +12,9 @@
   let updateChain: any = $state(null)
   let chainInterval: ReturnType<typeof setInterval> | null = null
   let chainBusy = $state(false)
+  let showConfirmModal = $state(false)
+  let approveAll = $state(true)
+  let resumeApproveAll = $state(true)
 
   async function checkUpdate() {
     updateChecking = true; updateError = ''
@@ -35,15 +38,18 @@
     } catch { /* chain state is advisory; a failure here must not break the tab */ }
   }
 
-  async function launchUpdate() {
-    const steps = updateInfo?.step_count || 1
-    const plan = steps > 1
-      ? `This will install ${steps} updates in sequence, ending at ${updateInfo.latest_version}, restarting the server after each one.`
-      : `This will install ${updateInfo?.latest_version || 'the update'} and restart the server.`
-    if (!confirm(`${plan}\n\nThe page will lose connection temporarily. Continue?`)) return
+  function openUpdateConfirm() {
+    approveAll = true
+    updateError = ''
+    showConfirmModal = true
+  }
+
+  async function confirmLaunchUpdate() {
+    showConfirmModal = false
     updating = true
+    updateError = ''
     try {
-      const result = await api.executeUpdate()
+      const result = await api.executeUpdate({ auto_approve: approveAll })
       if (result.success) {
         updateLaunched = true
         loadChain()
@@ -54,10 +60,11 @@
     finally { updating = false }
   }
 
-  async function resumeChain() {
+  async function resumeChain(autoApprove: boolean | undefined = undefined) {
     chainBusy = true; updateError = ''
     try {
-      const result = await api.resumeUpdateChain()
+      const opts = autoApprove === undefined ? undefined : { auto_approve: autoApprove }
+      const result = await api.resumeUpdateChain(opts)
       if (!result.success) updateError = result.error || 'Could not resume update'
       await loadChain()
     } catch (e: any) { updateError = e.message }
@@ -138,6 +145,43 @@
         {/if}
       </div>
     </div>
+  {:else if updateChain && updateChain.status === 'awaiting_approval' && !updateChain.active}
+    <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid #f59e0b; border-radius: 4px; padding: 16px; margin-bottom: 16px;">
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+        <span style="font-size: 18px;">⏸</span>
+        <strong style="font-size: 14px; color: #f59e0b;">
+          Approval Needed &mdash; step {updateChain.current_step + 1} of {updateChain.total_steps}
+        </strong>
+      </div>
+      <div style="font-size: 13px; margin-bottom: 8px;">
+        Upgrading <code>{updateChain.from_version}</code> &rarr; <code>{updateChain.target_version}</code>.
+        Step {updateChain.current_step} finished; ready to install the next version.
+      </div>
+      {#if updateChain.steps?.length}
+        <ol style="font-size: 12px; line-height: 1.9; padding-left: 20px; margin: 8px 0;">
+          {#each updateChain.steps as step}
+            <li>
+              <code>{step.version}</code>
+              {#if step.status === 'installed'}<span style="color: #22c55e;">&nbsp;&check; installed</span>
+              {:else if step.status === 'failed'}<span style="color: #ef4444;">&nbsp;&times; failed</span>
+              {:else}<span style="color: var(--text-dim);">&nbsp;pending</span>{/if}
+            </li>
+          {/each}
+        </ol>
+      {/if}
+      <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; margin: 10px 0 12px; cursor: pointer;">
+        <input type="checkbox" bind:checked={resumeApproveAll} style="width: auto;" />
+        Approve all remaining updates automatically (only stop on error)
+      </label>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <button class="primary" onclick={() => resumeChain(resumeApproveAll)} disabled={chainBusy} style="font-size: 13px; padding: 6px 16px;">
+          {chainBusy ? 'Working...' : (resumeApproveAll ? 'Approve All & Continue' : 'Approve Next Step')}
+        </button>
+        <button onclick={abortChain} disabled={chainBusy} style="font-size: 13px; padding: 6px 16px;">
+          Discard plan
+        </button>
+      </div>
+    </div>
   {:else if updateChain && updateChain.status && !updateChain.active && ['failed', 'stalled', 'version_mismatch', 'expired'].includes(updateChain.status)}
     <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; border-radius: 4px; padding: 16px; margin-bottom: 16px;">
       <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
@@ -158,7 +202,7 @@
         </details>
       {/if}
       <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-        <button class="primary" onclick={resumeChain} disabled={chainBusy} style="font-size: 13px; padding: 6px 16px;">
+        <button class="primary" onclick={() => resumeChain()} disabled={chainBusy} style="font-size: 13px; padding: 6px 16px;">
           {chainBusy ? 'Working...' : 'Retry this step'}
         </button>
         <button onclick={abortChain} disabled={chainBusy} style="font-size: 13px; padding: 6px 16px;">
@@ -200,7 +244,7 @@
         <div class="error-msg" style="margin-top: 8px;">{updateError}</div>
       {/if}
       <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
-        <button class="primary" onclick={launchUpdate} disabled={updating} style="font-size: 13px; padding: 6px 16px;">
+        <button class="primary" onclick={openUpdateConfirm} disabled={updating} style="font-size: 13px; padding: 6px 16px;">
           {updating ? 'Downloading...' : 'Update Now'}
         </button>
         {#if updateInfo.zip_url}
@@ -263,3 +307,48 @@
     <button class="primary" onclick={checkUpdate}>Check for Updates</button>
   {/if}
 </div>
+
+{#if showConfirmModal}
+  <div
+    class="modal-overlay"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="update-confirm-title"
+    tabindex="-1"
+    onclick={(e) => { if (e.target === e.currentTarget) showConfirmModal = false }}
+    onkeydown={(e) => { if (e.key === 'Escape') showConfirmModal = false }}
+  >
+    <div class="modal" style="max-width: 480px;">
+      <h3 id="update-confirm-title">Approve Update</h3>
+      <p style="font-size: 13px; line-height: 1.6; margin: 10px 0;">
+        {#if (updateInfo?.step_count || 1) > 1}
+          This will install <strong>{updateInfo.step_count} updates</strong> in sequence,
+          ending at <code>{updateInfo.latest_version}</code>, restarting the server after each step.
+        {:else}
+          This will install <code>{updateInfo?.latest_version || 'the update'}</code> and restart the server.
+        {/if}
+      </p>
+      <p style="font-size: 12px; color: var(--text-dim); margin: 0 0 12px;">
+        The page will lose connection temporarily while the server restarts.
+      </p>
+      {#if (updateInfo?.step_count || 1) > 1}
+        <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 12px; margin: 12px 0; padding: 10px; background: var(--bg-elevated); border-radius: 4px; cursor: pointer;">
+          <input type="checkbox" bind:checked={approveAll} style="width: auto; margin-top: 2px;" />
+          <span>
+            <strong>Approve all updates in this batch</strong><br />
+            <span style="color: var(--text-dim);">
+              Run all {updateInfo.step_count} steps automatically and only stop if an error occurs.
+              Uncheck to pause for your approval after each version.
+            </span>
+          </span>
+        </label>
+      {/if}
+      <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px;">
+        <button type="button" onclick={() => { showConfirmModal = false }}>Cancel</button>
+        <button type="button" class="primary" onclick={confirmLaunchUpdate}>
+          {(updateInfo?.step_count || 1) > 1 && approveAll ? 'Approve All & Update' : 'Approve & Update'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}

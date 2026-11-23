@@ -2,6 +2,14 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.47.1] - 2026-11-23
+
+Adds an auto-selected **Approve all** option to the update confirmation flow so multi-version updates run unattended through the entire batch and only stop on an actual error (or when the admin explicitly unchecks batch approval to review each version individually).
+
+### Added
+
+- **Batch "Approve all" option for multi-version updates.** Clicking **Update Now** in **Admin → Update** now opens a confirmation modal with **"Approve all updates in this batch automatically (only stop on error)"** checked by default (`auto_approve: true`). When checked, multi-release chains proceed through every hop unattended and halt only on actual errors (`failed`, `stalled`, `version_mismatch`, `expired`). When unchecked (`auto_approve: false`), the chain pauses after each installed hop in `awaiting_approval` until the admin clicks **Approve Next Step** or **Approve All & Continue** (`POST /api/admin/update/execute` and `POST /api/admin/update/chain/resume` accept optional `{ "auto_approve": bool }`, defaulting to `true` for backward compatibility).
+
 ## [0.47.0] - 2026-11-23
 
 Adds a warm single-use Deno worker pool with dynamic burst scaling (configurable live from the Admin panel) plus cantrip hot-path DB and context batching, cutting chained cantrip latency dramatically while preserving full per-cantrip process isolation.

@@ -1166,3 +1166,119 @@ class TestUpdaterPortFromEnv:
         # 5. Explicit CLI port overrides .env
         (tmp_path / ".env").write_text("GITV_PORT=8123\n", encoding="utf-8")
         assert _run("--auto", "9090") == "9090"
+
+
+class TestUpdateAutoApprove:
+    """0.47.1: batch auto-approve (default True) vs per-step approval pause."""
+
+    def _make_two_step_chain(self, tmp_path, monkeypatch, *, auto_approve: bool):
+        import app.services.updater as updater
+
+        chain_path = tmp_path / "update-chain.json"
+        archive_path = tmp_path / "update-chain-last.json"
+        log_path = tmp_path / "update-chain.log"
+        monkeypatch.setattr(updater, "_CHAIN_PATH", chain_path)
+        monkeypatch.setattr(updater, "_CHAIN_ARCHIVE_PATH", archive_path)
+        monkeypatch.setattr(updater, "_CHAIN_LOG_PATH", log_path)
+        monkeypatch.setattr(updater, "get_current_version", lambda: "0.46.0")
+
+        chain = {
+            "schema_version": updater.CHAIN_SCHEMA_VERSION,
+            "status": "active",
+            "auto_approve": auto_approve,
+            "created_at": updater._now(),
+            "last_activity_at": updater._now(),
+            "from_version": "0.45.2",
+            "target_version": "0.47.0",
+            "error": "",
+            "steps": [
+                {
+                    "version": "0.46.0",
+                    "tag": "v0.46.0",
+                    "zip_url": "https://example.com/0.46.0.zip",
+                    "release_url": "https://example.com/0.46.0",
+                    "status": "launched",
+                    "attempts": 1,
+                    "error": "",
+                },
+                {
+                    "version": "0.47.0",
+                    "tag": "v0.47.0",
+                    "zip_url": "https://example.com/0.47.0.zip",
+                    "release_url": "https://example.com/0.47.0",
+                    "status": "pending",
+                    "attempts": 0,
+                    "error": "",
+                },
+            ],
+        }
+        updater.write_chain(chain)
+        return updater
+
+    def test_auto_approve_true_continues_chain_automatically(self, tmp_path, monkeypatch):
+        updater = self._make_two_step_chain(tmp_path, monkeypatch, auto_approve=True)
+        resumed = updater.reconcile_chain_on_startup()
+        assert resumed is not None
+        assert resumed["status"] == "active"
+        assert resumed["steps"][0]["status"] == "installed"
+        assert resumed["steps"][1]["status"] == "pending"
+        assert updater.chain_status()["auto_approve"] is True
+
+    def test_auto_approve_false_pauses_in_awaiting_approval(self, tmp_path, monkeypatch):
+        updater = self._make_two_step_chain(tmp_path, monkeypatch, auto_approve=False)
+        resumed = updater.reconcile_chain_on_startup()
+        assert resumed is None
+        status = updater.chain_status()
+        assert status["active"] is False
+        assert status["status"] == "awaiting_approval"
+        assert status["auto_approve"] is False
+        assert status["steps"][0]["status"] == "installed"
+        assert status["steps"][1]["status"] == "pending"
+
+    @pytest.mark.asyncio
+    async def test_resume_chain_now_can_enable_auto_approve_for_remaining(self, tmp_path, monkeypatch):
+        updater = self._make_two_step_chain(tmp_path, monkeypatch, auto_approve=False)
+        updater.reconcile_chain_on_startup()
+
+        launched: list[int] = []
+
+        async def fake_run_step(chain, idx):
+            launched.append(idx)
+            return {"success": True, "message": "ok"}
+
+        monkeypatch.setattr(updater, "_run_step", fake_run_step)
+        result = await updater.resume_chain_now(auto_approve=True)
+        assert result["success"] is True
+        assert launched == [1]
+        saved = updater.read_chain()
+        assert saved["status"] == "active"
+        assert saved["auto_approve"] is True
+
+    @pytest.mark.asyncio
+    async def test_execute_update_persists_auto_approve_flag(self, tmp_path, monkeypatch):
+        import app.services.updater as updater
+
+        monkeypatch.setattr(updater, "_CHAIN_PATH", tmp_path / "update-chain.json")
+        monkeypatch.setattr(updater, "_CHAIN_ARCHIVE_PATH", tmp_path / "update-chain-last.json")
+        monkeypatch.setattr(updater, "_CHAIN_LOG_PATH", tmp_path / "update-chain.log")
+        monkeypatch.setattr(updater, "get_current_version", lambda: "0.45.0")
+
+        async def fake_releases(*, force=False):
+            return [_release("0.46.0"), _release("0.47.0")]
+
+        async def fake_run_step(chain, idx):
+            return {"success": True, "message": "ok"}
+
+        monkeypatch.setattr(updater, "get_releases", fake_releases)
+        monkeypatch.setattr(updater, "_run_step", fake_run_step)
+
+        # Default is True
+        res = await updater.execute_update()
+        assert res["success"] is True
+        assert updater.read_chain()["auto_approve"] is True
+
+        # Reset and explicitly pass False
+        (tmp_path / "update-chain.json").unlink()
+        res2 = await updater.execute_update(auto_approve=False)
+        assert res2["success"] is True
+        assert updater.read_chain()["auto_approve"] is False

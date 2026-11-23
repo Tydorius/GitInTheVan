@@ -597,11 +597,14 @@ async def _run_step(chain: dict[str, Any], index: int) -> dict[str, Any]:
     }
 
 
-async def execute_update() -> dict[str, Any]:
+async def execute_update(*, auto_approve: bool = True) -> dict[str, Any]:
     """Freeze an upgrade plan and launch its first hop.
 
     The plan is built from releases fetched right now and then never re-resolved,
     so a release published mid-chain cannot change where the user ends up.
+    When ``auto_approve`` is True (default), subsequent hops run automatically
+    after each restart and only halt on error. When False, the chain pauses in
+    ``awaiting_approval`` after each hop until the admin approves the next one.
     """
     existing = read_chain()
     if chain_is_active(existing):
@@ -624,6 +627,7 @@ async def execute_update() -> dict[str, Any]:
     chain = {
         "schema_version": CHAIN_SCHEMA_VERSION,
         "status": "active",
+        "auto_approve": bool(auto_approve),
         "created_at": _now(),
         "last_activity_at": _now(),
         "from_version": current,
@@ -633,8 +637,8 @@ async def execute_update() -> dict[str, Any]:
     }
     write_chain(chain)
     _chain_log(
-        "frozen %s -> %s in %d step(s): %s",
-        current, steps[-1]["version"], len(steps),
+        "frozen %s -> %s in %d step(s) (auto_approve=%s): %s",
+        current, steps[-1]["version"], len(steps), bool(auto_approve),
         ", ".join(s["version"] for s in steps),
     )
 
@@ -725,6 +729,14 @@ def reconcile_chain_on_startup() -> dict[str, Any] | None:
                 clear_chain(status="completed")
                 _chain_log("completed: now on %s", installed)
                 return None
+            if not chain.get("auto_approve", True):
+                chain["status"] = "awaiting_approval"
+                write_chain(chain)
+                _chain_log(
+                    "awaiting admin approval before hop %d/%d (%s)",
+                    index + 2, len(steps), steps[index + 1]["version"],
+                )
+                return None
             write_chain(chain)
             return chain
 
@@ -791,8 +803,8 @@ def start_chain_resume() -> asyncio.Task | None:
     return asyncio.create_task(_resume_after_ready(chain))
 
 
-async def resume_chain_now() -> dict[str, Any]:
-    """Admin-triggered retry of a failed, stalled, mismatched or expired chain.
+async def resume_chain_now(*, auto_approve: bool | None = None) -> dict[str, Any]:
+    """Admin-triggered retry or approval of a paused, failed, stalled, mismatched or expired chain.
 
     Clears the error and the attempt counter for the outstanding hop, then runs
     it immediately -- the frozen plan is reused as-is, never rebuilt, so a retry
@@ -815,8 +827,13 @@ async def resume_chain_now() -> dict[str, Any]:
     step["error"] = ""
     chain["status"] = "active"
     chain["error"] = ""
+    if auto_approve is not None:
+        chain["auto_approve"] = bool(auto_approve)
     write_chain(chain)
-    _chain_log("resumed by admin at hop %d/%d", index + 1, len(chain["steps"]))
+    _chain_log(
+        "resumed by admin at hop %d/%d (auto_approve=%s)",
+        index + 1, len(chain["steps"]), bool(chain.get("auto_approve", True)),
+    )
 
     return await _run_step(chain, index)
 
@@ -853,6 +870,7 @@ def chain_status() -> dict[str, Any]:
     return {
         "active": active,
         "status": chain.get("status", ""),
+        "auto_approve": bool(chain.get("auto_approve", True)),
         "from_version": chain.get("from_version", ""),
         "target_version": chain.get("target_version", ""),
         "current_step": min(installed + 1, len(steps)) if active else installed,
