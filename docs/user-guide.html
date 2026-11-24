@@ -1721,6 +1721,37 @@ editable at runtime from the Storage page.</p>
 </ul>
 <p>When summarization triggers, older dialogue is removed from the request and replaced with a single <code>[CONVERSATION SUMMARY]</code> system block. The most recent messages are always forwarded verbatim. Summaries are cached per conversation — rerolls and forks reuse the cached summary without re-calling the LLM.</p>
 <p>Compaction is incremental: when the history covered by the existing summary has not changed, the summarizer is sent only the newly aged messages plus that summary, instead of the whole history again. If earlier history has diverged (an edited or trimmed turn), the summary is rebuilt in full. A summarizer call that fails keeps the previous summary and leaves the stored one untouched, so the next turn retries rather than trusting a half-built summary.</p>
+<h3 id="prompt-caching">Prompt Caching</h3>
+<p><img alt="Prompt Caching settings" src="media/gitv-settings-prompt-caching.png"></p>
+<p><em>The Prompt Caching card with both modes enabled, captured 2026-11-23.</em></p>
+<p>Two opt-in settings (both off by default) that keep the static prefix of your prompts identical
+across turns, so upstream providers can reuse cached KV state — lower latency and lower
+input-token cost on long conversations:</p>
+<ul>
+<li><strong>Cache-Friendly Injection Mode</strong>: moves everything that changes turn-to-turn to the end of
+  your newest message instead of the top of the prompt. Persistent <code>[MEMORY]</code> blocks are sorted
+  by key and appended to the newest user message; non-constant lorebook entries set to
+  <code>before_last_message</code> or <code>in_chat_system</code> are redirected to the newest user message (constant
+  entries and <code>system_start</code> entries stay pinned at the top); and cantrip card edits that merely
+  <em>append</em> to the seeded fields ride the tail instead of rewriting the card (full replacements
+  still apply normally). Combined with the <code>user_tail</code> lorebook position and summarization
+  <strong>Block Size</strong>, this keeps everything before the current turn byte-identical between requests.</li>
+<li><strong>Auto-Place Anthropic / OpenRouter Cache Breakpoints</strong>: when forwarding to Anthropic,
+  OpenRouter, or Claude models, automatically stamps up to two
+  <code>cache_control: { type: 'ephemeral' }</code> breakpoints (the last system message and the
+  second-to-last non-system message). The breakpoints are added to the wire request only —
+  they never change what is stored, hashed, or shown in Debug, and non-Claude endpoints are
+  never touched. A <code>cache_control</code> entry appears in the Debug timeline whenever breakpoints
+  are stamped.</li>
+</ul>
+<p>The Debug page helps you verify all of this is working: selecting a run shows a
+<strong>Prompt Cache Analysis</strong> banner comparing that request's final prompt with the previous turn of
+the same chat — how many tokens of prefix were shared, a stability percentage, which message
+first diverged, and which pipeline stage caused it. A green banner with "all previous turns
+cache-eligible" is the goal; an early-diverging prefix with a named culprit stage tells you
+exactly what is busting your cache.</p>
+<p><img alt="Prompt Cache Analysis banner" src="media/gitv-debug-cache-banner.png"></p>
+<p><em>The Debug run view with its Prompt Cache Analysis banner, captured 2026-11-23.</em></p>
 <h3 id="driver-callable-tools_1">Driver-Callable Tools</h3>
 <p>Controls whether the writing LLM (Driver) can invoke cantrips as tools during generation:</p>
 <ul>

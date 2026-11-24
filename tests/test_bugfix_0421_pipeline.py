@@ -109,7 +109,9 @@ class TestPipelineOrderBugfixes:
             patch("app.services.conversation.save_memories_for_chat", AsyncMock()) as mock_save_mem,
             patch(
                 "app.services.cantrip.apply_cantrip_result_to_messages",
-                side_effect=lambda msgs, p, s, e: [
+                # 0.48.0 added cache_friendly=/seeded_character= kwargs at the
+                # call site; this mock ignores them (cache mode off in this test).
+                side_effect=lambda msgs, p, s, e, **kwargs: [
                     {"role": "system", "content": f"{msgs[0]['content']}\n{p}"},
                     *msgs[1:],
                 ],

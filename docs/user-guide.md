@@ -2008,6 +2008,43 @@ When summarization triggers, older dialogue is removed from the request and repl
 
 Compaction is incremental: when the history covered by the existing summary has not changed, the summarizer is sent only the newly aged messages plus that summary, instead of the whole history again. If earlier history has diverged (an edited or trimmed turn), the summary is rebuilt in full. A summarizer call that fails keeps the previous summary and leaves the stored one untouched, so the next turn retries rather than trusting a half-built summary.
 
+### Prompt Caching
+
+![Prompt Caching settings](media/gitv-settings-prompt-caching.png)
+
+*The Prompt Caching card with both modes enabled, captured 2026-11-23.*
+
+Two opt-in settings (both off by default) that keep the static prefix of your prompts identical
+across turns, so upstream providers can reuse cached KV state — lower latency and lower
+input-token cost on long conversations:
+
+- **Cache-Friendly Injection Mode**: moves everything that changes turn-to-turn to the end of
+  your newest message instead of the top of the prompt. Persistent `[MEMORY]` blocks are sorted
+  by key and appended to the newest user message; non-constant lorebook entries set to
+  `before_last_message` or `in_chat_system` are redirected to the newest user message (constant
+  entries and `system_start` entries stay pinned at the top); and cantrip card edits that merely
+  *append* to the seeded fields ride the tail instead of rewriting the card (full replacements
+  still apply normally). Combined with the `user_tail` lorebook position and summarization
+  **Block Size**, this keeps everything before the current turn byte-identical between requests.
+- **Auto-Place Anthropic / OpenRouter Cache Breakpoints**: when forwarding to Anthropic,
+  OpenRouter, or Claude models, automatically stamps up to two
+  `cache_control: { type: 'ephemeral' }` breakpoints (the last system message and the
+  second-to-last non-system message). The breakpoints are added to the wire request only —
+  they never change what is stored, hashed, or shown in Debug, and non-Claude endpoints are
+  never touched. A `cache_control` entry appears in the Debug timeline whenever breakpoints
+  are stamped.
+
+The Debug page helps you verify all of this is working: selecting a run shows a
+**Prompt Cache Analysis** banner comparing that request's final prompt with the previous turn of
+the same chat — how many tokens of prefix were shared, a stability percentage, which message
+first diverged, and which pipeline stage caused it. A green banner with "all previous turns
+cache-eligible" is the goal; an early-diverging prefix with a named culprit stage tells you
+exactly what is busting your cache.
+
+![Prompt Cache Analysis banner](media/gitv-debug-cache-banner.png)
+
+*The Debug run view with its Prompt Cache Analysis banner, captured 2026-11-23.*
+
 ### Driver-Callable Tools
 
 Controls whether the writing LLM (Driver) can invoke cantrips as tools during generation:
