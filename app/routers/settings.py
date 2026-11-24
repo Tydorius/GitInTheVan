@@ -46,6 +46,8 @@ class SettingsResponse(BaseModel):
     context_budget_percent: float
     context_window_override: int
     summarization_block_size: int = 0
+    cache_friendly_mode: bool = False
+    auto_cache_control: bool = False
     debug_mode: bool
     default_map_id: str | None
     # Phase 29: lexicon compiler settings and the user half of the
@@ -90,6 +92,8 @@ class SettingsUpdate(BaseModel):
     context_budget_percent: float | None = None
     context_window_override: int | None = None
     summarization_block_size: int | None = Field(default=None, ge=0)
+    cache_friendly_mode: bool | None = None
+    auto_cache_control: bool | None = None
     debug_mode: bool | None = None
     default_map_id: str | None = None
     lexicon_enabled: bool | None = None
@@ -132,6 +136,8 @@ async def get_settings(
         context_budget_percent=user_settings.context_budget_percent,
         context_window_override=user_settings.context_window_override,
         summarization_block_size=user_settings.summarization_block_size,
+        cache_friendly_mode=user_settings.cache_friendly_mode,
+        auto_cache_control=user_settings.auto_cache_control,
         debug_mode=user_settings.debug_mode,
         default_map_id=user_settings.default_map_id,
         lexicon_enabled=user_settings.lexicon_enabled,
@@ -200,6 +206,10 @@ async def update_settings(
         user_settings.context_window_override = max(0, req.context_window_override)
     if req.summarization_block_size is not None:
         user_settings.summarization_block_size = req.summarization_block_size
+    if req.cache_friendly_mode is not None:
+        user_settings.cache_friendly_mode = req.cache_friendly_mode
+    if req.auto_cache_control is not None:
+        user_settings.auto_cache_control = req.auto_cache_control
     if req.debug_mode is not None:
         user_settings.debug_mode = req.debug_mode
     if "default_map_id" in req.model_fields_set:
@@ -298,6 +308,8 @@ async def update_settings(
         context_budget_percent=user_settings.context_budget_percent,
         context_window_override=user_settings.context_window_override,
         summarization_block_size=user_settings.summarization_block_size,
+        cache_friendly_mode=user_settings.cache_friendly_mode,
+        auto_cache_control=user_settings.auto_cache_control,
         debug_mode=user_settings.debug_mode,
         default_map_id=user_settings.default_map_id,
         lexicon_enabled=user_settings.lexicon_enabled,

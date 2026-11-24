@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from app.services.lorebook import append_user_tail
 from app.services.messages import extract_text
 
 logger = logging.getLogger(__name__)
@@ -430,12 +431,26 @@ def apply_cantrip_result_to_messages(
     result_personality: str,
     result_scenario: str,
     result_example_dialogs: str,
+    *,
+    cache_friendly: bool = False,
+    seeded_character: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     finals = {
         "personality": result_personality,
         "scenario": result_scenario,
         "example_dialogs": result_example_dialogs,
     }
+    tail_deltas: list[str] = []
+    if cache_friendly and seeded_character is not None:
+        for field in ("personality", "scenario", "example_dialogs"):
+            new_val = finals[field]
+            base = seeded_character.get(field, "")
+            if new_val and new_val != base and new_val.startswith(base):
+                delta = new_val[len(base):].strip()
+                if delta:
+                    tail_deltas.append(delta)
+                finals[field] = base
+
     result = [msg.copy() for msg in messages]
 
     sections = parse_character_sections(result)
@@ -443,7 +458,10 @@ def apply_cantrip_result_to_messages(
         deferred = _splice_sections(result, sections, finals)
         if deferred:
             _inject_blocks(result, deferred)
-        return result
+    else:
+        _inject_blocks(result, finals)
 
-    _inject_blocks(result, finals)
+    if tail_deltas:
+        result = append_user_tail(result, "\n\n".join(tail_deltas))
+
     return result

@@ -79,7 +79,10 @@
   let error = ''
   let saved = false
   let sumSaved = false
+  let cacheSaved = false
   let lexSaved = false
+  let cacheFriendlyMode = false
+  let autoCacheControl = false
 
   // Phase 29: the lexicon compiler and the user half of the doubly-gated
   // cantrip auto-install. Both ride the general settings endpoint.
@@ -159,7 +162,7 @@
   let passengerEffectiveCap = 0
   let passengerSaved = false
 
-  let collapse = new CollapseController('settings', ['proxy', 'streaming', 'summarization', 'assistant', 'driver', 'prefill', 'budget', 'lexicon', 'passenger', 'strippatterns', 'order'])
+  let collapse = new CollapseController('settings', ['proxy', 'streaming', 'summarization', 'caching', 'assistant', 'driver', 'prefill', 'budget', 'lexicon', 'passenger', 'strippatterns', 'order'])
 
   async function load() {
     try {
@@ -205,6 +208,8 @@
       contextWindowOverride = (s as any).context_window_override ?? 0
       debugMode = (s as any).debug_mode ?? false
       defaultMapId = (s as any).default_map_id || ''
+      cacheFriendlyMode = (s as any).cache_friendly_mode ?? false
+      autoCacheControl = (s as any).auto_cache_control ?? false
 
       try {
         const ac = await api.getAssistantConfig()
@@ -240,6 +245,17 @@
       // but from this button, where the user edited them.
       await api.updateSettings({ summarization_parameters: summarizationParams } as any)
       sumSaved = true
+    } catch (e: any) { error = e.message }
+  }
+
+  async function saveCaching() {
+    error = ''; cacheSaved = false
+    try {
+      await api.updateSettings({
+        cache_friendly_mode: cacheFriendlyMode,
+        auto_cache_control: autoCacheControl,
+      } as any)
+      cacheSaved = true
     } catch (e: any) { error = e.message }
   }
 
@@ -464,6 +480,32 @@
     </p>
   </div>
   <button class="primary" onclick={saveSummarization}>Save Summarization Settings</button>
+</CollapsibleCard>
+
+<CollapsibleCard title="Prompt Caching" cardKey="caching" {collapse}>
+  <p style="color: var(--text-dim); font-size: 12px; margin-top: 12px; margin-bottom: 16px;">
+    Keep the static prefix of your prompts stable across turns so upstream providers can reuse cached KV state and reduce latency and input-token cost.
+  </p>
+  {#if cacheSaved}<div class="success-msg">Prompt caching settings saved.</div>{/if}
+  <div class="form-group">
+    <label>
+      <input type="checkbox" bind:checked={cacheFriendlyMode} style="width: auto;">
+      Cache-Friendly Injection Mode
+    </label>
+    <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+      Moves dynamic per-turn memories, non-constant lorebooks, and appended cantrip card deltas to the newest user message (<code>user_tail</code>) so the static prompt prefix stays cache-hot across turns.
+    </p>
+  </div>
+  <div class="form-group">
+    <label>
+      <input type="checkbox" bind:checked={autoCacheControl} style="width: auto;">
+      Auto-Place Anthropic / OpenRouter Cache Breakpoints
+    </label>
+    <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+      Automatically stamps <code>cache_control: {'{'} type: 'ephemeral' {'}'}</code> on the system prompt and previous turn when forwarding to Anthropic, OpenRouter, or Claude models.
+    </p>
+  </div>
+  <button class="primary" onclick={saveCaching}>Save Caching Settings</button>
 </CollapsibleCard>
 
 <CollapsibleCard title="Chat Lexicon & Cantrip Drafts" cardKey="lexicon" {collapse}>

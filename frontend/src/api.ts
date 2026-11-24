@@ -359,6 +359,20 @@ export interface DebugPipelineData {
   };
 }
 
+export interface CacheAnalysis {
+  available: boolean;
+  reason?: string;
+  previous_exchange_id?: string;
+  shared_prefix_tokens?: number;
+  total_prompt_tokens?: number;
+  prefix_stability_pct?: number;
+  first_diff_message_index?: number | null;
+  first_diff_role?: string;
+  culprit_stage?: string;
+  is_tail_only?: boolean;
+  summary?: string;
+}
+
 export interface DebugExchange {
   id: string;
   chat_id: string;
@@ -369,6 +383,7 @@ export interface DebugExchange {
   pipeline_data: DebugPipelineData;
   response_content: string;
   verification_data: Record<string, any>;
+  cache_analysis?: CacheAnalysis | null;
   created_at: string;
 }
 
@@ -663,6 +678,8 @@ export interface UserSettings {
   lexicon_parameters: LlmParameter[];
   passenger_parameters: LlmParameter[];
   summarization_block_size?: number;
+  cache_friendly_mode?: boolean;
+  auto_cache_control?: boolean;
   [key: string]: any;
 }
 

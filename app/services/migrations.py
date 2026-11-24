@@ -1617,6 +1617,14 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
         ALTER TABLE admin_settings ADD COLUMN deno_pool_idle_ttl_seconds INTEGER NOT NULL DEFAULT 60;
         """,
     ),
+    (
+        "072_user_settings_prompt_caching",
+        # 0.48.0 (Phase A): opt-in cache-friendly mode & automatic cache_control breakpoints.
+        """
+        ALTER TABLE user_settings ADD COLUMN cache_friendly_mode BOOLEAN NOT NULL DEFAULT FALSE;
+        ALTER TABLE user_settings ADD COLUMN auto_cache_control BOOLEAN NOT NULL DEFAULT FALSE;
+        """,
+    ),
 ]
 
 

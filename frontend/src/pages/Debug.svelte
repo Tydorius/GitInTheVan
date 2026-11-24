@@ -331,6 +331,36 @@
         </div>
 
         <MetricsBar totals={selectedExchange.pipeline_data?.run?.totals} />
+        {#if selectedExchange.cache_analysis?.available}
+          {@const ca = selectedExchange.cache_analysis}
+          {@const pct = ca.prefix_stability_pct ?? 0}
+          {@const isGood = Boolean(ca.is_tail_only) || pct >= 80}
+          {@const isBad = !isGood && pct < 50}
+          <div
+            class="cache-banner"
+            class:cache-good={isGood}
+            class:cache-warn={!isGood && !isBad}
+            class:cache-bad={isBad}
+          >
+            <div class="cache-banner-head">
+              <span class="cache-banner-title">Prompt Cache Analysis</span>
+              <span class="cache-banner-stat">
+                <strong>Prefix Stability: {pct}%</strong>
+                <span class="cache-banner-tokens">
+                  ({(ca.shared_prefix_tokens ?? 0).toLocaleString()} / {(ca.total_prompt_tokens ?? 0).toLocaleString()} tokens shared with previous turn)
+                </span>
+              </span>
+              {#if ca.culprit_stage}
+                <span class="cache-culprit" title="First pipeline stage that diverged from the previous turn's prefix">
+                  Culprit: {ca.culprit_stage}
+                </span>
+              {/if}
+            </div>
+            {#if ca.summary}
+              <div class="cache-banner-summary">{ca.summary}</div>
+            {/if}
+          </div>
+        {/if}
         <RunColumn exchange={selectedExchange} />
       </div>
     {:else}
@@ -371,6 +401,68 @@
   .run-actions button { font-size: 10px; padding: 2px 6px; }
 
   .detail-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  .cache-banner {
+    margin: 12px 0;
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    border-left-width: 4px;
+    background: var(--surface2);
+    font-size: 12px;
+  }
+  .cache-banner.cache-good {
+    border-left-color: var(--success);
+    background: rgba(61, 214, 140, 0.08);
+  }
+  .cache-banner.cache-warn {
+    border-left-color: var(--warn);
+    background: rgba(255, 180, 67, 0.08);
+  }
+  .cache-banner.cache-bad {
+    border-left-color: var(--danger);
+    background: rgba(229, 72, 77, 0.09);
+  }
+  .cache-banner-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .cache-banner-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+  }
+  .cache-banner-stat {
+    color: var(--text);
+  }
+  .cache-banner-tokens {
+    color: var(--text-dim);
+    margin-left: 4px;
+  }
+  .cache-culprit {
+    font-size: 11px;
+    font-family: var(--mono);
+    padding: 2px 7px;
+    border-radius: 999px;
+    border: 1px solid var(--warn);
+    color: var(--warn);
+    background: rgba(255, 180, 67, 0.12);
+    margin-left: auto;
+  }
+  .cache-banner.cache-bad .cache-culprit {
+    border-color: var(--danger);
+    color: var(--danger);
+    background: rgba(229, 72, 77, 0.14);
+  }
+  .cache-banner-summary {
+    margin-top: 6px;
+    color: var(--text-dim);
+    line-height: 1.45;
+  }
 
   .sandbox-card { margin-bottom: 16px; }
   .hint {

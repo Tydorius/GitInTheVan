@@ -60,6 +60,167 @@ def extract_response_text(response_data: Any) -> str:
     return content if isinstance(content, str) else str(content)
 
 
+_CACHE_CONTROL_EPHEMERAL: dict[str, str] = {"type": "ephemeral"}
+
+
+def _supports_anthropic_cache_control(provider: str, model: str, base_url: str) -> bool:
+    """Return True if the target endpoint supports Anthropic-style cache_control blocks."""
+    prov = (provider or "").strip().lower()
+    if prov in ("anthropic", "openrouter"):
+        return True
+    url = (base_url or "").strip().lower()
+    if "anthropic" in url or "openrouter.ai" in url:
+        return True
+    mdl = (model or "").strip().lower()
+    return "claude" in mdl
+
+
+def _has_cache_control(msg: dict[str, Any]) -> bool:
+    if "cache_control" in msg:
+        return True
+    content = msg.get("content")
+    if isinstance(content, list):
+        return any(isinstance(block, dict) and "cache_control" in block for block in content)
+    return False
+
+
+def _stamp_message_cache_control(msg: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """Return a shallow-copied message with an ephemeral cache_control breakpoint."""
+    if _has_cache_control(msg):
+        return msg, False
+
+    content = msg.get("content")
+    if isinstance(content, str):
+        if not content:
+            return msg, False
+        new_msg = {
+            **msg,
+            "content": [
+                {
+                    "type": "text",
+                    "text": content,
+                    "cache_control": dict(_CACHE_CONTROL_EPHEMERAL),
+                }
+            ],
+        }
+        return new_msg, True
+
+    if isinstance(content, list):
+        last_text_idx = None
+        for idx in range(len(content) - 1, -1, -1):
+            block = content[idx]
+            if isinstance(block, dict) and block.get("type") == "text":
+                last_text_idx = idx
+                break
+        if last_text_idx is None:
+            return msg, False
+        new_blocks = list(content)
+        new_blocks[last_text_idx] = {
+            **content[last_text_idx],
+            "cache_control": dict(_CACHE_CONTROL_EPHEMERAL),
+        }
+        return {**msg, "content": new_blocks}, True
+
+    return msg, False
+
+
+def apply_auto_cache_control(
+    messages: list[dict[str, Any]],
+    *,
+    provider: str = "",
+    model: str = "",
+    base_url: str = "",
+) -> tuple[list[dict[str, Any]], int]:
+    """Stamp up to 2 Anthropic/OpenRouter ephemeral cache_control breakpoints.
+
+    Breakpoints are placed on:
+    1. The last ``role == "system"`` message.
+    2. The second-to-last non-system message (when at least 2 non-system messages exist).
+
+    Never mutates caller message dicts or content lists. Returns
+    ``(new_messages, breakpoints_added)``.
+    """
+    if not messages or not _supports_anthropic_cache_control(provider, model, base_url):
+        return messages, 0
+
+    new_messages = list(messages)
+    breakpoints_added = 0
+
+    last_system_idx: int | None = None
+    non_system_indices: list[int] = []
+    for idx, msg in enumerate(new_messages):
+        if msg.get("role") == "system":
+            last_system_idx = idx
+        else:
+            non_system_indices.append(idx)
+
+    if last_system_idx is not None:
+        stamped_msg, stamped = _stamp_message_cache_control(new_messages[last_system_idx])
+        if stamped:
+            new_messages[last_system_idx] = stamped_msg
+            breakpoints_added += 1
+
+    if len(non_system_indices) >= 2:
+        target_idx = non_system_indices[-2]
+        stamped_msg, stamped = _stamp_message_cache_control(new_messages[target_idx])
+        if stamped:
+            new_messages[target_idx] = stamped_msg
+            breakpoints_added += 1
+
+    if breakpoints_added == 0:
+        return messages, 0
+    return new_messages, breakpoints_added
+
+
+def stamp_body_cache_control(
+    body_bytes: bytes,
+    body_json: dict[str, Any],
+    *,
+    provider: str = "",
+    model: str = "",
+    base_url: str = "",
+) -> bytes:
+    """Apply automatic cache_control breakpoints to a serialized wire body if enabled.
+
+    Never mutates ``body_json["messages"]`` or ``_gitv_messages_for_hash``. Emits a
+    ``cache_control`` debug capture stage when breakpoints are added.
+    """
+    if not body_json.get("_gitv_auto_cache_control"):
+        return body_bytes
+    try:
+        payload = json.loads(body_bytes)
+    except Exception:
+        return body_bytes
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return body_bytes
+    resolved_model = model or payload.get("model", "")
+    stamped, count = apply_auto_cache_control(
+        messages,
+        provider=provider,
+        model=resolved_model,
+        base_url=base_url,
+    )
+    if count <= 0:
+        return body_bytes
+    payload["messages"] = stamped
+    from app.services.debug import debug_capture
+
+    target_label = provider or base_url or resolved_model
+    debug_capture(
+        body_json,
+        "cache_control",
+        "Prompt Cache Breakpoints",
+        detail=f"Stamped {count} ephemeral cache_control breakpoint(s) for {target_label}",
+        metadata={
+            "breakpoints": count,
+            "provider": provider,
+            "model": resolved_model,
+        },
+    )
+    return json.dumps(payload).encode()
+
+
 def _resolve_proxy_override(name: str, local_fn: Any) -> Any:
     """Resolve a transport helper through ``app.services.proxy`` when patched.
 
@@ -332,6 +493,14 @@ async def forward_llm_chain(
             trial_body["stream"] = False
             trial_body = apply_to_body(trial_body, candidate_params)
             forward_body = json.dumps(trial_body).encode()
+
+        forward_body = stamp_body_cache_control(
+            forward_body,
+            body_json,
+            provider=candidate.provider,
+            model=effective_model,
+            base_url=candidate.base_url,
+        )
 
         started = time.monotonic()
         try:

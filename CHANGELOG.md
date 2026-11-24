@@ -2,6 +2,24 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.48.0] - 2026-11-23
+
+Automatic prompt caching and cache diagnostics release (Phase A): adds Cache-Friendly Injection Mode (moving dynamic memories, non-constant lorebooks, and appended cantrip card deltas to `user_tail`), automatic Anthropic / OpenRouter `cache_control` breakpoint stamping, a Debug Prefix-Diff ("Cache Buster") detector, and unified Lorebook `total_budget` enforcement on Map stages and manual Pre-Forward Order slots.
+
+### Added
+
+- **Cache-Friendly Injection Mode (`UserSettings.cache_friendly_mode`, opt-in, default off).** Configurable under **Settings → Prompt Caching**. When enabled:
+  - **Dynamic Memory tail injection**: persistent `[MEMORY]` blocks are sorted deterministically by key and appended to the newest `role == "user"` message (`user_tail`) via shared multimodal-safe `append_user_tail()` instead of mutating `messages[0]`.
+  - **Non-constant lorebook redirection**: non-constant `before_last_message` and `in_chat_system` lorebook entries are automatically redirected to `user_tail` while `is_constant` and `system_start` entries stay pinned at the top of the prompt.
+  - **Legacy cantrip delta redirection**: appended deltas on `context.character.personality`, `scenario`, and `example_dialogs` (when the mutated value starts with its seeded base value) are routed to `user_tail` instead of rewriting `messages[0]`; full replacements still apply normally.
+- **Automatic Anthropic / OpenRouter `cache_control` breakpoints (`UserSettings.auto_cache_control`, opt-in, default off).** Configurable under **Settings → Prompt Caching**. When enabled and forwarding to Anthropic, OpenRouter, or Claude models, stamps up to 2 `cache_control: {"type": "ephemeral"}` breakpoints (last `system` message + second-to-last non-system message) per failover candidate without mutating `_gitv_messages_for_hash` or non-Claude endpoints, emitting a `cache_control` Debug timeline entry.
+- **Debug Prefix-Diff / "Cache Buster" detector (`app/services/cache_diagnostics.py`).** `GET /api/debug/{exchange_id}` now computes `cache_analysis` against the immediately preceding debug exchange in the same chat: shared prefix token count & stability percentage, first diverging message index/role, culprit pipeline stage attribution, and a plain-English summary surfaced in a **Prompt Cache Analysis** banner on the Debug page.
+- **Lorebook `total_budget` enforcement on Map stages and manual Pre-Forward Order slots.** `_inject_stage_lorebooks` (`app/services/map_pipeline.py`) and `_inject_book_now` (`app/services/pipeline_order.py`) now enforce each lorebook's allocated budget cap (`lorebook_budget_chars`), matching the default global pass.
+
+### Schema
+
+- `072_user_settings_prompt_caching`: adds `cache_friendly_mode BOOLEAN NOT NULL DEFAULT FALSE` and `auto_cache_control BOOLEAN NOT NULL DEFAULT FALSE` to `user_settings`.
+
 ## [0.47.1] - 2026-11-23
 
 Adds an auto-selected **Approve all** option to the update confirmation flow so multi-version updates run unattended through the entire batch and only stop on an actual error (or when the admin explicitly unchecks batch approval to review each version individually).

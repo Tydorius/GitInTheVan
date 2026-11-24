@@ -27,6 +27,62 @@ class MatchedEntry:
     lorebook_id: str = ""
     lorebook_name: str = ""
     entry_id: str = ""
+    is_constant: bool = False
+
+
+def lorebook_budget_chars(lb: Any, allocs: dict[str, Any] | None) -> int:
+    """Resolve a lorebook's character cap from ``_gitv_budget_allocations``.
+
+    Converts the book's allocated token share into characters via ``* 4``
+    (matching the canonical ``len // 4`` estimator used by ``proxy.py``) when
+    the book participates in budgeting (``budget_weight > 0`` or
+    ``reserved_tokens > 0``). Returns 0 (uncapped) otherwise.
+    """
+    if not allocs:
+        return 0
+    weight = getattr(lb, "budget_weight", 0) or 0
+    reserved = getattr(lb, "reserved_tokens", 0) or 0
+    if weight <= 0 and reserved <= 0:
+        return 0
+    share = (allocs.get("allocations") or {}).get(lb.id, {}).get("share", 0) or 0
+    return int(share * 4)
+
+
+def append_user_tail(
+    messages: list[dict[str, Any]],
+    text: str,
+) -> list[dict[str, Any]]:
+    """Append ``text`` onto the newest ``role == "user"`` message.
+
+    Multimodal-safe: list content gets a new ``{"type": "text", ...}`` part;
+    string content gets ``"\\n\\n" + text`` (or ``text`` if empty). Falls back
+    to appending a new user message if no user message exists. Returns a new
+    message list and never mutates caller dicts or content lists.
+    """
+    result = [msg.copy() for msg in messages]
+    if not text:
+        return result
+
+    last_user_idx = None
+    for i in range(len(result) - 1, -1, -1):
+        if result[i].get("role") == "user":
+            last_user_idx = i
+            break
+
+    if last_user_idx is not None:
+        target = result[last_user_idx]
+        content = target.get("content")
+        if isinstance(content, list):
+            parts = list(content)
+            parts.append({"type": "text", "text": "\n\n" + text})
+            target["content"] = parts
+        else:
+            existing = content if isinstance(content, str) else ""
+            target["content"] = f"{existing}\n\n{text}" if existing else text
+    else:
+        result.append({"role": "user", "content": text})
+
+    return result
 
 
 def parse_json_list(raw: str) -> list[str]:
@@ -123,22 +179,34 @@ def match_book_entries(
     return match_entries(window, entries, total_budget=total_budget, word_boundary=word_boundary)
 
 
+def _effective_position(entry: MatchedEntry, cache_friendly: bool) -> str:
+    if (
+        cache_friendly
+        and entry.position in ("before_last_message", "in_chat_system")
+        and not getattr(entry, "is_constant", False)
+    ):
+        return "user_tail"
+    return entry.position
+
+
 def inject_entries(
     messages: list[dict],
     matched: list[MatchedEntry],
+    *,
+    cache_friendly: bool = False,
 ) -> list[dict]:
     if not matched:
         return messages
 
     result = [msg.copy() for msg in messages]
 
-    system_entries = [m for m in matched if m.position == "system_start"]
-    message_entries = [m for m in matched if m.position == "before_last_message"]
-    user_tail_entries = [m for m in matched if m.position == "user_tail"]
-    in_chat_entries = [m for m in matched if m.position == "in_chat_system"]
+    system_entries = [m for m in matched if _effective_position(m, cache_friendly) == "system_start"]
+    message_entries = [m for m in matched if _effective_position(m, cache_friendly) == "before_last_message"]
+    user_tail_entries = [m for m in matched if _effective_position(m, cache_friendly) == "user_tail"]
+    in_chat_entries = [m for m in matched if _effective_position(m, cache_friendly) == "in_chat_system"]
     other_entries = [
         m for m in matched
-        if m.position not in INJECTION_POSITIONS
+        if _effective_position(m, cache_friendly) not in INJECTION_POSITIONS
     ]
 
     if system_entries:
@@ -160,24 +228,7 @@ def inject_entries(
 
     if user_tail_entries:
         combined = "\n\n".join(m.content for m in user_tail_entries)
-        last_user_idx = None
-        for i in range(len(result) - 1, -1, -1):
-            if result[i].get("role") == "user":
-                last_user_idx = i
-                break
-
-        if last_user_idx is not None:
-            target = result[last_user_idx]
-            content = target.get("content")
-            if isinstance(content, list):
-                parts = list(content)
-                parts.append({"type": "text", "text": "\n\n" + combined})
-                target["content"] = parts
-            else:
-                existing = content if isinstance(content, str) else ""
-                target["content"] = f"{existing}\n\n{combined}" if existing else combined
-        else:
-            result.append({"role": "user", "content": combined})
+        result = append_user_tail(result, combined)
 
     if in_chat_entries:
         # Each in_chat_system entry is its own message at the very end --
@@ -249,6 +300,7 @@ def _to_matched_entry(entry: dict) -> MatchedEntry:
         lorebook_id=entry.get("lorebook_id", ""),
         lorebook_name=entry.get("lorebook_name", ""),
         entry_id=entry.get("entry_id", ""),
+        is_constant=bool(entry.get("is_constant", False)),
     )
 
 

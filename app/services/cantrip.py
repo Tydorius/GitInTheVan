@@ -783,6 +783,8 @@ async def process_cantrips(
             final_personality,
             final_scenario,
             final_example_dialogs,
+            cache_friendly=bool(body_json.get("_gitv_cache_friendly")),
+            seeded_character=seeded_character,
         )
         logger.info(
             "Cantrips processed: %d scripts, personality=%d chars, scenario=%d chars, dialogs=%d chars",

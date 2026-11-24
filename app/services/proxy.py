@@ -88,11 +88,58 @@ from app.services.upstream import (
 from app.services.upstream import (
     forward_llm_chain as forward_llm_chain,
 )
+from app.services.upstream import (
+    stamp_body_cache_control as stamp_body_cache_control,
+)
 
 logger = logging.getLogger(__name__)
 
 FORWARD_HEADERS = {"content-type", "accept"}
 SKIP_HEADERS = {"host", "authorization", "content-length", "transfer-encoding"}
+
+
+def _append_user_tail(messages: list[dict[str, Any]], text: str) -> list[dict[str, Any]]:
+    """Append text to the newest user message without mutating caller dicts.
+
+    Delegates to ``app.services.lorebook.append_user_tail`` when available.
+    """
+    import app.services.lorebook as _lorebook_mod
+
+    fn = getattr(_lorebook_mod, "append_user_tail", None)
+    if callable(fn):
+        return fn(messages, text)
+
+    result = [msg.copy() for msg in messages]
+    last_user_idx = None
+    for i in range(len(result) - 1, -1, -1):
+        if result[i].get("role") == "user":
+            last_user_idx = i
+            break
+    if last_user_idx is not None:
+        target = result[last_user_idx]
+        content = target.get("content")
+        if isinstance(content, list):
+            parts = list(content)
+            parts.append({"type": "text", "text": "\n\n" + text})
+            target["content"] = parts
+        else:
+            existing = content if isinstance(content, str) else ""
+            target["content"] = f"{existing}\n\n{text}" if existing else text
+    else:
+        result.append({"role": "user", "content": text})
+    return result
+
+
+def _inject_entries(
+    messages: list[dict[str, Any]],
+    entries: list[Any],
+    *,
+    cache_friendly: bool = False,
+) -> list[dict[str, Any]]:
+    try:
+        return inject_entries(messages, entries, cache_friendly=cache_friendly)
+    except TypeError:
+        return inject_entries(messages, entries)
 
 
 async def _flag_injection_content(user_id: str, text: str, source: str) -> None:
@@ -297,6 +344,19 @@ async def _forward_request_impl(
 
         from app.services.debug import debug_capture, init_debug, is_debug_mode
         debug_on = await is_debug_mode(user_id)
+        async with async_session() as _us_db:
+            from app.models.user_settings import UserSettings
+
+            _us_result = await _us_db.execute(
+                select(UserSettings).where(UserSettings.user_id == user_id)
+            )
+            user_settings = _us_result.scalar_one_or_none()
+        body_json["_gitv_cache_friendly"] = bool(
+            getattr(user_settings, "cache_friendly_mode", False)
+        )
+        body_json["_gitv_auto_cache_control"] = bool(
+            getattr(user_settings, "auto_cache_control", False)
+        )
         if debug_on:
             init_debug(body_json, tags)
             # Wall-clock start. summarize_run subtracts the summed upstream
@@ -475,32 +535,46 @@ async def _forward_request_impl(
         memory_disabled = cmd_overrides_mem.get("memory") is False
         memories = {} if memory_disabled else await load_memories_for_chat(internal_chat_id, user_id)
         if memories:
-            memory_block = _build_mem_block(memories)
+            sorted_memories = dict(sorted(memories.items()))
+            memory_block = _build_mem_block(sorted_memories)
             if memory_block:
                 await _flag_injection_content(user_id, memory_block, "memory_injection")
                 record_prompt_object(
                     body_json, "memory_injection", "memory",
                     0, _est_tokens(memory_block),
                 )
-                msgs = body_json["messages"]
-                system_idx = None
-                for i, msg in enumerate(msgs):
-                    if msg.get("role") == "system":
-                        system_idx = i
-                        break
-                if system_idx is not None:
-                    msgs[system_idx] = {
-                        **msgs[system_idx],
-                        "content": msgs[system_idx]["content"] + "\n\n" + memory_block,
-                    }
+                if body_json.get("_gitv_cache_friendly"):
+                    body_json["messages"] = _append_user_tail(body_json["messages"], memory_block)
+                    mem_position = "user_tail"
                 else:
-                    msgs.insert(0, {"role": "system", "content": memory_block})
-                logger.info("Memory injection: %d keys for chat %s", len(memories), internal_chat_id[:12])
+                    msgs = body_json["messages"]
+                    system_idx = None
+                    for i, msg in enumerate(msgs):
+                        if msg.get("role") == "system":
+                            system_idx = i
+                            break
+                    if system_idx is not None:
+                        msgs[system_idx] = {
+                            **msgs[system_idx],
+                            "content": msgs[system_idx]["content"] + "\n\n" + memory_block,
+                        }
+                    else:
+                        msgs.insert(0, {"role": "system", "content": memory_block})
+                    mem_position = "system_start"
+                logger.info(
+                    "Memory injection: %d keys for chat %s (position=%s)",
+                    len(sorted_memories), internal_chat_id[:12], mem_position,
+                )
                 if debug_on:
-                    debug_capture(body_json, "memory_injection", "Memory Injection",
-                        detail=f"Injected {len(memories)} memories for chat {internal_chat_id[:12]}",
+                    debug_capture(
+                        body_json, "memory_injection", "Memory Injection",
+                        detail=f"Injected {len(sorted_memories)} memories for chat {internal_chat_id[:12]}",
                         setting="memory_enabled", setting_value=not memory_disabled,
-                        metadata={"memory_keys": list(memories.keys())})
+                        metadata={
+                            "memory_keys": list(sorted_memories.keys()),
+                            "position": mem_position,
+                        },
+                    )
         elif debug_on:
             debug_capture(body_json, "memory_injection", "Memory Injection",
                 detail="No memories found" if not memory_disabled else "Disabled by command override",
@@ -717,8 +791,10 @@ async def _forward_request_impl(
             await _flag_injection_content(
                 user_id, "\n".join(e.content for e in deferred_entries), "lorebook_injection"
             )
-            body_json["messages"] = inject_entries(
-                body_json["messages"], deferred_entries
+            body_json["messages"] = _inject_entries(
+                body_json["messages"],
+                deferred_entries,
+                cache_friendly=bool(body_json.get("_gitv_cache_friendly")),
             )
             logger.info(
                 "Lorebook injection (post-cantrip): %d entries matched for user %s",
@@ -774,7 +850,11 @@ async def _forward_request_impl(
             await _flag_injection_content(
                 user_id, "\n".join(e.content for e in dynamic_delta), "lorebook_injection"
             )
-            body_json["messages"] = inject_entries(body_json["messages"], dynamic_delta)
+            body_json["messages"] = _inject_entries(
+                body_json["messages"],
+                dynamic_delta,
+                cache_friendly=bool(body_json.get("_gitv_cache_friendly")),
+            )
             logger.info(
                 "Dynamic lorebook injection (same-turn): %d entries for user %s",
                 len(dynamic_delta), user_id,
@@ -1247,7 +1327,11 @@ async def _apply_lorebook_injection(
                 await _flag_injection_content(
                     user_id, "\n".join(e.content for e in pre_matched), "lorebook_injection"
                 )
-                body_json["messages"] = inject_entries(messages, pre_matched)
+                body_json["messages"] = _inject_entries(
+                    messages,
+                    pre_matched,
+                    cache_friendly=bool(body_json.get("_gitv_cache_friendly")),
+                )
                 logger.info(
                     "Lorebook injection: %d entries matched for user %s", len(pre_matched), user_id
                 )
@@ -1538,8 +1622,15 @@ async def _forward_non_streaming_verified(
             body_json, failover_chain, method, path, headers, timeout, body,
         )
     else:
+        forward_body = stamp_body_cache_control(
+            body,
+            body_json,
+            provider=body_json.get("_gitv_provider", ""),
+            model=body_json.get("model", ""),
+            base_url=body_json.get("_gitv_base_url", ""),
+        )
         started = time.monotonic()
-        response_data, status_code = await _do_forward(method, url, headers, body, timeout,
+        response_data, status_code = await _do_forward(method, url, headers, forward_body, timeout,
             provider=body_json.get("_gitv_provider", ""),
             base_url=body_json.get("_gitv_base_url", ""),
             api_key=body_json.get("_gitv_api_key", ""),
@@ -1772,8 +1863,15 @@ async def _forward_streaming_with_memory(
             body_json, failover_chain, method, path, headers, timeout, body,
         )
     else:
+        forward_body = stamp_body_cache_control(
+            body,
+            body_json,
+            provider=body_json.get("_gitv_provider", "") if body_json else "",
+            model=body_json.get("model", "") if body_json else "",
+            base_url=body_json.get("_gitv_base_url", "") if body_json else "",
+        )
         started = time.monotonic()
-        response_data, status_code = await _do_forward(method, url, headers, body, timeout,
+        response_data, status_code = await _do_forward(method, url, headers, forward_body, timeout,
             provider=body_json.get("_gitv_provider", "") if body_json else "",
             base_url=body_json.get("_gitv_base_url", "") if body_json else "",
             api_key=body_json.get("_gitv_api_key", "") if body_json else "",

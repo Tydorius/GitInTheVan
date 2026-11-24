@@ -368,16 +368,28 @@ async def _inject_stage_lorebooks(
         if not lorebooks:
             return body_json
 
-        from app.services.lorebook import book_entries_to_dicts, inject_entries, match_book_entries
+        from app.services.lorebook import (
+            book_entries_to_dicts,
+            inject_entries,
+            lorebook_budget_chars,
+            match_book_entries,
+        )
         messages = body_json.get("messages", [])
+        allocs = body_json.get("_gitv_budget_allocations")
+        cache_friendly = bool(body_json.get("_gitv_cache_friendly"))
         pre_matched: list = []
         deferred_matched: list = []
         for lb in lorebooks:
             book_entries = book_entries_to_dicts(lb.entries, book=lb)
+            book_budget = lorebook_budget_chars(lb, allocs)
             # Per-book matching with the book's own scan depth, and the same
             # inject-after-cantrips split as the global pass (0.35.0).
             book_matched = match_book_entries(
-                messages, book_entries, lb.scan_depth, word_boundary=lb.word_boundary_keys
+                messages,
+                book_entries,
+                lb.scan_depth,
+                word_boundary=lb.word_boundary_keys,
+                total_budget=book_budget,
             )
             if lb.inject_after_cantrips:
                 deferred_matched.extend(book_matched)
@@ -388,7 +400,9 @@ async def _inject_stage_lorebooks(
         deferred_matched.sort(key=lambda m: m.insertion_order)
 
         if pre_matched:
-            body_json["messages"] = inject_entries(messages, pre_matched)
+            body_json["messages"] = inject_entries(
+                messages, pre_matched, cache_friendly=cache_friendly
+            )
             logger.info(
                 "Map stage '%s': %d lorebook entries injected",
                 stage_name, len(pre_matched),
@@ -1210,7 +1224,9 @@ async def run_map_pipeline(
             from app.services.lorebook import inject_entries as _inject_entries
 
             body_json["messages"] = _inject_entries(
-                body_json["messages"], stage_deferred
+                body_json["messages"],
+                stage_deferred,
+                cache_friendly=bool(body_json.get("_gitv_cache_friendly")),
             )
             logger.info(
                 "Map stage '%s': %d lorebook entries injected after cantrips",
@@ -1240,7 +1256,9 @@ async def run_map_pipeline(
             from app.services.metrics import record_prompt_object
 
             body_json["messages"] = _inject_entries(
-                body_json["messages"], stage_dynamic_delta
+                body_json["messages"],
+                stage_dynamic_delta,
+                cache_friendly=bool(body_json.get("_gitv_cache_friendly")),
             )
             logger.info(
                 "Map stage '%s': %d dynamic lorebook entries injected (same-turn)",

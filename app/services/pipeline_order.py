@@ -120,6 +120,12 @@ def ordered_steps(
     return steps
 
 
+def _lorebook_budget_for(lb: Any, allocs: dict[str, Any] | None) -> int:
+    from app.services.lorebook import lorebook_budget_chars
+
+    return lorebook_budget_chars(lb, allocs)
+
+
 async def _inject_book_now(
     body_json: dict[str, Any],
     user_id: str,
@@ -142,7 +148,15 @@ async def _inject_book_now(
     )
     if not entry_dicts:
         return 0
-    matched = match_book_entries(messages, entry_dicts, lb.scan_depth, word_boundary=lb.word_boundary_keys)
+    allocs = body_json.get("_gitv_budget_allocations")
+    book_budget = _lorebook_budget_for(lb, allocs)
+    matched = match_book_entries(
+        messages,
+        entry_dicts,
+        lb.scan_depth,
+        word_boundary=lb.word_boundary_keys,
+        total_budget=book_budget,
+    )
     matched.sort(key=lambda m: m.insertion_order)
     if not matched:
         debug_capture(
@@ -152,7 +166,11 @@ async def _inject_book_now(
         )
         return 0
 
-    body_json["messages"] = inject_entries(body_json["messages"], matched)
+    body_json["messages"] = inject_entries(
+        body_json["messages"],
+        matched,
+        cache_friendly=bool(body_json.get("_gitv_cache_friendly")),
+    )
     for m in matched:
         record_prompt_object(
             body_json, "lorebook_entry", m.entry_id or lb.id,
@@ -373,7 +391,9 @@ async def run_pre_forward_ordered(
                 messages_dirty = True
             if request_rows:
                 body_json["messages"] = _inject_entries(
-                    body_json["messages"], request_rows
+                    body_json["messages"],
+                    request_rows,
+                    cache_friendly=bool(body_json.get("_gitv_cache_friendly")),
                 )
                 messages_dirty = True
                 debug_capture(
@@ -422,4 +442,6 @@ async def run_pre_forward_ordered(
             final_personality,
             final_scenario,
             final_example_dialogs,
+            cache_friendly=bool(body_json.get("_gitv_cache_friendly")),
+            seeded_character=seeded_character,
         )

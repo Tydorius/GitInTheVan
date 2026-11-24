@@ -1,13 +1,17 @@
+import json
 import logging
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.models.debug_exchange import DebugExchange
 from app.models.user import User
+from app.services.cache_diagnostics import analyze_prompt_cache
 from app.services.debug import (
     clear_exchanges,
     delete_exchange,
@@ -74,6 +78,7 @@ class DebugExchangeResponse(BaseModel):
     response_content: str
     verification_data: dict
     created_at: str
+    cache_analysis: dict[str, Any] | None = None
 
 
 class DebugListResponse(BaseModel):
@@ -162,6 +167,56 @@ async def list_debug_exchanges(
     )
 
 
+async def _compute_cache_analysis(
+    db: AsyncSession,
+    user_id: str,
+    exchange: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Compute prompt-cache prefix diff against the preceding turn in the same chat."""
+    try:
+        chat_id = exchange.get("chat_id", "")
+        if not chat_id:
+            return analyze_prompt_cache(exchange.get("pipeline_data", {}), None)
+
+        current_created_at = (
+            await db.execute(
+                select(DebugExchange.created_at).where(
+                    DebugExchange.id == exchange["id"],
+                    DebugExchange.user_id == user_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if current_created_at is None:
+            return analyze_prompt_cache(exchange.get("pipeline_data", {}), None)
+
+        prev_row = (
+            await db.execute(
+                select(DebugExchange)
+                .where(
+                    DebugExchange.user_id == user_id,
+                    DebugExchange.chat_id == chat_id,
+                    DebugExchange.id != exchange["id"],
+                    DebugExchange.created_at < current_created_at,
+                )
+                .order_by(DebugExchange.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+        if prev_row is None:
+            return analyze_prompt_cache(exchange.get("pipeline_data", {}), None)
+
+        prev_pipeline = json.loads(prev_row.pipeline_data) if prev_row.pipeline_data else {}
+        return analyze_prompt_cache(
+            exchange.get("pipeline_data", {}),
+            prev_pipeline,
+            previous_exchange_id=prev_row.id,
+        )
+    except Exception:
+        logger.exception("Prompt cache analysis failed for debug exchange %s", exchange.get("id"))
+        return None
+
+
 @router.get("/{exchange_id}", response_model=DebugExchangeResponse)
 async def get_debug_exchange(
     exchange_id: str,
@@ -171,7 +226,8 @@ async def get_debug_exchange(
     exchange = await get_exchange(current_user.id, exchange_id)
     if not exchange:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Debug exchange not found")
-    return DebugExchangeResponse(**exchange)
+    cache_analysis = await _compute_cache_analysis(db, current_user.id, exchange)
+    return DebugExchangeResponse(**exchange, cache_analysis=cache_analysis)
 
 
 @router.post("/{exchange_id}/save", response_model=DebugExchangeResponse)

@@ -45,6 +45,13 @@ class UserSettings(Base):
     summarization_block_size: Mapped[int] = mapped_column(
         Integer, default=0, server_default="0", nullable=False
     )
+    # 0.48.0 (Phase A): Automatic Prompt Caching & Cache Diagnostics.
+    cache_friendly_mode: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
+    auto_cache_control: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
     summarization_prompt: Mapped[str] = mapped_column(
         Text, nullable=False,
         default="Summarize the following roleplay conversation excerpt. Preserve key facts, "
