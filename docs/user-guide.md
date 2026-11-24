@@ -1948,6 +1948,16 @@ Model configuration is per-endpoint — there is no model override here. Set the
 
 **Default Parameters** blocks appear here for each role — all requests, verification calls, and summarization calls. They are the broadest layer of the parameter system; anything set on an endpoint, a model, a rule or a map stage overrides them. See [Model Parameters](#model-parameters).
 
+### Timezone
+
+![Display Timezone setting](media/gitv-settings-timezone.png)
+
+*The Display Timezone control under Settings → Proxy Configuration, captured 2026-11-24.*
+
+The **Display Timezone** dropdown (here under Proxy Configuration, and on the Debug page) chooses the timezone your own timestamps are shown in — **Debug**, **Compare** and **Metrics** all follow it. Leave it on **Global default** to inherit the admin's instance-wide setting (set in [Admin → Server Logs](#admin)); when neither is set, timestamps render in your browser's local time. Values are IANA timezone names (`Europe/Berlin`, `America/New_York`, `UTC`…), validated when saved.
+
+The admin's global setting also — and separately — controls the timezone written into the server's log files and the audit log's timestamps, so logs and displays can agree without forcing every user onto one clock.
+
 ### Pre-Forward Order
 
 ![Pre-Forward Order](media/gitv-settings-pipeline-order.png)
@@ -2463,6 +2473,12 @@ Read-only view of admin actions. Each entry shows the action type, target, detai
 ![Server Logs](media/gitv-admin-server-logs.png)
 
 Read-only view of recent server log output (last 200 lines). Logs are read from the file configured by `GITV_LOG_FILE` (auto-creates `data/logs/gitinthevan.log` if unset). Use **Refresh** or toggle **Auto** for automatic refresh every 15 seconds.
+
+![Log Timezone setting](media/gitv-admin-log-timezone.png)
+
+*The Log Timezone control on the Server Logs tab, captured 2026-11-24.*
+
+The **Log Timezone** field on this tab sets the instance-wide IANA timezone for the server's log files and the audit log's timestamps — applied live on save, no restart. Leave it blank for the server's own local time; each user can separately override the timezone their own Debug, Compare and Metrics displays use (see [Timezone](#timezone)).
 
 ### Update Tab
 

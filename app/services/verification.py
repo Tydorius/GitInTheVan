@@ -572,6 +572,7 @@ async def load_verification_config(
         ep_result = await db.execute(
             select(Endpoint).where(
                 Endpoint.id == user_settings.verification_endpoint_id,
+                Endpoint.user_id == user_id,
                 Endpoint.enabled.is_(True),
             )
         )
@@ -630,6 +631,7 @@ async def prepare_verification_run(
             ep_result = await db.execute(
                 select(Endpoint).where(
                     Endpoint.id == rule.verification_endpoint_id,
+                    Endpoint.user_id == user_id,
                     Endpoint.enabled.is_(True),
                 )
             )

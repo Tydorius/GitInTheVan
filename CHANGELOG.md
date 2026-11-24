@@ -17,6 +17,10 @@ Adds global and per-user IANA timezone settings for server logs, audit logs, Deb
   - `admin_reads.py` (`install_health`) now reports `deno_pool_*` settings + live `deno_pool.status()` and `log_timezone`.
   - `selfcheck.py` (`lint_configuration` & `probe_judge`) validates `regex_pattern` compilation, stops falsely flagging missing judge endpoints when active rules are regex-only, and surfaces a non-failing informational prompt-caching tip when `cache_friendly_mode` is off with dynamic lorebooks/memories.
 
+### Security
+
+- **Verification judge endpoints must belong to the user naming them.** A rule's **Verification Endpoint Override** and the global **Verification Endpoint** are owner-checked on save (a foreign id is rejected with 404 `Endpoint not found`, the same behavior as the driver's default-endpoint field), and both runtime lookups are scoped to the requesting user. Previously, a user who knew another user's endpoint id could point a judge at it, and the judge call was sent out with that endpoint's stored API key. Ids stored before this release simply stop resolving at runtime; nothing is deleted or rewritten.
+
 ### Schema
 
 - `073_timezone_settings`: adds `log_timezone VARCHAR(64) NOT NULL DEFAULT ''` to `admin_settings` and `timezone VARCHAR(64) NOT NULL DEFAULT ''` to `user_settings`.

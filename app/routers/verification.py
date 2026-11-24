@@ -26,6 +26,35 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/verification", tags=["verification"])
 
 
+async def _verify_endpoint_owner(
+    db: AsyncSession, endpoint_id: str | None, user_id: str
+) -> str | None:
+    """Resolve a judge endpoint id to an id owned by ``user_id``, else 404.
+
+    A judge call is sent with the named endpoint's stored API key, so an
+    endpoint belonging to another user must never be accepted here — the
+    same ownership rule the driver's default-endpoint field enforces.
+    An empty value clears the setting and returns ``None``.
+    """
+    cleaned = (endpoint_id or "").strip()
+    if not cleaned:
+        return None
+    owned = (
+        await db.execute(
+            select(Endpoint.id).where(
+                Endpoint.id == cleaned,
+                Endpoint.user_id == user_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if owned is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Endpoint not found",
+        )
+    return cleaned
+
+
 class RuleCreate(BaseModel):
     name: str
     description: str = ""
@@ -249,7 +278,9 @@ async def create_rule(
         execution_order=req.execution_order,
         resubmission_strategy=req.resubmission_strategy,
         tag=req.tag,
-        verification_endpoint_id=req.verification_endpoint_id,
+        verification_endpoint_id=await _verify_endpoint_owner(
+            db, req.verification_endpoint_id, current_user.id
+        ),
         verification_model=req.verification_model,
         parameters_json=params_from_api(req.parameters, "verification rule parameters"),
     )
@@ -291,6 +322,11 @@ async def update_rule(
             )
         if update_data.get("regex_pattern") is not None:
             _validate_regex_pattern(update_data["regex_pattern"], max_rule_chars)
+
+    if "verification_endpoint_id" in update_data:
+        update_data["verification_endpoint_id"] = await _verify_endpoint_owner(
+            db, update_data["verification_endpoint_id"], current_user.id
+        )
 
     for key, value in update_data.items():
         setattr(rule, key, value)
@@ -506,7 +542,9 @@ async def update_verification_settings(
     if req.verification_enabled is not None:
         user_settings.verification_enabled = req.verification_enabled
     if req.verification_endpoint_id is not None:
-        user_settings.verification_endpoint_id = req.verification_endpoint_id or None
+        user_settings.verification_endpoint_id = await _verify_endpoint_owner(
+            db, req.verification_endpoint_id, current_user.id
+        )
     if req.verification_model is not None:
         user_settings.verification_model = req.verification_model
 

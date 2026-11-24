@@ -1671,6 +1671,11 @@ only.</p>
 </ul>
 <p>Model configuration is per-endpoint — there is no model override here. Set the <strong>Default Model</strong> on each endpoint in the Endpoints page; it is used as a fallback when the client doesn't specify one.</p>
 <p><strong>Default Parameters</strong> blocks appear here for each role — all requests, verification calls, and summarization calls. They are the broadest layer of the parameter system; anything set on an endpoint, a model, a rule or a map stage overrides them. See <a href="#model-parameters">Model Parameters</a>.</p>
+<h3 id="timezone">Timezone</h3>
+<p><img alt="Display Timezone setting" src="media/gitv-settings-timezone.png"></p>
+<p><em>The Display Timezone control under Settings → Proxy Configuration, captured 2026-11-24.</em></p>
+<p>The <strong>Display Timezone</strong> dropdown (here under Proxy Configuration, and on the Debug page) chooses the timezone your own timestamps are shown in — <strong>Debug</strong>, <strong>Compare</strong> and <strong>Metrics</strong> all follow it. Leave it on <strong>Global default</strong> to inherit the admin's instance-wide setting (set in <a href="#admin">Admin → Server Logs</a>); when neither is set, timestamps render in your browser's local time. Values are IANA timezone names (<code>Europe/Berlin</code>, <code>America/New_York</code>, <code>UTC</code>…), validated when saved.</p>
+<p>The admin's global setting also — and separately — controls the timezone written into the server's log files and the audit log's timestamps, so logs and displays can agree without forcing every user onto one clock.</p>
 <h3 id="pre-forward-order">Pre-Forward Order</h3>
 <p><img alt="Pre-Forward Order" src="media/gitv-settings-pipeline-order.png"></p>
 <p><em>The Pre-Forward Order card with an interleaved order: the Prompt Janitor cantrip first, then a lorebook, then another cantrip. Captured 2026-11-19.</em></p>
@@ -2183,6 +2188,9 @@ single-use OS-process isolation exactly as before.</p>
 <h3 id="server-logs-tab">Server Logs Tab</h3>
 <p><img alt="Server Logs" src="media/gitv-admin-server-logs.png"></p>
 <p>Read-only view of recent server log output (last 200 lines). Logs are read from the file configured by <code>GITV_LOG_FILE</code> (auto-creates <code>data/logs/gitinthevan.log</code> if unset). Use <strong>Refresh</strong> or toggle <strong>Auto</strong> for automatic refresh every 15 seconds.</p>
+<p><img alt="Log Timezone setting" src="media/gitv-admin-log-timezone.png"></p>
+<p><em>The Log Timezone control on the Server Logs tab, captured 2026-11-24.</em></p>
+<p>The <strong>Log Timezone</strong> field on this tab sets the instance-wide IANA timezone for the server's log files and the audit log's timestamps — applied live on save, no restart. Leave it blank for the server's own local time; each user can separately override the timezone their own Debug, Compare and Metrics displays use (see <a href="#timezone">Timezone</a>).</p>
 <h3 id="update-tab">Update Tab</h3>
 <p>The Update tab checks for new releases from the official GitHub repository. It automatically checks on page load and every 5 minutes.</p>
 <p>When an update is available:</p>
