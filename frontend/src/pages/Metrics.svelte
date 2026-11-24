@@ -14,6 +14,7 @@
   } from '../api'
   import CollapsibleCard from '../lib/CollapsibleCard.svelte'
   import { CollapseController } from '../lib/collapse'
+  import { formatTimestamp } from '../lib/timezone'
 
   let collapse = new CollapseController('metrics', ['prompt-objects', 'llm-calls', 'recent-rows'])
 
@@ -22,6 +23,7 @@
   let llmRows: LlmCallMetricRow[] = []
   let loading = true
   let error = ''
+  let effectiveTimezone = ''
 
   let days = 30
   let chatId = ''
@@ -86,7 +88,12 @@
     ? Math.round((totalCachedTokens / totalPromptTokens) * 100)
     : null
 
-  onMount(load)
+  onMount(() => {
+    api.getSettings()
+      .then((s) => { effectiveTimezone = s.effective_timezone ?? (s.timezone || s.global_timezone || '') })
+      .catch(() => {})
+    load()
+  })
 </script>
 
 <div class="metrics-header">
@@ -265,7 +272,7 @@
         <tbody>
           {#each llmRows as r (r.id)}
             <tr>
-              <td>{new Date(r.created_at).toLocaleString()}</td>
+              <td>{formatTimestamp(r.created_at, effectiveTimezone)}</td>
               <td>{purposeLabel(r.purpose)}{#if r.is_retry} <span class="badge">retry</span>{/if}</td>
               <td>{r.model || '—'}</td>
               <td>{r.status_code ?? '—'}</td>
@@ -299,7 +306,7 @@
         <tbody>
           {#each promptRows as r (r.id)}
             <tr>
-              <td>{new Date(r.created_at).toLocaleString()}</td>
+              <td>{formatTimestamp(r.created_at, effectiveTimezone)}</td>
               <td title={r.object_id}>{r.object_id}</td>
               <td>{typeLabel(r.object_type)}</td>
               <td class:positive={r.difference > 0} class:negative={r.difference < 0}>{signed(r.difference)}</td>

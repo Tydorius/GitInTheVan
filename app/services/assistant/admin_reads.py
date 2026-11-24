@@ -354,6 +354,61 @@ async def _install_health(ctx: Any, args: dict[str, Any]) -> list[CheckResult]:
     except Exception as exc:
         results.append(CheckResult("self-reachability", False, f"{type(exc).__name__}: {exc}"))
 
+    # --- Deno warm worker pool (0.47.0) ----------------------------------
+    try:
+        from app.services.admin import get_admin_settings
+        from app.services.deno_runner import deno_pool
+
+        admin_settings = await get_admin_settings()
+        min_idle = int(getattr(admin_settings, "deno_pool_min_idle", 1))
+        max_idle = int(getattr(admin_settings, "deno_pool_max_idle", 4))
+        idle_ttl = int(getattr(admin_settings, "deno_pool_idle_ttl_seconds", 60))
+        live_status = deno_pool.status()
+        results.append(
+            CheckResult(
+                name="deno worker pool",
+                passed=True,
+                message=(
+                    f"Configured min_idle={min_idle}, max_idle={max_idle}, "
+                    f"idle_ttl_seconds={idle_ttl}; "
+                    f"live idle={live_status.get('idle_count', 0)}, "
+                    f"warm_hits={live_status.get('total_warm_hits', 0)}, "
+                    f"cold_spawns={live_status.get('total_cold_spawns', 0)}"
+                ),
+                detail=json.dumps(
+                    {
+                        "deno_pool_min_idle": min_idle,
+                        "deno_pool_max_idle": max_idle,
+                        "deno_pool_idle_ttl_seconds": idle_ttl,
+                        "live": live_status,
+                    }
+                ),
+            )
+        )
+    except Exception as exc:
+        results.append(CheckResult("deno worker pool", False, f"{type(exc).__name__}: {exc}"))
+
+    # --- log timezone (0.49.0) -------------------------------------------
+    try:
+        from app.services.admin import get_admin_settings
+
+        admin_settings = await get_admin_settings()
+        log_tz = str(getattr(admin_settings, "log_timezone", "") or "")
+        results.append(
+            CheckResult(
+                name="log timezone",
+                passed=True,
+                message=(
+                    f"Server log timezone set to '{log_tz}'"
+                    if log_tz
+                    else "Server log timezone is unset (using system local time)"
+                ),
+                detail=json.dumps({"log_timezone": log_tz}),
+            )
+        )
+    except Exception as exc:
+        results.append(CheckResult("log timezone", False, f"{type(exc).__name__}: {exc}"))
+
     return results
 
 

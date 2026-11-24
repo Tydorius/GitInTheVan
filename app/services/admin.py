@@ -86,11 +86,13 @@ def apply_admin_runtime_overrides(s: AdminSettings) -> None:
     """
     from app.config import settings as runtime_settings
     from app.services import deno_runner
+    from app.services.log_manager import apply_log_timezone
 
     runtime_settings.rate_limit_proxy_per_min = s.rate_limit_proxy_per_min
     runtime_settings.rate_limit_api_per_min = s.rate_limit_api_per_min
     if s.runtime_log_level:
         apply_runtime_log_level(s.runtime_log_level)
+    apply_log_timezone(s.log_timezone)
 
     pool = getattr(deno_runner, "deno_pool", None)
     if pool is not None:

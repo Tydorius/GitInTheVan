@@ -2,6 +2,29 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.49.0] - 2026-11-24
+
+Adds global and per-user IANA timezone settings for server logs, audit logs, Debug, Compare, and Metrics, and catches the AI Assistant Pane up to full `0.44.0–0.49.0` feature parity (Phase C).
+
+### Added
+
+- **Global & per-user log/output timezone (`AdminSettings.log_timezone`, `UserSettings.timezone`).**
+  - Admins can set a global IANA timezone (e.g. `America/New_York`, `UTC`, or blank for server/browser local) directly in **Admin → Server Logs** (or `PUT /api/admin/settings`). Changes apply live via `TimezoneFormatter` across root file and console log handlers without restarting, and format **Admin → Audit Logs** timestamps.
+  - Users can override their display timezone in **Debug** or **Settings → Proxy Configuration** (or `PUT /api/settings`), inheriting the admin's global timezone automatically when left blank (`effective_timezone = timezone || global_timezone || local`). Applied across **Debug**, **Compare**, and **Metrics** via shared `formatTimestamp()`.
+  - Validated server-side via Python stdlib `zoneinfo.ZoneInfo` (returning 422 on invalid IANA names).
+- **AI Assistant Pane parity with `0.44.0–0.49.0` (Phase C).**
+  - Tool schemas and docs in `app/services/assistant/registry.py` and `docs/*.md` now expose and document `regex_pattern`, `final_verification_enabled`, `history_window`, `reserved_tokens`, `user_data_prefixes`, `user_tail`, `context.history`, `summarization_block_size`, `cache_friendly_mode`, `auto_cache_control`, `cached_tokens`, `cache_analysis`, Gemini 4 `thinking_level`, and `timezone` / `log_timezone`.
+  - `admin_reads.py` (`install_health`) now reports `deno_pool_*` settings + live `deno_pool.status()` and `log_timezone`.
+  - `selfcheck.py` (`lint_configuration` & `probe_judge`) validates `regex_pattern` compilation, stops falsely flagging missing judge endpoints when active rules are regex-only, and surfaces a non-failing informational prompt-caching tip when `cache_friendly_mode` is off with dynamic lorebooks/memories.
+
+### Schema
+
+- `073_timezone_settings`: adds `log_timezone VARCHAR(64) NOT NULL DEFAULT ''` to `admin_settings` and `timezone VARCHAR(64) NOT NULL DEFAULT ''` to `user_settings`.
+
+### Dependencies
+
+- Added `tzdata==2026.6` (official IANA timezone database for `zoneinfo` on Windows and minimal containers); regenerated `requirements/main.txt`, `requirements/dev.txt`, and `requirements/docker.txt` with `--universal --generate-hashes --python-version 3.12 --upgrade`. `pip-audit` reports 0 known vulnerabilities.
+
 ## [0.48.1] - 2026-11-23
 
 Phase B token-saving verification and summarization hardening: enables zero-LLM regex-only verification without a Navigator judge endpoint, hardens incremental summarization against degraded or empty-delta passes, and adds config-time validation for Gemini `thinking_level`.

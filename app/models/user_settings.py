@@ -154,6 +154,11 @@ class UserSettings(Base):
     assistant_context_tokens: Mapped[int] = mapped_column(
         Integer, nullable=False, default=64000, server_default="64000"
     )
+    # Phase 49 (0.49.0): per-user IANA timezone override for debug/log views.
+    # Empty = inherit global admin log_timezone (or server/browser local time).
+    timezone: Mapped[str] = mapped_column(
+        String(64), default="", server_default="", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

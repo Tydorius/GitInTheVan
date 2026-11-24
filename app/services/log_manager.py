@@ -6,6 +6,54 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from app.config import settings
+from app.services.timezones import get_zoneinfo
+
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+
+_active_log_timezone: str = ""
+
+
+class TimezoneFormatter(logging.Formatter):
+    """Log formatter that renders ``%(asctime)s`` in a configured IANA timezone.
+
+    When ``tz_name`` is empty or invalid, falls back to standard
+    ``logging.Formatter.formatTime`` (server local time).
+    """
+
+    def __init__(
+        self,
+        fmt: str | None = LOG_FORMAT,
+        datefmt: str | None = None,
+        tz_name: str = "",
+    ) -> None:
+        super().__init__(fmt=fmt, datefmt=datefmt)
+        self.tz_name = (tz_name or "").strip()
+        self._zi = get_zoneinfo(self.tz_name)
+
+    def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:  # noqa: N802
+        if self._zi is None:
+            return super().formatTime(record, datefmt)
+        dt = datetime.fromtimestamp(record.created, tz=self._zi)
+        if datefmt:
+            return dt.strftime(datefmt)
+        return dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
+def apply_log_timezone(tz_name: str) -> None:
+    """Update all root logger handlers to format timestamps in ``tz_name`` live.
+
+    Passing an empty string resets handlers to standard server local time.
+    """
+    global _active_log_timezone
+    cleaned = (tz_name or "").strip()
+    _active_log_timezone = cleaned if get_zoneinfo(cleaned) is not None else ""
+
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers:
+        existing = handler.formatter
+        fmt = existing._fmt if existing is not None and getattr(existing, "_fmt", None) else LOG_FORMAT
+        datefmt = existing.datefmt if existing is not None else None
+        handler.setFormatter(TimezoneFormatter(fmt=fmt, datefmt=datefmt, tz_name=_active_log_timezone))
 
 
 def setup_file_logging() -> Path | None:
@@ -23,7 +71,7 @@ def setup_file_logging() -> Path | None:
         backupCount=99,
         encoding="utf-8",
     )
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    handler.setFormatter(TimezoneFormatter(LOG_FORMAT, tz_name=_active_log_timezone))
 
     level = getattr(logging, settings.log_level.upper(), logging.INFO)
     handler.setLevel(level)

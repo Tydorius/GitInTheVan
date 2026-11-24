@@ -995,6 +995,100 @@ async def _lint_configuration(ctx: Any, args: dict[str, Any]) -> list[CheckResul
         else:
             results.append(CheckResult("sanitization sweep", True, "No zero-width, blocklisted-URL or injection-marker content found"))
 
+        # --- verification rule regexes & judge endpoint (0.44.0 / 0.48.1) --
+        bad_rule_regexes: list[CheckResult] = []
+        for r in verification_rules:
+            pattern = (getattr(r, "regex_pattern", "") or "").strip()
+            if not pattern:
+                continue
+            try:
+                re.compile(pattern)
+            except re.error as exc:
+                bad_rule_regexes.append(
+                    CheckResult(
+                        f"verification rule regex: {r.name}",
+                        False,
+                        f"Does not compile, so regex pre-check is skipped at runtime: {exc}",
+                    )
+                )
+        if bad_rule_regexes:
+            results.extend(bad_rule_regexes)
+
+        if us and us.verification_enabled:
+            active_rules = [r for r in verification_rules if r.is_active]
+            default_judge_ok = bool(
+                us.verification_endpoint_id
+                and us.verification_endpoint_id in endpoints_by_id
+                and endpoints_by_id[us.verification_endpoint_id].enabled
+            )
+            missing_judge_rules: list[str] = []
+            for r in active_rules:
+                has_regex = bool((getattr(r, "regex_pattern", "") or "").strip())
+                if has_regex:
+                    continue
+                rule_ep = endpoints_by_id.get(r.verification_endpoint_id) if r.verification_endpoint_id else None
+                if not (rule_ep and rule_ep.enabled) and not default_judge_ok:
+                    missing_judge_rules.append(r.name)
+
+            if missing_judge_rules:
+                results.append(
+                    CheckResult(
+                        "verification configuration",
+                        False,
+                        f"{len(missing_judge_rules)} active LLM-judged rule(s) have no enabled judge endpoint",
+                        detail=json.dumps({"rules": missing_judge_rules}),
+                    )
+                )
+            elif active_rules and not default_judge_ok and all(
+                bool((getattr(r, "regex_pattern", "") or "").strip()) for r in active_rules
+            ):
+                results.append(
+                    CheckResult(
+                        "verification configuration",
+                        True,
+                        "Active verification rules use regex_pattern pre-checks and do not require a judge endpoint",
+                    )
+                )
+            else:
+                results.append(
+                    CheckResult(
+                        "verification configuration",
+                        True,
+                        "Verification configuration has all required judge endpoints",
+                    )
+                )
+
+        # --- prompt caching tip (0.46.0 / 0.48.0) --------------------------
+        cache_friendly = bool(getattr(us, "cache_friendly_mode", False)) if us else False
+        has_mid_chat_lore = any(
+            lb.is_active
+            and any(
+                not e.is_disabled and e.position in ("before_last_message", "in_chat_system")
+                for e in lb.entries
+            )
+            for lb in lorebooks
+        )
+        if not cache_friendly and (has_mid_chat_lore or bool(memories)):
+            results.append(
+                CheckResult(
+                    "prompt caching",
+                    True,
+                    (
+                        "Cache-Friendly Mode is off while active lorebooks or memories "
+                        "inject mid-conversation; enabling cache_friendly_mode or using "
+                        "lorebook position 'user_tail' can improve prompt-cache hit rates"
+                    ),
+                )
+            )
+        elif cache_friendly:
+            results.append(
+                CheckResult(
+                    "prompt caching",
+                    True,
+                    "Cache-Friendly Mode is enabled to preserve provider prompt-cache prefixes",
+                )
+            )
+
     return results
 
 
@@ -1288,14 +1382,19 @@ async def _probe_judge(ctx: Any, args: dict[str, Any]) -> list[CheckResult]:
 
         us = (await db.execute(select(UserSettings).where(UserSettings.user_id == ctx.user_id))).scalar_one_or_none()
         endpoint_id = rule.verification_endpoint_id or (us.verification_endpoint_id if us else None)
-        if not endpoint_id:
+        has_regex = bool((getattr(rule, "regex_pattern", "") or "").strip())
+        endpoint = None
+        model = ""
+        if endpoint_id:
+            endpoint = (
+                await db.execute(select(Endpoint).where(Endpoint.id == endpoint_id, Endpoint.enabled.is_(True)))
+            ).scalar_one_or_none()
+            if endpoint is None and not has_regex:
+                return [CheckResult("probe_judge", False, "The configured verification endpoint was not found or is disabled")]
+            if endpoint is not None:
+                model = rule.verification_model or (us.verification_model if us else "") or endpoint.default_model or ""
+        elif not has_regex:
             return [CheckResult("probe_judge", False, "No verification endpoint configured")]
-        endpoint = (
-            await db.execute(select(Endpoint).where(Endpoint.id == endpoint_id, Endpoint.enabled.is_(True)))
-        ).scalar_one_or_none()
-        if endpoint is None:
-            return [CheckResult("probe_judge", False, "The configured verification endpoint was not found or is disabled")]
-        model = rule.verification_model or (us.verification_model if us else "") or endpoint.default_model or ""
 
     results: list[CheckResult] = []
 

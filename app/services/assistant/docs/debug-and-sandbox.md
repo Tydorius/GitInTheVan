@@ -11,10 +11,23 @@ GitInTheVan's end-to-end request tracing, replay, sandboxing, and comparison sys
 `init_debug()` seeds the trace with the original message snapshot, extracted tags, and the client's own top-level body keys (`original_params` — captured before any stage can mutate them, so a replay can reproduce the client's real sampling settings, not just `{model, messages, stream}`). From there:
 
 - **Stages** (`run.stages`, via `debug_capture`/`debug_capture_response`): one entry per pipeline stage, in execution order — name, label, detail summary, before/after message or content snapshot, a `changed` signal, and stage-specific metadata (matched lorebook entries, memory keys, resolved parameters + source layer, cantrip pass results, etc.). See `pipeline-order.md` for the full stage list.
-- **LLM calls** (`run.llm_calls`, via `record_llm_call()`): one row per actual upstream call — `purpose` (`MAIN` for the Driver, `VERIFICATION_JUDGE`, `SUMMARIZER`, `MAP_STAGE`), endpoint id/name, provider, model requested vs. resolved, latency, status, token usage (from the provider's `usage` object when returned, otherwise estimated — never silently mixed with a real count), and the failover attempt number. A forwarder that skips this call is invisible to the run's cost accounting.
+- **LLM calls** (`run.llm_calls`, via `record_llm_call()`): one row per actual upstream call — `purpose` (`MAIN` for the Driver, `VERIFICATION_JUDGE`, `SUMMARIZER`, `MAP_STAGE`), endpoint id/name, provider, model requested vs. resolved, latency, status, token usage (including `cached_tokens` when the provider reports prompt-cache hits, and estimated otherwise — never silently mixed with a real count), and the failover attempt number. A forwarder that skips this call is invisible to the run's cost accounting.
 - **Cantrips** (`run.cantrips`): every cantrip *considered* at each position, whether it triggered, why not if it didn't (most often: tag not present), duration, and error if any. This is identity + outcome, not the cantrip's source code.
 - **Injections**: captured as stage metadata rather than a separate list — e.g. `lorebook_injection`'s metadata carries the matched entries and their token counts; `skills_injection`'s carries which skills/samples loaded.
 - **Verification**: `verification_data` — approved/rejected, retries used, and a `check_history` of per-attempt judgments (violations, severity, the judge's raw thinking/reasoning if the model returned any).
+- **Cache analysis** (`cache_analysis`, 0.48.0): computed on `GET /api/debug/{exchange_id}` (`get_debug_run`) by `app/services/cache_diagnostics.py` (`analyze_prompt_cache`). It compares the run's final outbound prompt against the previous turn in the same chat to report prefix-reuse ratio, first divergence index, and likely "cache busters" (mid-chat injections, system-prompt mutations, or rolling-summary rewrites that invalidated the provider's prompt cache).
+
+## Prompt caching controls (0.48.0)
+
+Two per-user settings in `UserSettings` (editable via `update_settings`) work directly with the cache diagnostics above:
+
+- `cache_friendly_mode`: keeps the static system prompt and earlier turns prefix-stable by redirecting dynamic injections (memories, mid-chat lorebook entries, and cantrip persona/scenario deltas) to the tail of the newest user message (`user_tail`) instead of mutating earlier messages.
+- `auto_cache_control`: automatically attaches provider cache-control breakpoints (e.g. Anthropic `cache_control: {"type": "ephemeral"}`) on stable prefix boundaries so supported providers cache the static prompt and history automatically.
+
+## Display and log timezones (0.49.0)
+
+- `UserSettings.timezone` (per-user, editable via `update_settings`): optional IANA timezone name (e.g. `America/New_York`, `UTC`; empty = browser local time) used to format debug run timestamps and UI clocks.
+- `AdminSettings.log_timezone` (instance-wide, readable via `install_health`): optional IANA timezone name used by the server's log formatter (`app/services/log_manager.py`); empty falls back to the host's local time.
 
 ## Saved runs and pruning
 

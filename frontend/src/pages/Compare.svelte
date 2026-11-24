@@ -15,6 +15,7 @@
   import { routeParams } from '../stores'
   import { replaceRouteParams } from '../lib/deeplink'
   import { downloadFromApi } from '../lib/download'
+  import { formatTimestamp } from '../lib/timezone'
   import GitvLink from '../lib/GitvLink.svelte'
   import MetricsBar from '../lib/MetricsBar.svelte'
   import RunColumn from '../lib/RunColumn.svelte'
@@ -30,11 +31,15 @@
   let error = ''
   let notice = ''
   let showTimelines = false
+  let effectiveTimezone = ''
 
   $: params = $routeParams.params
   $: orderedIds = comparison?.order || selectedIds
 
   onMount(async () => {
+    api.getSettings()
+      .then((s) => { effectiveTimezone = s.effective_timezone ?? (s.timezone || s.global_timezone || '') })
+      .catch(() => {})
     await loadAvailable()
 
     const fromUrl = (params.ids || '').split(',').filter(Boolean)
@@ -240,7 +245,7 @@
             {#if item.source === 'replay'}<span class="badge">replay</span>{/if}
           </span>
           <span class="pick-meta">
-            {new Date(item.created_at).toLocaleString()}
+            {formatTimestamp(item.created_at, effectiveTimezone)}
             · {item.stage_count} stages
             {#if item.totals?.total_tokens}· {item.totals.total_tokens.toLocaleString()} tok{/if}
             {#if (item.totals?.cached_tokens ?? 0) > 0}
@@ -283,7 +288,7 @@
           </label>
           <div class="col-name">{runName(id)}</div>
           <div class="col-meta">
-            {new Date(exchanges[id]?.created_at || '').toLocaleString()}
+            {formatTimestamp(exchanges[id]?.created_at, effectiveTimezone)}
           </div>
           <div class="col-actions">
             <button onclick={() => replay(id)} title="Re-run this exchange against your current configuration">

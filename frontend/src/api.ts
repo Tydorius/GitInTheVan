@@ -680,6 +680,9 @@ export interface UserSettings {
   summarization_block_size?: number;
   cache_friendly_mode?: boolean;
   auto_cache_control?: boolean;
+  timezone?: string;
+  global_timezone?: string;
+  effective_timezone?: string;
   [key: string]: any;
 }
 
@@ -707,6 +710,7 @@ export interface AdminSettings {
   url_blocklist: string;
   runtime_log_level: string;
   effective_log_level: string;
+  log_timezone?: string;
   site_banner: string;
   site_banner_level: string;
   backup_schedule_enabled: boolean;

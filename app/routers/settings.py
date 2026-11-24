@@ -3,7 +3,7 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +14,7 @@ from app.models.user_settings import UserSettings
 from app.services.llm_params import ParameterDef, params_from_api, params_to_api
 from app.services.pipeline_order import MAX_PLAN_ITEMS, parse_plan
 from app.services.response_tags import parse_strip_patterns
+from app.services.timezones import resolve_effective_timezone, validate_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,16 @@ async def _passenger_effective_cap(user_settings: UserSettings) -> int:
     if budget and budget > 0:
         cap = min(cap, budget)
     return cap
+
+
+async def _get_global_timezone(db: AsyncSession) -> str:
+    """Read-only lookup of the admin-configured global log_timezone."""
+    from app.models.admin_settings import AdminSettings
+
+    tz = (
+        await db.execute(select(AdminSettings.log_timezone).where(AdminSettings.id == 1))
+    ).scalar_one_or_none()
+    return (tz or "").strip()
 
 
 class SettingsResponse(BaseModel):
@@ -77,6 +88,10 @@ class SettingsResponse(BaseModel):
     # "cantrip"|"lorebook", "id": str}]} -- the manual pre-forward order.
     # Empty dict = manual ordering off.
     pipeline_order: dict = Field(default_factory=dict)
+    # Phase 49 (0.49.0): per-user timezone override + read-only global & effective resolution.
+    timezone: str = ""
+    global_timezone: str = ""
+    effective_timezone: str = ""
 
 
 class SettingsUpdate(BaseModel):
@@ -108,6 +123,14 @@ class SettingsUpdate(BaseModel):
     passenger_parameters: list[ParameterDef] | None = None
     response_strip_patterns: list[str] | None = None
     pipeline_order: dict | None = None
+    timezone: str | None = None
+
+    @field_validator("timezone")
+    @classmethod
+    def _validate_timezone(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return validate_timezone(v)
 
 
 @router.get("")
@@ -123,6 +146,7 @@ async def get_settings(
         await db.commit()
         await db.refresh(user_settings)
 
+    global_tz = await _get_global_timezone(db)
     return SettingsResponse(
         default_endpoint_id=user_settings.default_endpoint_id,
         default_model=user_settings.default_model,
@@ -155,6 +179,9 @@ async def get_settings(
             getattr(user_settings, "response_strip_patterns", None)
         ),
         pipeline_order=parse_plan(getattr(user_settings, "pipeline_order_json", None)),
+        timezone=user_settings.timezone,
+        global_timezone=global_tz,
+        effective_timezone=resolve_effective_timezone(user_settings.timezone, global_tz),
     )
 
 
@@ -291,10 +318,13 @@ async def update_settings(
         user_settings.passenger_parameters_json = params_from_api(
             req.passenger_parameters, "passenger parameters"
         )
+    if req.timezone is not None:
+        user_settings.timezone = req.timezone
 
     await db.commit()
     await db.refresh(user_settings)
 
+    global_tz = await _get_global_timezone(db)
     return SettingsResponse(
         default_endpoint_id=user_settings.default_endpoint_id,
         default_model=user_settings.default_model,
@@ -327,4 +357,7 @@ async def update_settings(
             getattr(user_settings, "response_strip_patterns", None)
         ),
         pipeline_order=parse_plan(getattr(user_settings, "pipeline_order_json", None)),
+        timezone=user_settings.timezone,
+        global_timezone=global_tz,
+        effective_timezone=resolve_effective_timezone(user_settings.timezone, global_tz),
     )

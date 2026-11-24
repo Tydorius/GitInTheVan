@@ -1625,6 +1625,14 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
         ALTER TABLE user_settings ADD COLUMN auto_cache_control BOOLEAN NOT NULL DEFAULT FALSE;
         """,
     ),
+    (
+        "073_timezone_settings",
+        # 0.49.0: global admin log_timezone and per-user timezone override (empty = default/inherit).
+        """
+        ALTER TABLE admin_settings ADD COLUMN log_timezone VARCHAR(64) NOT NULL DEFAULT '';
+        ALTER TABLE user_settings ADD COLUMN timezone VARCHAR(64) NOT NULL DEFAULT '';
+        """,
+    ),
 ]
 
 

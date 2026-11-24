@@ -32,7 +32,7 @@ Not recoverable from a proxied request: `description` (JanitorAI never sends it 
 Per-conversation, per-user, and per-cantrip key/value stores, each with `get(key)`, `set(key, value)`, `keys()`, `delete(key)`:
 
 - `context.chat_data` — keyed by conversation id. Survives across turns of the same chat; isolated per conversation.
-- `context.user_data` — keyed by user id only. Shared across every chat and every cantrip the user runs. **Not conversation-scoped** — see `debug-and-sandbox.md` for why this matters during replay/sandbox.
+- `context.user_data` — keyed by user id only. Shared across every chat and every cantrip the user runs (optionally restricted to allowed key prefixes via `Cantrip.user_data_prefixes`, 0.45.0). **Not conversation-scoped** — see `debug-and-sandbox.md` for why this matters during replay/sandbox.
 - `context.cantrip_data` — keyed by user id + cantrip id. Persists across chats but is isolated to the one cantrip; also not conversation-scoped.
 - `context.memory` — `get`/`set`/`keys`/`delete`/`all()` over the LLM-managed `<memstore>` persistent-memory store for this conversation (distinct from `chat_data`: this is the same store the Driver's response can write to via `<memstore key="...">value</memstore>` tags, injected back as `[PERSISTENT MEMORY]` on later turns).
 
@@ -105,7 +105,7 @@ Set **LLM Instructions** to something like: `Roll dice. Args: count (default 1),
 
 - `context.response_tags` — object of `{tagName: [payload, ...]}` seeded into post-Navigator scripts the same turn the model wrote them. The cantrip registers tag names (Response Tags field); GitV extracts them from the final reply, strips them before the client, and delivers here. Unregistered tags pass through untouched.
 - `context.activate(name)` — turn one of the user's existing lorebooks on for this request only (union source; see `#activation-hierarchy`).
-- `context.inject(text, position)` — place prompt text at `system_start`, `before_last_message`, `in_chat_system` (a system message at the very end), or `user_tail` (appended to the newest user message; multimodal-safe; falls back to appending a new user message if none exists). Max 20 per request.
+- `context.inject(text, position)` — place prompt text at `system_start`, `before_last_message`, `in_chat_system` (a system message at the very end), or `user_tail` (appended to the newest user message; multimodal-safe; falls back to appending a new user message if none exists). Max 20 per request. When `UserSettings.cache_friendly_mode` (0.48.0) is enabled, dynamic persona/scenario deltas and mid-chat injections are automatically redirected to `user_tail` so the cached system/history prefix stays byte-identical across turns.
 - `context.request.id` — stable id for the current request.
 - `context.request.is_regenerate` — true when this request repeats the previous one's shape (same message count, same trailing user message): a swipe regeneration.
 - `context.chat.last_messages` entries now carry `role` alongside `message`.

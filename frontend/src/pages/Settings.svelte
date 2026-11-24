@@ -6,6 +6,7 @@
   import ModelSelect from '../lib/ModelSelect.svelte'
   import { CollapseController } from '../lib/collapse'
   import { loadConfig as loadAssistantConfig } from '../lib/assistant/store'
+  import { COMMON_TIMEZONES } from '../lib/timezone'
 
   let settings = {
     default_endpoint_id: '' as string | null,
@@ -73,6 +74,8 @@
   let budgetPercent = 10.0
   let contextWindowOverride = 0
   let debugMode = false
+  let userTimezone = ''
+  let globalTimezone = ''
   let defaultMapId: string = ''
   let maps: any[] = []
   let endpoints: any[] = []
@@ -207,6 +210,8 @@
       budgetPercent = (s as any).context_budget_percent ?? 10.0
       contextWindowOverride = (s as any).context_window_override ?? 0
       debugMode = (s as any).debug_mode ?? false
+      userTimezone = s.timezone || ''
+      globalTimezone = s.global_timezone || ''
       defaultMapId = (s as any).default_map_id || ''
       cacheFriendlyMode = (s as any).cache_friendly_mode ?? false
       autoCacheControl = (s as any).auto_cache_control ?? false
@@ -228,8 +233,20 @@
 
   async function save() {
     error = ''; saved = false
-    try { await api.updateSettings({ ...settings, debug_mode: debugMode, parameters: driverParams, verification_parameters: verificationParams } as any); saved = true }
-    catch (e: any) { error = e.message }
+    try {
+      const updated = await api.updateSettings({
+        ...settings,
+        debug_mode: debugMode,
+        timezone: userTimezone,
+        parameters: driverParams,
+        verification_parameters: verificationParams,
+      } as any)
+      if (updated) {
+        userTimezone = updated.timezone ?? userTimezone
+        globalTimezone = updated.global_timezone ?? globalTimezone
+      }
+      saved = true
+    } catch (e: any) { error = e.message }
   }
 
   async function saveSummarization() {
@@ -367,6 +384,21 @@
     </label>
     <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
       Captures pipeline stage data for the last 20 exchanges. View in the Debug tab under Dashboard.
+    </p>
+  </div>
+  <div class="form-group">
+    <label for="display-timezone">Display Timezone</label>
+    <select id="display-timezone" bind:value={userTimezone}>
+      <option value="">Global default ({globalTimezone || 'Browser Local'})</option>
+      {#if userTimezone && !COMMON_TIMEZONES.some((tz) => tz.value === userTimezone)}
+        <option value={userTimezone}>{userTimezone}</option>
+      {/if}
+      {#each COMMON_TIMEZONES as tz}
+        <option value={tz.value}>{tz.label}</option>
+      {/each}
+    </select>
+    <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
+      Timezone used for timestamps in Debug, Compare, and Metrics. Leave as Global default to follow the admin log timezone (or your browser's local timezone).
     </p>
   </div>
   <button class="primary" onclick={save}>Save Settings</button>

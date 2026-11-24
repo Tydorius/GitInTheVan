@@ -6,11 +6,12 @@
    * view so the two cannot drift apart. This page adds the run list and the
    * per-run actions: save, rename, replay, export, and jumping to a comparison.
    */
-  import { onMount } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
   import { api } from '../api'
   import type { DebugExchange, DebugExchangeListItem, DebugSandbox } from '../api'
   import { currentRoute } from '../stores'
   import { downloadFromApi } from '../lib/download'
+  import { COMMON_TIMEZONES, formatTimestamp } from '../lib/timezone'
   import MetricsBar from '../lib/MetricsBar.svelte'
   import RunColumn from '../lib/RunColumn.svelte'
 
@@ -24,6 +25,12 @@
   let sandboxes: DebugSandbox[] = []
   let editingSandboxId: string | null = null
   let editingPrompt = ''
+  let userTimezone = ''
+  let globalTimezone = ''
+  let effectiveTimezone = ''
+  let tzSaving = false
+  let tzSaved = false
+  let tzSavedTimer: ReturnType<typeof setTimeout> | null = null
 
   async function load() {
     loading = true
@@ -195,7 +202,46 @@
     window.location.hash = `#/debug/compare${query}`
   }
 
-  onMount(load)
+  async function loadTimezone() {
+    try {
+      const s = await api.getSettings()
+      userTimezone = s.timezone || ''
+      globalTimezone = s.global_timezone || ''
+      effectiveTimezone = s.effective_timezone ?? (userTimezone || globalTimezone || '')
+    } catch {
+      // default to browser local
+    }
+  }
+
+  async function handleTimezoneChange(event: Event) {
+    const value = (event.currentTarget as HTMLSelectElement).value
+    userTimezone = value
+    error = ''
+    tzSaving = true
+    tzSaved = false
+    try {
+      const res = await api.updateSettings({ timezone: value })
+      userTimezone = res?.timezone ?? value
+      globalTimezone = res?.global_timezone ?? globalTimezone
+      effectiveTimezone = res?.effective_timezone ?? (userTimezone || globalTimezone || '')
+      tzSaved = true
+      if (tzSavedTimer) clearTimeout(tzSavedTimer)
+      tzSavedTimer = setTimeout(() => { tzSaved = false }, 2000)
+    } catch (e: any) {
+      error = e.message
+    } finally {
+      tzSaving = false
+    }
+  }
+
+  onMount(() => {
+    load()
+    loadTimezone()
+  })
+
+  onDestroy(() => {
+    if (tzSavedTimer) clearTimeout(tzSavedTimer)
+  })
 </script>
 
 <div class="toolbar">
@@ -203,6 +249,19 @@
     {savedCount} of {maxSaved} save slot{maxSaved === 1 ? '' : 's'} used
   </div>
   <div class="toolbar-actions">
+    <label class="tz-control">
+      <span>Timezone</span>
+      <select value={userTimezone} onchange={handleTimezoneChange} disabled={tzSaving}>
+        <option value="">Global default ({globalTimezone || 'Browser Local'})</option>
+        {#if userTimezone && !COMMON_TIMEZONES.some((tz) => tz.value === userTimezone)}
+          <option value={userTimezone}>{userTimezone}</option>
+        {/if}
+        {#each COMMON_TIMEZONES as tz}
+          <option value={tz.value}>{tz.label}</option>
+        {/each}
+      </select>
+      {#if tzSaved}<span class="tz-saved">Saved</span>{/if}
+    </label>
     <button onclick={openCompare} disabled={exchanges.length < 2}>Compare runs</button>
     <button onclick={load}>Refresh</button>
     <button class="danger" onclick={handleClear} disabled={exchanges.length === 0}>Clear All</button>
@@ -238,7 +297,7 @@
             <span class="run-meta">
               {sb.run_count} run{sb.run_count === 1 ? '' : 's'}
               · {sb.message_count} message{sb.message_count === 1 ? '' : 's'}
-              {#if sb.last_run_at}· last {new Date(sb.last_run_at).toLocaleString()}{/if}
+              {#if sb.last_run_at}· last {formatTimestamp(sb.last_run_at, effectiveTimezone)}{/if}
             </span>
             <div class="sandbox-actions">
               <button class="primary" onclick={() => runSandbox(sb)}>Run</button>
@@ -287,7 +346,7 @@
               {#if e.saved}<span class="badge">saved</span>{/if}
               {#if e.source === 'replay'}<span class="badge">replay</span>{/if}
             </div>
-            <div class="run-meta">{new Date(e.created_at).toLocaleString()}</div>
+            <div class="run-meta">{formatTimestamp(e.created_at, effectiveTimezone)}</div>
             <div class="run-meta">
               {e.stage_count} stages{#if e.has_verification} · verified{/if}
               {#if e.totals?.total_tokens}
@@ -380,7 +439,16 @@
     margin-bottom: 16px;
   }
   .saved-count { font-size: 12px; color: var(--text-dim); }
-  .toolbar-actions { display: flex; gap: 8px; }
+  .toolbar-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .tz-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .tz-control select { width: auto; font-size: 12px; padding: 4px 8px; }
+  .tz-saved { font-size: 11px; color: var(--success); }
 
   .layout { display: flex; gap: 16px; align-items: flex-start; }
   .list-card { flex: 0 0 300px; }

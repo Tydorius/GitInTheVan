@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -16,6 +16,7 @@ from app.services.admin import (
     update_admin_settings,
 )
 from app.services.audit import count_logs, list_logs
+from app.services.timezones import validate_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,7 @@ class AdminSettingsResponse(BaseModel):
     deno_pool_max_idle: int = 4
     deno_pool_idle_ttl_seconds: int = 60
     deno_pool_status: dict[str, Any] | None = None
+    log_timezone: str = ""
 
 
 class AdminSettingsUpdate(BaseModel):
@@ -98,6 +100,14 @@ class AdminSettingsUpdate(BaseModel):
     deno_pool_min_idle: int | None = Field(default=None, ge=0, le=16)
     deno_pool_max_idle: int | None = Field(default=None, ge=0, le=32)
     deno_pool_idle_ttl_seconds: int | None = Field(default=None, ge=10, le=600)
+    log_timezone: str | None = None
+
+    @field_validator("log_timezone")
+    @classmethod
+    def _validate_log_timezone(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return validate_timezone(v)
 
 
 def _settings_response(s: AdminSettings, effective: str) -> AdminSettingsResponse:
@@ -150,6 +160,7 @@ def _settings_response(s: AdminSettings, effective: str) -> AdminSettingsRespons
         deno_pool_max_idle=s.deno_pool_max_idle,
         deno_pool_idle_ttl_seconds=s.deno_pool_idle_ttl_seconds,
         deno_pool_status=pool_status,
+        log_timezone=s.log_timezone,
     )
 
 
@@ -276,6 +287,8 @@ async def update_settings(
         updates["deno_pool_max_idle"] = max(new_max, new_min)
     if req.deno_pool_idle_ttl_seconds is not None:
         updates["deno_pool_idle_ttl_seconds"] = req.deno_pool_idle_ttl_seconds
+    if req.log_timezone is not None:
+        updates["log_timezone"] = req.log_timezone
 
     s = await update_admin_settings(updates)
     from app.services.admin import get_effective_log_level

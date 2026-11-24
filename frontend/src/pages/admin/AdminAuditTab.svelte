@@ -1,17 +1,28 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
   import { api } from '../../api'
+  import { formatTimestamp } from '../../lib/timezone'
 
   let auditLogs: any[] = $state([])
   let error = $state('')
   let auditAutoRefresh = $state(false)
   let auditInterval: ReturnType<typeof setInterval> | null = null
+  let logTimezone = $state('')
 
   async function loadAudit() {
     try {
       const data = await api.getAdminAuditLogs(100, 0)
       auditLogs = data.logs
     } catch (e: any) { error = e.message }
+  }
+
+  async function loadTimezone() {
+    try {
+      const settings = await api.getAdminSettings()
+      logTimezone = settings.log_timezone || ''
+    } catch {
+      // default to browser local
+    }
   }
 
   function toggleAuditAutoRefresh() {
@@ -24,7 +35,10 @@
     }
   }
 
-  onMount(loadAudit)
+  onMount(() => {
+    loadAudit()
+    loadTimezone()
+  })
 
   onDestroy(() => {
     if (auditInterval) clearInterval(auditInterval)
@@ -52,7 +66,7 @@
           <td style="font-size: 11px;">{log.username || (log.user_id || '').slice(0, 8)}</td>
           <td style="font-size: 11px;">{log.target_type}{#if log.target_id} ({log.target_id.slice(0, 8)}){/if}</td>
           <td style="font-size: 12px; max-width: 300px; overflow: hidden; text-overflow: ellipsis;">{log.details}</td>
-          <td style="color: var(--text-dim); font-size: 11px;">{new Date(log.created_at).toLocaleString()}</td>
+          <td style="color: var(--text-dim); font-size: 11px;">{formatTimestamp(log.created_at, logTimezone)}</td>
         </tr>
       {/each}
     </tbody>

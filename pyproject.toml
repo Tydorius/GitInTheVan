@@ -1,6 +1,6 @@
 [project]
 name = "gitinthevan"
-version = "0.48.1"
+version = "0.49.0"
 description = "Self-hostable MITM LLM router/proxy for roleplay services"
 readme = "README.md"
 license = "MPL-2.0"
@@ -21,6 +21,7 @@ dependencies = [
     "bcrypt==5.0.0",
     "dulwich==1.2.9",
     "litellm==1.110.2",
+    "tzdata==2026.6",
     # Transitive deps pinned explicitly to patched versions per pip-audit findings
     # (2026-07-11, re-audited 2026-08-17 and 2026-11-18 — see
     # Planning/security-control-document.md). Remove an explicit pin once the

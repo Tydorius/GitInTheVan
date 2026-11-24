@@ -67,6 +67,11 @@ class AdminSettings(Base):
     deno_pool_idle_ttl_seconds: Mapped[int] = mapped_column(
         Integer, default=60, server_default="60", nullable=False
     )
+    # Phase 49 (0.49.0): global default IANA timezone for server logs and
+    # fallback for user-facing debug/log views. Empty = server local time.
+    log_timezone: Mapped[str] = mapped_column(
+        String(64), default="", server_default="", nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=text("CURRENT_TIMESTAMP"), nullable=False,
         onupdate=lambda: datetime.now(UTC),
