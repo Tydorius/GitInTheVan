@@ -2,6 +2,16 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.48.1] - 2026-11-23
+
+Phase B token-saving verification and summarization hardening: enables zero-LLM regex-only verification without a Navigator judge endpoint, hardens incremental summarization against degraded or empty-delta passes, and adds config-time validation for Gemini `thinking_level`.
+
+### Fixed
+
+- **Regex-only verification rules now run without a Navigator judge endpoint.** `load_verification_config`, `is_verification_enabled`, `run_verification_loop`, `check_response`, and Map final-output verification previously skipped verification whenever no global judge endpoint was configured — even when active rules had deterministic `regex_pattern` pre-checks. Active regex rules now run and pass/reject cleanly with zero LLM token cost when no judge endpoint is configured (LLM-only rules without a judge endpoint still record an error note as before).
+- **Incremental summarization no longer drops newly-aged messages on degraded or empty-delta passes.** When an incremental summarizer call degrades (times out or errors) or encounters an empty-text delta, `maybe_summarize()` now compresses only the already-covered prefix (`existing.message_count`) under `existing.summary` — keeping newly-aged delta messages verbatim in the prompt and never promoting the stored `boundary_hash` / `message_count`.
+- **Config-time validation for `thinking_level`.** `ParameterDef` in `app/services/llm_params.py` now validates non-blank `thinking_level` values against `minimal`, `low`, `medium`, `high`, `xhigh`, `disable`, and `none` (case-insensitive) at save time (422) rather than letting typos reach the provider as a 400.
+
 ## [0.48.0] - 2026-11-23
 
 Automatic prompt caching and cache diagnostics release (Phase A): adds Cache-Friendly Injection Mode (moving dynamic memories, non-constant lorebooks, and appended cantrip card deltas to `user_tail`), automatic Anthropic / OpenRouter `cache_control` breakpoint stamping, a Debug Prefix-Diff ("Cache Buster") detector, and unified Lorebook `total_budget` enforcement on Map stages and manual Pre-Forward Order slots.

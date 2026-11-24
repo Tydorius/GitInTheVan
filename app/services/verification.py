@@ -297,16 +297,29 @@ async def check_response(
     for rule in rules:
         candidates = _judge_candidates(rule, endpoint, model, rule_endpoints, rule_chains)
         if not candidates:
-            judgments.append(
-                VerificationJudgment(
-                    violation=False,
-                    reason="No verification endpoint available",
-                    severity="none",
-                    rule_name=rule.name,
-                    thinking=judge_error_note("no available endpoint", rule.name),
-                    errored=True,
+            has_regex = bool((getattr(rule, "regex_pattern", "") or "").strip())
+            if has_regex:
+                judgments.append(
+                    VerificationJudgment(
+                        violation=False,
+                        reason="Regex pre-check passed (no judge endpoint configured)",
+                        severity="none",
+                        rule_name=rule.name,
+                        rule_id=getattr(rule, "id", ""),
+                        errored=False,
+                    )
                 )
-            )
+            else:
+                judgments.append(
+                    VerificationJudgment(
+                        violation=False,
+                        reason="No verification endpoint available",
+                        severity="none",
+                        rule_name=rule.name,
+                        thinking=judge_error_note("no available endpoint", rule.name),
+                        errored=True,
+                    )
+                )
             continue
 
         messages = _build_verification_messages(content, rule.prompt, forbidden_context)
@@ -519,6 +532,14 @@ async def _load_verification_param_layer(db: AsyncSession, user_id: str) -> list
     return parse_params(s.verification_parameters_json, "user settings (verification)")
 
 
+def _has_regex_rule(rules: list[VerificationRule]) -> bool:
+    return any((getattr(r, "regex_pattern", "") or "").strip() for r in rules)
+
+
+def _has_rule_endpoint(rules: list[VerificationRule]) -> bool:
+    return any(getattr(r, "verification_endpoint_id", None) for r in rules)
+
+
 async def load_verification_config(
     db: AsyncSession, user_id: str, tags: list | None = None
 ) -> tuple[list[VerificationRule], Endpoint | None, str, int]:
@@ -556,7 +577,7 @@ async def load_verification_config(
         )
         endpoint = ep_result.scalar_one_or_none()
 
-    if endpoint is None:
+    if endpoint is None and not _has_regex_rule(rules) and not _has_rule_endpoint(rules):
         return [], None, "", 0
 
     max_retries = max(r.max_retries for r in rules)
@@ -571,7 +592,9 @@ async def load_verification_config(
 async def is_verification_enabled(user_id: str, tags: list | None = None) -> bool:
     async with async_session() as db:
         rules, endpoint, _, _ = await load_verification_config(db, user_id, tags)
-        return len(rules) > 0 and endpoint is not None
+        return len(rules) > 0 and (
+            endpoint is not None or _has_regex_rule(rules) or _has_rule_endpoint(rules)
+        )
 
 
 async def prepare_verification_run(
@@ -613,7 +636,7 @@ async def prepare_verification_run(
             rule_ep = ep_result.scalar_one_or_none()
             if rule_ep:
                 rule_endpoints[rule.id] = (rule_ep, rule.verification_model or v_model)
-        elif rule.verification_model and rule.verification_model != v_model:
+        elif rule.verification_model and rule.verification_model != v_model and v_endpoint is not None:
             rule_endpoints[rule.id] = (v_endpoint, rule.verification_model)
 
         judge_ep, judge_model = rule_endpoints.get(rule.id, (v_endpoint, v_model))
@@ -674,7 +697,7 @@ async def run_verification_loop(
     if not rules and not forbidden_summary:
         return response_data, None
 
-    if not v_endpoint:
+    if not v_endpoint and not rule_chains and not _has_regex_rule(rules):
         if forbidden_summary:
             response_data["_gitv_forbidden_summary"] = forbidden_summary
         return response_data, None

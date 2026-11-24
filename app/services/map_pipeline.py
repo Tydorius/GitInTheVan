@@ -879,7 +879,8 @@ async def _run_final_map_verification(
             rule_chains,
         ) = await prepare_verification_run(db, user_id, tags)
 
-    if not rules or not v_endpoint:
+    has_regex_rules = any((getattr(r, "regex_pattern", "") or "").strip() for r in rules)
+    if not rules or (not v_endpoint and not rule_chains and not has_regex_rules):
         return None
 
     final_content = extract_response_text(response_data)

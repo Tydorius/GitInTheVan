@@ -211,6 +211,8 @@ async def summarize_messages(
 
     transcript = _format_transcript(messages)
     if not transcript:
+        if body_json is not None:
+            body_json["_gitv_summarizer_empty_delta"] = True
         return existing_summary
 
     if existing_summary:
@@ -445,8 +447,10 @@ async def maybe_summarize(
             )
         else:
             body_json.pop("_gitv_summarizer_degraded", None)
+            body_json.pop("_gitv_summarizer_empty_delta", None)
             messages_for_llm = to_compress
             prior_summary = ""
+            is_incremental = False
             if (
                 existing
                 and existing.summary
@@ -456,6 +460,7 @@ async def maybe_summarize(
                 if prefix_hash == existing.boundary_hash:
                     messages_for_llm = to_compress[existing.message_count :]
                     prior_summary = existing.summary
+                    is_incremental = True
                     logger.info(
                         "Summarization: incremental delta for chat %s (%d -> %d msgs, delta=%d)",
                         internal_chat_id[:12],
@@ -482,7 +487,17 @@ async def maybe_summarize(
                 body_json=body_json,
             )
             degraded = bool(body_json.pop("_gitv_summarizer_degraded", False))
-            if summary_text and not degraded:
+            empty_delta = bool(body_json.pop("_gitv_summarizer_empty_delta", False))
+            if degraded or empty_delta:
+                # Never compress newly-aged messages under a stale summary that
+                # never incorporated them, and never promote the stored boundary
+                # when the summarizer did not actually summarize the delta.
+                if is_incremental and existing and existing.summary:
+                    compress_indices_set = set(compress_indices[: existing.message_count])
+                    summary_text = existing.summary
+                else:
+                    return body_json
+            elif summary_text:
                 async with async_session() as db:
                     await save_summary(
                         db, user_id, internal_chat_id, summary_text,

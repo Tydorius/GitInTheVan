@@ -50,6 +50,16 @@ PARAM_TYPES: tuple[str, ...] = (
 # pack imports.
 RESERVED_NAMES: frozenset[str] = frozenset({"messages", "model", "stream"})
 
+VALID_THINKING_LEVELS: tuple[str, ...] = (
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "disable",
+    "none",
+)
+
 NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,63}$")
 
 MAX_PARAMS_PER_SCOPE = 32
@@ -134,6 +144,15 @@ class ParameterDef(BaseModel):
             raise ValueError(
                 f"Parameter '{self.name}' value '{self.value}' is not one of its "
                 f"options ({', '.join(self.options)})"
+            )
+        if (
+            self.name == "thinking_level"
+            and not _is_blank(self.value)
+            and str(self.value).strip().lower() not in VALID_THINKING_LEVELS
+        ):
+            raise ValueError(
+                f"Parameter 'thinking_level' value '{self.value}' is not valid "
+                f"(expected one of: {', '.join(VALID_THINKING_LEVELS)})"
             )
         return self
 
