@@ -1158,13 +1158,13 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 - <strong>Name</strong>: A label for the rule
 - <strong>Description</strong>: Optional notes
 - <strong>Verification Prompt</strong>: Instructions for the Navigator (e.g., "The response must contain the string MARKER:")
-- <strong>Regex Pre-Check</strong> (optional): a regular expression checked against the reply <em>before</em> the Navigator LLM is called — a match rejects the reply immediately, saving a judge call on obviously-violating output. Validated on save (must compile; capped at 1024 characters). Rules with a pattern show a <strong>Regex</strong> badge on their card.
+- <strong>Regex Pre-Check</strong> (optional): a regular expression checked against the reply <em>before</em> the Navigator LLM is called — a match rejects the reply immediately, saving a judge call on obviously-violating output. Validated on save (must compile; capped at 1024 characters). Rules with a pattern show a <strong>Regex</strong> badge on their card. A rule that carries only a pattern needs no judge endpoint: the pattern is the whole check, so it runs even when no <strong>Verification Endpoint</strong> is set and costs no judge tokens. A match still triggers the rule's normal resubmission of the Driver request.
 - <strong>Max Retries</strong>: How many times to resubmit before giving up (default 2)
 - <strong>Execution Order</strong>: Sort order when multiple rules are active
 - <strong>Resubmission Strategy</strong>: How to handle violations:
   - <strong>Add Instructions</strong>: Appends a corrective system message to the request
   - <strong>Rewrite</strong>: Sends the bad response back with rewrite instructions
-- <strong>Verification Endpoint Override</strong>: Use a specific endpoint for this rule (leave as "Use global setting" for the default)
+- <strong>Verification Endpoint Override</strong>: Use a specific endpoint for this rule (leave as "Use global setting" for the default). A rule with an override is judged there even when no global <strong>Verification Endpoint</strong> is set
 - <strong>Verification Model Override</strong>: Use a specific model for this rule (leave blank for the global setting)</p>
 <p>Each rule card has an <strong>ON/OFF toggle</strong> to enable/disable without editing. Rules are taggable and activate via <code>&lt;#verify-tag#&gt;</code> in persona or message text.</p>
 <p><img alt="Edit Verification Rule" src="media/gitv-verification-rules-edit-rule-example.png"></p>
@@ -1173,7 +1173,7 @@ Message 5: &quot;Done &lt;VERIFY:reset&gt;&quot;                     -&gt; Persi
 <p><img alt="Verification Settings" src="media/gitv-verification-settings.png"></p>
 <p>Configure the Navigator:
 - <strong>Verification Enabled</strong>: Master toggle for response verification
-- <strong>Verification Endpoint</strong>: Which endpoint to use for Navigator checks (can be the same or different from your Driver endpoint)
+- <strong>Verification Endpoint</strong>: Which endpoint to use for Navigator checks (can be the same or different from your Driver endpoint). It can be left unset when every active rule carries a <strong>Regex Pre-Check</strong> or its own endpoint override; a rule that needs the Navigator LLM cannot run without one
 - <strong>Verification Model</strong>: Which model to use for checking (a fast, instruction-following model is recommended)</p>
 <p><strong>Note:</strong> When verification is enabled, streaming requests are automatically converted to non-streaming to allow the full response to be checked before returning to the client.</p>
 <h3 id="logs-tab">Logs Tab</h3>
@@ -1225,7 +1225,8 @@ Debug, the reason column on the <strong>Logs</strong> tab, and an amber banner o
 <strong>Test</strong> tab. A rule that did not run never shows as approved.</p>
 <p>If you see this, check that the endpoint on <strong>Verification -&gt; Settings</strong> (or the
 rule's own override) is reachable, and that its <strong>Provider</strong> setting matches the
-API it actually speaks.</p>
+API it actually speaks. A <strong>Regex Pre-Check</strong> is not held up by any of this: it
+runs before the endpoint is consulted.</p>
 <hr>
 <p><a id="memories"></a></p>
 <h2 id="12-memories">12. Memories</h2>
@@ -1720,7 +1721,7 @@ editable at runtime from the Storage page.</p>
 <li><strong>Summarization Prompt</strong>: System prompt for the summarization LLM</li>
 </ul>
 <p>When summarization triggers, older dialogue is removed from the request and replaced with a single <code>[CONVERSATION SUMMARY]</code> system block. The most recent messages are always forwarded verbatim. Summaries are cached per conversation — rerolls and forks reuse the cached summary without re-calling the LLM.</p>
-<p>Compaction is incremental: when the history covered by the existing summary has not changed, the summarizer is sent only the newly aged messages plus that summary, instead of the whole history again. If earlier history has diverged (an edited or trimmed turn), the summary is rebuilt in full. A summarizer call that fails keeps the previous summary and leaves the stored one untouched, so the next turn retries rather than trusting a half-built summary.</p>
+<p>Compaction is incremental: when the history covered by the existing summary has not changed, the summarizer is sent only the newly aged messages plus that summary, instead of the whole history again. If earlier history has diverged (an edited or trimmed turn), the summary is rebuilt in full. A summarizer call that fails keeps the previous summary and leaves the stored one untouched, so the next turn retries rather than trusting a half-built summary. When an incremental pass fails, only the messages the existing summary already covers are folded under it; the newer messages that pass was meant to summarize stay in the prompt word for word instead of being hidden under a summary that never saw them.</p>
 <h3 id="prompt-caching">Prompt Caching</h3>
 <p><img alt="Prompt Caching settings" src="media/gitv-settings-prompt-caching.png"></p>
 <p><em>The Prompt Caching card with both modes enabled, captured 2026-11-23.</em></p>
@@ -1823,13 +1824,14 @@ gets <code>low</code>. A client that asked for <code>high</code> is overridden i
 Configuring a name is what makes GitInTheVan override it.</p>
 <h3 id="gemini-thinking_level">Gemini <code>thinking_level</code></h3>
 <p>On Gemini and Vertex endpoints served through LiteLLM, a parameter named
-<code>thinking_level</code> — <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code> or <code>xhigh</code> — is how you set
+<code>thinking_level</code> — <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code> or <code>xhigh</code>, plus <code>disable</code>
+or <code>none</code> for the lowest level with no thoughts returned — is how you set
 Gemini 3 and 4 thinking. GitInTheVan translates it to <code>reasoning_effort</code>, which
 LiteLLM maps to the model's thinking level; <code>thinking_level</code> itself is never
-forwarded to Google, which rejects unknown fields. The value is not checked
-when you save it unless you give the parameter an <strong>Options</strong> list, so a
-misspelt level is otherwise rejected by the provider rather than by
-GitInTheVan.</p>
+forwarded to Google, which rejects unknown fields. The value is checked when you
+save it: anything outside that list is rejected with a 422, so a misspelt level
+is caught by GitInTheVan rather than by the provider. A value saved before this
+check existed is left as it is and still forwarded.</p>
 <blockquote>
 <p><strong>Note: this behaves differently from every other parameter.</strong> An explicit
 <code>reasoning_effort</code> outranks <code>thinking_level</code> wherever each comes from. So a

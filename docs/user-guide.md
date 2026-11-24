@@ -1311,13 +1311,13 @@ Each rule contains:
 - **Name**: A label for the rule
 - **Description**: Optional notes
 - **Verification Prompt**: Instructions for the Navigator (e.g., "The response must contain the string MARKER:")
-- **Regex Pre-Check** (optional): a regular expression checked against the reply *before* the Navigator LLM is called — a match rejects the reply immediately, saving a judge call on obviously-violating output. Validated on save (must compile; capped at 1024 characters). Rules with a pattern show a **Regex** badge on their card.
+- **Regex Pre-Check** (optional): a regular expression checked against the reply *before* the Navigator LLM is called — a match rejects the reply immediately, saving a judge call on obviously-violating output. Validated on save (must compile; capped at 1024 characters). Rules with a pattern show a **Regex** badge on their card. A rule that carries only a pattern needs no judge endpoint: the pattern is the whole check, so it runs even when no **Verification Endpoint** is set and costs no judge tokens. A match still triggers the rule's normal resubmission of the Driver request.
 - **Max Retries**: How many times to resubmit before giving up (default 2)
 - **Execution Order**: Sort order when multiple rules are active
 - **Resubmission Strategy**: How to handle violations:
   - **Add Instructions**: Appends a corrective system message to the request
   - **Rewrite**: Sends the bad response back with rewrite instructions
-- **Verification Endpoint Override**: Use a specific endpoint for this rule (leave as "Use global setting" for the default)
+- **Verification Endpoint Override**: Use a specific endpoint for this rule (leave as "Use global setting" for the default). A rule with an override is judged there even when no global **Verification Endpoint** is set
 - **Verification Model Override**: Use a specific model for this rule (leave blank for the global setting)
 
 Each rule card has an **ON/OFF toggle** to enable/disable without editing. Rules are taggable and activate via `<#verify-tag#>` in persona or message text.
@@ -1332,7 +1332,7 @@ Each rule card has an **ON/OFF toggle** to enable/disable without editing. Rules
 
 Configure the Navigator:
 - **Verification Enabled**: Master toggle for response verification
-- **Verification Endpoint**: Which endpoint to use for Navigator checks (can be the same or different from your Driver endpoint)
+- **Verification Endpoint**: Which endpoint to use for Navigator checks (can be the same or different from your Driver endpoint). It can be left unset when every active rule carries a **Regex Pre-Check** or its own endpoint override; a rule that needs the Navigator LLM cannot run without one
 - **Verification Model**: Which model to use for checking (a fast, instruction-following model is recommended)
 
 **Note:** When verification is enabled, streaming requests are automatically converted to non-streaming to allow the full response to be checked before returning to the client.
@@ -1401,7 +1401,8 @@ Debug, the reason column on the **Logs** tab, and an amber banner on the
 
 If you see this, check that the endpoint on **Verification -> Settings** (or the
 rule's own override) is reachable, and that its **Provider** setting matches the
-API it actually speaks.
+API it actually speaks. A **Regex Pre-Check** is not held up by any of this: it
+runs before the endpoint is consulted.
 
 ---
 
@@ -2006,7 +2007,7 @@ Automatically compresses long conversations to reduce token usage while preservi
 
 When summarization triggers, older dialogue is removed from the request and replaced with a single `[CONVERSATION SUMMARY]` system block. The most recent messages are always forwarded verbatim. Summaries are cached per conversation — rerolls and forks reuse the cached summary without re-calling the LLM.
 
-Compaction is incremental: when the history covered by the existing summary has not changed, the summarizer is sent only the newly aged messages plus that summary, instead of the whole history again. If earlier history has diverged (an edited or trimmed turn), the summary is rebuilt in full. A summarizer call that fails keeps the previous summary and leaves the stored one untouched, so the next turn retries rather than trusting a half-built summary.
+Compaction is incremental: when the history covered by the existing summary has not changed, the summarizer is sent only the newly aged messages plus that summary, instead of the whole history again. If earlier history has diverged (an edited or trimmed turn), the summary is rebuilt in full. A summarizer call that fails keeps the previous summary and leaves the stored one untouched, so the next turn retries rather than trusting a half-built summary. When an incremental pass fails, only the messages the existing summary already covers are folded under it; the newer messages that pass was meant to summarize stay in the prompt word for word instead of being hidden under a summary that never saw them.
 
 ### Prompt Caching
 
@@ -2113,13 +2114,14 @@ Configuring a name is what makes GitInTheVan override it.
 ### Gemini `thinking_level`
 
 On Gemini and Vertex endpoints served through LiteLLM, a parameter named
-`thinking_level` — `minimal`, `low`, `medium`, `high` or `xhigh` — is how you set
+`thinking_level` — `minimal`, `low`, `medium`, `high` or `xhigh`, plus `disable`
+or `none` for the lowest level with no thoughts returned — is how you set
 Gemini 3 and 4 thinking. GitInTheVan translates it to `reasoning_effort`, which
 LiteLLM maps to the model's thinking level; `thinking_level` itself is never
-forwarded to Google, which rejects unknown fields. The value is not checked
-when you save it unless you give the parameter an **Options** list, so a
-misspelt level is otherwise rejected by the provider rather than by
-GitInTheVan.
+forwarded to Google, which rejects unknown fields. The value is checked when you
+save it: anything outside that list is rejected with a 422, so a misspelt level
+is caught by GitInTheVan rather than by the provider. A value saved before this
+check existed is left as it is and still forwarded.
 
 > **Note: this behaves differently from every other parameter.** An explicit
 > `reasoning_effort` outranks `thinking_level` wherever each comes from. So a
