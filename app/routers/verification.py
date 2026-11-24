@@ -12,7 +12,7 @@ from app.dependencies import get_current_user
 from app.models.endpoint import Endpoint
 from app.models.user import User
 from app.models.verification import VerificationLog, VerificationRule
-from app.routers._helpers import check_tag_unique, get_owned_or_404
+from app.routers._helpers import assert_owned_endpoint_id, check_tag_unique, get_owned_or_404
 from app.services import snapshots
 from app.services.admin import get_admin_settings
 from app.services.content_guard import check_size, sanitize_and_log
@@ -24,35 +24,6 @@ from app.services.verification import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/verification", tags=["verification"])
-
-
-async def _verify_endpoint_owner(
-    db: AsyncSession, endpoint_id: str | None, user_id: str
-) -> str | None:
-    """Resolve a judge endpoint id to an id owned by ``user_id``, else 404.
-
-    A judge call is sent with the named endpoint's stored API key, so an
-    endpoint belonging to another user must never be accepted here — the
-    same ownership rule the driver's default-endpoint field enforces.
-    An empty value clears the setting and returns ``None``.
-    """
-    cleaned = (endpoint_id or "").strip()
-    if not cleaned:
-        return None
-    owned = (
-        await db.execute(
-            select(Endpoint.id).where(
-                Endpoint.id == cleaned,
-                Endpoint.user_id == user_id,
-            )
-        )
-    ).scalar_one_or_none()
-    if owned is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Endpoint not found",
-        )
-    return cleaned
 
 
 class RuleCreate(BaseModel):
@@ -278,7 +249,7 @@ async def create_rule(
         execution_order=req.execution_order,
         resubmission_strategy=req.resubmission_strategy,
         tag=req.tag,
-        verification_endpoint_id=await _verify_endpoint_owner(
+        verification_endpoint_id=await assert_owned_endpoint_id(
             db, req.verification_endpoint_id, current_user.id
         ),
         verification_model=req.verification_model,
@@ -324,7 +295,7 @@ async def update_rule(
             _validate_regex_pattern(update_data["regex_pattern"], max_rule_chars)
 
     if "verification_endpoint_id" in update_data:
-        update_data["verification_endpoint_id"] = await _verify_endpoint_owner(
+        update_data["verification_endpoint_id"] = await assert_owned_endpoint_id(
             db, update_data["verification_endpoint_id"], current_user.id
         )
 
@@ -542,7 +513,7 @@ async def update_verification_settings(
     if req.verification_enabled is not None:
         user_settings.verification_enabled = req.verification_enabled
     if req.verification_endpoint_id is not None:
-        user_settings.verification_endpoint_id = await _verify_endpoint_owner(
+        user_settings.verification_endpoint_id = await assert_owned_endpoint_id(
             db, req.verification_endpoint_id, current_user.id
         )
     if req.verification_model is not None:

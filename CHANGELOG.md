@@ -2,6 +2,16 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.49.1] - 2026-11-24
+
+Completes the user-isolation policy (no user data crosses user boundaries; content packs are the only cross-user channel) across every endpoint-id field, closing one live leak found by the sweep.
+
+### Security
+
+- **The summarization endpoint was a live cross-user leak.** `summarization_endpoint_id` was stored without an ownership check and resolved without a user filter, so a user who knew another user's endpoint id could send their summarizer calls — and, because the lexicon endpoint chain lists the summarizer id as a candidate and resolved candidate ids with **no user filter at all**, their `<LEXICON:name>` side calls too — using that endpoint's stored API key. The write now owner-checks (404 on a foreign id), and both reads (the summarizer config and the lexicon chain) are scoped to the requesting user. Ids stored before this release resolve to nothing; nothing is deleted.
+- **Api-key pins, map-stage endpoint pins, and scenario-rule endpoints no longer accept another user's endpoint id** (404 on save). Their runtime resolution was already user-scoped, so nothing leaked at runtime — but foreign ids were storable. Map packs are unaffected: imported endpoint ids dangle by design and the scoped stage resolver ignores them.
+- All checks share one helper (`assert_owned_endpoint_id` in `app/routers/_helpers.py`), which the 0.49.0 verification-judge checks now use too. The policy is codified as project rule 23 with matching test standards.
+
 ## [0.49.0] - 2026-11-24
 
 Adds global and per-user IANA timezone settings for server logs, audit logs, Debug, Compare, and Metrics, and catches the AI Assistant Pane up to full `0.44.0–0.49.0` feature parity (Phase C).

@@ -148,7 +148,10 @@ async def load_lexicon_endpoints(
     if any(candidate_ids):
         rows = (
             await db.execute(
-                select(Endpoint).where(Endpoint.id.in_([c for c in candidate_ids if c]))
+                select(Endpoint).where(
+                Endpoint.id.in_([c for c in candidate_ids if c]),
+                Endpoint.user_id == user_id,
+            )
             )
         ).scalars().all()
         by_id = {e.id: e for e in rows if e.enabled}

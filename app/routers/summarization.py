@@ -11,6 +11,7 @@ from app.dependencies import get_current_user
 from app.models.conversation_summary import ConversationSummary
 from app.models.user import User
 from app.models.user_settings import UserSettings
+from app.routers._helpers import assert_owned_endpoint_id
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,9 @@ async def update_summarization_settings(
     if req.summarization_enabled is not None:
         user_settings.summarization_enabled = req.summarization_enabled
     if req.summarization_endpoint_id is not None:
-        user_settings.summarization_endpoint_id = req.summarization_endpoint_id or None
+        user_settings.summarization_endpoint_id = await assert_owned_endpoint_id(
+            db, req.summarization_endpoint_id, current_user.id
+        )
     if req.summarization_model is not None:
         user_settings.summarization_model = req.summarization_model
     if req.summarization_token_threshold is not None:

@@ -10,6 +10,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.scenario_rule import ScenarioRule
 from app.models.user import User
+from app.routers._helpers import assert_owned_endpoint_id
 from app.services import snapshots
 from app.services.admin import get_admin_settings
 from app.services.content_guard import check_size, sanitize_and_log
@@ -124,7 +125,7 @@ async def create_rule(
         name=req.name,
         token_threshold=max(100, req.token_threshold),
         fire_position=req.fire_position,
-        endpoint_id=req.endpoint_id or None,
+        endpoint_id=await assert_owned_endpoint_id(db, req.endpoint_id, current_user.id),
         model=req.model,
         parameters_json=params_from_api(req.parameters, "scenario rule parameters"),
         prompt=req.prompt,
@@ -177,7 +178,7 @@ async def update_rule(
             raise HTTPException(status_code=400, detail="fire_position must be 'pre' or 'post'")
         rule.fire_position = req.fire_position
     if req.endpoint_id is not None:
-        rule.endpoint_id = req.endpoint_id or None
+        rule.endpoint_id = await assert_owned_endpoint_id(db, req.endpoint_id, current_user.id)
     if req.model is not None:
         rule.model = req.model
     if req.parameters is not None:

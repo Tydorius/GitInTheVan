@@ -10,6 +10,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.api_key import ApiKey
 from app.models.user import User
+from app.routers._helpers import assert_owned_endpoint_id
 from app.services.auth import generate_api_key
 
 logger = logging.getLogger(__name__)
@@ -79,7 +80,7 @@ async def create_api_key(
         user_id=current_user.id,
         key_hash=key_hash,
         label=req.label or "default",
-        endpoint_id=req.endpoint_id,
+        endpoint_id=await assert_owned_endpoint_id(db, req.endpoint_id, current_user.id),
     )
     db.add(api_key)
     await db.commit()

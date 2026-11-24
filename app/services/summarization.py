@@ -79,6 +79,7 @@ async def load_summarization_config(
         ep_result = await db.execute(
             select(Endpoint).where(
                 Endpoint.id == user_settings.summarization_endpoint_id,
+                Endpoint.user_id == user_id,
                 Endpoint.enabled.is_(True),
             )
         )

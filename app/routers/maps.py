@@ -11,7 +11,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.map import Map, MapStage, MapStageResource
 from app.models.user import User
-from app.routers._helpers import check_tag_unique, get_owned_or_404
+from app.routers._helpers import assert_owned_endpoint_id, check_tag_unique, get_owned_or_404
 from app.services.admin import get_admin_settings
 from app.services.content_guard import (
     check_size,
@@ -240,6 +240,20 @@ def _map_to_response(m: Map) -> MapResponse:
     )
 
 
+async def _guard_stage_endpoints(
+    db: AsyncSession,
+    user_id: str,
+    stages: list[StageInput] | None,
+) -> None:
+    """Stage endpoint pins must belong to the map's owner (project rule: no
+    user data crosses user boundaries). Pack installs bypass this guard —
+    imported ids dangle by design and the user-scoped stage resolver in
+    ``map_pipeline._resolve_stage_endpoint`` never resolves them."""
+    for stage in stages or []:
+        await assert_owned_endpoint_id(db, stage.endpoint_id, user_id)
+        await assert_owned_endpoint_id(db, stage.verification_endpoint_id, user_id)
+
+
 async def _guard_map_texts(
     db: AsyncSession,
     user_id: str,
@@ -383,6 +397,7 @@ async def create_map(
 ):
     await check_tag_unique(db, Map, current_user.id, req.tag)
     await _guard_map_texts(db, current_user.id, req, req.stages)
+    await _guard_stage_endpoints(db, current_user.id, req.stages)
     m = Map(
         user_id=current_user.id,
         name=req.name,
@@ -433,6 +448,7 @@ async def update_map(
     await capture_snapshot(db, current_user.id, "map", map_id)
 
     await _guard_map_texts(db, current_user.id, req, req.stages, map_id)
+    await _guard_stage_endpoints(db, current_user.id, req.stages)
 
     if req.tag is not None and req.tag != m.tag:
         await check_tag_unique(db, Map, current_user.id, req.tag, exclude_id=map_id)
