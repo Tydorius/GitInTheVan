@@ -506,8 +506,13 @@ endpoint path.
 - **Budget Weight**: Proportional weight for context budget allocation (default 1.0). Higher weights receive a larger share of the injection budget
 - **Reserved Tokens** (default 0 = weighted share): a fixed token share this cantrip's output is budgeted for, taken off the top before weighted resources split the rest (see [Context Budgeting](#settings))
 - **User Data Prefixes** (default blank = all keys): an optional comma-separated list of `user_data` key prefixes (e.g. `kok:`). When set, the cantrip only sees matching keys in `context.user_data`, and its writes/deletes are confined to those keys — everything else in the store is invisible and untouchable to it. Use it to hand a third-party cantrip exactly the slice of state it needs
+- **Card edits are standing** (default off): only meaningful with [Cache-Friendly Injection Mode](#prompt-caching) on. A standing cantrip's *appended* text on `personality`, `scenario` or `example dialogs` stays in the system prompt (the cached prefix), while other cantrips' appends still move to the end of your newest message. Turn it on only for appends that are byte-identical every request — a standing append that changes between requests busts the cache just like any other prefix change. Full replacements of a field are never treated as appends; they apply in place
 - **Active**: Whether the cantrip is enabled
 - **Public**: Whether other users can see and use this cantrip
+
+![Card edits are standing](media/gitv-cantrips-standing.png)
+
+*The Card edits are standing toggle in the cantrip editor, captured 2026-11-24.*
 
 ![Cantrip Editor](media/gitv-cantrips-edit.png)
 
@@ -2146,7 +2151,7 @@ check existed is left as it is and still forwarded.
 | Field | Meaning |
 |-------|---------|
 | **Name** | The key sent upstream, e.g. `reasoning_effort` |
-| **Type** | `string`, `string list`, `integer`, `float`, `number`, or `boolean`. The value is converted before sending, so an integer arrives as `128000`, not `"128000"` |
+| **Type** | `string`, `string list`, `integer`, `float`, `number`, `boolean`, or `object`. The value is converted before sending, so an integer arrives as `128000`, not `"128000"` |
 | **Value** | What to send |
 | **Required** | Stops you saving the parameter with an empty value, and marks it in the UI. It does not change what is sent — every parameter you define is sent |
 | **Options** | Optional comma-separated list of allowed values. Setting it turns Value into a dropdown and rejects anything outside the list |
@@ -2160,6 +2165,13 @@ the request.
 A parameter whose value cannot be converted to its type, or whose value is not in
 its own options list, is dropped with a log line rather than sent upstream. A bad
 parameter never fails the request.
+
+The **`object`** type carries a JSON object (validated when you save it) and is
+sent as a nested value rather than a string — on provider endpoints it rides
+LiteLLM's `extra_body`. Its main use is `chat_template_kwargs` on vLLM-style
+backends, e.g. `{"thinking": true}` for DeepSeek V4 or
+`{"enable_thinking": false}` for GLM 5.x, and nested provider options such as
+Anthropic's `thinking` configuration.
 
 ### Where to set them
 

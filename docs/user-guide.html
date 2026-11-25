@@ -480,9 +480,12 @@ endpoint path.</p>
 <li><strong>Budget Weight</strong>: Proportional weight for context budget allocation (default 1.0). Higher weights receive a larger share of the injection budget</li>
 <li><strong>Reserved Tokens</strong> (default 0 = weighted share): a fixed token share this cantrip's output is budgeted for, taken off the top before weighted resources split the rest (see <a href="#settings">Context Budgeting</a>)</li>
 <li><strong>User Data Prefixes</strong> (default blank = all keys): an optional comma-separated list of <code>user_data</code> key prefixes (e.g. <code>kok:</code>). When set, the cantrip only sees matching keys in <code>context.user_data</code>, and its writes/deletes are confined to those keys — everything else in the store is invisible and untouchable to it. Use it to hand a third-party cantrip exactly the slice of state it needs</li>
+<li><strong>Card edits are standing</strong> (default off): only meaningful with <a href="#prompt-caching">Cache-Friendly Injection Mode</a> on. A standing cantrip's <em>appended</em> text on <code>personality</code>, <code>scenario</code> or <code>example dialogs</code> stays in the system prompt (the cached prefix), while other cantrips' appends still move to the end of your newest message. Turn it on only for appends that are byte-identical every request — a standing append that changes between requests busts the cache just like any other prefix change. Full replacements of a field are never treated as appends; they apply in place</li>
 <li><strong>Active</strong>: Whether the cantrip is enabled</li>
 <li><strong>Public</strong>: Whether other users can see and use this cantrip</li>
 </ul>
+<p><img alt="Card edits are standing" src="media/gitv-cantrips-standing.png"></p>
+<p><em>The Card edits are standing toggle in the cantrip editor, captured 2026-11-24.</em></p>
 <p><img alt="Cantrip Editor" src="media/gitv-cantrips-edit.png"></p>
 <p><em>The cantrip editor with Reserved Tokens and User Data Prefixes, captured 2026-11-21.</em></p>
 <h3 id="cantrip-context-api">Cantrip Context API</h3>
@@ -1861,7 +1864,7 @@ normal layering and also blocks any <code>thinking_level</code> from applying.</
 </tr>
 <tr>
 <td><strong>Type</strong></td>
-<td><code>string</code>, <code>string list</code>, <code>integer</code>, <code>float</code>, <code>number</code>, or <code>boolean</code>. The value is converted before sending, so an integer arrives as <code>128000</code>, not <code>"128000"</code></td>
+<td><code>string</code>, <code>string list</code>, <code>integer</code>, <code>float</code>, <code>number</code>, <code>boolean</code>, or <code>object</code>. The value is converted before sending, so an integer arrives as <code>128000</code>, not <code>"128000"</code></td>
 </tr>
 <tr>
 <td><strong>Value</strong></td>
@@ -1888,6 +1891,12 @@ the request.</p>
 <p>A parameter whose value cannot be converted to its type, or whose value is not in
 its own options list, is dropped with a log line rather than sent upstream. A bad
 parameter never fails the request.</p>
+<p>The <strong><code>object</code></strong> type carries a JSON object (validated when you save it) and is
+sent as a nested value rather than a string — on provider endpoints it rides
+LiteLLM's <code>extra_body</code>. Its main use is <code>chat_template_kwargs</code> on vLLM-style
+backends, e.g. <code>{"thinking": true}</code> for DeepSeek V4 or
+<code>{"enable_thinking": false}</code> for GLM 5.x, and nested provider options such as
+Anthropic's <code>thinking</code> configuration.</p>
 <h3 id="where-to-set-them">Where to set them</h3>
 <table>
 <thead>
