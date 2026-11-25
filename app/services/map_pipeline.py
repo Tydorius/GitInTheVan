@@ -196,7 +196,7 @@ async def stage_parameters(
 
 
 async def _resolve_stage_endpoint(
-    db, stage: MapStage, user_id: str
+    db, stage: MapStage, user_id: str, body_json: dict[str, Any] | None = None
 ) -> tuple[list[Endpoint], str]:
     """Resolve endpoint candidates and model for a map stage.
 
@@ -213,6 +213,18 @@ async def _resolve_stage_endpoint(
         tagged = await resolve_endpoints_by_tag(db, user_id, stage.endpoint_tag)
         if tagged:
             return tagged, model
+        if body_json is not None:
+            from app.services.debug import debug_capture
+
+            debug_capture(
+                body_json,
+                "map_stage_tag_fallback",
+                "Map Stage Tag Fallback",
+                detail=(
+                    f"Stage '{stage.name}' tag '{stage.endpoint_tag}' matched no enabled endpoint; falling back"
+                ),
+                metadata={"stage": stage.name, "requested_tag": stage.endpoint_tag},
+            )
 
     # 2. Specific endpoint pin.
     if stage.endpoint_id:
@@ -1124,7 +1136,7 @@ async def run_map_pipeline(
                 )
 
         async with async_session() as db:
-            endpoints, model = await _resolve_stage_endpoint(db, stage, user_id)
+            endpoints, model = await _resolve_stage_endpoint(db, stage, user_id, body_json=body_json)
             # Resolved per stage against the endpoint this stage actually
             # landed on, which tag-based resolution may make different from the
             # previous stage's.

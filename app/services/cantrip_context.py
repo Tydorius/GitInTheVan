@@ -426,6 +426,71 @@ def _inject_blocks(result: list[dict[str, Any]], finals: dict[str, str]) -> None
         result.insert(insert_idx, {"role": "system", "content": block})
 
 
+_CARD_FIELDS: tuple[str, str, str] = ("personality", "scenario", "example_dialogs")
+
+
+class CardEditTracker:
+    """Track per-cantrip card field edits to separate standing vs dynamic appends
+    under cache-friendly mode (0.50.0 N13).
+
+    Each cantrip in a pass still sees the accumulated ``context["character"]``
+    from earlier cantrips (preserving JanitorAI chaining semantics). Under
+    ``cache_friendly=True``, pure appends from cantrips marked
+    ``card_edits_standing=True`` stay in ``messages[0]`` (the cached system
+    prompt), while pure appends from non-standing cantrips route to
+    ``user_tail`` regardless of whether standing or dynamic cantrips ran first.
+    """
+
+    def __init__(self, initial_character: dict[str, str]) -> None:
+        self.initial: dict[str, str] = {
+            f: initial_character.get(f, "") for f in _CARD_FIELDS
+        }
+        self.standing: dict[str, str] = dict(self.initial)
+        self.dynamic_deltas: dict[str, list[str]] = {f: [] for f in _CARD_FIELDS}
+
+    def record_step(
+        self,
+        pre: dict[str, str],
+        post: dict[str, str],
+        *,
+        is_standing: bool,
+    ) -> None:
+        for field in _CARD_FIELDS:
+            before = pre.get(field, "")
+            after = post.get(field, "")
+            if after == before:
+                continue
+            if after.startswith(before):
+                delta = after[len(before):]
+                if is_standing:
+                    if not self.standing[field]:
+                        self.standing[field] = delta.lstrip("\n")
+                    else:
+                        self.standing[field] += delta
+                else:
+                    stripped = delta.strip()
+                    if stripped:
+                        self.dynamic_deltas[field].append(stripped)
+            else:
+                # Full replacement (or deletion/rewrite): cannot be split as a
+                # tail delta; it becomes the new in-place value and supersedes
+                # any earlier dynamic deltas on this field.
+                self.standing[field] = after
+                self.dynamic_deltas[field].clear()
+
+    def any_changed(self, final_character: dict[str, str]) -> bool:
+        return any(
+            final_character.get(f, "") != self.initial[f] for f in _CARD_FIELDS
+        )
+
+    def resolve_for_cache_friendly(self) -> tuple[dict[str, str], list[str]]:
+        """Return ``(standing_finals, tail_deltas)`` for cache-friendly emission."""
+        tail_deltas: list[str] = []
+        for field in _CARD_FIELDS:
+            tail_deltas.extend(self.dynamic_deltas[field])
+        return dict(self.standing), tail_deltas
+
+
 def apply_cantrip_result_to_messages(
     messages: list[dict[str, Any]],
     result_personality: str,
@@ -434,6 +499,7 @@ def apply_cantrip_result_to_messages(
     *,
     cache_friendly: bool = False,
     seeded_character: dict[str, str] | None = None,
+    extra_tail_deltas: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     finals = {
         "personality": result_personality,
@@ -442,7 +508,7 @@ def apply_cantrip_result_to_messages(
     }
     tail_deltas: list[str] = []
     if cache_friendly and seeded_character is not None:
-        for field in ("personality", "scenario", "example_dialogs"):
+        for field in _CARD_FIELDS:
             new_val = finals[field]
             base = seeded_character.get(field, "")
             if new_val and new_val != base and new_val.startswith(base):
@@ -450,6 +516,8 @@ def apply_cantrip_result_to_messages(
                 if delta:
                     tail_deltas.append(delta)
                 finals[field] = base
+    if extra_tail_deltas:
+        tail_deltas.extend(d for d in extra_tail_deltas if d)
 
     result = [msg.copy() for msg in messages]
 

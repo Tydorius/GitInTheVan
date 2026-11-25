@@ -2,6 +2,25 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.50.0] - 2026-11-24
+
+Phase D1 routing, reasoning parameter, response observability, and caching polish release: fixes custom `role_tag` routing and failover isolation (N10), adds an `"object"` (JSON) LLM parameter type for `chat_template_kwargs` and nested provider options (N11), captures OpenRouter/nano-GPT `reasoning` and empty-content/Navigator-skip diagnostics in Debug (N12), adds a per-cantrip `card_edits_standing` toggle for Cache-Friendly Mode (N13), and fixes uncompilable stored regex verification reporting.
+
+### Fixed
+
+- **Custom `role_tag` endpoints now match Passenger and Map-stage tags and isolate failover chains (N10).** `resolve_endpoints_by_tag` and `_build_failover_chain` in `app/services/routing.py` previously compared `Endpoint.role_tag` only, ignoring `Endpoint.custom_tag` when `role_tag == "custom"`. Both now match on `custom_tag` (strictly user-scoped per Rule 23), keeping different custom tags on separate failover chains, and `passenger.py` / `map_pipeline.py` now emit a `passenger_tag_fallback` / `map_stage_tag_fallback` Debug capture when a requested tag matches no enabled endpoint and falls back to the default chain.
+- **OpenRouter / nano-GPT `reasoning` field extraction and empty-content Debug diagnostics (N12).** `upstream.py` and `response_pipeline.py` now read `reasoning` alongside `reasoning_content` and `thinking` (both streaming and non-streaming). When a status 200 response yields empty `content`, `_save_debug_exchange` now records `empty_content_diagnostics` (`finish_reason`, `choice_keys`, `message_keys`, and a truncated `raw_snippet`) on `llm_response`, and `finalize_response` emits a `navigator_cantrips_skipped` Debug capture explaining why response-side cantrips did not run.
+- **Uncompilable stored `regex_pattern` rules with no judge endpoint now report `errored=True`.** In `app/services/verification.py`, `check_response` now tracks rules whose `regex_pattern` raised `re.error` during pre-check so the no-candidates fallback records an error note instead of reporting a clean pass.
+
+### Added
+
+- **`"object"` (JSON) LLM parameter type (N11).** `PARAM_TYPES` in `app/services/llm_params.py` and `ParameterEditor.svelte` now support `"object"`, validated as a JSON object at save time (422 on invalid JSON or non-object values) and applied as a nested dict in `apply_to_body` / LiteLLM `extra_body` — enabling vLLM/Featherless `chat_template_kwargs` (e.g. `{"thinking": true}` for DeepSeek V4, `{"enable_thinking": false}` for GLM 5.x) and nested Anthropic `thinking` configs.
+- **Per-cantrip `card_edits_standing` toggle for Cache-Friendly Mode (N13).** Cantrips now expose `card_edits_standing` (default `false`) in the Cantrips UI, API, export/import, and Assistant tools. When `cache_friendly_mode` is enabled, a standing cantrip's appends to `personality`, `scenario`, or `example_dialogs` stay in `messages[0]` (the cached system prompt) while dynamic cantrips' appends still redirect to `user_tail` — accurately in both default and manual pipeline ordering regardless of cantrip order.
+
+### Schema
+
+- `074_cantrip_card_edits_standing`: adds `card_edits_standing BOOLEAN NOT NULL DEFAULT FALSE` to `cantrips`.
+
 ## [0.49.1] - 2026-11-24
 
 Completes the user-isolation policy (no user data crosses user boundaries; content packs are the only cross-user channel) across every endpoint-id field, closing one live leak found by the sweep.

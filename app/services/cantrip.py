@@ -16,7 +16,12 @@ from app.models.cantrip_data import CantripData
 from app.models.chat_data import ChatData
 from app.models.lorebook import Lorebook
 from app.models.user_data import UserData
-from app.services.cantrip_context import apply_cantrip_result_to_messages, build_context, extract_context_params
+from app.services.cantrip_context import (
+    CardEditTracker,
+    apply_cantrip_result_to_messages,
+    build_context,
+    extract_context_params,
+)
 from app.services.deno_runner import CantripResult, run_cantrip
 from app.services.dynamic_lorebook import DELTA_KEY, apply_ops, build_seed, parse_reads
 
@@ -653,6 +658,7 @@ async def process_cantrips(
             "scenario": context["character"]["scenario"],
             "example_dialogs": context["character"]["example_dialogs"],
         }
+        card_tracker = CardEditTracker(seeded_character)
 
         from app.services.passenger import get_passenger_handler
 
@@ -679,6 +685,11 @@ async def process_cantrips(
         }
 
         for cantrip in cantrips:
+            pre_character = {
+                "personality": context["character"]["personality"],
+                "scenario": context["character"]["scenario"],
+                "example_dialogs": context["character"]["example_dialogs"],
+            }
             result, request_rows = await _execute_cantrip_step(
                 cantrip,
                 db=db,
@@ -698,6 +709,12 @@ async def process_cantrips(
             )
             if result is None:
                 continue
+
+            card_tracker.record_step(
+                pre_character,
+                context["character"],
+                is_standing=bool(getattr(cantrip, "card_edits_standing", False)),
+            )
 
             # Package 3 (items 8 + 4): prompt-side requests. Like the op
             # delta, they only land before the forward; on response-side
@@ -771,21 +788,30 @@ async def process_cantrips(
     final_scenario = context["character"]["scenario"]
     final_example_dialogs = context["character"]["example_dialogs"]
 
-    character_changed = (
-        final_personality != seeded_character["personality"]
-        or final_scenario != seeded_character["scenario"]
-        or final_example_dialogs != seeded_character["example_dialogs"]
-    )
+    character_changed = card_tracker.any_changed(context["character"])
 
     if character_changed:
-        body_json["messages"] = apply_cantrip_result_to_messages(
-            messages,
-            final_personality,
-            final_scenario,
-            final_example_dialogs,
-            cache_friendly=bool(body_json.get("_gitv_cache_friendly")),
-            seeded_character=seeded_character,
-        )
+        cache_friendly = bool(body_json.get("_gitv_cache_friendly"))
+        if cache_friendly:
+            standing_finals, tail_deltas = card_tracker.resolve_for_cache_friendly()
+            body_json["messages"] = apply_cantrip_result_to_messages(
+                messages,
+                standing_finals["personality"],
+                standing_finals["scenario"],
+                standing_finals["example_dialogs"],
+                cache_friendly=True,
+                seeded_character=standing_finals,
+                extra_tail_deltas=tail_deltas,
+            )
+        else:
+            body_json["messages"] = apply_cantrip_result_to_messages(
+                messages,
+                final_personality,
+                final_scenario,
+                final_example_dialogs,
+                cache_friendly=False,
+                seeded_character=seeded_character,
+            )
         logger.info(
             "Cantrips processed: %d scripts, personality=%d chars, scenario=%d chars, dialogs=%d chars",
             len(cantrips),

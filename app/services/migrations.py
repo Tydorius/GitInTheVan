@@ -1633,6 +1633,13 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
         ALTER TABLE user_settings ADD COLUMN timezone VARCHAR(64) NOT NULL DEFAULT '';
         """,
     ),
+    (
+        "074_cantrip_card_edits_standing",
+        # 0.50.0 (N13): per-cantrip toggle keeping card-field appends in the cached system prompt.
+        """
+        ALTER TABLE cantrips ADD COLUMN card_edits_standing BOOLEAN NOT NULL DEFAULT FALSE;
+        """,
+    ),
 ]
 
 

@@ -417,7 +417,7 @@ export interface DebugComparison {
 // because the closest scope wins at request time.
 export interface LlmParameter {
   name: string
-  type: 'string' | 'string[]' | 'number' | 'float' | 'integer' | 'boolean'
+  type: 'string' | 'string[]' | 'number' | 'float' | 'integer' | 'boolean' | 'object'
   value: any
   description: string
   required: boolean
@@ -579,6 +579,7 @@ export interface Cantrip {
   timeout_ms?: number
   budget_weight?: number
   reserved_tokens?: number
+  card_edits_standing?: boolean
   lorebook_reads?: string[]
   user_data_prefixes?: string[]
   response_tags?: string[]

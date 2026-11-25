@@ -49,6 +49,9 @@ class Cantrip(Base):
     # 0.45.0: JSON list of user_data key prefixes this cantrip can access.
     # Same MySQL NULL-reads-as-empty convention.
     user_data_prefixes: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    # 0.50.0 (N13): when True, card-field appends from this cantrip stay in
+    # messages[0] (the cached system prompt) even under cache_friendly_mode.
+    card_edits_standing: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

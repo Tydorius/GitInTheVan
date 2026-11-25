@@ -252,6 +252,7 @@ async def check_response(
     # Hybrid verification: run per-rule regex pre-checks before any LLM judge
     # call. If any regex matches, short-circuit immediately with zero Navigator
     # API calls so the caller can retry or log at zero judge cost.
+    regex_errored_rules: set[int] = set()
     for rule in rules:
         pattern = (getattr(rule, "regex_pattern", "") or "").strip()
         if not pattern:
@@ -268,6 +269,7 @@ async def check_response(
                 judgments.append(judgment)
                 violations.append(judgment)
         except re.error as exc:
+            regex_errored_rules.add(id(rule))
             logger.warning(
                 "Invalid regex pattern on verification rule '%s': %s",
                 rule.name, exc,
@@ -298,7 +300,22 @@ async def check_response(
         candidates = _judge_candidates(rule, endpoint, model, rule_endpoints, rule_chains)
         if not candidates:
             has_regex = bool((getattr(rule, "regex_pattern", "") or "").strip())
-            if has_regex:
+            if id(rule) in regex_errored_rules:
+                judgments.append(
+                    VerificationJudgment(
+                        violation=False,
+                        reason=f"Invalid regex pattern on rule '{rule.name}' (no judge endpoint configured)",
+                        severity="none",
+                        rule_name=rule.name,
+                        rule_id=getattr(rule, "id", ""),
+                        thinking=judge_error_note(
+                            "an invalid regex pattern and no available endpoint",
+                            rule.name,
+                        ),
+                        errored=True,
+                    )
+                )
+            elif has_regex:
                 judgments.append(
                     VerificationJudgment(
                         violation=False,

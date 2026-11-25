@@ -226,7 +226,11 @@ async def run_pre_forward_ordered(
         apply_history_ops,
         apply_prompt_strips,
     )
-    from app.services.cantrip_context import build_context, extract_context_params
+    from app.services.cantrip_context import (
+        CardEditTracker,
+        build_context,
+        extract_context_params,
+    )
     from app.services.conversation import load_memories_for_chat
     from app.services.debug import debug_capture
     from app.services.debug_metrics import record_cantrip
@@ -326,6 +330,7 @@ async def run_pre_forward_ordered(
             "scenario": context["character"]["scenario"],
             "example_dialogs": context["character"]["example_dialogs"],
         }
+        card_tracker = CardEditTracker(seeded_character)
         state: dict[str, Any] = {
             "chat_data": chat_data,
             "user_data": user_data,
@@ -356,6 +361,11 @@ async def run_pre_forward_ordered(
                 context["chat"] = fresh["chat"]
                 messages_dirty = False
 
+            pre_character = {
+                "personality": context["character"]["personality"],
+                "scenario": context["character"]["scenario"],
+                "example_dialogs": context["character"]["example_dialogs"],
+            }
             result, request_rows = await _execute_cantrip_step(
                 obj,
                 db=db,
@@ -375,6 +385,12 @@ async def run_pre_forward_ordered(
             )
             if result is None:
                 continue
+
+            card_tracker.record_step(
+                pre_character,
+                context["character"],
+                is_standing=bool(getattr(obj, "card_edits_standing", False)),
+            )
 
             # Slot-local outputs: everything this cantrip asked for lands
             # NOW, before the next step runs -- strips rewrites the message
@@ -432,16 +448,25 @@ async def run_pre_forward_ordered(
     final_personality = context["character"]["personality"]
     final_scenario = context["character"]["scenario"]
     final_example_dialogs = context["character"]["example_dialogs"]
-    if (
-        final_personality != seeded_character["personality"]
-        or final_scenario != seeded_character["scenario"]
-        or final_example_dialogs != seeded_character["example_dialogs"]
-    ):
-        body_json["messages"] = apply_cantrip_result_to_messages(
-            body_json.get("messages", []),
-            final_personality,
-            final_scenario,
-            final_example_dialogs,
-            cache_friendly=bool(body_json.get("_gitv_cache_friendly")),
-            seeded_character=seeded_character,
-        )
+    if card_tracker.any_changed(context["character"]):
+        cache_friendly = bool(body_json.get("_gitv_cache_friendly"))
+        if cache_friendly:
+            standing_finals, tail_deltas = card_tracker.resolve_for_cache_friendly()
+            body_json["messages"] = apply_cantrip_result_to_messages(
+                body_json.get("messages", []),
+                standing_finals["personality"],
+                standing_finals["scenario"],
+                standing_finals["example_dialogs"],
+                cache_friendly=True,
+                seeded_character=standing_finals,
+                extra_tail_deltas=tail_deltas,
+            )
+        else:
+            body_json["messages"] = apply_cantrip_result_to_messages(
+                body_json.get("messages", []),
+                final_personality,
+                final_scenario,
+                final_example_dialogs,
+                cache_friendly=False,
+                seeded_character=seeded_character,
+            )

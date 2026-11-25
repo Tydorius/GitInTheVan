@@ -21,6 +21,7 @@
     { value: 'float', label: 'Float' },
     { value: 'number', label: 'Number (same as float)' },
     { value: 'boolean', label: 'Boolean' },
+    { value: 'object', label: 'Object (JSON)' },
   ]
 
   const RESERVED = ['messages', 'model', 'stream']
@@ -56,14 +57,39 @@
     params = [...params]
   }
 
+  function objectText(p: any): string {
+    return typeof p.value === 'string'
+      ? p.value
+      : (p.value && typeof p.value === 'object' ? JSON.stringify(p.value, null, 2) : '')
+  }
+
+  function setObjectValue(idx: number, text: string) {
+    params[idx].value = text
+    params = [...params]
+  }
+
   function onTypeChange(idx: number) {
-    // Switching to or from a list changes what shape `value` holds; converting
-    // rather than clearing keeps whatever the user already typed.
+    // Switching between list, object, and scalar types changes what shape
+    // `value` holds; converting rather than clearing keeps whatever the user
+    // already typed without crashing or leaving an uneditable object behind.
     const p = params[idx]
-    if (p.type === 'string[]' && !Array.isArray(p.value)) {
-      p.value = String(p.value ?? '').split(',').map((v: string) => v.trim()).filter(Boolean)
-    } else if (p.type !== 'string[]' && Array.isArray(p.value)) {
-      p.value = p.value.join(', ')
+    if (p.type === 'object') {
+      if (typeof p.value === 'string') {
+        // keep as-is
+      } else if (p.value && typeof p.value === 'object' && !Array.isArray(p.value)) {
+        p.value = JSON.stringify(p.value, null, 2)
+      } else {
+        p.value = ''
+      }
+    } else {
+      if (p.value && typeof p.value === 'object' && !Array.isArray(p.value)) {
+        p.value = JSON.stringify(p.value)
+      }
+      if (p.type === 'string[]' && !Array.isArray(p.value)) {
+        p.value = String(p.value ?? '').split(',').map((v: string) => v.trim()).filter(Boolean)
+      } else if (p.type !== 'string[]' && Array.isArray(p.value)) {
+        p.value = p.value.join(', ')
+      }
     }
     params = [...params]
   }
@@ -86,6 +112,20 @@
       return 'Duplicate name'
     }
     if (p.required && isBlank(p.value)) return 'Marked required, so it needs a value'
+    if (p.type === 'object' && !isBlank(p.value)) {
+      if (typeof p.value === 'string') {
+        try {
+          const parsed = JSON.parse(p.value)
+          if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+            return 'Must be a valid JSON object, e.g. {"thinking": true}'
+          }
+        } catch {
+          return 'Must be a valid JSON object, e.g. {"thinking": true}'
+        }
+      } else if (typeof p.value !== 'object' || Array.isArray(p.value)) {
+        return 'Must be a valid JSON object, e.g. {"thinking": true}'
+      }
+    }
     const opts: string[] = Array.isArray(p.options) ? p.options : []
     if (opts.length && !isBlank(p.value) && !opts.includes(String(p.value))) {
       return `Value must be one of: ${opts.join(', ')}`
@@ -147,6 +187,15 @@
               oninput={(e) => setListValue(idx, e.currentTarget.value)}
               placeholder="END, ###"
             />
+          {:else if p.type === 'object'}
+            <textarea
+              id="p-value-{idx}"
+              rows={2}
+              style="font-family: monospace; min-height: 54px;"
+              value={objectText(p)}
+              oninput={(e) => setObjectValue(idx, e.currentTarget.value)}
+              placeholder={'{"thinking": true}'}
+            ></textarea>
           {:else}
             <input id="p-value-{idx}" bind:value={p.value} placeholder="medium" />
           {/if}

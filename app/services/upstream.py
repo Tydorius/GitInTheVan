@@ -293,7 +293,12 @@ def _convert_to_sse(
     choices = data.get("choices") or [{}]
     message = (choices[0] if isinstance(choices[0], dict) else {}).get("message", {}) or {}
     content = message.get("content", "")
-    reasoning = message.get("reasoning_content", "") or message.get("thinking", "")
+    reasoning = (
+        message.get("reasoning_content")
+        or message.get("thinking")
+        or message.get("reasoning")
+        or ""
+    )
     chunk_id = data.get("id", "chatcmpl-converted")
     created = data.get("created", 0)
 
@@ -731,8 +736,13 @@ async def _do_forward_litellm(
                     delta = chunk_dict["choices"][0].get("delta", {})
                     if delta.get("content"):
                         content_parts.append(delta["content"])
-                    if delta.get("reasoning_content"):
-                        reasoning_parts.append(delta["reasoning_content"])
+                    reasoning_delta = (
+                        delta.get("reasoning_content")
+                        or delta.get("thinking")
+                        or delta.get("reasoning")
+                    )
+                    if reasoning_delta:
+                        reasoning_parts.append(reasoning_delta)
                 if chunk_dict.get("usage"):
                     final_metadata["usage"] = chunk_dict["usage"]
                 if chunk_dict.get("model"):
@@ -847,6 +857,8 @@ class _StreamAccumulator:
                 self.reasoning.append(delta["reasoning_content"])
             elif delta.get("thinking"):
                 self.reasoning.append(delta["thinking"])
+            elif delta.get("reasoning"):
+                self.reasoning.append(delta["reasoning"])
 
     def as_response(self, fallback_model: str) -> dict[str, Any]:
         message: dict[str, Any] = {

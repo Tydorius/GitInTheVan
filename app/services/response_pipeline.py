@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Any
@@ -192,10 +193,15 @@ async def _save_debug_exchange(
     response_content = extract_response_text(response_data)
     response_thinking = ""
     choices = response_data.get("choices", []) if isinstance(response_data, dict) else []
-    if choices and isinstance(choices[0], dict):
-        message = choices[0].get("message") or {}
-        if isinstance(message, dict):
-            response_thinking = message.get("reasoning_content", "") or message.get("thinking", "")
+    first_choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else None
+    message = first_choice.get("message") if first_choice is not None else None
+    if isinstance(message, dict):
+        response_thinking = (
+            message.get("reasoning_content")
+            or message.get("thinking")
+            or message.get("reasoning")
+            or ""
+        )
 
     verification_data: dict[str, Any] = {}
     if vresult:
@@ -227,10 +233,35 @@ async def _save_debug_exchange(
     # Content and reasoning are stored whole. A comparison built on text clipped
     # at 500 characters cannot show where two runs diverged, which was the point.
     # The size bound is applied to the serialized trace in capture_exchange.
-    debug_capture_response(body_json, "llm_response", "LLM Response",
+    llm_metadata: dict[str, Any] = {}
+    if response_thinking:
+        llm_metadata["thinking"] = response_thinking
+
+    llm_detail = "Final response from upstream LLM"
+    if not response_content:
+        finish_reason = first_choice.get("finish_reason") if first_choice is not None else None
+        choice_keys = sorted(str(k) for k in first_choice.keys()) if first_choice is not None else []
+        message_keys = sorted(str(k) for k in message.keys()) if isinstance(message, dict) else []
+        try:
+            raw_snippet = json.dumps(response_data, default=str)[:800]
+        except Exception:
+            raw_snippet = str(response_data)[:800]
+        llm_metadata["empty_content_diagnostics"] = {
+            "finish_reason": finish_reason,
+            "choice_keys": choice_keys,
+            "message_keys": message_keys,
+            "raw_snippet": raw_snippet,
+        }
+        llm_detail = f"Empty content (finish_reason={finish_reason or 'none'}, message_keys={message_keys})"
+
+    debug_capture_response(
+        body_json,
+        "llm_response",
+        "LLM Response",
         content_after=response_content,
-        detail="Final response from upstream LLM",
-        metadata={"thinking": response_thinking} if response_thinking else None)
+        detail=llm_detail,
+        metadata=llm_metadata or None,
+    )
 
     pipeline_data = body_json.get("_gitv_debug", {})
 
@@ -402,6 +433,7 @@ async def finalize_response(
     req_headers = request_headers or {}
 
     if status_code == 200 and user_id:
+        pre_nav_skipped = bool(run_post_driver and not extract_response_text(response_data))
         if run_post_driver:
             post_driver_fn = _resolve_proxy_override(
                 "_apply_post_driver_processing", _apply_post_driver_processing
@@ -435,6 +467,7 @@ async def finalize_response(
                 response_data, user_id, body_json
             )
 
+        post_nav_skipped = bool(run_post_navigator and not extract_response_text(response_data))
         if run_post_navigator:
             try:
                 post_nav_fn = _resolve_proxy_override(
@@ -445,6 +478,21 @@ async def finalize_response(
                 )
             except Exception:
                 logger.exception("Post-navigator processing failed")
+
+        if (pre_nav_skipped or post_nav_skipped) and body_json.get("_gitv_debug") is not None:
+            from app.services.debug import debug_capture_response
+
+            debug_capture_response(
+                body_json,
+                "navigator_cantrips_skipped",
+                "Navigator Cantrips Skipped",
+                detail="Skipped response-side cantrips because upstream response content was empty",
+                metadata={
+                    "reason": "empty_response_content",
+                    "run_pre_navigator": run_post_driver,
+                    "run_post_navigator": run_post_navigator,
+                },
+            )
 
     if status_code == 200 and user_id and run_memories and body_json.get("_gitv_chat_id"):
         mem_fn = _resolve_proxy_override("_handle_response_memories", _handle_response_memories)

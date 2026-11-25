@@ -94,6 +94,8 @@ class CantripCreate(BaseModel):
     response_tags: list[str] = []
     # 0.45.0: user_data key prefixes this cantrip is allowed to access.
     user_data_prefixes: list[str] = []
+    # 0.50.0 (N13): keep card-field appends in messages[0] under cache_friendly_mode.
+    card_edits_standing: bool = False
     # Set by a client that has already shown the scanner findings to the user
     # and been told to proceed anyway. Not a model column.
     override_scan: bool = False
@@ -119,6 +121,7 @@ class CantripUpdate(BaseModel):
     lorebook_reads: list[str] | None = None
     response_tags: list[str] | None = None
     user_data_prefixes: list[str] | None = None
+    card_edits_standing: bool | None = None
     override_scan: bool = False
 
 
@@ -143,6 +146,7 @@ class CantripResponse(BaseModel):
     lorebook_reads: list[str]
     response_tags: list[str] = []
     user_data_prefixes: list[str] = []
+    card_edits_standing: bool = False
 
 
 class CantripListItem(BaseModel):
@@ -166,6 +170,7 @@ class CantripListItem(BaseModel):
     lorebook_reads: list[str]
     response_tags: list[str] = []
     user_data_prefixes: list[str] = []
+    card_edits_standing: bool = False
 
 
 class CantripListResponse(BaseModel):
@@ -360,6 +365,7 @@ def _cantrip_to_response(cantrip: Cantrip) -> CantripResponse:
         lorebook_reads=parse_reads(getattr(cantrip, "lorebook_reads", None)),
         response_tags=parse_tag_names(getattr(cantrip, "response_tags", None)),
         user_data_prefixes=_parse_prefixes(getattr(cantrip, "user_data_prefixes", None)),
+        card_edits_standing=bool(getattr(cantrip, "card_edits_standing", False)),
     )
 
 
@@ -385,6 +391,7 @@ def _cantrip_to_list_item(cantrip: Cantrip) -> CantripListItem:
         lorebook_reads=parse_reads(getattr(cantrip, "lorebook_reads", None)),
         response_tags=parse_tag_names(getattr(cantrip, "response_tags", None)),
         user_data_prefixes=_parse_prefixes(getattr(cantrip, "user_data_prefixes", None)),
+        card_edits_standing=bool(getattr(cantrip, "card_edits_standing", False)),
     )
 
 
@@ -456,6 +463,7 @@ async def install_template(
         run_driver_callable=template.get("run_driver_callable", False),
         run_pre_navigator=template.get("run_pre_navigator", False),
         run_post_navigator=template.get("run_post_navigator", False),
+        card_edits_standing=template.get("card_edits_standing", False),
     )
     db.add(cantrip)
     await db.commit()
@@ -507,6 +515,7 @@ async def create_cantrip(
         lorebook_reads=json.dumps(_normalize_reads(req.lorebook_reads)),
         response_tags=await _validate_response_tags(db, current_user.id, req.response_tags),
         user_data_prefixes=json.dumps(_normalize_string_list(req.user_data_prefixes)),
+        card_edits_standing=req.card_edits_standing,
     )
     db.add(cantrip)
     await db.commit()
@@ -789,6 +798,7 @@ async def export_cantrip(
         "code": c.code or "",
         "reserved_tokens": getattr(c, "reserved_tokens", 0) or 0,
         "user_data_prefixes": _parse_prefixes(getattr(c, "user_data_prefixes", None)),
+        "card_edits_standing": bool(getattr(c, "card_edits_standing", False)),
         "author": "",
         "version": "1.0.0",
         "updated": c.updated_at.isoformat() if c.updated_at else "",

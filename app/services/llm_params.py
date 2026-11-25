@@ -40,6 +40,7 @@ PARAM_TYPES: tuple[str, ...] = (
     "float",
     "integer",
     "boolean",
+    "object",
 )
 
 # Names a parameter may never take. `model` has dedicated override fields at
@@ -154,6 +155,25 @@ class ParameterDef(BaseModel):
                 f"Parameter 'thinking_level' value '{self.value}' is not valid "
                 f"(expected one of: {', '.join(VALID_THINKING_LEVELS)})"
             )
+        if self.type == "object":
+            if isinstance(self.value, dict):
+                pass
+            elif isinstance(self.value, str):
+                if self.value.strip():
+                    try:
+                        parsed = json.loads(self.value)
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"Parameter '{self.name}' must be a valid JSON object"
+                        ) from exc
+                    if not isinstance(parsed, dict):
+                        raise ValueError(
+                            f"Parameter '{self.name}' must be a valid JSON object"
+                        )
+            elif self.value is not None:
+                raise ValueError(
+                    f"Parameter '{self.name}' must be a valid JSON object"
+                )
         return self
 
 
@@ -326,6 +346,16 @@ def coerce(p: ParamDef) -> tuple[bool, Any]:
             if not text:
                 return True, []
             return True, [part.strip() for part in text.split(",") if part.strip()]
+
+        if p.type == "object":
+            if isinstance(v, dict):
+                return True, json.loads(json.dumps(v))
+            if isinstance(v, str):
+                parsed = json.loads(v)
+                if isinstance(parsed, dict):
+                    return True, parsed
+                raise ValueError("expected JSON object")
+            raise ValueError("expected JSON object")
 
         if v is None:
             raise ValueError("no value")

@@ -181,7 +181,7 @@ class PassengerHandler:
         await _flag_injection_content(self.user_id, context, f"passenger:{n}:context")
 
         async with async_session() as db:
-            chain = await _resolve_chain(db, self.user_id, tag)
+            chain = await _resolve_chain(db, self.user_id, tag, body_json=self.body_json)
 
         if not chain:
             self._capture_error(
@@ -283,7 +283,12 @@ class PassengerHandler:
         return None, last_error
 
 
-async def _resolve_chain(db: AsyncSession, user_id: str, tag: str) -> list[Any]:
+async def _resolve_chain(
+    db: AsyncSession,
+    user_id: str,
+    tag: str,
+    body_json: dict[str, Any] | None = None,
+) -> list[Any]:
     """Ordered failover chain for one Passenger call.
 
     A non-empty tag resolves to the user's enabled endpoints carrying that
@@ -303,6 +308,16 @@ async def _resolve_chain(db: AsyncSession, user_id: str, tag: str) -> list[Any]:
         tagged = await resolve_endpoints_by_tag(db, user_id, tag)
         if tagged:
             return [_endpoint_to_candidate(ep) for ep in tagged]
+        if body_json is not None:
+            from app.services.debug import debug_capture
+
+            debug_capture(
+                body_json,
+                "passenger_tag_fallback",
+                "Passenger Tag Fallback",
+                detail=f"Tag '{tag}' matched no enabled endpoint; falling back to default chain",
+                metadata={"requested_tag": tag},
+            )
 
     primary = await _resolve_default_endpoint(db, user_id)
     if primary is None:

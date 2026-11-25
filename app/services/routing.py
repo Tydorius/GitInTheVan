@@ -2,7 +2,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from sqlalchemy import inspect, select
+from sqlalchemy import and_, inspect, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.api_key import ApiKey
@@ -103,13 +103,23 @@ async def _build_failover_chain(
     two endpoints both tagged 'driver') failover correctly. The DB session is
     used only here — callers close it before any upstream call."""
     tag = primary.role_tag or "default"
-    result = await db.execute(
-        select(Endpoint)
-        .where(
+    custom_tag = (getattr(primary, "custom_tag", "") or "").strip()
+    if tag == "custom" and custom_tag:
+        where_clauses = (
+            Endpoint.user_id == user_id,
+            Endpoint.enabled.is_(True),
+            Endpoint.role_tag == "custom",
+            Endpoint.custom_tag == primary.custom_tag,
+        )
+    else:
+        where_clauses = (
             Endpoint.user_id == user_id,
             Endpoint.enabled.is_(True),
             Endpoint.role_tag == tag,
         )
+    result = await db.execute(
+        select(Endpoint)
+        .where(*where_clauses)
         .order_by(Endpoint.priority, Endpoint.created_at)
     )
     tagged = list(result.scalars().all())
@@ -286,14 +296,22 @@ async def resolve_endpoints_by_tag(
 ) -> list[Endpoint]:
     """Resolve all enabled endpoints matching a role tag, ordered by priority.
 
-    Used by the map pipeline for tag-based stage endpoint resolution. The
-    session is closed by the caller before any upstream call."""
+    Matches both preset role_tag values and custom tags (role_tag == 'custom'
+    with custom_tag == tag). Used by the map pipeline and Passenger for
+    tag-based resolution. The session is closed by the caller before any
+    upstream call."""
+    clean_tag = (tag or "").strip()
+    if not clean_tag:
+        return []
     result = await db.execute(
         select(Endpoint)
         .where(
             Endpoint.user_id == user_id,
             Endpoint.enabled.is_(True),
-            Endpoint.role_tag == tag,
+            or_(
+                Endpoint.role_tag == clean_tag,
+                and_(Endpoint.role_tag == "custom", Endpoint.custom_tag == clean_tag),
+            ),
         )
         .order_by(Endpoint.priority, Endpoint.created_at)
     )

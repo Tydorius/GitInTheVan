@@ -52,6 +52,7 @@
     run_pre_driver: true, run_driver_callable: false,
     run_pre_navigator: false, run_post_navigator: false,
     execution_order: 10, timeout_ms: 5000, budget_weight: 1.0, reserved_tokens: 0,
+    card_edits_standing: false,
     lorebook_reads_text: '',
     user_data_prefixes_text: '',
     response_tags_text: '',
@@ -122,7 +123,7 @@
   }
 
   function resetForm() {
-    form = { name: '', description: '', llm_instructions: '', code: '', hook_type: 'pre', is_active: true, is_public: false, run_pre_driver: true, run_driver_callable: false, run_pre_navigator: false, run_post_navigator: false, execution_order: 10, timeout_ms: 5000, budget_weight: 1.0, reserved_tokens: 0, lorebook_reads_text: '', user_data_prefixes_text: '', response_tags_text: '' }
+    form = { name: '', description: '', llm_instructions: '', code: '', hook_type: 'pre', is_active: true, is_public: false, run_pre_driver: true, run_driver_callable: false, run_pre_navigator: false, run_post_navigator: false, execution_order: 10, timeout_ms: 5000, budget_weight: 1.0, reserved_tokens: 0, card_edits_standing: false, lorebook_reads_text: '', user_data_prefixes_text: '', response_tags_text: '' }
     editingId = null
     validationStatus = null
     errorLine = null
@@ -140,6 +141,7 @@
       execution_order: s.execution_order, timeout_ms: s.timeout_ms,
       budget_weight: s.budget_weight ?? 1.0,
       reserved_tokens: s.reserved_tokens ?? 0,
+      card_edits_standing: Boolean(s.card_edits_standing),
       lorebook_reads_text: (s.lorebook_reads || []).join(', '),
       user_data_prefixes_text: (s.user_data_prefixes || []).join(', '),
       response_tags_text: (s.response_tags || []).join(', '),
@@ -660,6 +662,15 @@
             <small>GitV extracts these tags from the model's reply, strips them before the
               client, and hands the contents to post-Navigator scripts the same turn via
               <code>context.response_tags</code>. Lowercase letters, digits, - and _; unique per user.</small>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex: 1;">
+            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+              <input type="checkbox" bind:checked={form.card_edits_standing} style="width: auto;" />
+              Card edits are standing
+            </label>
+            <small>Keep appends to personality/scenario/example dialogs in the cached system prompt even when Cache-Friendly Injection Mode is enabled (use only for byte-identical standing notes).</small>
           </div>
         </div>
         <div class="form-row">
