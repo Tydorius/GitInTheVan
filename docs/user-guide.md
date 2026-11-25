@@ -901,15 +901,15 @@ Each entry has:
 - **Keywords**: Comma-separated trigger words (e.g., `castle, throne, keep`)
 - **Secondary Keywords**: Additional keywords for selective matching
 - **Content**: The text to inject when keywords match
-- **Position**: Where in the prompt to inject. `before_last_message` (default) adds a system message before your last message; `system_start` appends to the system message; `user_tail` appends to the end of your newest message. Any other value is rejected when you save, and on import an unrecognized value becomes `before_last_message`
+- **Position**: Where in the prompt to inject. `before_last_message` (default) adds a system message before your last message; `system_start` appends to the system message; `in_chat_system` adds the entry as its own system message at the very end of the prompt; `user_tail` appends to the end of your newest message. Any other value is rejected when you save, and on import an unrecognized value becomes `before_last_message`
 - **Insertion Order**: Sort order when multiple entries match (lower = first)
 - **Always Include (Constant)**: Entry always fires regardless of keywords
 - **Selective**: Requires both a primary AND secondary keyword to match
 - **Disabled**: Temporarily disable this entry without deleting it
 
-![Lorebook entry editor](media/gitv-lorebooks-entry-user-tail.png)
+![Lorebook entry editor](media/gitv-lorebooks-entry-in-chat-system.png)
 
-*The entry editor with the `user_tail` position selected, captured 2026-11-22.*
+*The entry editor's Position dropdown with all four positions, `in_chat_system` selected, captured 2026-11-24.*
 
 **`user_tail` is the cache-friendly position.** Everything before your last
 message stays byte-identical from turn to turn, which is what lets Gemini,
@@ -2017,7 +2017,7 @@ Automatically compresses long conversations to reduce token usage while preservi
 - **Model Override**: Override the model name for summarization calls
 - **Token Threshold**: When estimated tokens exceed this, summarization triggers (default 8000)
 - **Keep Recent Messages**: Number of recent messages always sent verbatim (minimum 3)
-- **Block Size**: `0` (default) compacts as soon as the threshold is crossed. A number greater than `1` compacts only on multiples of that many messages, so the point where old dialogue folds into the summary moves less often and the start of your prompt stays identical between compactions — which keeps provider prompt caches warm. There is no upper limit, and a block larger than the messages available to compress never lines up, so summarization would stop triggering: keep it well below your typical conversation length
+- **Block Size**: `0` (default) compacts as soon as the threshold is crossed. A number greater than `1` compacts only on multiples of that many messages, so the point where old dialogue folds into the summary moves less often and the start of your prompt stays identical between compactions — which keeps provider prompt caches warm. There is no upper limit, and a block larger than the messages available to compress never lines up, so summarization would stop triggering: keep it well below your typical conversation length (the card shows a reminder note above 20)
 - **Summarization Prompt**: System prompt for the summarization LLM
 
 When summarization triggers, older dialogue is removed from the request and replaced with a single `[CONVERSATION SUMMARY]` system block. The most recent messages are always forwarded verbatim. Summaries are cached per conversation — rerolls and forks reuse the cached summary without re-calling the LLM.

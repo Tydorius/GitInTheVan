@@ -789,13 +789,13 @@ and cantrip API second, so they are documented with the rest of it in the
 - <strong>Keywords</strong>: Comma-separated trigger words (e.g., <code>castle, throne, keep</code>)
 - <strong>Secondary Keywords</strong>: Additional keywords for selective matching
 - <strong>Content</strong>: The text to inject when keywords match
-- <strong>Position</strong>: Where in the prompt to inject. <code>before_last_message</code> (default) adds a system message before your last message; <code>system_start</code> appends to the system message; <code>user_tail</code> appends to the end of your newest message. Any other value is rejected when you save, and on import an unrecognized value becomes <code>before_last_message</code>
+- <strong>Position</strong>: Where in the prompt to inject. <code>before_last_message</code> (default) adds a system message before your last message; <code>system_start</code> appends to the system message; <code>in_chat_system</code> adds the entry as its own system message at the very end of the prompt; <code>user_tail</code> appends to the end of your newest message. Any other value is rejected when you save, and on import an unrecognized value becomes <code>before_last_message</code>
 - <strong>Insertion Order</strong>: Sort order when multiple entries match (lower = first)
 - <strong>Always Include (Constant)</strong>: Entry always fires regardless of keywords
 - <strong>Selective</strong>: Requires both a primary AND secondary keyword to match
 - <strong>Disabled</strong>: Temporarily disable this entry without deleting it</p>
-<p><img alt="Lorebook entry editor" src="media/gitv-lorebooks-entry-user-tail.png"></p>
-<p><em>The entry editor with the <code>user_tail</code> position selected, captured 2026-11-22.</em></p>
+<p><img alt="Lorebook entry editor" src="media/gitv-lorebooks-entry-in-chat-system.png"></p>
+<p><em>The entry editor's Position dropdown with all four positions, <code>in_chat_system</code> selected, captured 2026-11-24.</em></p>
 <p><strong><code>user_tail</code> is the cache-friendly position.</strong> Everything before your last
 message stays byte-identical from turn to turn, which is what lets Gemini,
 Claude and OpenAI prompt caches keep serving the earlier part of the prompt at
@@ -1725,7 +1725,7 @@ editable at runtime from the Storage page.</p>
 <li><strong>Model Override</strong>: Override the model name for summarization calls</li>
 <li><strong>Token Threshold</strong>: When estimated tokens exceed this, summarization triggers (default 8000)</li>
 <li><strong>Keep Recent Messages</strong>: Number of recent messages always sent verbatim (minimum 3)</li>
-<li><strong>Block Size</strong>: <code>0</code> (default) compacts as soon as the threshold is crossed. A number greater than <code>1</code> compacts only on multiples of that many messages, so the point where old dialogue folds into the summary moves less often and the start of your prompt stays identical between compactions — which keeps provider prompt caches warm. There is no upper limit, and a block larger than the messages available to compress never lines up, so summarization would stop triggering: keep it well below your typical conversation length</li>
+<li><strong>Block Size</strong>: <code>0</code> (default) compacts as soon as the threshold is crossed. A number greater than <code>1</code> compacts only on multiples of that many messages, so the point where old dialogue folds into the summary moves less often and the start of your prompt stays identical between compactions — which keeps provider prompt caches warm. There is no upper limit, and a block larger than the messages available to compress never lines up, so summarization would stop triggering: keep it well below your typical conversation length (the card shows a reminder note above 20)</li>
 <li><strong>Summarization Prompt</strong>: System prompt for the summarization LLM</li>
 </ul>
 <p>When summarization triggers, older dialogue is removed from the request and replaced with a single <code>[CONVERSATION SUMMARY]</code> system block. The most recent messages are always forwarded verbatim. Summaries are cached per conversation — rerolls and forks reuse the cached summary without re-calling the LLM.</p>
