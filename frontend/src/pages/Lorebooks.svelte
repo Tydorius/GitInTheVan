@@ -56,6 +56,7 @@
   const POSITION_OPTIONS = [
     { value: 'before_last_message', label: 'Before Last Message' },
     { value: 'system_start', label: 'System Start' },
+    { value: 'in_chat_system', label: 'In-chat system message (after last message)' },
     { value: 'user_tail', label: 'Append to newest user message (cache-friendly)' },
   ]
 

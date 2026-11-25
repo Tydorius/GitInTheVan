@@ -503,6 +503,11 @@
     <p style="color: var(--text-dim); font-size: 11px; margin-top: 4px;">
       0 = compact every turn; N &gt; 1 compacts in fixed blocks of N messages to keep prompt caches warm.
     </p>
+    {#if (summarization.summarization_block_size ?? 0) > 20}
+      <p style="color: var(--warn); font-size: 11px; margin-top: 4px;">
+        Large block sizes only compact once at least {summarization.summarization_block_size} older messages accumulate past the Keep Recent window.
+      </p>
+    {/if}
   </div>
   <div class="form-group">
     <label for="sum-prompt">Summarization Prompt</label>

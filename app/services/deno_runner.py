@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import atexit
-import base64
 import json
 import logging
 import os
@@ -18,7 +17,6 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_TEMPLATE_PATH = Path(__file__).parent / "deno_template.mjs"
 _WORKER_PATH = Path(__file__).parent / "deno_worker.mjs"
 
 
@@ -142,32 +140,6 @@ def _parse_history_ops(raw: Any) -> list[dict[str, Any]]:
                 if indices:
                     ops.append({"op": "drop", "indices": indices})
     return ops
-
-
-def _build_runner_script(
-    context: dict,
-    chat_data: dict,
-    user_data: dict,
-    cantrip_data: dict,
-    user_code: str,
-    passenger_cfg: dict | None = None,
-) -> str:
-    template = _TEMPLATE_PATH.read_text(encoding="utf-8")
-    context_b64 = base64.b64encode(json.dumps(context).encode("utf-8")).decode("ascii")
-    chatdata_b64 = base64.b64encode(json.dumps(chat_data).encode("utf-8")).decode("ascii")
-    userdata_b64 = base64.b64encode(json.dumps(user_data).encode("utf-8")).decode("ascii")
-    cantripdata_b64 = base64.b64encode(json.dumps(cantrip_data).encode("utf-8")).decode("ascii")
-    usercode_b64 = base64.b64encode(user_code.encode("utf-8")).decode("ascii")
-
-    return (
-        template
-        .replace("__GITV_CONTEXT__", context_b64)
-        .replace("__GITV_CHATDATA__", chatdata_b64)
-        .replace("__GITV_USERDATA__", userdata_b64)
-        .replace("__GITV_CANTRIPDATA__", cantripdata_b64)
-        .replace("__GITV_USERCODE__", usercode_b64)
-        .replace("__GITV_PASSENGER__", json.dumps(passenger_cfg) if passenger_cfg else "null")
-    )
 
 
 # Cantrips get no permissions. Deno denies everything by default when no --allow-*
@@ -662,112 +634,9 @@ async def run_cantrip(
     )
 
 
-def _run_deno_sync(script_path: str, timeout_ms: int) -> tuple[bytes, int, bytes]:
-    try:
-        result = subprocess.run(
-            [DENO_PATH, "run", "--quiet", *_DENO_DENY_FLAGS, script_path],
-            capture_output=True,
-            timeout=timeout_ms / 1000,
-        )
-        return result.stdout, result.returncode, result.stderr
-    except subprocess.TimeoutExpired:
-        return b"", 124, b"timeout"
-    except Exception as e:
-        return b"", 1, str(e).encode()
-
-
-async def _execute_deno(script_path: str, timeout_ms: int) -> tuple[bytes, int]:
-    loop = asyncio.get_event_loop()
-    stdout, return_code, stderr = await loop.run_in_executor(
-        None, _run_deno_sync, script_path, timeout_ms
-    )
-
-    if return_code == 124:
-        raise TimeoutError(f"Deno timed out after {timeout_ms}ms")
-
-    if return_code != 0 and stderr:
-        stderr_text = stderr.decode("utf-8", errors="replace").strip()
-        if stderr_text:
-            logger.warning("Deno stderr: %s", stderr_text[:500])
-
-    return stdout, return_code
-
-
 # Sentinel prefixing protocol traffic on the child's stderr. Deno diagnostics
-# never carry it, so the two cannot be confused. Must match deno_template.mjs.
+# never carry it, so the two cannot be confused. Must match deno_worker.mjs.
 _MSG_PREFIX = "__GITV_MSG__ "
-
-
-async def _execute_deno_interactive(
-    script_path: str, watchdog_ms: int, passenger_handler: Any
-) -> tuple[bytes, int]:
-    """Run a cantrip with the Passenger protocol attached.
-
-    Same command line and deny flags as the plain path; stdin/stdout/stderr
-    are pipes driven by an asyncio read/write loop instead of
-    ``subprocess.run``. Requires subprocess support on the event loop, which
-    on Windows means the Proactor policy -- uvicorn's default. The watchdog
-    covers the script budget plus every Passenger call's upstream timeout;
-    on expiry the process is killed and the caller sees ``TimeoutError``.
-    """
-    try:
-        return await asyncio.wait_for(
-            _run_deno_interactive(script_path, passenger_handler),
-            timeout=watchdog_ms / 1000,
-        )
-    except TimeoutError:
-        raise TimeoutError(f"Deno timed out after {watchdog_ms}ms") from None
-
-
-async def _run_deno_interactive(script_path: str, passenger_handler: Any) -> tuple[bytes, int]:
-    proc = await asyncio.create_subprocess_exec(
-        DENO_PATH, "run", "--quiet", *_DENO_DENY_FLAGS, script_path,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout_task = asyncio.create_task(proc.stdout.read())
-    answers: set[asyncio.Task] = set()
-    try:
-        while True:
-            raw = await proc.stderr.readline()
-            if not raw:
-                break  # stderr closed: the process is exiting
-            line = raw.decode("utf-8", errors="replace").rstrip("\n")
-            if not line.startswith(_MSG_PREFIX):
-                if line.strip():
-                    logger.debug("Deno stderr: %s", line[:300])
-                continue
-            try:
-                msg = json.loads(line[len(_MSG_PREFIX):])
-            except json.JSONDecodeError:
-                logger.debug("Passenger: unparseable protocol line: %s", line[:200])
-                continue
-            if not isinstance(msg, dict) or msg.get("type") != "passenger_call":
-                continue
-            task = asyncio.create_task(_answer_passenger_call(proc, passenger_handler, msg))
-            answers.add(task)
-            task.add_done_callback(answers.discard)
-
-        stdout_bytes = await stdout_task
-        await proc.wait()
-        return stdout_bytes, proc.returncode or 0
-    except asyncio.CancelledError:
-        # Watchdog fired (or the server is shutting down): take the process
-        # down and let in-flight answers fail on their broken pipes.
-        stdout_task.cancel()
-        for task in answers:
-            task.cancel()
-        with suppress(ProcessLookupError):
-            proc.kill()
-        await proc.wait()
-        raise
-    finally:
-        # The template closes its own stdin when the user code completes; this
-        # covers any exit path that skipped it, so a blocked reply reader can
-        # never hold the process open past its own completion.
-        if proc.stdin is not None:
-            proc.stdin.close()
 
 
 async def _answer_passenger_call(
@@ -802,7 +671,7 @@ async def _answer_passenger_call(
 def _validate_syntax_sync(code: str) -> str:
     """Parse-check cantrip code with the runner's async wrapper in a bare Deno run.
 
-    Parses exactly what the template will compile -- ``new Function`` around
+    Parses exactly what deno_worker.mjs will compile -- ``new Function`` around
     the user code wrapped in an async IIFE, with the same trailing-brace trim
     fallback -- so a syntax error surfaces at write time, not first run. The
     async wrapper only adds capability (top-level ``await``), so code valid

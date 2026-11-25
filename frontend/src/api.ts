@@ -451,7 +451,17 @@ export interface VerificationRule {
 export type VerificationRuleCreate = Partial<VerificationRule> & { name: string; prompt: string }
 export type VerificationRuleUpdate = Partial<VerificationRule>
 
+export interface MapStageResource {
+  id?: string
+  resource_type: string
+  resource_id: string
+  position: string
+  sticky: boolean
+}
+
 export interface MapStage {
+  id?: string
+  stage_order?: number
   name?: string
   description?: string
   system_instructions?: string
@@ -470,8 +480,7 @@ export interface MapStage {
   condition_json?: string
   parameters?: LlmParameter[]
   verification_parameters?: LlmParameter[]
-  resources?: any[]
-  [key: string]: any
+  resources?: MapStageResource[]
 }
 
 export interface MapResponse {
@@ -659,13 +668,30 @@ export interface Skill {
 export type SkillCreate = Partial<Skill> & { name: string; type: string }
 export type SkillUpdate = Partial<Skill>
 
+export interface PipelineOrderItem {
+  type: 'cantrip' | 'lorebook';
+  id: string;
+}
+
+export interface PipelineOrderPlan {
+  enabled?: boolean;
+  items?: PipelineOrderItem[];
+}
+
 export interface UserSettings {
   default_endpoint_id: string | null;
   default_model: string;
   preserve_thinking: boolean;
   gitv_status: boolean;
   simulated_streaming_speed: number;
+  driver_callable_turns: number;
+  bypass_method: string;
+  prefill_enabled: boolean;
   streaming_post_processing_enabled: boolean;
+  context_budget_percent: number;
+  context_window_override: number;
+  debug_mode: boolean;
+  default_map_id: string | null;
   lexicon_enabled: boolean;
   lexicon_endpoint_id: string | null;
   cantrip_auto_install_enabled: boolean;
@@ -673,6 +699,7 @@ export interface UserSettings {
   passenger_call_budget: number;
   passenger_effective_cap: number;
   response_strip_patterns: string[];
+  pipeline_order: PipelineOrderPlan;
   parameters: LlmParameter[];
   verification_parameters: LlmParameter[];
   summarization_parameters: LlmParameter[];
@@ -684,7 +711,6 @@ export interface UserSettings {
   timezone?: string;
   global_timezone?: string;
   effective_timezone?: string;
-  [key: string]: any;
 }
 
 export interface DenoPoolStatus {
@@ -793,8 +819,8 @@ export const api = {
 
   // Settings
   getSettings: () => request<UserSettings>('/api/settings'),
-  updateSettings: (data: any) =>
-    request<any>('/api/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  updateSettings: (data: Partial<UserSettings>) =>
+    request<UserSettings>('/api/settings', { method: 'PUT', body: JSON.stringify(data) }),
 
   // Cantrips
   listCantrips: () => cantripsCrud.list() as Promise<{ cantrips: Cantrip[] }>,

@@ -2,6 +2,22 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.51.0] - 2026-11-24
+
+Phase D2 sandbox, pack security, and frontend hygiene release: retires the dead pre-0.47.0 Deno template path, unifies map pack critical scan-gating with direct map imports, tightens frontend TypeScript interfaces, adds `in_chat_system` to the Lorebook Position dropdown, and adds cross-feature regression tests.
+
+### Changed
+
+- **Retired dead pre-0.47.0 Deno template path.** Removed `app/services/deno_template.mjs` and the unused legacy cold-runner helpers (`_TEMPLATE_PATH`, `_build_runner_script`, `_run_deno_sync`, `_execute_deno`, `_execute_deno_interactive`, `_run_deno_interactive`) from `app/services/deno_runner.py`, eliminating the duplicate Passenger stderr-pump copy now that all cantrips run through the `deno_worker.mjs` pool.
+- **Map pack installs now enforce `gate_scan_findings` (behavior change).** `POST /api/packs/install` previously bypassed `gate_scan_findings` for `resource_type == "map"`, allowing embedded cantrips or lorebooks with critical safety findings to install without `override_scan=True`. Map pack installs now reject critical findings with HTTP 422 (unless `override_scan=True`), matching `POST /api/maps/import`.
+
+### Added
+
+- **`in_chat_system` option in Lorebooks Position dropdown** (`frontend/src/pages/Lorebooks.svelte`) so all four backend-supported `INJECTION_POSITIONS` (`system_start`, `before_last_message`, `in_chat_system`, `user_tail`) are selectable in the UI.
+- **Large `summarization_block_size` UI hint** (`frontend/src/pages/Settings.svelte`): displays a non-blocking note when `summarization_block_size > 20` explaining that compaction waits until at least that many older messages accumulate past the Keep Recent window.
+- **Strict frontend TypeScript interfaces** (`frontend/src/api.ts`): removed `[key: string]: any` from `MapStage` and `UserSettings` and added explicit `MapStageResource` and `PipelineOrderPlan` types.
+- **Cross-feature regression tests** (`tests/test_phase51_d2_cleanup.py`) covering map-pack critical scan-gating parity, lorebook + cantrip `user_tail` coexistence in both orders, `context.history.drop` relative to `history_window` inside a Map stage, and dead-template removal.
+
 ## [0.50.0] - 2026-11-24
 
 Phase D1 routing, reasoning parameter, response observability, and caching polish release: fixes custom `role_tag` routing and failover isolation (N10), adds an `"object"` (JSON) LLM parameter type for `chat_template_kwargs` and nested provider options (N11), captures OpenRouter/nano-GPT `reasoning` and empty-content/Navigator-skip diagnostics in Debug (N12), adds a per-cantrip `card_edits_standing` toggle for Cache-Friendly Mode (N13), and fixes uncompilable stored regex verification reporting.

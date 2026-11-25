@@ -510,8 +510,7 @@ async def install_file(
     )
     scan_result = scan_file(raw_content, resource_type, max_content_size=max_content_size)
     await log_scan_findings(current_user.id, scan_result, f"pack_{resource_type}", req.file_path)
-    if resource_type != "map":
-        gate_scan_findings(scan_result, req.override_scan, f"Pack {resource_type}")
+    gate_scan_findings(scan_result, req.override_scan, f"Pack {resource_type}")
 
     try:
         data = json.loads(raw_content)

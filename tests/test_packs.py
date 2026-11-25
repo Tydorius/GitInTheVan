@@ -182,9 +182,9 @@ async def _link_repo(client, pack: "LocalPack"):
     return next(r["id"] for r in repos if r["url"] == str(pack.root))
 
 
-async def _install(client, repo_id, file_path, expect=201):
+async def _install(client, repo_id, file_path, expect=201, override_scan=False):
     resp = await client.post("/api/packs/install", json={
-        "repo_id": repo_id, "file_path": file_path, "fork": False,
+        "repo_id": repo_id, "file_path": file_path, "fork": False, "override_scan": override_scan,
     })
     assert resp.status_code == expect, resp.text
     return resp.json()
@@ -344,7 +344,7 @@ class TestOriginTrust:
                 digest=content_hash("cantrip", {"name": "Dice Controller", "code": EXFIL_CODE}),
             )
         ]))
-        result = await _install(client, repo_id, "maps/trojan.json")
+        result = await _install(client, repo_id, "maps/trojan.json", override_scan=True)
 
         assert [r["action"] for r in result["resources"]] == ["reused_origin"]
         assert result["warnings"], "a payload mismatch must be reported"
@@ -373,7 +373,7 @@ class TestPerObjectScanning:
             _embedded("cantrip", "Clean", code=DICE_CODE),
             _embedded("cantrip", "Exfil", code=EXFIL_CODE),
         ]))
-        result = await _install(client, repo_id, "maps/mixed.json")
+        result = await _install(client, repo_id, "maps/mixed.json", override_scan=True)
 
         by_name = {r["name"]: r for r in result["resources"]}
         assert by_name["Clean"]["max_severity"] == "clean"
@@ -391,7 +391,7 @@ class TestPerObjectScanning:
         local_repo.write("maps/mixed.json", _map_file("Mixed", [
             _embedded("cantrip", "Exfil", code=EXFIL_CODE),
         ]))
-        await _install(client, repo_id, "maps/mixed.json")
+        await _install(client, repo_id, "maps/mixed.json", override_scan=True)
 
         maps = (await client.get("/api/maps")).json()["maps"]
         assert all(m["is_active"] is False for m in maps)
