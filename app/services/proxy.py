@@ -357,6 +357,15 @@ async def _forward_request_impl(
         body_json["_gitv_auto_cache_control"] = bool(
             getattr(user_settings, "auto_cache_control", False)
         )
+        # Request strip rules (0.52.0, N1): compiled once here and stashed on
+        # the body for every identity-hash site (resolve, record, regenerate
+        # fingerprint) and the forward-strip stage below. user_settings may be
+        # None for a first request; getattr degrades to no rules.
+        from app.services.request_strip import compile_request_strip_rules
+
+        body_json["_gitv_request_strip"] = compile_request_strip_rules(
+            getattr(user_settings, "request_strip_patterns", None)
+        )
         if debug_on:
             init_debug(body_json, tags)
             # Wall-clock start. summarize_run subtracts the summed upstream
@@ -447,7 +456,11 @@ async def _forward_request_impl(
             json.dumps(messages_for_conv, default=str)
         )
 
-        internal_chat_id, is_new_conv = await resolve_conversation(messages_for_conv, user_id)
+        internal_chat_id, is_new_conv = await resolve_conversation(
+            messages_for_conv,
+            user_id,
+            strip_patterns=body_json["_gitv_request_strip"]["hash"],
+        )
 
         if body_json.get("_gitv_sandbox"):
             # A sandbox owns a forked conversation: its memories, chat data and
@@ -469,6 +482,50 @@ async def _forward_request_impl(
             internal_chat_id = f"replay:{body_json.get('_gitv_replay_of', '')}"
             logger.info("Replay of run %s: isolated as chat %s",
                         body_json.get("_gitv_replay_of", "")[:8], internal_chat_id[:20])
+
+        # Forward-scope request strip (0.52.0, N1): remove client-appended
+        # junk the user marked from the outbound body. Hash-scope rules
+        # already ran inside resolve_conversation; forward implies hash, so
+        # the raw anchor captured above normalizes identically on the next
+        # request's resolve. Runs before every consumer (budgeting, cantrips,
+        # injections, forwarding) so nothing downstream sees the junk, and
+        # never touches _gitv_messages_for_hash.
+        _strip_rules = body_json["_gitv_request_strip"]
+        if _strip_rules["forward"]:
+            from app.services.request_strip import strip_forward_messages
+
+            body_json["messages"], _stripped_idx = strip_forward_messages(
+                body_json.get("messages", []), _strip_rules["forward"]
+            )
+            logger.info(
+                "Request strip (forward): %d message(s) modified by %d rule(s)",
+                len(_stripped_idx), len(_strip_rules["forward"]),
+            )
+            if debug_on:
+                debug_capture(
+                    body_json, "request_strip", "Request Strip",
+                    detail=(
+                        f"{len(_stripped_idx)} message(s) modified by "
+                        f"{len(_strip_rules['forward'])} forward rule(s)"
+                        if _stripped_idx
+                        else f"{len(_strip_rules['forward'])} forward rule(s), nothing matched"
+                    ),
+                    metadata={
+                        "forward_rule_count": len(_strip_rules["forward"]),
+                        "hash_rule_count": len(_strip_rules["hash"]),
+                        "modified_message_indexes": _stripped_idx,
+                    },
+                )
+        elif _strip_rules["hash"] and debug_on:
+            debug_capture(
+                body_json, "request_strip", "Request Strip (hash only)",
+                detail=(f"{len(_strip_rules['hash'])} identity rule(s) "
+                        "applied to the conversation hash; forwarded body untouched"),
+                metadata={
+                    "forward_rule_count": 0,
+                    "hash_rule_count": len(_strip_rules["hash"]),
+                },
+            )
 
         from app.services.command_tags import resolve_command_overrides
         command_overrides = await resolve_command_overrides(
@@ -509,7 +566,8 @@ async def _forward_request_impl(
                     user_id, turn_conversation_id
                 )
                 body_json["_gitv_is_regenerate"] = await note_request_shape(
-                    user_id, turn_conversation_id, body_json.get("messages", [])
+                    user_id, turn_conversation_id, body_json.get("messages", []),
+                    strip_patterns=body_json["_gitv_request_strip"]["hash"],
                 )
             except Exception:
                 logger.exception("Turn counter bump failed; cantrips see turn_index 0")

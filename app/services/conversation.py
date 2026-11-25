@@ -20,14 +20,29 @@ DEFAULT_WINDOW = 4
 _extract_text = extract_text
 
 
-def compute_hash(messages: list[dict[str, Any]], window: int = DEFAULT_WINDOW) -> str:
+def compute_hash(
+    messages: list[dict[str, Any]],
+    window: int = DEFAULT_WINDOW,
+    strip_patterns: list[Any] | None = None,
+) -> str:
+    """Hash the conversation window for identity matching.
+
+    strip_patterns (0.52.0, N1): compiled request-strip rules applied to each
+    message's extracted text before the per-message truncation. Both identity
+    sides (resolve_conversation, record_post_hash) receive the same compiled
+    set, so client-appended per-request notes (JanitorAI's banned-words note)
+    normalize out of the hash on both sides. None/empty = the historical hash.
+    """
     if not messages:
         return ""
+
+    from app.services.request_strip import normalize_for_hash
 
     items = []
     for msg in messages[-window:]:
         role = msg.get("role", "")
         content = _extract_text(msg.get("content", ""))
+        content = normalize_for_hash(content, strip_patterns)
         items.append(f"{role}|{content[:2000]}")
 
     raw = "\n".join(items)
@@ -55,8 +70,13 @@ async def resolve_conversation(
     messages: list[dict[str, Any]],
     user_id: str,
     window: int = DEFAULT_WINDOW,
+    strip_patterns: list[Any] | None = None,
 ) -> tuple[str, bool]:
     """Resolve internal chat ID from message history.
+
+    strip_patterns: the user's hash-scope request-strip rules, applied inside
+    compute_hash. Must be the same set record_post_hash received, or the two
+    hash sides stop matching.
 
     Returns (internal_chat_id, is_new).
     """
@@ -64,7 +84,7 @@ async def resolve_conversation(
         return await _create_new_conversation(user_id)
 
     prior_messages = _prior_messages_for_hash(messages)
-    pre_hash = compute_hash(prior_messages, window)
+    pre_hash = compute_hash(prior_messages, window, strip_patterns)
 
     if not pre_hash:
         return await _create_new_conversation(user_id)
@@ -74,7 +94,7 @@ async def resolve_conversation(
         if existing:
             return existing.internal_chat_id, False
 
-        legacy_hash = compute_hash(messages[:-1], window)
+        legacy_hash = compute_hash(messages[:-1], window, strip_patterns)
         if legacy_hash and legacy_hash != pre_hash:
             legacy = await _find_by_hash(db, user_id, legacy_hash)
             if legacy:
@@ -103,6 +123,7 @@ async def record_post_hash(
     internal_chat_id: str,
     user_id: str,
     window: int = DEFAULT_WINDOW,
+    strip_patterns: list[Any] | None = None,
 ) -> str:
     """Record a hash of the request messages so the next request can chain.
 
@@ -112,8 +133,12 @@ async def record_post_hash(
     recorded anchor must be the request messages exactly as the user sent
     them. bot_response_content is accepted for interface compatibility and
     potential future use (e.g. logging) but is not part of the hash.
+
+    strip_patterns: the same compiled hash-scope set resolve_conversation
+    used for this request -- the anchor normalizes identically to the next
+    request's pre-hash (0.52.0, N1).
     """
-    post_hash = compute_hash(messages, window)
+    post_hash = compute_hash(messages, window, strip_patterns)
 
     if not post_hash:
         return ""
@@ -273,7 +298,7 @@ async def bump_turn_counter(user_id: str, conversation_id: str) -> int:
 
 
 async def note_request_shape(
-    user_id: str, conversation_id: str, messages: list
+    user_id: str, conversation_id: str, messages: list, strip_patterns=None
 ) -> bool:
     """Record this request's shape; True when it repeats the previous one.
 
@@ -284,6 +309,10 @@ async def note_request_shape(
     means regenerate. Only live requests call this -- the proxy gates it on
     the same non-replay condition as the turn counter, and sandbox forks
     pass their own conversation id. False (unknown) is the safe default.
+
+    strip_patterns: the hash-scope request-strip rules (0.52.0) so a
+    client-appended note that changes between requests (e.g. an edited
+    banned-words list) does not hide a regenerate.
     """
     import hashlib
     from datetime import UTC, datetime
@@ -305,6 +334,10 @@ async def note_request_shape(
             else:
                 trailing = str(content)
             break
+    if strip_patterns:
+        from app.services.request_strip import normalize_for_hash
+
+        trailing = normalize_for_hash(trailing, strip_patterns)
     digest = hashlib.sha256(trailing[:2000].encode("utf-8", "replace")).hexdigest()
     fingerprint = f"{count}:{digest}"
 

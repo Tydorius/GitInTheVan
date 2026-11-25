@@ -13,6 +13,7 @@ from app.models.user import User
 from app.models.user_settings import UserSettings
 from app.services.llm_params import ParameterDef, params_from_api, params_to_api
 from app.services.pipeline_order import MAX_PLAN_ITEMS, parse_plan
+from app.services.request_strip import parse_request_strip_rules
 from app.services.response_tags import parse_strip_patterns
 from app.services.timezones import resolve_effective_timezone, validate_timezone
 
@@ -84,6 +85,10 @@ class SettingsResponse(BaseModel):
     passenger_parameters: list[ParameterDef] = Field(default_factory=list)
     # Package 3 (item 22): regex patterns stripped from every final reply.
     response_strip_patterns: list[str] = Field(default_factory=list)
+    # 0.52.0 (N1): regex strip rules for request message text -- {"pattern",
+    # "scope"} with scope "hash" (identity only) or "forward" (outbound body,
+    # implies hash).
+    request_strip_patterns: list[dict] = Field(default_factory=list)
     # Pipeline ordering (0.41.0): {"enabled": bool, "items": [{"type":
     # "cantrip"|"lorebook", "id": str}]} -- the manual pre-forward order.
     # Empty dict = manual ordering off.
@@ -122,6 +127,7 @@ class SettingsUpdate(BaseModel):
     lexicon_parameters: list[ParameterDef] | None = None
     passenger_parameters: list[ParameterDef] | None = None
     response_strip_patterns: list[str] | None = None
+    request_strip_patterns: list[dict] | None = None
     pipeline_order: dict | None = None
     timezone: str | None = None
 
@@ -177,6 +183,9 @@ async def get_settings(
         passenger_parameters=params_to_api(user_settings.passenger_parameters_json),
         response_strip_patterns=parse_strip_patterns(
             getattr(user_settings, "response_strip_patterns", None)
+        ),
+        request_strip_patterns=parse_request_strip_rules(
+            getattr(user_settings, "request_strip_patterns", None)
         ),
         pipeline_order=parse_plan(getattr(user_settings, "pipeline_order_json", None)),
         timezone=user_settings.timezone,
@@ -286,6 +295,17 @@ async def update_settings(
                 detail=str(exc),
             ) from exc
         user_settings.response_strip_patterns = json.dumps(cleaned)
+    if req.request_strip_patterns is not None:
+        from app.services.request_strip import validate_request_strip_rules
+
+        try:
+            cleaned_rules = validate_request_strip_rules(req.request_strip_patterns)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
+        user_settings.request_strip_patterns = json.dumps(cleaned_rules)
     if req.pipeline_order is not None:
         # Shape-validated and normalized through the same parser the
         # pipeline uses; the ids themselves are resolved at request time
@@ -355,6 +375,9 @@ async def update_settings(
         passenger_parameters=params_to_api(user_settings.passenger_parameters_json),
         response_strip_patterns=parse_strip_patterns(
             getattr(user_settings, "response_strip_patterns", None)
+        ),
+        request_strip_patterns=parse_request_strip_rules(
+            getattr(user_settings, "request_strip_patterns", None)
         ),
         pipeline_order=parse_plan(getattr(user_settings, "pipeline_order_json", None)),
         timezone=user_settings.timezone,

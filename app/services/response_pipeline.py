@@ -34,7 +34,10 @@ async def _record_conversation_anchor(
     messages_for_hash = body_json.get("_gitv_messages_for_hash", body_json.get("messages", []))
     from app.services.conversation import record_post_hash
 
-    await record_post_hash(messages_for_hash, content, chat_id, user_id)
+    await record_post_hash(
+        messages_for_hash, content, chat_id, user_id,
+        strip_patterns=(body_json.get("_gitv_request_strip") or {}).get("hash"),
+    )
 
 
 async def _extract_response_memories(
@@ -85,7 +88,10 @@ async def _extract_response_memories(
             metadata={"memory_keys": list(memories.keys()) if memories else []})
 
     if chat_id:
-        await record_post_hash(messages_for_hash, cleaned, chat_id, user_id)
+        await record_post_hash(
+            messages_for_hash, cleaned, chat_id, user_id,
+            strip_patterns=(body_json.get("_gitv_request_strip") or {}).get("hash"),
+        )
 
     return response_data
 

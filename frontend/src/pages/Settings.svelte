@@ -101,6 +101,12 @@
   let stripPatternsText = ''
   let stripSaved = false
 
+  // 0.52.0 (N1): request strip rules. Scope "hash" normalizes the
+  // conversation identity hash only; "forward" also strips the outbound
+  // request. Rows are plain strings here; the backend validates on save.
+  let requestRules: { pattern: string; scope: string }[] = []
+  let requestRulesSaved = false
+
   // Pipeline ordering (0.41.0): the manual pre-forward order.
   type OrderItem = { type: 'cantrip' | 'lorebook'; id: string; name: string }
   let orderCantrips: any[] = []
@@ -187,6 +193,10 @@
       passengerEnabled = s.passenger_calling_enabled ?? true
       passengerBudget = s.passenger_call_budget ?? 0
       stripPatternsText = (s.response_strip_patterns || []).join('\n')
+      requestRules = ((s as any).request_strip_patterns || []).map((r: any) => ({
+        pattern: r.pattern || '',
+        scope: r.scope === 'forward' ? 'forward' : 'hash',
+      }))
       const plan = s.pipeline_order || {}
       orderEnabled = !!plan.enabled
       orderItems = (plan.items || []).map((it: any) => ({
@@ -305,6 +315,36 @@
           .filter(Boolean),
       } as any)
       stripSaved = true
+    } catch (e: any) { error = e.message }
+  }
+
+  function addRequestRule() {
+    requestRules = [...requestRules, { pattern: '', scope: 'hash' }]
+  }
+
+  function addJanitorExample() {
+    // JanitorAI appends its banned-words SYSTEM NOTE to the newest user
+    // message only, after one newline, no wrapper (observed 2026-11-25).
+    // Hash scope: the model must still see the note.
+    requestRules = [...requestRules, {
+      pattern: '\\n?SYSTEM NOTE: Do not include the following words/phrases in your output under any circumstances:.*',
+      scope: 'hash',
+    }]
+  }
+
+  function removeRequestRule(i: number) {
+    requestRules = requestRules.filter((_, idx) => idx !== i)
+  }
+
+  async function saveRequestRules() {
+    error = ''; requestRulesSaved = false
+    try {
+      await api.updateSettings({
+        request_strip_patterns: requestRules
+          .map((r) => ({ pattern: r.pattern.trim(), scope: r.scope }))
+          .filter((r) => r.pattern),
+      } as any)
+      requestRulesSaved = true
     } catch (e: any) { error = e.message }
   }
 
@@ -611,6 +651,40 @@
       placeholder="SITE_FOOTER_.*&#10;^\[watermark\].*$" style="width: 100%; font-family: monospace;"></textarea>
   </div>
   <button class="primary" onclick={saveStripPatterns}>Save Strip Patterns</button>
+</CollapsibleCard>
+
+<CollapsibleCard title="Conversation Matching (Request Strip Rules)" cardKey="requestrules" {collapse}>
+  <p style="color: var(--text-dim); font-size: 12px; margin-top: 12px; margin-bottom: 16px;">
+    Some platforms append per-request notes to message text — JanitorAI's banned-words
+    <strong>SYSTEM NOTE</strong>, for example — so the same message looks different on the next
+    request, the chat silently restarts, and chat_data, memories and summaries fragment every
+    turn. A <strong>hash</strong> rule removes such text from the conversation identity hash
+    only: the model still sees it. A <strong>forward</strong> rule also removes it from the
+    outgoing request. Max 20 rules, 256 characters each.
+    <a class="help-link" href="/help/user-guide.html#conversation-matching" target="_blank" title="Open documentation">Guide</a>
+  </p>
+  {#if requestRulesSaved}<div class="success-msg">Request strip rules saved.</div>{/if}
+  {#each requestRules as rule, i}
+    <div class="form-group" style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+      <input type="text" bind:value={rule.pattern} placeholder="\n?SYSTEM NOTE: .*"
+        style="flex: 1; font-family: monospace;" aria-label="Strip rule pattern" />
+      <select bind:value={rule.scope} style="width: auto;" aria-label="Strip rule scope">
+        <option value="hash">Hash only</option>
+        <option value="forward">Hash + outgoing request</option>
+      </select>
+      <button onclick={() => removeRequestRule(i)} title="Remove rule" aria-label="Remove rule">✕</button>
+    </div>
+  {/each}
+  {#if requestRules.length === 0}
+    <p style="color: var(--text-dim); font-size: 12px; margin-bottom: 8px;">
+      No rules — conversation matching behaves exactly as before.
+    </p>
+  {/if}
+  <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+    <button onclick={addRequestRule}>Add Rule</button>
+    <button onclick={addJanitorExample}>Add JanitorAI Example</button>
+    <button class="primary" onclick={saveRequestRules}>Save Request Strip Rules</button>
+  </div>
 </CollapsibleCard>
 
 <CollapsibleCard title="Pre-Forward Order" cardKey="order" {collapse}>

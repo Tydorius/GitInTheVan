@@ -2024,6 +2024,52 @@ When summarization triggers, older dialogue is removed from the request and repl
 
 Compaction is incremental: when the history covered by the existing summary has not changed, the summarizer is sent only the newly aged messages plus that summary, instead of the whole history again. If earlier history has diverged (an edited or trimmed turn), the summary is rebuilt in full. A summarizer call that fails keeps the previous summary and leaves the stored one untouched, so the next turn retries rather than trusting a half-built summary. When an incremental pass fails, only the messages the existing summary already covers are folded under it; the newer messages that pass was meant to summarize stay in the prompt word for word instead of being hidden under a summary that never saw them.
 
+<a id="conversation-matching"></a>
+
+### Conversation Matching (Request Strip Rules)
+
+Some platforms append per-request notes to the text of your messages. JanitorAI's
+banned-words **SYSTEM NOTE** is the documented example: it is glued onto your newest
+message only, so on your next request that same message comes back without it — and
+GitInTheVan, which recognizes your conversation by hashing the recent messages, sees
+two different messages. Every turn then resolves as a brand-new chat, and per-chat
+state (chat_data, memories, summaries) fragments: nothing carries over. Turns longer
+than ~2,000 characters hid the note inside the hash's truncation, which is why the
+breakage looked intermittent.
+
+**Request strip rules** (Settings → *Conversation Matching*) fix this generally, for
+any platform that does the same thing. Each rule is a regex plus a scope:
+
+| Scope | What it does | Use it for |
+|---|---|---|
+| **Hash only** | Removes matches from the conversation identity hash only — the model still sees the text | Platform notes the model is meant to act on (JanitorAI's banned-words list) |
+| **Hash + outgoing request** | Also removes matches from the request the model receives | Platform-injected junk you never want seen or hashed |
+
+A **hash + outgoing request** rule implies the hash part — junk text should never be
+hashed either, and keeping both sides symmetric is what makes the rules work. Rules
+are capped at 20, 256 characters each, and must compile (they are regexes, so write
+them accordingly).
+
+The card ships an **Add JanitorAI Example** button that fills in a rule for the note
+as observed on 2026-11-25 — appended after one newline, no wrapper, word list to the
+end of the line:
+
+```regex
+\n?SYSTEM NOTE: Do not include the following words/phrases in your output under any circumstances:.*
+```
+
+Keep that one on **Hash only** — the note exists so the model avoids the banned words;
+stripping it from the outgoing request would defeat the feature.
+
+![Conversation Matching settings](media/gitv-settings-conversation-matching.png)
+
+*The Conversation Matching card with the JanitorAI example rule added, captured 2026-11-25.*
+
+With no rules configured, conversation matching behaves exactly as before. When you
+first add a rule, each affected chat picks up one new conversation id on its next
+request (previously stored hashes still contain the note); from that point the chat
+chains correctly. The stage appears in the Debug timeline as *Request Strip*.
+
 ### Prompt Caching
 
 ![Prompt Caching settings](media/gitv-settings-prompt-caching.png)

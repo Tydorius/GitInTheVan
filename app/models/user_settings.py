@@ -111,6 +111,14 @@ class UserSettings(Base):
     response_strip_patterns: Mapped[str] = mapped_column(
         Text, nullable=False, default="[]"
     )
+    # Request strip rules (0.52.0, N1): JSON list of {"pattern", "scope"}
+    # regexes applied to request message text. Scope "hash" normalizes
+    # conversation identity only (the forwarded request keeps the text);
+    # "forward" also strips the outbound body, and implies hash.
+    # MySQL NULL reads as empty.
+    request_strip_patterns: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]"
+    )
     # Pipeline ordering (0.41.0): the user-defined interleaved order for the
     # pre-forward window (cantrips and lorebooks). Empty/"" = manual
     # ordering off, today's batched behavior. JSON: {"enabled": bool,

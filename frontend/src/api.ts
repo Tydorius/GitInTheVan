@@ -678,6 +678,13 @@ export interface PipelineOrderPlan {
   items?: PipelineOrderItem[];
 }
 
+// 0.52.0 (N1): a request strip rule. scope "hash" normalizes conversation
+// identity only; "forward" also strips the outbound body (implies hash).
+export interface RequestStripRule {
+  pattern: string;
+  scope: 'hash' | 'forward';
+}
+
 export interface UserSettings {
   default_endpoint_id: string | null;
   default_model: string;
@@ -699,6 +706,7 @@ export interface UserSettings {
   passenger_call_budget: number;
   passenger_effective_cap: number;
   response_strip_patterns: string[];
+  request_strip_patterns: RequestStripRule[];
   pipeline_order: PipelineOrderPlan;
   parameters: LlmParameter[];
   verification_parameters: LlmParameter[];

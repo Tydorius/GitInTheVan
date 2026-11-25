@@ -2,6 +2,18 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.52.0] - 2026-11-25
+
+Request strip rules (feature-request N1): user-configurable regex rules that repair conversation matching when a client platform appends per-request notes to message text — JanitorAI's banned-words SYSTEM NOTE being the confirmed case (three requests from one chat each resolved as a brand-new chat, fragmenting chat_data, memories and summaries every turn). Ships with a one-click JanitorAI example rule; empty configuration changes nothing.
+
+### Added
+
+- **Request strip rules** (Settings → *Conversation Matching*): a list of `{pattern, scope}` regexes under a new `request_strip_patterns` user setting (migration 075). Scope **hash** normalizes conversation identity only — the same compiled set runs inside `compute_hash` for `resolve_conversation`, both `record_post_hash` call sites, and the `note_request_shape` regenerate fingerprint, so a client-appended note that vanishes from the resent history no longer breaks matching on either side. Scope **forward** also strips matches from the outbound request body (implies hash) — a new *Request Strip* pipeline stage before budgeting, injections, cantrips and forwarding, with a rule-16 debug capture (`request_strip`). The forwarded request is untouched by hash-scope rules: JanitorAI's note exists so the model avoids the banned words, and removing it would defeat the feature. Rules mirror the response strip pattern machinery (max 20, 256 chars each, must compile, 422 on bad input); empty/absent rules leave the hash byte-identical to pre-0.52.0.
+- **JanitorAI example rule**: an *Add JanitorAI Example* button in the new Settings card fills in `\n?SYSTEM NOTE: Do not include the following words/phrases in your output under any circumstances:.*` (hash scope), captured verbatim from a 2026-11-25 user sample (`gitv-n1-samples`). The same sample drives the test suite: the three-request scenario (Post 1 → Post 2 → byte-identical regenerate) now resolves to a single chat id, and without rules the three-ids failure is asserted as the vacuity check.
+- **Forward strip helper** (`app/services/request_strip.py`): `strip_forward_messages` strips string content and per-text-part content lists without mutating the input (the pre-injection hash anchor stays raw by construction), `compile_request_strip_rules` groups hash/forward with forward implying hash, and `normalize_for_hash` reuses the response-side strip behavior so both scopes clean up identically.
+- **Upgrade path**: a 0.51.0-era database gains the column via migration 075 (dialect-aware; MySQL TEXT nullable per the 060 precedent) and existing rows read as no rules.
+- **Guide section** "Conversation Matching (Request Strip Rules)" under Settings, linked from the new card's help link (`#conversation-matching`).
+
 ## [0.51.0] - 2026-11-24
 
 Phase D2 sandbox, pack security, and frontend hygiene release: retires the dead pre-0.47.0 Deno template path, unifies map pack critical scan-gating with direct map imports, tightens frontend TypeScript interfaces, adds `in_chat_system` to the Lorebook Position dropdown, and adds cross-feature regression tests.

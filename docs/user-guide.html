@@ -1730,6 +1730,56 @@ editable at runtime from the Storage page.</p>
 </ul>
 <p>When summarization triggers, older dialogue is removed from the request and replaced with a single <code>[CONVERSATION SUMMARY]</code> system block. The most recent messages are always forwarded verbatim. Summaries are cached per conversation — rerolls and forks reuse the cached summary without re-calling the LLM.</p>
 <p>Compaction is incremental: when the history covered by the existing summary has not changed, the summarizer is sent only the newly aged messages plus that summary, instead of the whole history again. If earlier history has diverged (an edited or trimmed turn), the summary is rebuilt in full. A summarizer call that fails keeps the previous summary and leaves the stored one untouched, so the next turn retries rather than trusting a half-built summary. When an incremental pass fails, only the messages the existing summary already covers are folded under it; the newer messages that pass was meant to summarize stay in the prompt word for word instead of being hidden under a summary that never saw them.</p>
+<p><a id="conversation-matching"></a></p>
+<h3 id="conversation-matching-request-strip-rules">Conversation Matching (Request Strip Rules)</h3>
+<p>Some platforms append per-request notes to the text of your messages. JanitorAI's
+banned-words <strong>SYSTEM NOTE</strong> is the documented example: it is glued onto your newest
+message only, so on your next request that same message comes back without it — and
+GitInTheVan, which recognizes your conversation by hashing the recent messages, sees
+two different messages. Every turn then resolves as a brand-new chat, and per-chat
+state (chat_data, memories, summaries) fragments: nothing carries over. Turns longer
+than ~2,000 characters hid the note inside the hash's truncation, which is why the
+breakage looked intermittent.</p>
+<p><strong>Request strip rules</strong> (Settings → <em>Conversation Matching</em>) fix this generally, for
+any platform that does the same thing. Each rule is a regex plus a scope:</p>
+<table>
+<thead>
+<tr>
+<th>Scope</th>
+<th>What it does</th>
+<th>Use it for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Hash only</strong></td>
+<td>Removes matches from the conversation identity hash only — the model still sees the text</td>
+<td>Platform notes the model is meant to act on (JanitorAI's banned-words list)</td>
+</tr>
+<tr>
+<td><strong>Hash + outgoing request</strong></td>
+<td>Also removes matches from the request the model receives</td>
+<td>Platform-injected junk you never want seen or hashed</td>
+</tr>
+</tbody>
+</table>
+<p>A <strong>hash + outgoing request</strong> rule implies the hash part — junk text should never be
+hashed either, and keeping both sides symmetric is what makes the rules work. Rules
+are capped at 20, 256 characters each, and must compile (they are regexes, so write
+them accordingly).</p>
+<p>The card ships an <strong>Add JanitorAI Example</strong> button that fills in a rule for the note
+as observed on 2026-11-25 — appended after one newline, no wrapper, word list to the
+end of the line:</p>
+<pre><code class="language-regex">\n?SYSTEM NOTE: Do not include the following words/phrases in your output under any circumstances:.*
+</code></pre>
+<p>Keep that one on <strong>Hash only</strong> — the note exists so the model avoids the banned words;
+stripping it from the outgoing request would defeat the feature.</p>
+<p><img alt="Conversation Matching settings" src="media/gitv-settings-conversation-matching.png"></p>
+<p><em>The Conversation Matching card with the JanitorAI example rule added, captured 2026-11-25.</em></p>
+<p>With no rules configured, conversation matching behaves exactly as before. When you
+first add a rule, each affected chat picks up one new conversation id on its next
+request (previously stored hashes still contain the note); from that point the chat
+chains correctly. The stage appears in the Debug timeline as <em>Request Strip</em>.</p>
 <h3 id="prompt-caching">Prompt Caching</h3>
 <p><img alt="Prompt Caching settings" src="media/gitv-settings-prompt-caching.png"></p>
 <p><em>The Prompt Caching card with both modes enabled, captured 2026-11-23.</em></p>

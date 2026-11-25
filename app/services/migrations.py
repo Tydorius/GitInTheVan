@@ -1640,6 +1640,19 @@ MIGRATIONS: list[tuple[str, str | dict[str, str]]] = [
         ALTER TABLE cantrips ADD COLUMN card_edits_standing BOOLEAN NOT NULL DEFAULT FALSE;
         """,
     ),
+    (
+        "075_request_strip_patterns",
+        # 0.52.0 (N1): user regex strip rules for request message text.
+        # JSON list of {"pattern", "scope"}; scope "hash" normalizes
+        # conversation identity only, "forward" also strips the outbound
+        # body (forward implies hash). MySQL TEXT follows the 060
+        # precedent: nullable, NULL reads as empty by every reader.
+        {
+            "sqlite": "ALTER TABLE user_settings ADD COLUMN request_strip_patterns TEXT DEFAULT '[]' NOT NULL;",
+            "postgresql": "ALTER TABLE user_settings ADD COLUMN request_strip_patterns TEXT DEFAULT '[]' NOT NULL;",
+            "mysql": "ALTER TABLE user_settings ADD COLUMN request_strip_patterns TEXT;",
+        },
+    ),
 ]
 
 
