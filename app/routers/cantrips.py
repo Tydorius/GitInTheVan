@@ -15,7 +15,7 @@ from app.routers._helpers import check_tag_unique, get_owned_or_404
 from app.services import snapshots
 from app.services.admin import get_admin_settings
 from app.services.budget import estimate_messages_tokens, estimate_tokens
-from app.services.cantrip import test_cantrip
+from app.services.cantrip import _load_user_data, select_user_data_seed, test_cantrip
 from app.services.cantrip_context import build_context
 from app.services.content_guard import check_size, gate_scan_findings, log_scan_findings
 from app.services.deno_runner import CantripExecutionError, CantripResult, CantripTimeoutError
@@ -30,7 +30,12 @@ router = APIRouter(prefix="/api/cantrips", tags=["cantrips"])
 
 
 async def _test_with_passenger(
-    code: str, context: dict, chat_data: dict | None, timeout_ms: int, user_id: str
+    code: str,
+    context: dict,
+    chat_data: dict | None,
+    timeout_ms: int,
+    user_id: str,
+    user_data: dict | None = None,
 ) -> CantripResult:
     """Run a test cantrip with Passenger available, as the pipeline would run
     it: the caller's own gates, endpoints and budgets, against a synthetic
@@ -45,6 +50,7 @@ async def _test_with_passenger(
     try:
         return await test_cantrip(
             code=code, context=context, chat_data=chat_data,
+            user_data=user_data,
             timeout_ms=timeout_ms, passenger_handler=handler,
         )
     finally:
@@ -192,6 +198,8 @@ class CantripTestRequest(BaseModel):
     first_message: str = ""
     alternate_greetings: list[str] = []
     chat_data: dict[str, Any] | None = None
+    user_data: dict[str, Any] | None = None
+    user_data_prefixes: list[str] | None = None
     timeout_ms: int = 5000
 
 
@@ -200,6 +208,7 @@ class CantripTestResponse(BaseModel):
     scenario: str
     example_dialogs: str
     chat_data: dict[str, Any]
+    user_data: dict[str, Any] = Field(default_factory=dict)
     debug_logs: list[str]
     error: str | None
     tokens_before: int = 0
@@ -564,6 +573,12 @@ async def update_cantrip(
     return _cantrip_to_response(cantrip)
 
 
+def _copy_name(name: str, max_len: int = 128) -> str:
+    suffix = " (Copy)"
+    limit = max_len - len(suffix)
+    return f"{name[:limit]}{suffix}" if len(name) > limit else f"{name}{suffix}"
+
+
 @router.delete("/{cantrip_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_cantrip(
     cantrip_id: str,
@@ -575,6 +590,43 @@ async def delete_cantrip(
     await snapshots.capture(db, current_user.id, "cantrip", cantrip_id)
     await db.delete(cantrip)
     await db.commit()
+
+
+@router.post("/{cantrip_id}/duplicate", response_model=CantripResponse, status_code=status.HTTP_201_CREATED)
+async def duplicate_cantrip(
+    cantrip_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    source = await get_owned_or_404(db, Cantrip, cantrip_id, current_user.id, "Cantrip")
+
+    copy = Cantrip(
+        user_id=current_user.id,
+        name=_copy_name(source.name, 128),
+        description=source.description,
+        llm_instructions=source.llm_instructions,
+        code=source.code,
+        hook_type=source.hook_type,
+        run_pre_driver=source.run_pre_driver,
+        run_driver_callable=source.run_driver_callable,
+        run_pre_navigator=source.run_pre_navigator,
+        run_post_navigator=source.run_post_navigator,
+        is_public=False,
+        is_active=False,
+        tag=source.tag,
+        execution_order=source.execution_order,
+        timeout_ms=source.timeout_ms,
+        budget_weight=source.budget_weight,
+        reserved_tokens=getattr(source, "reserved_tokens", 0) or 0,
+        lorebook_reads=source.lorebook_reads if source.lorebook_reads is not None else "[]",
+        response_tags=source.response_tags if source.response_tags is not None else "[]",
+        user_data_prefixes=source.user_data_prefixes if source.user_data_prefixes is not None else "[]",
+        card_edits_standing=bool(getattr(source, "card_edits_standing", False)),
+    )
+    db.add(copy)
+    await db.commit()
+    await db.refresh(copy)
+    return _cantrip_to_response(copy)
 
 
 class ValidateRequest(BaseModel):
@@ -606,6 +658,7 @@ async def validate_cantrip(
 async def test_cantrip_endpoint(
     req: CantripTestRequest,
     current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     code = req.code
     if code is None:
@@ -630,6 +683,15 @@ async def test_cantrip_endpoint(
         alternate_greetings=req.alternate_greetings,
     )
 
+    raw_user_data = (
+        req.user_data
+        if req.user_data is not None
+        else await _load_user_data(db, current_user.id)
+    )
+    seeded_user_data, _ = select_user_data_seed(
+        raw_user_data, code, req.user_data_prefixes
+    )
+
     try:
         result = await _test_with_passenger(
             code=code,
@@ -637,6 +699,7 @@ async def test_cantrip_endpoint(
             chat_data=req.chat_data,
             timeout_ms=req.timeout_ms,
             user_id=current_user.id,
+            user_data=seeded_user_data,
         )
     except CantripTimeoutError:
         raise HTTPException(
@@ -657,6 +720,7 @@ async def test_cantrip_endpoint(
         scenario=result.scenario,
         example_dialogs=result.example_dialogs,
         chat_data=result.chat_data,
+        user_data=result.user_data,
         debug_logs=result.debug_logs,
         error=result.error,
         tokens_before=tokens_before,
@@ -696,6 +760,17 @@ async def test_stored_cantrip(
     )
 
     code = req.code if req.code is not None else cantrip.code
+    raw_user_data = (
+        req.user_data
+        if req.user_data is not None
+        else await _load_user_data(db, current_user.id)
+    )
+    prefixes = (
+        req.user_data_prefixes
+        if req.user_data_prefixes is not None
+        else cantrip.user_data_prefixes
+    )
+    seeded_user_data, _ = select_user_data_seed(raw_user_data, code, prefixes)
 
     try:
         test_result = await _test_with_passenger(
@@ -704,6 +779,7 @@ async def test_stored_cantrip(
             chat_data=req.chat_data,
             timeout_ms=req.timeout_ms or cantrip.timeout_ms,
             user_id=current_user.id,
+            user_data=seeded_user_data,
         )
     except CantripTimeoutError:
         raise HTTPException(
@@ -724,6 +800,7 @@ async def test_stored_cantrip(
         scenario=test_result.scenario,
         example_dialogs=test_result.example_dialogs,
         chat_data=test_result.chat_data,
+        user_data=test_result.user_data,
         debug_logs=test_result.debug_logs,
         error=test_result.error,
         tokens_before=tokens_before,

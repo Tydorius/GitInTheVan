@@ -42,6 +42,7 @@
   let error = ''
   let showForm = false
   let editingId: string | null = null
+  let duplicatingId: string | null = null
   let showTest = false
   let testResults: any = null
   let testing = false
@@ -207,6 +208,22 @@
     if (!confirm('Delete this cantrip?')) return
     try { await api.deleteCantrip(id); await withScroll(load) }
     catch (e: any) { error = e.message }
+  }
+
+  async function handleDuplicate(s: any) {
+    if (duplicatingId) return
+    duplicatingId = s.id
+    error = ''
+    try {
+      const copy = await api.duplicateCantrip(s.id)
+      await withScroll(load)
+      const fresh = cantrips.find((c: any) => c.id === copy.id) || copy
+      startEdit(fresh)
+    } catch (e: any) {
+      error = e.message
+    } finally {
+      duplicatingId = null
+    }
   }
 
   async function toggleActive(s: any) {
@@ -524,6 +541,9 @@
           >{s.is_active ? 'ON' : 'OFF'}</button>
           <button onclick={() => openTest(s.id)}>Test</button>
           <button onclick={() => startEdit(s)}>Edit</button>
+          <button onclick={() => handleDuplicate(s)} disabled={duplicatingId !== null}>
+            {duplicatingId === s.id ? 'Duplicating…' : 'Duplicate'}
+          </button>
           <button onclick={() => openHistory(s)}>History</button>
           <button onclick={() => handleExport(s.id)}>Export</button>
           <button class="danger" onclick={() => handleDelete(s.id)}>Delete</button>

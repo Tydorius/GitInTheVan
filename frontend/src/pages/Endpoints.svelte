@@ -48,8 +48,17 @@
   let apiKeys: any[] = []
   let loading = true
   let error = ''
+  let successMsg = ''
+  let successTimer: ReturnType<typeof setTimeout> | null = null
   let showForm = false
   let editingId: string | null = null
+  let duplicatingId: string | null = null
+
+  function showSuccess(msg: string) {
+    successMsg = msg
+    if (successTimer) clearTimeout(successTimer)
+    successTimer = setTimeout(() => { successMsg = '' }, 4000)
+  }
 
   let form: any = { name: '', base_url: '', api_key: '', api_base_path: '', provider: '', default_model: '', bypass_method: 'none', enabled: true, role_tag: 'default', priority: 1, custom_tag: '', parameters: [], models: [] }
   let showApiKey = false
@@ -154,6 +163,7 @@
 
   async function handleSubmit() {
     error = ''
+    successMsg = ''
     try {
       if (editingId) {
         const payload = { ...form }
@@ -166,6 +176,23 @@
       resetForm()
       await withScroll(load)
     } catch (e: any) { error = e.message }
+  }
+
+  async function handleDuplicate(ep: any) {
+    if (duplicatingId) return
+    duplicatingId = ep.id
+    error = ''
+    try {
+      const copy = await api.duplicateEndpoint(ep.id)
+      await withScroll(load)
+      const fresh = endpoints.find((e: any) => e.id === copy.id) || copy
+      startEdit(fresh)
+      showSuccess(`Duplicated "${ep.name}" — provider API key preserved.`)
+    } catch (e: any) {
+      error = e.message
+    } finally {
+      duplicatingId = null
+    }
   }
 
   async function revealKey(ep: any) {
@@ -234,6 +261,7 @@
 </div>
 
 {#if error}<div class="error-msg">{error}</div>{/if}
+{#if successMsg}<div class="success-msg">{successMsg}</div>{/if}
 
 {#if loading}<div class="loading">Loading...</div>
 {:else if endpoints.length === 0 && !showForm}
@@ -250,6 +278,9 @@
         </div>
         <div>
           <button onclick={() => startEdit(ep)}>Edit</button>
+          <button onclick={() => handleDuplicate(ep)} disabled={duplicatingId !== null}>
+            {duplicatingId === ep.id ? 'Duplicating…' : 'Duplicate'}
+          </button>
           <button class="danger" onclick={() => handleDelete(ep.id)}>Delete</button>
           <button onclick={() => toggleCard(`endpoint-${ep.id}`)} style="padding: 2px 4px; font-size: 14px; border: none; background: none; cursor: pointer;" title={(collapsedCards[`endpoint-${ep.id}`] ?? false) ? 'Expand' : 'Collapse'}>
             {(collapsedCards[`endpoint-${ep.id}`] ?? false) ? '▶' : '▼'}
@@ -333,6 +364,7 @@
     <div class="modal">
       <h3>{editingId ? 'Edit Endpoint' : 'Add Endpoint'}</h3>
       {#if error}<div class="error-msg">{error}</div>{/if}
+      {#if successMsg}<div class="success-msg">{successMsg}</div>{/if}
       <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
         <div class="form-group">
           <label for="ep-name">Name</label>

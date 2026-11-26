@@ -275,6 +275,12 @@ async def update_endpoint(
     return _endpoint_to_response(result.scalar_one())
 
 
+def _copy_name(name: str, max_len: int = 128) -> str:
+    suffix = " (Copy)"
+    limit = max_len - len(suffix)
+    return f"{name[:limit]}{suffix}" if len(name) > limit else f"{name}{suffix}"
+
+
 @router.delete("/{endpoint_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_endpoint(
     endpoint_id: str,
@@ -290,6 +296,57 @@ async def delete_endpoint(
 
     await db.delete(endpoint)
     await db.commit()
+
+
+@router.post("/{endpoint_id}/duplicate", response_model=EndpointResponse, status_code=status.HTTP_201_CREATED)
+async def duplicate_endpoint(
+    endpoint_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    result = await db.execute(
+        select(Endpoint)
+        .where(Endpoint.id == endpoint_id, Endpoint.user_id == current_user.id)
+        .options(selectinload(Endpoint.models))
+    )
+    source = result.scalar_one_or_none()
+    if source is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Endpoint not found")
+
+    copy = Endpoint(
+        user_id=current_user.id,
+        name=_copy_name(source.name, 128),
+        base_url=source.base_url,
+        api_key=source.api_key,
+        api_base_path=source.api_base_path,
+        provider=source.provider,
+        default_model=source.default_model,
+        bypass_method=source.bypass_method,
+        enabled=source.enabled,
+        role_tag=source.role_tag,
+        priority=source.priority,
+        custom_tag=source.custom_tag,
+        parameters_json=source.parameters_json,
+    )
+    db.add(copy)
+    await db.flush()
+    for m in source.models:
+        db.add(
+            EndpointModel(
+                endpoint_id=copy.id,
+                name=m.name,
+                description=m.description,
+                sort_order=m.sort_order,
+                parameters_json=m.parameters_json,
+            )
+        )
+    await db.commit()
+
+    refreshed = await db.execute(
+        select(Endpoint).where(Endpoint.id == copy.id).options(selectinload(Endpoint.models))
+    )
+    logger.info("Endpoint duplicated: %s -> %s for user: %s", source.name, copy.name, current_user.username)
+    return _endpoint_to_response(refreshed.scalar_one())
 
 
 class ApiKeyRevealResponse(BaseModel):

@@ -31,6 +31,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -57,6 +58,9 @@ logger = logging.getLogger(__name__)
 
 SOURCE_PRE_EDIT = "pre_edit"
 SOURCE_MANUAL = "manual"
+
+# Matches MAX_REGEX_PATTERN_CHARS in app/routers/verification.py.
+_MAX_REGEX_PATTERN_CHARS = 1024
 
 # Identity, ownership and bookkeeping. Everything else on the model is content a
 # restore has to put back.
@@ -478,6 +482,29 @@ async def guard_content(
     if max_bytes:
         for name in spec.size_fields:
             check_size(str(guarded.get(name) or ""), max_bytes, spec.label)
+
+    if spec.resource_type == "verification_rule":
+        raw_pattern = guarded.get("regex_pattern")
+        if raw_pattern is not None and raw_pattern != "":
+            if not isinstance(raw_pattern, str):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Invalid regex pattern: must be a string",
+                )
+            if len(raw_pattern) > _MAX_REGEX_PATTERN_CHARS:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Regex pattern too long (max {_MAX_REGEX_PATTERN_CHARS} characters)",
+                )
+            if max_bytes:
+                check_size(raw_pattern, max_bytes, "Regex pattern")
+            try:
+                re.compile(raw_pattern)
+            except re.error as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Invalid regex pattern: {exc}",
+                ) from exc
 
     for name in spec.sanitize_fields:
         value = guarded.get(name)

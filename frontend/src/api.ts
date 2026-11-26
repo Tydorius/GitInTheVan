@@ -822,6 +822,8 @@ export const api = {
     request<any>(`/api/endpoints/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteEndpoint: (id: string) =>
     request<void>(`/api/endpoints/${id}`, { method: 'DELETE' }),
+  duplicateEndpoint: (id: string) =>
+    request<any>(`/api/endpoints/${id}/duplicate`, { method: 'POST' }),
   listEndpointModels: (id: string) =>
     request<{ models: string[] }>(`/api/endpoints/${id}/models`),
 
@@ -836,6 +838,8 @@ export const api = {
   getCantrip: (id: string) => cantripsCrud.get(id) as Promise<Cantrip>,
   updateCantrip: (id: string, data: CantripUpdate) => cantripsCrud.update(id, data) as Promise<Cantrip>,
   deleteCantrip: cantripsCrud.delete,
+  duplicateCantrip: (id: string) =>
+    request<Cantrip>(`/api/cantrips/${id}/duplicate`, { method: 'POST' }),
   exportCantrip: cantripsCrud.export,
   testCantripById: (id: string, data: any) =>
     request<CantripTestResponse>(`/api/cantrips/${id}/test`, { method: 'POST', body: JSON.stringify(data) }),
@@ -896,6 +900,8 @@ export const api = {
   getLorebook: (id: string) => lorebooksCrud.get(id) as Promise<Lorebook>,
   updateLorebook: (id: string, data: LorebookUpdate) => lorebooksCrud.update(id, data) as Promise<Lorebook>,
   deleteLorebook: lorebooksCrud.delete,
+  duplicateLorebook: (id: string) =>
+    request<Lorebook>(`/api/lorebooks/${id}/duplicate`, { method: 'POST' }),
   addLorebookEntry: (lbId: string, data: any) =>
     request<any>(`/api/lorebooks/${lbId}/entries`, { method: 'POST', body: JSON.stringify(data) }),
   updateLorebookEntry: (lbId: string, entryId: string, data: any) =>
@@ -965,6 +971,8 @@ export const api = {
   createMap: (data: MapCreate) => mapsCrud.create(data) as Promise<MapResponse>,
   updateMap: (id: string, data: MapUpdate) => mapsCrud.update(id, data) as Promise<MapResponse>,
   deleteMap: mapsCrud.delete,
+  duplicateMap: (id: string) =>
+    request<MapResponse>(`/api/maps/${id}/duplicate`, { method: 'POST' }),
   exportMap: (id: string, mode: 'embedded' | 'linked' = 'embedded') =>
     request<any>(`/api/maps/${id}/export?mode=${mode}`),
   importMap: (data: any, name?: string, resourceMode?: string, overrideScan: boolean = false) =>

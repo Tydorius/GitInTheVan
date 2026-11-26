@@ -12,6 +12,7 @@
   let maps: any[] = []
   let loading = true
   let error = ''
+  let duplicatingId: string | null = null
   let selectedMap: any = null
   let editing = false
   let endpoints: any[] = []
@@ -170,6 +171,22 @@
     if (!confirm('Delete this map?')) return
     try { await api.deleteMap(id); await withScroll(load) }
     catch (e: any) { error = e.message }
+  }
+
+  async function handleDuplicate(m: any) {
+    if (duplicatingId) return
+    duplicatingId = m.id
+    error = ''
+    try {
+      const copy = await api.duplicateMap(m.id)
+      await withScroll(load)
+      const fresh = maps.find((item: any) => item.id === copy.id) || copy
+      startEdit(fresh)
+    } catch (e: any) {
+      error = e.message
+    } finally {
+      duplicatingId = null
+    }
   }
 
   function toggleStageResource(stage: any, type: string, id: string, position: string = 'pre_driver') {
@@ -550,6 +567,9 @@
           </td>
           <td>
             <button onclick={() => startEdit(m)}>Edit</button>
+            <button onclick={() => handleDuplicate(m)} disabled={duplicatingId !== null}>
+              {duplicatingId === m.id ? 'Duplicating…' : 'Duplicate'}
+            </button>
             <button onclick={() => openHistory(m)}>History</button>
             <button onclick={() => exportMap(m)} title="Full content of every attached resource — installs anywhere">Export</button>
             <button onclick={() => exportMap(m, 'linked')} title="References instead of copies where the origin is known — the map tracks upstream">Export (linked)</button>

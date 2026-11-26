@@ -495,6 +495,12 @@ async def update_map(
     return _map_to_response(result.scalar_one())
 
 
+def _copy_name(name: str, max_len: int = 128) -> str:
+    suffix = " (Copy)"
+    limit = max_len - len(suffix)
+    return f"{name[:limit]}{suffix}" if len(name) > limit else f"{name}{suffix}"
+
+
 @router.delete("/{map_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_map(
     map_id: str,
@@ -509,6 +515,80 @@ async def delete_map(
 
     await db.delete(m)
     await db.commit()
+
+
+@router.post("/{map_id}/duplicate", response_model=MapResponse, status_code=status.HTTP_201_CREATED)
+async def duplicate_map(
+    map_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    source = await get_owned_or_404(
+        db,
+        Map,
+        map_id,
+        current_user.id,
+        "Map",
+        options=(selectinload(Map.stages).selectinload(MapStage.resources),),
+    )
+
+    copy = Map(
+        user_id=current_user.id,
+        name=_copy_name(source.name, 128),
+        description=source.description,
+        tag=source.tag,
+        is_public=False,
+        is_active=False,
+        version=source.version,
+        author=source.author,
+        global_llm_instructions=source.global_llm_instructions,
+        final_verification_enabled=source.final_verification_enabled,
+    )
+    db.add(copy)
+    await db.flush()
+
+    for stage in source.stages:
+        stage_copy = MapStage(
+            map_id=copy.id,
+            stage_order=stage.stage_order,
+            name=stage.name,
+            description=stage.description,
+            system_instructions=stage.system_instructions,
+            endpoint_id=stage.endpoint_id,
+            endpoint_tag=stage.endpoint_tag,
+            model_override=stage.model_override,
+            parameters_json=stage.parameters_json,
+            driver_callable_turns=stage.driver_callable_turns,
+            verification_enabled=stage.verification_enabled,
+            verification_endpoint_id=stage.verification_endpoint_id,
+            verification_model=stage.verification_model,
+            verification_max_retries=stage.verification_max_retries,
+            verification_instructions=stage.verification_instructions,
+            verification_parameters_json=stage.verification_parameters_json,
+            output_mode=stage.output_mode,
+            base_prompt_mode=stage.base_prompt_mode,
+            condition_json=stage.condition_json,
+            history_window=stage.history_window,
+        )
+        for res in stage.resources:
+            stage_copy.resources.append(
+                MapStageResource(
+                    resource_type=res.resource_type,
+                    resource_id=res.resource_id,
+                    position=res.position,
+                    sticky=res.sticky,
+                )
+            )
+        db.add(stage_copy)
+
+    await db.commit()
+
+    refreshed = await db.execute(
+        select(Map)
+        .where(Map.id == copy.id)
+        .options(selectinload(Map.stages).selectinload(MapStage.resources))
+    )
+    return _map_to_response(refreshed.scalar_one())
 
 
 @router.get("/{map_id}/export")

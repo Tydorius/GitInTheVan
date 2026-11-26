@@ -5,7 +5,6 @@ import logging
 import re
 import sys
 import time
-from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -398,9 +397,6 @@ async def forward_llm_chain(
     body_bytes: bytes | None = None,
     *,
     purpose: str = "main",
-    extra_layers_fn: Callable[[FailoverEndpoint, str], list[tuple[str, list[ParamDef]]]] | None = None,
-    default_params: dict[str, Any] | None = None,
-    base_messages: list[dict[str, Any]] | None = None,
     stage_index: int | None = None,
     rule_id: str | None = None,
     update_body_meta: bool = True,
@@ -445,13 +441,7 @@ async def forward_llm_chain(
         # the first candidate's resolved set is not reusable. Re-resolve against
         # this one. The pure user-settings layer travels on body_json from the
         # driver path and does not include Candidate 0's endpoint/model params.
-        if (
-            idx == 0
-            and body_bytes is not None
-            and "_gitv_llm_params" in body_json
-            and extra_layers_fn is None
-            and default_params is None
-        ):
+        if idx == 0 and body_bytes is not None and "_gitv_llm_params" in body_json:
             candidate_params = body_json.get("_gitv_llm_params", {})
         else:
             layers: list[tuple[str, list[ParamDef]]] = [
@@ -463,8 +453,6 @@ async def forward_llm_chain(
                 ),
                 (f"model '{effective_model}'", candidate.params_for_model(effective_model)),
             ]
-            if extra_layers_fn is not None:
-                layers.extend(extra_layers_fn(candidate, effective_model))
             resolved = resolve(layers)
             user_params = body_json.get("_gitv_user_llm_params", {})
             candidate_params = {**user_params, **resolved.values}
@@ -488,13 +476,8 @@ async def forward_llm_chain(
                 ).encode()
         else:
             trial_body = {k: v for k, v in body_json.items() if not k.startswith("_gitv")}
-            if default_params:
-                for k, v in default_params.items():
-                    trial_body.setdefault(k, v)
             if effective_model:
                 trial_body["model"] = effective_model
-            if base_messages is not None:
-                trial_body["messages"] = base_messages
             trial_body["stream"] = False
             trial_body = apply_to_body(trial_body, candidate_params)
             forward_body = json.dumps(trial_body).encode()
@@ -524,7 +507,7 @@ async def forward_llm_chain(
             _record_call(
                 body_json, candidate, idx, started,
                 status_code=0, response_data=None, error=str(exc)[:500],
-                purpose=purpose, messages=base_messages, stage_index=stage_index, rule_id=rule_id,
+                purpose=purpose, stage_index=stage_index, rule_id=rule_id,
             )
             failover_notes.append(f"'{candidate.endpoint_name}' failed with an exception")
             continue
@@ -532,7 +515,7 @@ async def forward_llm_chain(
         _record_call(
             body_json, candidate, idx, started,
             status_code=status_code, response_data=response_data,
-            purpose=purpose, messages=base_messages, stage_index=stage_index, rule_id=rule_id,
+            purpose=purpose, stage_index=stage_index, rule_id=rule_id,
         )
 
         if status_code == 200:

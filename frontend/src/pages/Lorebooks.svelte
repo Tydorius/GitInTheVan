@@ -11,6 +11,7 @@
   let lorebooks: any[] = []
   let loading = true
   let error = ''
+  let duplicatingId: string | null = null
   let showForm = false
   let form = {
     name: '', description: '', is_public: false, budget_weight: 1.0, reserved_tokens: 0,
@@ -119,6 +120,21 @@
       await api.deleteLorebook(id); await withScroll(load)
     }
     catch (e: any) { error = e.message }
+  }
+
+  async function handleDuplicate(lb: any) {
+    if (duplicatingId) return
+    duplicatingId = lb.id
+    error = ''
+    try {
+      const copy = await api.duplicateLorebook(lb.id)
+      await withScroll(load)
+      await openLorebook(copy)
+    } catch (e: any) {
+      error = e.message
+    } finally {
+      duplicatingId = null
+    }
   }
 
   let tagModal = { show: false, id: '', name: '', tag: '' }
@@ -412,6 +428,9 @@
             <td>{#if lb.is_public}<span class="badge active">Public</span>{:else}<span class="badge inactive">Private</span>{/if}</td>
             <td>
               <button onclick={() => openLorebook(lb)}>Manage</button>
+              <button onclick={() => handleDuplicate(lb)} disabled={duplicatingId !== null}>
+                {duplicatingId === lb.id ? 'Duplicating…' : 'Duplicate'}
+              </button>
               <button onclick={() => handleExport(lb.id)}>Export</button>
               <button onclick={() => openHistory(lb)}>History</button>
               <button class="danger" onclick={() => handleDelete(lb.id)}>Delete</button>

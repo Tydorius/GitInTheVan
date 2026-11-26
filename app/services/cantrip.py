@@ -1229,12 +1229,14 @@ def apply_history_ops(
             kept_non_system = set(non_system_indices[-count:]) if count > 0 else set()
             if last_user_idx is not None:
                 kept_non_system.add(last_user_idx)
-            current = [
+            next_messages = [
                 msg for i, msg in enumerate(current)
                 if (isinstance(msg, dict) and msg.get("role") == "system")
                 or i in kept_non_system
             ]
-            ops_applied += 1
+            if len(next_messages) != len(current):
+                current = next_messages
+                ops_applied += 1
 
         elif op_kind == "drop":
             raw_indices = raw_op.get("indices")
@@ -1250,7 +1252,7 @@ def apply_history_ops(
                     to_drop.add(resolved)
             if to_drop:
                 current = [msg for i, msg in enumerate(current) if i not in to_drop]
-            ops_applied += 1
+                ops_applied += 1
 
     after_count = len(current)
     dropped_count = before_count - after_count

@@ -429,6 +429,12 @@ async def update_lorebook(
     )
 
 
+def _copy_name(name: str, max_len: int = 128) -> str:
+    suffix = " (Copy)"
+    limit = max_len - len(suffix)
+    return f"{name[:limit]}{suffix}" if len(name) > limit else f"{name}{suffix}"
+
+
 @router.delete("/{lorebook_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_lorebook(
     lorebook_id: str,
@@ -440,6 +446,90 @@ async def delete_lorebook(
     await snapshots.capture(db, current_user.id, "lorebook", lorebook_id)
     await db.delete(lorebook)
     await db.commit()
+
+
+@router.post("/{lorebook_id}/duplicate", response_model=LorebookResponse, status_code=status.HTTP_201_CREATED)
+async def duplicate_lorebook(
+    lorebook_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    source = await get_owned_or_404(
+        db,
+        Lorebook,
+        lorebook_id,
+        current_user.id,
+        "Lorebook",
+        options=(selectinload(Lorebook.entries),),
+    )
+
+    copy = Lorebook(
+        user_id=current_user.id,
+        name=_copy_name(source.name, 128),
+        description=source.description,
+        llm_instructions=source.llm_instructions,
+        is_public=False,
+        is_active=False,
+        tag=source.tag,
+        run_pre_driver=source.run_pre_driver,
+        run_driver_callable=source.run_driver_callable,
+        run_pre_navigator=source.run_pre_navigator,
+        run_post_navigator=source.run_post_navigator,
+        inject_after_cantrips=source.inject_after_cantrips,
+        scan_depth=source.scan_depth,
+        word_boundary_keys=source.word_boundary_keys,
+        budget_weight=source.budget_weight,
+        reserved_tokens=getattr(source, "reserved_tokens", 0) or 0,
+    )
+    db.add(copy)
+    await db.flush()
+
+    for entry in source.entries:
+        db.add(
+            LorebookEntry(
+                lorebook_id=copy.id,
+                name=entry.name,
+                keys=entry.keys,
+                secondary_keys=entry.secondary_keys,
+                content=entry.content,
+                content_summary=entry.content_summary,
+                content_bullets=entry.content_bullets,
+                position=entry.position,
+                insertion_order=entry.insertion_order,
+                is_constant=entry.is_constant,
+                is_selective=entry.is_selective,
+                is_disabled=entry.is_disabled,
+                character_limit=entry.character_limit,
+            )
+        )
+
+    await db.commit()
+
+    refreshed = await db.execute(
+        select(Lorebook)
+        .where(Lorebook.id == copy.id)
+        .options(selectinload(Lorebook.entries))
+    )
+    duplicated = refreshed.scalar_one()
+    return LorebookResponse(
+        id=duplicated.id,
+        name=duplicated.name,
+        description=duplicated.description,
+        llm_instructions=duplicated.llm_instructions,
+        is_public=duplicated.is_public,
+        is_active=duplicated.is_active,
+        tag=duplicated.tag,
+        run_pre_driver=duplicated.run_pre_driver,
+        run_driver_callable=duplicated.run_driver_callable,
+        run_pre_navigator=duplicated.run_pre_navigator,
+        run_post_navigator=duplicated.run_post_navigator,
+        budget_weight=duplicated.budget_weight,
+        reserved_tokens=getattr(duplicated, "reserved_tokens", 0) or 0,
+        inject_after_cantrips=duplicated.inject_after_cantrips,
+        scan_depth=duplicated.scan_depth,
+        word_boundary_keys=duplicated.word_boundary_keys,
+        entries=[_entry_to_response(e) for e in duplicated.entries],
+    )
 
 
 @router.post("/{lorebook_id}/entries", status_code=status.HTTP_201_CREATED)

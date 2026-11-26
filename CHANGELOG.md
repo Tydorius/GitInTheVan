@@ -2,6 +2,28 @@
 
 All notable changes to GitInTheVan are documented in this file.
 
+## [0.52.1] - 2026-11-26
+
+Resource duplication (Endpoints, Cantrips, Lorebooks, Maps) and backend housekeeping release: lets users one-click duplicate endpoints (preserving the real stored API key and curated per-model parameters) as well as cantrips, lorebooks (with entries), and maps (with stages and resources), scopes `user_data_prefixes` in the single-run Cantrip Tester, fixes no-op `history_control` accounting, validates `regex_pattern` on verification-rule snapshot restore, and removes dormant `forward_llm_chain()` parameters.
+
+### Added
+
+- **One-click Duplicate for Endpoints, Cantrips, Lorebooks, and Maps**:
+  - Server-side `POST /api/endpoints/{id}/duplicate`, `POST /api/cantrips/{id}/duplicate`, `POST /api/lorebooks/{id}/duplicate`, and `POST /api/maps/{id}/duplicate` endpoints (HTTP 201, strictly owner-scoped per Rule 23 — foreign IDs return 404 even for public items).
+  - Endpoint duplication copies the real stored `api_key`, provider/routing/tag settings, `parameters_json`, and deep-copies all curated `EndpointModel` rows (including per-model parameters) so users can spin up per-use-case endpoint variants without re-pasting keys.
+  - Lorebook duplication deep-copies all `LorebookEntry` rows; Map duplication deep-copies all `MapStage` and `MapStageResource` rows; Cantrip, Lorebook, and Map copies start with `is_active=False` and `is_public=False` so duplicates never double-fire before editing.
+  - Added **Duplicate** buttons in the Endpoints, Cantrips, Lorebooks, and Maps pages (`frontend/src/pages/*.svelte`) that duplicate and open the new copy immediately for editing.
+
+### Fixed
+
+- **Single-run Cantrip Tester now honors `user_data_prefixes`** (`app/routers/cantrips.py`): `POST /api/cantrips/{id}/test` and `POST /api/cantrips/test` now apply `select_user_data_seed` using the cantrip's `user_data_prefixes` (or explicit request prefixes) over explicit `user_data` or the user's persisted `UserData`, matching live-pipeline scoping.
+- **No-op `history_control` ops no longer inflate `ops_applied`** (`app/services/cantrip.py`): `apply_history_ops()` only increments `ops_applied` when an operation actually removes/mutates messages, avoiding spurious `"1 op(s) applied (0 dropped)"` debug entries.
+- **Snapshot restore validates `verification_rule` `regex_pattern`** (`app/services/snapshots.py`): `guard_content()` now enforces the 1024-character cap and `re.compile()` check on both `restore-as-new` and `restore-in-place` for verification-rule snapshots (HTTP 422 on invalid stored patterns).
+
+### Changed
+
+- **Removed dormant `forward_llm_chain()` kwargs** (`app/services/upstream.py`): deleted unused `extra_layers_fn`, `default_params`, and `base_messages` parameters and their dead branches.
+
 ## [0.52.0] - 2026-11-25
 
 Request strip rules (feature-request N1): user-configurable regex rules that repair conversation matching when a client platform appends per-request notes to message text — JanitorAI's banned-words SYSTEM NOTE being the confirmed case (three requests from one chat each resolved as a brand-new chat, fragmenting chat_data, memories and summaries every turn). Ships with a one-click JanitorAI example rule; empty configuration changes nothing.
