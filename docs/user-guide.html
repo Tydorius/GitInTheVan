@@ -256,9 +256,13 @@ below covers the timeline only.</p>
 <p><img alt="Endpoints List" src="media/gitv-endpoints.png"></p>
 <p>The Endpoints page manages your LLM backend connections. Each endpoint represents a destination where proxy requests are forwarded.</p>
 <h3 id="endpoint-list">Endpoint List</h3>
-<p>Each endpoint card shows the <strong>name</strong>, <strong>enabled/disabled status</strong>, <strong>base URL</strong>, <strong>API base path</strong>, whether a <strong>provider API key is set</strong> (the key itself is never listed — the <strong>Reveal</strong> button fetches it on demand, and every reveal is written to the audit log), the <strong>provider</strong> (or "Custom (passthrough)"), the <strong>content bypass method</strong>, and the endpoint's <strong>role tag and priority</strong>. <strong>Edit</strong> and <strong>Delete</strong> buttons are on each card, and <strong>Collapse All</strong> / <strong>Expand All</strong> fold the cards when you have many.</p>
+<p>Each endpoint card shows the <strong>name</strong>, <strong>enabled/disabled status</strong>, <strong>base URL</strong>, <strong>API base path</strong>, whether a <strong>provider API key is set</strong> (the key itself is never listed — the <strong>Reveal</strong> button fetches it on demand, and every reveal is written to the audit log), the <strong>provider</strong> (or "Custom (passthrough)"), the <strong>content bypass method</strong>, and the endpoint's <strong>role tag and priority</strong>. <strong>Edit</strong>, <strong>Duplicate</strong> and <strong>Delete</strong> buttons are on each card, and <strong>Collapse All</strong> / <strong>Expand All</strong> fold the cards when you have many.</p>
 <p>When editing an endpoint, leaving the key field blank keeps the current key.</p>
+<h3 id="duplicating-an-endpoint">Duplicating an Endpoint</h3>
+<p><img alt="Endpoint Duplicate button" src="media/gitv-endpoints-duplicate.png"></p>
+<p><strong>Duplicate</strong> copies the endpoint — including the stored API key, provider and routing settings, endpoint parameters, and every curated model row with its per-model parameters — into a new endpoint named <code>... (Copy)</code>, then opens it for editing. Nothing is sent to the provider. The copy inherits the source's <strong>Enabled</strong> state (cantrips, lorebooks and maps always duplicate inactive); turn it off if you don't want the variant joining the failover chain yet. Useful for per-use-case variants of one provider: same key and models, different role tag, priority or parameters. Foreign endpoints never duplicate — the route answers 404 outside your own list.</p>
 <h3 id="adding-an-endpoint">Adding an Endpoint</h3>
+<h3 id="adding-an-endpoint_1">Adding an Endpoint</h3>
 <p><img alt="Edit Endpoint, upper half" src="media/gitv-endpoints-edit-endpoint-1-top.png"></p>
 <p><img alt="Edit Endpoint, lower half" src="media/gitv-endpoints-edit-endpoint-2-bottom.png"></p>
 <p>Click <strong>"+ Add Endpoint"</strong> to open the endpoint form:</p>
@@ -406,7 +410,8 @@ verification judge and the verification retry.</p>
 - <strong>Name</strong> and <strong>Public</strong> badge (if shared)
 - <strong>ON/OFF toggle</strong>: Enable or disable without editing
 - <strong>Test</strong>: Open the cantrip tester
-- <strong>Edit</strong> / <strong>History</strong> / <strong>Export</strong> (download as JSON) / <strong>Delete</strong></p>
+- <strong>Edit</strong> / <strong>Duplicate</strong> / <strong>History</strong> / <strong>Export</strong> (download as JSON) / <strong>Delete</strong></p>
+<p><strong>Duplicate</strong> copies the cantrip — code, instructions, positions, tag, timeout, budget weight, reserved tokens, lorebook reads, response tags and <code>user_data</code> prefixes — into a new cantrip named <code>... (Copy)</code> that starts <strong>inactive</strong>, then opens it for editing.</p>
 <p>The card footer displays the active pipeline positions, execution order, and timeout.</p>
 <h3 id="cantrip-tester">Cantrip Tester</h3>
 <p><img alt="Cantrip Test Panel" src="media/gitv-cantrips-test-example.png"></p>
@@ -766,7 +771,8 @@ and cantrip API second, so they are documented with the rest of it in the
 - <strong>Entries</strong>: Count of keyword entries
 - <strong>Active</strong>: ON/OFF toggle to enable/disable injection without deleting
 - <strong>Visibility</strong>: Public or Private
-- <strong>Actions</strong>: Manage, Export (download JSON), Delete</p>
+- <strong>Actions</strong>: Manage, Duplicate, Export (download JSON), Delete</p>
+<p><strong>Duplicate</strong> copies the lorebook and every entry in it (keys, secondary keys, content, positions, options) into a new lorebook named <code>... (Copy)</code> that starts <strong>inactive</strong>.</p>
 <h3 id="importing-lorebooks">Importing Lorebooks</h3>
 <p><img alt="Import Lorebook" src="media/gitv-lorebooks-import-lorebook-example.png"></p>
 <p>Click <strong>"Import JSON"</strong> to import a lorebook from an external source:</p>
@@ -1341,7 +1347,8 @@ another user's rows are invisible.</p>
 - <strong>Stages</strong>: Number of LLM stages in the chain
 - <strong>Tag</strong>: Activation tag (click to copy the <code>&lt;#map-tag#&gt;</code> string)
 - <strong>Active</strong>: ON/OFF toggle
-- <strong>Actions</strong>: Edit, History, Export, Delete</p>
+- <strong>Actions</strong>: Edit, Duplicate, History, Export, Delete</p>
+<p><strong>Duplicate</strong> copies the map — every stage with its instructions, endpoint pins, verification settings, output modes and conditions, and each stage's attached lorebooks/cantrips — into a new map named <code>... (Copy)</code> that starts <strong>inactive</strong>.</p>
 <h3 id="map-activation">Map Activation</h3>
 <p>Maps activate via <code>&lt;#map-tag#&gt;</code> tags in persona or message text, the same tag system used by lorebooks, cantrips, and verification rules. One map per request (first match wins). When no map tag is present, the standard pipeline runs.</p>
 <h3 id="map-editor">Map Editor</h3>

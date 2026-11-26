@@ -295,9 +295,17 @@ The Endpoints page manages your LLM backend connections. Each endpoint represent
 
 ### Endpoint List
 
-Each endpoint card shows the **name**, **enabled/disabled status**, **base URL**, **API base path**, whether a **provider API key is set** (the key itself is never listed — the **Reveal** button fetches it on demand, and every reveal is written to the audit log), the **provider** (or "Custom (passthrough)"), the **content bypass method**, and the endpoint's **role tag and priority**. **Edit** and **Delete** buttons are on each card, and **Collapse All** / **Expand All** fold the cards when you have many.
+Each endpoint card shows the **name**, **enabled/disabled status**, **base URL**, **API base path**, whether a **provider API key is set** (the key itself is never listed — the **Reveal** button fetches it on demand, and every reveal is written to the audit log), the **provider** (or "Custom (passthrough)"), the **content bypass method**, and the endpoint's **role tag and priority**. **Edit**, **Duplicate** and **Delete** buttons are on each card, and **Collapse All** / **Expand All** fold the cards when you have many.
 
 When editing an endpoint, leaving the key field blank keeps the current key.
+
+### Duplicating an Endpoint
+
+![Endpoint Duplicate button](media/gitv-endpoints-duplicate.png)
+
+**Duplicate** copies the endpoint — including the stored API key, provider and routing settings, endpoint parameters, and every curated model row with its per-model parameters — into a new endpoint named `... (Copy)`, then opens it for editing. Nothing is sent to the provider. The copy inherits the source's **Enabled** state (cantrips, lorebooks and maps always duplicate inactive); turn it off if you don't want the variant joining the failover chain yet. Useful for per-use-case variants of one provider: same key and models, different role tag, priority or parameters. Foreign endpoints never duplicate — the route answers 404 outside your own list.
+
+### Adding an Endpoint
 
 ### Adding an Endpoint
 
@@ -418,7 +426,9 @@ Each cantrip card shows:
 - **Name** and **Public** badge (if shared)
 - **ON/OFF toggle**: Enable or disable without editing
 - **Test**: Open the cantrip tester
-- **Edit** / **History** / **Export** (download as JSON) / **Delete**
+- **Edit** / **Duplicate** / **History** / **Export** (download as JSON) / **Delete**
+
+**Duplicate** copies the cantrip — code, instructions, positions, tag, timeout, budget weight, reserved tokens, lorebook reads, response tags and `user_data` prefixes — into a new cantrip named `... (Copy)` that starts **inactive**, then opens it for editing.
 
 The card footer displays the active pipeline positions, execution order, and timeout.
 
@@ -870,7 +880,9 @@ The table shows each lorebook with:
 - **Entries**: Count of keyword entries
 - **Active**: ON/OFF toggle to enable/disable injection without deleting
 - **Visibility**: Public or Private
-- **Actions**: Manage, Export (download JSON), Delete
+- **Actions**: Manage, Duplicate, Export (download JSON), Delete
+
+**Duplicate** copies the lorebook and every entry in it (keys, secondary keys, content, positions, options) into a new lorebook named `... (Copy)` that starts **inactive**.
 
 ### Importing Lorebooks
 
@@ -1566,7 +1578,9 @@ The table shows each map with:
 - **Stages**: Number of LLM stages in the chain
 - **Tag**: Activation tag (click to copy the `<#map-tag#>` string)
 - **Active**: ON/OFF toggle
-- **Actions**: Edit, History, Export, Delete
+- **Actions**: Edit, Duplicate, History, Export, Delete
+
+**Duplicate** copies the map — every stage with its instructions, endpoint pins, verification settings, output modes and conditions, and each stage's attached lorebooks/cantrips — into a new map named `... (Copy)` that starts **inactive**.
 
 ### Map Activation
 
